@@ -1,0 +1,34 @@
+@startuml
+
+rectangle "RuntimeBuilder" as Builder
+rectangle "Runtime" as Runtime
+
+Builder --> Runtime: Create
+
+collections "ForegroundWorker" as ForegroundWorker
+collections "BackgroundWorker" as BackgroundWorker
+collections "SystemWorker" as SystemWorker
+
+Builder --> ForegroundWorker: Create(M)
+Builder --> BackgroundWorker: Create(N)
+Builder --> SystemWorker: Create(O)
+
+collections "ForegroundTaskContext" as ForegroundTaskContext
+collections "BackgroundTaskContext" as BackgroundTaskContext
+collections "SystemTaskContext" as SystemTaskContext
+
+ForegroundWorker --> ForegroundTaskContext : Create(per task)
+BackgroundWorker --> BackgroundTaskContext : Create(per task)
+SystemWorker --> SystemTaskContext : Create(per task)
+
+actor "Any code" as Any
+
+Any -up-> Runtime: Command
+
+actor "Current task" as Current
+
+Current -up-> ForegroundTaskContext: Command
+Current -up-> BackgroundTaskContext: Command
+Current -up-> SystemTaskContext: Command
+
+@enduml

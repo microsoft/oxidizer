@@ -1,0 +1,68 @@
+[package]
+name = "oxidizer_io"
+description = "I/O subsystem and common I/O vocabulary used by I/O endpoints in the Oxidizer SDK"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+fakes = ["oxidizer_mem/fakes"]
+# Compatibility with Hyper I/O mechanisms (e.g. adapters for Read/Write traits).
+hyper = ["dep:hyper"]
+unstable-testing = ["futures/executor", "dep:oxidizer_testing"]
+
+[dependencies]
+oxidizer_mem = { workspace = true, features = ["fakes"] }
+async-channel = { workspace = true }
+async-observable = { workspace = true }
+bytes = { workspace = true }
+derive_more = { workspace = true, features = ["debug", "display"] }
+futures = { workspace = true, features = ["alloc"] }
+hyper = { workspace = true, optional = true }
+negative-impl = { workspace = true }
+oneshot = { workspace = true }
+# used by unstable-testing
+oxidizer_testing = { workspace = true, optional = true }
+pin-project = { workspace = true }
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
+trait-variant = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+heapless = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_System_IO"] }
+windows = { workspace = true, features = [
+    "Win32_Networking_WinSock",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_WindowsProgramming",
+] }
+
+[dev-dependencies]
+async-io = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+heapless = { workspace = true }
+mockall = { workspace = true }
+mutants = { workspace = true }
+oxidizer_testing = { path = "../../crates/oxidizer_testing" }
+scopeguard = { workspace = true }
+tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = [
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+] }
+
+[lints]
+workspace = true

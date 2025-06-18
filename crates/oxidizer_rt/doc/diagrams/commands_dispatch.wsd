@@ -1,0 +1,32 @@
+@startuml
+
+rectangle "RuntimeBuilder" as Builder
+rectangle "Runtime" as Runtime
+
+Builder --> Runtime: Create
+
+collections "ForegroundWorker" as ForegroundWorker
+
+Builder --> ForegroundWorker: Create(N)
+
+collections "ForegroundTaskContext" as ForegroundTaskContext
+
+ForegroundWorker --> ForegroundTaskContext : Create(per task)
+
+actor "Any code" as Any
+
+Any -up-> Runtime: Command
+
+actor "Current task" as Current
+
+Current -up-> ForegroundTaskContext: Command
+
+rectangle "Dispatcher" as Dispatcher
+
+Builder --> Dispatcher: Create
+ForegroundTaskContext -[#blue]up-> Dispatcher: Non-local command
+Runtime -[#blue]up-> Dispatcher: Command
+Dispatcher -[#blue]-> ForegroundWorker: Command
+ForegroundTaskContext -[#blue]up-> ForegroundWorker: Local command
+
+@enduml
