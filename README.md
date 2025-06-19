@@ -1,18 +1,18 @@
 # Project
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+This repository contains a set of libraries that should eventually help with building performant services in Rust.
+At this stage, these libraries should be treated as experimental as we figure out the correct shape that best suits
+the goals of large-scale services.
 
-As the maintainer of this project, please make a few updates:
-
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+Explore the [crates](./crates) directory to find more information.
 
 ## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+This project is extracted from a larger internal codebase, so accepting direct contributions is a bit more challenging
+at this stage. This will change as the project matures. We definitely welcome issues, and if you want to submit a pull
+request, feel free to do so, but it may take longer to get it merged.
+
+Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
 the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
 
