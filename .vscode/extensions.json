@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "EditorConfig.EditorConfig",
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+    ]
+}

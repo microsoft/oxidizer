@@ -1,0 +1,27 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Everything outside this folder is dev/test stuff not worth mutation testing.
+examine_globs = ["crates/**"]
+
+# We have mutation-optimized settings that speed up the builds a lot.
+profile = "mutants"
+
+additional_cargo_args = [
+    # TODO: Migrate to separate setting once we upgrade cargo-mutants.
+    "--all-features"
+]
+
+# Only run unit tests and integration tests, not doctests, benchmarks or examples.
+additional_cargo_test_args = [ "--tests" ]
+
+exclude_re = [
+    # There are no API contracts for what these must return because they
+    # are for human-readable stringification. No purpose mutating them.
+    "impl Debug",
+    "impl fmt::Debug",
+    "impl std::fmt::Debug",
+    "impl Display",
+    "impl fmt::Display",
+    "impl std::fmt::Display",
+]

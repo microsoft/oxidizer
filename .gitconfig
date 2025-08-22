@@ -1,0 +1,10 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[core]
+# We do not use CRLF but if someone (or some automation like 1ES autobaselining) happens
+# to try commit a CRLF file, we convert it to LF for storage in the Git index.
+autocrlf = input
+
+# Scream if files do not match what .gitattributes requires.
+safecrlf = true

@@ -1,0 +1,90 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/*",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.89"
+authors = ["Oxidizer Team <ox-team@microsoft.com>"]
+license-file = "LICENSE.txt"
+readme = "README.md"
+homepage = "https://github.com/microsoft/oxidizer"
+repository = "https://github.com/microsoft/oxidizer"
+keywords = ["Rust", "microservices"]
+categories = ["sdk", "framework", "library"]
+
+[workspace.dependencies]
+# workspace dependencies
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false  }
+
+# external dependencies
+insta = { version = "1.42.0", default-features = false  }
+mutants = { version = "0.0.3", default-features = false  }
+once_cell = { version = "1.21.3", default-features = false  }
+prettyplease = { version = "0.2.29", default-features = false  }
+proc-macro2 = { version = "1.0.101", default-features = true  }
+proc-macro-crate = { version = "3.3.0", default-features = false  }
+quote = { version = "1.0.38", default-features = false  }
+serde = { version = "1.0.217", default-features = false }
+serde_json = { version = "1.0.135", default-features = false  }
+syn = { version = "2.0.106", default-features = false }
+xxhash-rust = { version = "0.8.15", default-features = false  }
+
+[workspace.lints.rust]
+ambiguous_negative_literals = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+
+# Lints from the `restriction` group that not enabled by categories above but are still useful.
+allow_attributes_without_reason = "warn"
+as_pointer_underscore = "warn"
+assertions_on_result_states = "warn"
+clone_on_ref_ptr = "warn"
+deref_by_slicing = "warn"
+disallowed_script_idents = "warn"
+empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
+empty_structs_with_brackets = "warn"
+fn_to_numeric_cast_any = "warn"
+if_then_some_else_none = "warn"
+map_err_ignore = "warn"
+multiple_unsafe_ops_per_block = "warn"
+redundant_type_annotations = "warn"
+renamed_function_params = "warn"
+semicolon_outside_block = "warn"
+string_to_string = "warn"
+undocumented_unsafe_blocks = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unneeded_field_pattern = "warn"
+unused_result_ok = "warn"
+
+# Below are undesirable lint rules that are enabled by the categories above but are not useful.
+
+# Testing panic messages is not universally applicable - panic messages are not an API contract.
+should_panic_without_expect = "allow"
+
+[profile.release]
+debug = "line-tables-only"
+
+[profile.mutants]
+inherits = "test"
+debug = "none"

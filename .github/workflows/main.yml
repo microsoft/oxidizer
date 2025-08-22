@@ -1,0 +1,112 @@
+name: main
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  testing:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.89
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack@0.4.7
+      - name: Build
+        run: cargo hack build --each-feature --verbose
+      - name: Tests
+        run: cargo test --verbose
+      - name: Doc Tests
+        run: cargo test --doc --verbose
+
+  static-analysis:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.89
+          components: clippy, rustfmt
+      - name: Install Rust Nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: miri
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit@0.21.2, cargo-udeps@0.1.57
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Audit
+        run: cargo audit
+      - name: Format
+        run: cargo fmt -- --check
+      - name: Docs
+        run: cargo doc --no-deps --workspace --all-features
+      - name: Udeps
+        run: cargo +nightly udeps --all-features --workspace
+      - name: Miri
+        run: cargo +nightly miri test --all-features --workspace
+
+  mutation-testing:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.89
+          components: clippy, rustfmt
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@25.3.1, cargo-udeps@0.1.57
+      - name: Mutate
+        run: cargo mutants --test-workspace=true --colors=never --jobs=2 --build-timeout=120 --cap-lints=true
+
+  coverage:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.6.18
+      - name: Generate Coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true

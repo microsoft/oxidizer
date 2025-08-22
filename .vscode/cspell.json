@@ -1,0 +1,12 @@
+{
+    "dictionaries": [
+        "workspace"
+    ],
+    "dictionaryDefinitions": [
+        {
+            "name": "workspace",
+            "path": "../.spelling",
+            "addWords": true,
+        }
+    ]
+}
