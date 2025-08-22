@@ -1,0 +1,8 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+unstable_features = true
+
+format_code_in_doc_comments = true
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"

@@ -1,0 +1,27 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+root = true
+
+[*]
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# We edit our repo on both Linux and Windows, potentially same files on both, so standardize on LF.
+end_of_line = lf
+
+[*.rs]
+# rustfmt takes care of formating rust code
+max_line_length = unset
+
+[*.md]
+# double whitespace at end of line
+# denotes a line break in Markdown
+trim_trailing_whitespace = false
+
+[*.yml]
+indent_size = 2

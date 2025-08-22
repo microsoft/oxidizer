@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Our regular development environment is dual-OS - the same working directory is accessed
 # from both Windows and Linux. To avoid line ending issues, we're making all text files
 # use Linux line endings.

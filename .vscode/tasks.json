@@ -1,0 +1,197 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cargo",
+            "command": "build",
+            "args": [
+                "--all-features",
+                "--all-targets"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "build",
+            },
+            "label": "rust: build (entire workspace)"
+        },
+        {
+            "type": "cargo",
+            "command": "detect-package",
+            "args": [
+                "--path",
+                "${relativeFileDirname}",
+                "build",
+                "--all-features",
+                "--all-targets"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "label": "rust: build (current package)"
+        },
+        {
+            "type": "cargo",
+            "command": "nextest",
+            "args": [
+                "run",
+                "--all-features",
+                "--tests",
+                "--no-fail-fast",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "test",
+            },
+            "label": "rust: run unit tests + integration tests (entire workspace)"
+        },
+        {
+            "type": "cargo",
+            "command": "detect-package",
+            "args": [
+                "--path",
+                "${relativeFileDirname}",
+                "nextest",
+                "run",
+                "--all-features",
+                "--tests",
+                "--no-fail-fast",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "label": "rust: run unit tests + integration tests (current package)"
+        },
+        {
+            "type": "cargo",
+            "command": "test",
+            "args": [
+                "--all-features",
+                "--doc"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "test"
+            },
+            "label": "rust: run documentation tests (entire workspace)"
+        },
+        {
+            "type": "cargo",
+            "command": "detect-package",
+            "args": [
+                "--path",
+                "${relativeFileDirname}",
+                "test",
+                "--all-features",
+                "--doc"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": {
+                "kind": "test"
+            },
+            "label": "rust: run documentation tests (current package)"
+        },
+        {
+            "type": "cargo",
+            "command": "doc",
+            "args": [
+                "--all-features",
+                "--no-deps",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none",
+            "label": "rust: build API documentation (entire workspace)"
+        },
+        {
+            "type": "cargo",
+            "command": "detect-package",
+            "args": [
+                "--path",
+                "${relativeFileDirname}",
+                "doc",
+                "--all-features",
+                "--no-deps",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none",
+            "label": "rust: build API documentation (current package)"
+        },
+        {
+            "type": "cargo",
+            "command": "check",
+            "args": [
+                "--all-features",
+                "--all-targets",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none",
+            "label": "rust: check (entire workspace)"
+        },
+        {
+            "type": "cargo",
+            "command": "detect-package",
+            "args": [
+                "--path",
+                "${relativeFileDirname}",
+                "check",
+                "--all-features",
+                "--all-targets",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none",
+            "label": "rust: check (current package)"
+        },
+        {
+            "type": "cargo",
+            "command": "clippy",
+            "args": [
+                "--all-features",
+                "--all-targets",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none",
+            "label": "rust: Clippy (entire workspace)"
+        },
+        {
+            "type": "cargo",
+            "command": "detect-package",
+            "args": [
+                "--path",
+                "${relativeFileDirname}",
+                "clippy",
+                "--all-features",
+                "--all-targets",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "none",
+            "label": "rust: Clippy (current package)"
+        },
+    ],
+}
