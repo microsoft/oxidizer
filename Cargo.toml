@@ -9,17 +9,15 @@ members = [
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.89"
-authors = ["Oxidizer Team <ox-team@microsoft.com>"]
+rust-version = "1.88"
+authors = ["The Oxidizer Project Authors"]
 license-file = "LICENSE.txt"
-readme = "README.md"
 homepage = "https://github.com/microsoft/oxidizer"
 repository = "https://github.com/microsoft/oxidizer"
-keywords = ["Rust", "microservices"]
-categories = ["sdk", "framework", "library"]
 
+# all dependencies are listed with default-features = false, individual crates add the features they need
 [workspace.dependencies]
-# workspace dependencies
+# local dependencies
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false  }
 
 # external dependencies

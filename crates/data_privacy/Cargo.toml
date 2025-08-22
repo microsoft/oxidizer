@@ -5,15 +5,16 @@
 name = "data_privacy"
 description = "Data annotation and redaction system providing a robust way to manipulate sensitive information."
 version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
+categories = ["data-structures"]
+
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license-file.workspace = true
-readme.workspace = true
 homepage.workspace = true
 repository.workspace = true
-keywords.workspace = true
-categories.workspace = true
 
 [dependencies]
 data_privacy_macros.workspace = true

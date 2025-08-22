@@ -6,6 +6,8 @@
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
+<!-- cargo-rdme start -->
+
 Mechanisms to classify, manipulate, and redact sensitive data.
 
 Commercial software often needs to handle sensitive data, such as personally identifiable information (PII).
@@ -59,12 +61,12 @@ contains the name of the taxonomy and the name of the data class.
 
 ## Classified Containers
 
-Types that implement the `Classified` trait are said to be classified containers. They encapsulate
+Types that implement the [`Classified`] trait are said to be classified containers. They encapsulate
 an instance of another type. Although containers can be created by hand, they are most commonly created
 using the `taxonomy` attribute. See the documentation for the attribute to learn how you define your own
 taxonomy and all its data classes.
 
-Classified containers implement the `Debug` trait if the data they hold implements the trait. However,
+Classified containers implement the [`Debug`] trait if the data they hold implements the trait. However,
 the data produced by the `Debug` trait is redacted, so it does not accidentally expose the sensitive data.
 
 Applications use the classified container types around application
@@ -157,3 +159,5 @@ fn try_out() {
     assert_eq!(output_buffer, "********");
 }
 ```
+
+<!-- cargo-rdme end -->
