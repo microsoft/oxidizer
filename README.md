@@ -1,4 +1,8 @@
-# Project
+# The Oxidizer Project
+
+[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
 This repository contains a set of libraries that should eventually help with building performant services in Rust.
 At this stage, these libraries should be treated as experimental as we figure out the correct shape that best suits
@@ -21,8 +25,8 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
+trademarks or logos is subject to and must follow
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.

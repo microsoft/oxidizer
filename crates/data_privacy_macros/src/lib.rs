@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Exposes a macro to generate data taxonomies.
+//! This crate exposes macros to generate data taxonomies.
+//!
+//! See the documentation for the [`data_privacy`](https://docs.rs/data_privacy) crate for details.
 
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;

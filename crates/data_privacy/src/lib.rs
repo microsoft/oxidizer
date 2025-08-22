@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(rustdoc::redundant_explicit_links, reason = "Needed to support cargo-rdme link mapping.")]
+
 //! Mechanisms to classify, manipulate, and redact sensitive data.
 //!
 //! Commercial software often needs to handle sensitive data, such as personally identifiable information (PII).
@@ -40,23 +42,23 @@
 //!
 //! This crate is built around two traits:
 //!
-//! * The [`Classified`] trait is used to mark types that hold sensitive data. The trait exposes
+//! * The [`Classified`](crate::Classified) trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
 //!
-//! * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
-//!   few implementations of this trait, such as [`SimpleRedactor`], but others can
+//! * The [`Redactor`](crate::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
+//!   few implementations of this trait, such as [`SimpleRedactor`](crate::SimpleRedactor), but others can
 //!   be implemented and used by applications as well.
 //!
 //! # Data Classes
 //!
-//! A [`DataClass`] is a struct that represents a single data class within a taxonomy. The struct
+//! A [`DataClass`](crate::DataClass) is a struct that represents a single data class within a taxonomy. The struct
 //! contains the name of the taxonomy and the name of the data class.
 //!
 //! # Classified Containers
 //!
 //! Types that implement the [`Classified`] trait are said to be classified containers. They encapsulate
 //! an instance of another type. Although containers can be created by hand, they are most commonly created
-//! using the [`taxonomy`] attribute. See the documentation for the attribute to learn how you define your own
+//! using the [`taxonomy`](crate::taxonomy) attribute. See the documentation for the attribute to learn how you define your own
 //! taxonomy and all its data classes.
 //!
 //! Classified containers implement the [`Debug`] trait if the data they hold implements the trait. However,
@@ -66,20 +68,20 @@
 //! data types to indicate instances of those types hold sensitive data. Although applications typically
 //! define their own taxonomies of data classes, this crate defines three well-known data classes:
 //!
-//! * [`Sensitive<T>`](common_taxonomy::Sensitive) which can be used for taxonomy-agnostic classification in libraries.
-//! * [`UnknownSensitivity<T>`](common_taxonomy::UnknownSensitivity) which holds data without a known classification.
-//! * [`Insensitive<T>`](common_taxonomy::Insensitive) which holds data that explicitly has no classification.
+//! * [`Sensitive<T>`](crate::common_taxonomy::Sensitive) which can be used for taxonomy-agnostic classification in libraries.
+//! * [`UnknownSensitivity<T>`](crate::common_taxonomy::UnknownSensitivity) which holds data without a known classification.
+//! * [`Insensitive<T>`](crate::common_taxonomy::Insensitive) which holds data that explicitly has no classification.
 //!
 //! # Theory of Operation
 //!
 //! How this all works:
 //!
-//! * An application defines its own taxonomy using the [`taxonomy`] macro, which generates classified container types.
+//! * An application defines its own taxonomy using the [`taxonomy`](crate::taxonomy) macro, which generates classified container types.
 //!
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
-//! * On startup, the application initializes a [`RedactionEngine`] using the [`RedactionEngineBuilder`] type. The engine is configured with
+//! * On startup, the application initializes a [`RedactionEngine`](crate::RedactionEngine) using the [`RedactionEngineBuilder`](crate::RedactionEngineBuilder) type. The engine is configured with
 //!   redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class. For example, for
 //!   a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
