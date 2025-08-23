@@ -1,0 +1,212 @@
+---
+source: crates/data_privacy_macros/src/lib.rs
+expression: pretty
+---
+enum GovTaxonomy {
+    #[doc("Really secret data")]
+    Confidential,
+    #[doc("More secret data")]
+    TopSecret,
+}
+impl GovTaxonomy {
+    /// Returns the data class associated with the current variant.
+    #[must_use]
+    pub fn data_class(&self) -> data_privacy::DataClass {
+        match self {
+            GovTaxonomy::Confidential => {
+                data_privacy::DataClass::new("tax", "confidential")
+            }
+            GovTaxonomy::TopSecret => data_privacy::DataClass::new("tax", "top_secret"),
+        }
+    }
+}
+impl core::cmp::PartialEq<data_privacy::DataClass> for GovTaxonomy {
+    fn eq(&self, other: &data_privacy::DataClass) -> core::primitive::bool {
+        self.data_class() == *other
+    }
+}
+impl core::cmp::PartialEq<GovTaxonomy> for data_privacy::DataClass {
+    fn eq(&self, other: &GovTaxonomy) -> core::primitive::bool {
+        other == self
+    }
+}
+#[doc = concat!(
+    "A classified data container for the `", "confidential", "` class of the `", "tax",
+    "` taxonomy."
+)]
+///
+#[doc("Really secret data")]
+#[derive(Clone, Default, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+struct Confidential<T> {
+    payload: T,
+}
+impl<T> Confidential<T> {
+    /// Creates a new instance of the classified data container.
+    #[must_use]
+    pub fn new(payload: T) -> Self {
+        Self { payload }
+    }
+    /// Exfiltrates the payload, allowing it to be used outside the classified context.
+    ///
+    /// Exfiltration should be done with caution, as it may expose sensitive information.
+    ///
+    /// # Returns
+    /// The original payload.
+    #[must_use]
+    pub fn declassify(self) -> T {
+        self.payload
+    }
+    /// Provides a reference to the declassified payload, allowing read access without ownership transfer.
+    ///
+    /// Exfiltration should be done with caution, as it may expose sensitive information.
+    ///
+    /// # Returns
+    /// A reference to the original payload.
+    pub fn as_declassified(&self) -> &T {
+        &self.payload
+    }
+    /// Provides a mutable reference to the declassified payload, allowing write access without ownership transfer.
+    ///
+    /// Exfiltration should be done with caution, as it may expose sensitive information.
+    ///
+    /// # Returns
+    /// A mutable reference to the original payload.
+    pub fn as_declassified_mut(&mut self) -> &mut T {
+        &mut self.payload
+    }
+    /// Maps the classified payload to a new type using the provided function.
+    pub fn map<F, U>(self, f: F) -> Confidential<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        Confidential::new(f(self.payload))
+    }
+    /// Returns the data class of the payload.
+    #[must_use]
+    pub const fn data_class() -> data_privacy::DataClass {
+        data_privacy::DataClass::new("tax", "confidential")
+    }
+}
+impl<T> data_privacy::Classified<T> for Confidential<T> {
+    fn declassify(self) -> T {
+        Self::declassify(self)
+    }
+    fn as_declassified(&self) -> &T {
+        Self::as_declassified(self)
+    }
+    fn as_declassified_mut(&mut self) -> &mut T {
+        Self::as_declassified_mut(self)
+    }
+    fn data_class(&self) -> data_privacy::DataClass {
+        Self::data_class()
+    }
+}
+impl<T> core::fmt::Debug for Confidential<T>
+where
+    T: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(::core::format_args!("<{}/{}:REDACTED>", "tax", "confidential"))
+    }
+}
+impl<T> core::convert::From<T> for Confidential<T> {
+    fn from(payload: T) -> Self {
+        Self::new(payload)
+    }
+}
+impl<T> core::convert::From<Confidential<T>> for data_privacy::ClassifiedWrapper<T> {
+    fn from(classified: Confidential<T>) -> Self {
+        let data_class = Confidential::<T>::data_class();
+        Self::new(Confidential::declassify(classified), data_class)
+    }
+}
+#[doc = concat!(
+    "A classified data container for the `", "top_secret", "` class of the `", "tax",
+    "` taxonomy."
+)]
+///
+#[doc("More secret data")]
+#[derive(Clone, Default, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+struct TopSecret<T> {
+    payload: T,
+}
+impl<T> TopSecret<T> {
+    /// Creates a new instance of the classified data container.
+    #[must_use]
+    pub fn new(payload: T) -> Self {
+        Self { payload }
+    }
+    /// Exfiltrates the payload, allowing it to be used outside the classified context.
+    ///
+    /// Exfiltration should be done with caution, as it may expose sensitive information.
+    ///
+    /// # Returns
+    /// The original payload.
+    #[must_use]
+    pub fn declassify(self) -> T {
+        self.payload
+    }
+    /// Provides a reference to the declassified payload, allowing read access without ownership transfer.
+    ///
+    /// Exfiltration should be done with caution, as it may expose sensitive information.
+    ///
+    /// # Returns
+    /// A reference to the original payload.
+    pub fn as_declassified(&self) -> &T {
+        &self.payload
+    }
+    /// Provides a mutable reference to the declassified payload, allowing write access without ownership transfer.
+    ///
+    /// Exfiltration should be done with caution, as it may expose sensitive information.
+    ///
+    /// # Returns
+    /// A mutable reference to the original payload.
+    pub fn as_declassified_mut(&mut self) -> &mut T {
+        &mut self.payload
+    }
+    /// Maps the classified payload to a new type using the provided function.
+    pub fn map<F, U>(self, f: F) -> TopSecret<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        TopSecret::new(f(self.payload))
+    }
+    /// Returns the data class of the payload.
+    #[must_use]
+    pub const fn data_class() -> data_privacy::DataClass {
+        data_privacy::DataClass::new("tax", "top_secret")
+    }
+}
+impl<T> data_privacy::Classified<T> for TopSecret<T> {
+    fn declassify(self) -> T {
+        Self::declassify(self)
+    }
+    fn as_declassified(&self) -> &T {
+        Self::as_declassified(self)
+    }
+    fn as_declassified_mut(&mut self) -> &mut T {
+        Self::as_declassified_mut(self)
+    }
+    fn data_class(&self) -> data_privacy::DataClass {
+        Self::data_class()
+    }
+}
+impl<T> core::fmt::Debug for TopSecret<T>
+where
+    T: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(::core::format_args!("<{}/{}:REDACTED>", "tax", "top_secret"))
+    }
+}
+impl<T> core::convert::From<T> for TopSecret<T> {
+    fn from(payload: T) -> Self {
+        Self::new(payload)
+    }
+}
+impl<T> core::convert::From<TopSecret<T>> for data_privacy::ClassifiedWrapper<T> {
+    fn from(classified: TopSecret<T>) -> Self {
+        let data_class = TopSecret::<T>::data_class();
+        Self::new(TopSecret::declassify(classified), data_class)
+    }
+}

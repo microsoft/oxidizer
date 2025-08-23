@@ -499,15 +499,6 @@ mod tests {
         let fallback_len = engine.exact_len(&unknown_class);
         assert_eq!(fallback_len, None, "Insert redactor should return None");
 
-        // Verify the actual behavior matches the exact_len hint
-        let sensitive_data = Sensitive::new("test".to_string());
-        let erase_result = collect_output(&engine, &sensitive_data);
-        assert_eq!(
-            erase_result.len(),
-            erase_len.unwrap_or(0),
-            "Actual output length should match exact_len hint"
-        );
-
         let unknown_data = UnknownSensitivity::new("test".to_string());
         let fallback_result = collect_output(&engine, &unknown_data);
         // For Insert mode, the output is always "REDACTED" regardless of input

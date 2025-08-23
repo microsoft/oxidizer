@@ -74,21 +74,6 @@ fn pascal_to_snake_case(s: &str) -> String {
     result
 }
 
-/// Determine the path to the `data_privacy` crate
-#[cfg(not(test))]
-#[cfg_attr(test, mutants::skip)]
-fn find_crate(input: &ItemEnum) -> Result<TokenStream, syn::Error> {
-    let found_crate = proc_macro_crate::crate_name("data_privacy").map_err(|e| syn::Error::new(input.ident.span(), e))?;
-
-    Ok(match found_crate {
-        proc_macro_crate::FoundCrate::Itself => quote!(data_privacy),
-        proc_macro_crate::FoundCrate::Name(name) => {
-            let ident = quote::format_ident!("{}", name);
-            quote!(::#ident)
-        }
-    })
-}
-
 #[allow(clippy::too_many_lines, reason = "Yeah, it's a bit much...")]
 fn taxonomy_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStream> {
     let macro_args = MacroArgs::parse(attr_args)?;
@@ -101,12 +86,7 @@ fn taxonomy_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenSt
         ));
     }
 
-    #[cfg(test)]
     let data_privacy_path = quote!(data_privacy);
-
-    #[cfg(not(test))]
-    let data_privacy_path = find_crate(&input)?;
-
     let enum_name = &input.ident;
     let enum_vis = &input.vis;
 
@@ -495,6 +475,25 @@ mod tests {
     #[test]
     fn test_success() {
         let args = quote! { tax, serde = true };
+        let input = quote! {
+            enum GovTaxonomy {
+                #[doc("Really secret data")]
+                Confidential,
+                #[doc("More secret data")]
+                TopSecret,
+            }
+        };
+
+        let result = taxonomy_impl(args, input);
+        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
+        let pretty = prettyplease::unparse(&result_file);
+
+        assert_snapshot!(pretty);
+    }
+
+    #[test]
+    fn test_success_no_serde() {
+        let args = quote! { tax, serde = false };
         let input = quote! {
             enum GovTaxonomy {
                 #[doc("Really secret data")]
