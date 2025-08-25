@@ -96,18 +96,19 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v5
-      - name: Install Rust
+      - name: Install Rust Nightly
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly
+          components: llvm-tools-preview
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.6.18
       - name: Generate Coverage (all-features)
-        run: cargo llvm-cov --all-features --workspace --tests --lcov --output-path lcov.info
+        run: cargo +nightly llvm-cov --all-features --workspace --tests --lcov --output-path lcov.info
       - name: Generate Coverage (no-default-features)
-        run: cargo llvm-cov --no-default-features --workspace --tests --lcov --output-path lcov.info
+        run: cargo +nightly llvm-cov --no-default-features --workspace --tests --lcov --output-path lcov.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
