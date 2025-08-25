@@ -133,5 +133,9 @@ mod tests {
             *value = 20;
         });
         classified.visit(|value| assert_eq!(*value, 20, "Value should be updated to 20"));
+
+        assert_eq!(classified.data_class().name(), "classified_example");
+        assert_eq!(classified.as_declassified(), &20);
+        assert_eq!(classified.declassify(), 20);
     }
 }

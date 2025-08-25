@@ -5,6 +5,7 @@ coverage:
   status:
     project:
       default:
-        target: 97
-        threshold: 0
+        target: 100
+        threshold: "0"
         base: auto
+  

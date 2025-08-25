@@ -157,4 +157,32 @@ mod tests {
         assert_eq!(classified2.partial_cmp(&classified1).unwrap(), Ordering::Less);
         assert_eq!(classified1.partial_cmp(&classified1).unwrap(), Ordering::Equal);
     }
+
+    #[test]
+    fn test_declassify_returns_inner_value() {
+        // Consuming declassification returns the inner value
+        let classified = ClassifiedWrapper::new(String::from("secret"), CommonTaxonomy::Sensitive.data_class());
+        let value = classified.declassify();
+        assert_eq!(value, "secret");
+    }
+
+    #[test]
+    fn test_as_declassified_mut_allows_mutation() {
+        // Mutable access allows in-place mutation of the wrapped value
+        let mut classified = ClassifiedWrapper::new(vec![1, 2, 3], CommonTaxonomy::Sensitive.data_class());
+        classified.as_declassified_mut().push(4);
+        assert_eq!(classified.as_declassified(), &vec![1, 2, 3, 4]);
+        // Ensure the data class remains unchanged after mutation
+        assert_eq!(classified.data_class(), CommonTaxonomy::Sensitive.data_class());
+    }
+
+    #[test]
+    fn test_from_impl_sets_unknown_sensitivity() {
+        // Using From<T> should default to UnknownSensitivity
+        let classified: ClassifiedWrapper<String> = String::from("hello").into();
+        assert_eq!(classified.as_declassified(), &"hello".to_string());
+        assert_eq!(classified.data_class(), CommonTaxonomy::UnknownSensitivity.data_class());
+        // Debug should redact and include the correct class path
+        assert_eq!(format!("{classified:?}"), "<common/unknown_sensitivity:REDACTED>");
+    }
 }
