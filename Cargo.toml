@@ -11,7 +11,7 @@ members = [
 edition = "2024"
 rust-version = "1.88"
 authors = ["The Oxidizer Project Authors"]
-license-file = "LICENSE.txt"
+license-file = "LICENSE"
 homepage = "https://github.com/microsoft/oxidizer"
 repository = "https://github.com/microsoft/oxidizer"
 
