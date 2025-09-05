@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy"
 description = "Data annotation and redaction system providing a robust way to manipulate sensitive information."
-version = "0.1.0-alpha.1"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
