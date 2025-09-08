@@ -26,6 +26,3 @@ mutants.out.old
 *.pdb
 *.dll
 *.so
-
-# Best practice not to check this in for libraries
-Cargo.lock
