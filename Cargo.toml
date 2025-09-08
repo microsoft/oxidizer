@@ -18,7 +18,7 @@ repository = "https://github.com/microsoft/oxidizer"
 # all dependencies are listed with default-features = false, individual crates add the features they need
 [workspace.dependencies]
 # local dependencies
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.2.1" }
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.2.2-alpha.1" }
 
 # external dependencies
 insta = { version = "1.42.0", default-features = false  }
