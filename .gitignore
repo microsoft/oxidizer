@@ -20,9 +20,16 @@ mutants.out.old
 # We intentionally ignore this because we want to have high flexibility in customization.
 .vscode/settings.json
 .vscode/mcp.json
+.cargo/config.toml
 
 # Binaries
 *.exe
 *.pdb
 *.dll
 *.so
+
+# Internal tooling artifacts
+_manifest
+.artifactIgnore
+.sarif
+ARROW
