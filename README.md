@@ -4,9 +4,22 @@
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
-This repository contains a set of libraries that should eventually help with building performant services in Rust.
-At this stage, these libraries should be treated as experimental as we figure out the correct shape that best suits
-the goals of large-scale services.
+This repository contains a set of libraries that help you build robust highly scalable services in Rust.
+
+## Crates
+
+- [`data_privacy`](./crates/data_privacy/README.md)
+- [`data_privacy_macros`](./crates/data_privacy_macros/README.md)
+
+## Repo Guidelines
+
+- Every PR submitted to this repo should follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification.
+- Every crate built in this repo should:
+  - Have an entry in the Crates section above.
+  - Have an entry in in [CHANGELOG.md](./CHANGELOG.md).
+  - Have a README.md file generated using [`cargo-rdme`](https://docs.rs/cargo-rdme/latest/cargo_rdme/) with a consistent set of badges (see [crates/data_privacy/README.md](./crates/data_privacy/README.md) as an example)
+  - Have a CHANGELOG.md file generated using [`git-cliff`](https://git-cliff.org/docs/).
+  - Have a meaningful set of categories and keywords in their Cargo.toml file (see [crates/data_privacy/Cargo.toml](./crates/data_privacy/Cargo.toml) as an example). The `oxidizer` keyword should always be present.
 
 ## Contributing
 
