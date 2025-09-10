@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "insta",
  "mutants",
