@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy_macros"
 description = "Procedural macros for data privacy."
-version = "0.2.5"
+version = "0.2.6"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
