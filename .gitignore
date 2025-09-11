@@ -30,6 +30,5 @@ mutants.out.old
 
 # Internal tooling artifacts
 _manifest
-.artifactIgnore
 .sarif
 ARROW

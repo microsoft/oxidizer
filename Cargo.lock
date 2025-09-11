@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "data_privacy"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "data_privacy_macros",
  "mutants",
@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.2.8"
+version = "0.2.10"
 dependencies = [
  "insta",
  "mutants",
