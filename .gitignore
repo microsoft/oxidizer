@@ -20,6 +20,7 @@ mutants.out.old
 # We intentionally ignore this because we want to have high flexibility in customization.
 .vscode/settings.json
 .vscode/mcp.json
+.cargo/config.toml
 
 # Binaries
 *.exe
@@ -27,5 +28,8 @@ mutants.out.old
 *.dll
 *.so
 
-# Best practice not to check this in for libraries
-Cargo.lock
+# Internal tooling artifacts
+_manifest
+.artifactIgnore
+.sarif
+ARROW
