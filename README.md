@@ -36,6 +36,18 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/)
 or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
+## Releases
+
+Releases to crates.io are handled by an internal process. To release a new version of any of the crates,
+bump the version in accordance to semver. You should use cargo set-version for this to ensure all appropriate
+files are updated. For example:
+
+```bash
+cargo set-version -p data_privacy_macros -p data_privacy --bump minor
+```
+
+After the version is bumped, an automated process should publish a new version within the next 48 hours.
+
 ## Trademarks
 
 This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
