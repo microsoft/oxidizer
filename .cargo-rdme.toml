@@ -1,0 +1,4 @@
+# Defines the base heading level to use when inserting the crate’s documentation in the
+# README.  If this is not set the crate’s documentation will be inserted with its sections
+# belonging to the README section where the insertion happens.
+heading-base-level = 1

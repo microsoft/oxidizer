@@ -70,6 +70,24 @@ jobs:
       - name: Miri
         run: cargo +nightly miri test --all-features --workspace
 
+  pr-title-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conventional Commits
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            doc
+            task
+            style
+            perf
+            refactor
+            test
+
   mutation-testing:
     runs-on: ${{ matrix.os }}
     strategy:
