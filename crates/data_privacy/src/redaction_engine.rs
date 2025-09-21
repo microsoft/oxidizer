@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::redactors::Redactors;
+use crate::{Classified, DataClass};
 use core::fmt::{Debug, Display};
-use std::collections::HashMap;
 use std::io::{Cursor, Write};
-
-use crate::{Classified, DataClass, Redactor, SimpleRedactor, SimpleRedactorMode};
+use std::sync::Arc;
 
 /// Lets you apply redaction to classified data.
 ///
@@ -53,20 +53,18 @@ use crate::{Classified, DataClass, Redactor, SimpleRedactor, SimpleRedactorMode}
 /// #     try_out();
 /// # }
 /// ```
+#[derive(Clone, Default)]
 pub struct RedactionEngine {
-    redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
-    fallback: Box<dyn Redactor + Send + Sync>,
+    redactors: Arc<Redactors>,
 }
 
 impl RedactionEngine {
     #[must_use]
-    pub(crate) fn new(
-        mut redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
-        fallback: Box<dyn Redactor + Send + Sync>,
-    ) -> Self {
-        redactors.shrink_to_fit();
-
-        Self { redactors, fallback }
+    pub(crate) fn new(mut redactors: Redactors) -> Self {
+        redactors.shrink();
+        Self {
+            redactors: Arc::new(redactors),
+        }
     }
 
     /// Redacts the output of a classified value's [`Debug`] trait.
@@ -133,9 +131,24 @@ impl RedactionEngine {
         });
     }
 
+    /// Redacts the output of a classified value's [`Display`] trait and returns it as a `String`.
+    ///
+    /// Given a classified value whose payload implements the [`Display`] trait, this method will
+    /// redact the output of that trait using the redactor registered for the data class of the value.
+    #[must_use]
+    pub fn to_string_redacted<C, T>(&self, value: &C) -> String
+    where
+        C: Classified<T>,
+        T: Display,
+    {
+        let mut output = String::new();
+        self.display_redacted(value, |s| output.push_str(s));
+        output
+    }
+
     /// Redacts a string with an explicit data classification, sending the results to the output callback.
     pub fn redact(&self, data_class: &DataClass, value: impl AsRef<str>, mut output: impl FnMut(&str)) {
-        let redactor = self.redactors.get(data_class).unwrap_or(&self.fallback);
+        let redactor = self.redactors.get_or_fallback(data_class);
         redactor.redact(data_class, value.as_ref(), &mut output);
     }
 
@@ -144,20 +157,14 @@ impl RedactionEngine {
     /// This can be used as a hint to optimize buffer allocations.
     #[must_use]
     pub fn exact_len(&self, data_class: &DataClass) -> Option<usize> {
-        let redactor = self.redactors.get(data_class).unwrap_or(&self.fallback);
+        let redactor = self.redactors.get_or_fallback(data_class);
         redactor.exact_len()
-    }
-}
-
-impl Default for RedactionEngine {
-    fn default() -> Self {
-        Self::new(HashMap::new(), Box::new(SimpleRedactor::with_mode(SimpleRedactorMode::Erase)))
     }
 }
 
 impl Debug for RedactionEngine {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_list().entries(self.redactors.keys()).finish()
+        self.redactors.fmt(f)
     }
 }
 
@@ -167,7 +174,7 @@ mod tests {
 
     use super::*;
     use crate::common_taxonomy::{CommonTaxonomy, Insensitive, Sensitive, UnknownSensitivity};
-    use crate::{RedactionEngineBuilder, taxonomy};
+    use crate::{RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode, taxonomy};
 
     #[taxonomy(test, serde = false)]
     enum TestTaxonomy {
@@ -196,15 +203,14 @@ mod tests {
 
     #[test]
     fn test_new_creates_engine_with_redactors() {
-        let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
-        // Test that the engine was created successfully
+        // Test that the engine was created successfully. One redactor is the passthrough for Insensitive which is set by default.
         assert_eq!(engine.redactors.len(), 1);
     }
 
@@ -213,10 +219,11 @@ mod tests {
         let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let sensitive_data = Sensitive::new("secret".to_string());
         let result = collect_output(&engine, &sensitive_data);
@@ -229,10 +236,11 @@ mod tests {
         let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Replace('X'));
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let unknown_data = UnknownSensitivity::new("john@example.com".to_string());
         let result = collect_output(&engine, &unknown_data);
@@ -245,10 +253,11 @@ mod tests {
         let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let result = collect_output_as_class(&engine, &Sensitive::<()>::data_class(), "confidential");
 
@@ -260,10 +269,11 @@ mod tests {
         let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Replace('?'));
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let unknown_class = DataClass::new("unknown", "test");
         let result = collect_output_as_class(&engine, &unknown_class, "data");
@@ -277,11 +287,12 @@ mod tests {
         let hash_redactor = create_test_redactor(SimpleRedactorMode::Replace('#'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
-        _ = redactors.insert(TestTaxonomy::Personal.data_class(), Box::new(hash_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.insert(TestTaxonomy::Personal.data_class(), hash_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let sensitive_data = Sensitive::new("secret".to_string());
         let personal_data = Personal::new("email".to_string());
@@ -295,27 +306,31 @@ mod tests {
 
     #[test]
     fn test_redact_with_different_redactor_modes() {
-        let insert_redactor = create_test_redactor(SimpleRedactorMode::Insert("[REDACTED]".to_string()));
+        let insert_redactor = create_test_redactor(SimpleRedactorMode::Insert("[REDACTED]".into()));
         let passthrough_redactor = create_test_redactor(SimpleRedactorMode::Passthrough);
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(insert_redactor));
-        _ = redactors.insert(UnknownSensitivity::<()>::data_class(), Box::new(passthrough_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), insert_redactor);
+        redactors.insert(CommonTaxonomy::UnknownSensitivity.data_class(), passthrough_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let sensitive_data = Sensitive::new("secret".to_string());
         let unknown_data = UnknownSensitivity::new("public".to_string());
         let unclassified_data = Insensitive::new("account123".to_string());
+        let personal_data = Personal::new("username".to_string());
 
         let sensitive_result = collect_output(&engine, &sensitive_data);
         let unknown_result = collect_output(&engine, &unknown_data);
         let unclassified_result = collect_output(&engine, &unclassified_data);
+        let personal_result = collect_output(&engine, &personal_data);
 
         assert_eq!(sensitive_result, "[REDACTED]");
         assert_eq!(unknown_result, "public");
-        assert_eq!(unclassified_result, ""); // Uses fallback (erase)
+        assert_eq!(unclassified_result, "account123"); // Set by default by redactors
+        assert_eq!(personal_result, ""); // Uses fallback (erase)
     }
 
     #[test]
@@ -323,10 +338,11 @@ mod tests {
         let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let empty_data = Sensitive::new(String::new());
         let result = collect_output(&engine, &empty_data);
@@ -339,10 +355,11 @@ mod tests {
         let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let result = collect_output_as_class(&engine, &CommonTaxonomy::Sensitive.data_class(), "");
 
@@ -354,10 +371,11 @@ mod tests {
         let passthrough_redactor = create_test_redactor(SimpleRedactorMode::Passthrough);
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(passthrough_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), passthrough_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         let sensitive_data = Sensitive::new("hello world".to_string());
         let mut call_count = 0;
@@ -434,11 +452,12 @@ mod tests {
         let hash_redactor = create_test_redactor(SimpleRedactorMode::Replace('#'));
         let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(asterisk_redactor));
-        _ = redactors.insert(TestTaxonomy::Personal.data_class(), Box::new(hash_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), asterisk_redactor);
+        redactors.insert(TestTaxonomy::Personal.data_class(), hash_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         // Test the Debug trait implementation
         let debug_output = format!("{engine:?}");
@@ -454,17 +473,16 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_trait_with_empty_redactors() {
-        let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
-        let redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
+    fn test_debug_trait_with_default_redactors() {
+        let redactors = Redactors::default();
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         // Test the Debug trait implementation with no redactors
         let debug_output = format!("{engine:?}");
 
         // Should be an empty debug list
-        assert_eq!(debug_output, "[]");
+        assert_eq!(debug_output, r#"[DataClass { taxonomy: "common", name: "insensitive" }]"#);
     }
 
     #[test]
@@ -473,14 +491,15 @@ mod tests {
         let erase_redactor = create_test_redactor(SimpleRedactorMode::Erase);
         let replace_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
         let passthrough_redactor = create_test_redactor(SimpleRedactorMode::Passthrough);
-        let fallback_redactor = create_test_redactor(SimpleRedactorMode::Insert("REDACTED".to_string()));
+        let fallback_redactor = create_test_redactor(SimpleRedactorMode::Insert("REDACTED".into()));
 
-        let mut redactors = HashMap::<DataClass, Box<dyn Redactor + Send + Sync>>::new();
-        _ = redactors.insert(Sensitive::<()>::data_class(), Box::new(erase_redactor));
-        _ = redactors.insert(Insensitive::<()>::data_class(), Box::new(replace_redactor));
-        _ = redactors.insert(TestTaxonomy::Personal.data_class(), Box::new(passthrough_redactor));
+        let mut redactors = Redactors::default();
+        redactors.insert(CommonTaxonomy::Sensitive.data_class(), erase_redactor);
+        redactors.insert(CommonTaxonomy::Insensitive.data_class(), replace_redactor);
+        redactors.insert(TestTaxonomy::Personal.data_class(), passthrough_redactor);
+        redactors.set_fallback(fallback_redactor);
 
-        let engine = RedactionEngine::new(redactors, Box::new(fallback_redactor));
+        let engine = RedactionEngine::new(redactors);
 
         // Test exact_len for Erase mode - should return Some(0)
         let erase_len = engine.exact_len(&Sensitive::<()>::data_class());
@@ -498,6 +517,11 @@ mod tests {
         let unknown_class = UnknownSensitivity::<()>::data_class();
         let fallback_len = engine.exact_len(&unknown_class);
         assert_eq!(fallback_len, None, "Insert redactor should return None");
+
+        // Verify the actual behavior matches the exact_len hint
+        let sensitive_data = Sensitive::new("test".to_string());
+        let erase_result = collect_output(&engine, &sensitive_data);
+        assert_eq!(erase_result.len(), erase_len.unwrap_or(0));
 
         let unknown_data = UnknownSensitivity::new("test".to_string());
         let fallback_result = collect_output(&engine, &unknown_data);
@@ -532,25 +556,40 @@ mod tests {
 
         let expected_display_output = format!("<common/sensitive:{long_string}>");
         assert_eq!(output_buffer, expected_display_output);
+
+        let result_string = engine.to_string_redacted(&classified_long_string);
+
+        let expected_to_string_output = format!("<common/sensitive:{long_string}>");
+        assert_eq!(result_string, expected_to_string_output);
     }
 
     #[test]
-    fn test_default_creates_engine_with_empty_redactors_and_erase_fallback() {
+    fn test_default_creates_engine_with_passthrough_insecure_and_tagged_erase_fallback() {
         let engine = RedactionEngine::default();
 
-        // Should have no specific redactors
-        assert_eq!(engine.redactors.len(), 0);
+        // Should have one passthrough redactor for Insensitive data class
+        assert_eq!(engine.redactors.len(), 1);
 
-        // Should use the erase fallback for any data class
+        engine
+            .redactors
+            .get(&CommonTaxonomy::Insensitive.data_class())
+            .expect("Should have a redactor for Insensitive data class");
+
+        // Should use the tagged erase fallback for any other data class
         let test_data = Sensitive::new("secret data".to_string());
         let result = collect_output(&engine, &test_data);
 
         // Default fallback should be SimpleRedactor with Erase mode (empty string)
-        assert_eq!(result, "");
+        assert_eq!(result, "*");
 
         // Test with unknown sensitivity as well
         let unknown_data = UnknownSensitivity::new("some data".to_string());
         let result = collect_output(&engine, &unknown_data);
-        assert_eq!(result, "");
+        assert_eq!(result, "*");
+
+        // Test of Insensitive data passthrough
+        let insensitive_data = Insensitive::new("public data".to_string());
+        let result = collect_output(&engine, &insensitive_data);
+        assert_eq!(result, "public data"); // Should passthrough without redaction and tag
     }
 }

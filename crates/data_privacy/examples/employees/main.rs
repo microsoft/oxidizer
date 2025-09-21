@@ -38,13 +38,12 @@ mod employee;
 mod example_taxonomy;
 mod logging;
 
-use std::fs::{File, OpenOptions};
-use std::io::BufReader;
-
 use data_privacy::{RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode};
 use employee::Employee;
 use example_taxonomy::{ExampleTaxonomy, OrganizationallyIdentifiableInformation, PersonallyIdentifiableInformation};
 use logging::{log, set_redaction_engine_for_logging};
+use std::fs::{File, OpenOptions};
+use std::io::BufReader;
 
 fn main() {
     // First step, we create a redaction engine that prescribes how to redact individual data classes.

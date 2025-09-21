@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::{DataClass, Redactor};
+use std::borrow::Cow;
 
 /// Mode of operation for the `SimpleRedactor`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -25,10 +26,10 @@ pub enum SimpleRedactorMode {
     ReplaceAndTag(char),
 
     /// Inserts a custom string in place of the original string.
-    Insert(String),
+    Insert(Cow<'static, str>),
 
     /// Inserts a custom string in place of the original string and tags it with the class id.
-    InsertAndTag(String),
+    InsertAndTag(Cow<'static, str>),
 }
 
 /// A redactor that performs a variety of simple transformations on the input text.
@@ -92,7 +93,7 @@ impl Redactor for SimpleRedactor {
                 }
             }
             SimpleRedactorMode::Insert(s) => {
-                output(s.as_str());
+                output(s);
             }
             SimpleRedactorMode::InsertAndTag(s) => {
                 output(format!("<{data_class}:{s}>").as_str());
@@ -202,14 +203,14 @@ mod tests {
 
     #[test]
     fn redact_should_insert() {
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("replacement".to_string()));
+        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("replacement".into()));
         let result = redact_to_string(&redactor, &TEST_CLASS_ID, TEST_VALUE);
         assert_eq!(result, "replacement");
     }
 
     #[test]
     fn redact_should_insert_and_tag() {
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::InsertAndTag("replacement".to_string()));
+        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::InsertAndTag("replacement".into()));
         let result = redact_to_string(&redactor, &TEST_CLASS_ID, TEST_VALUE);
         assert_eq!(result, format!("<{TEST_CLASS_ID}:replacement>"));
     }
@@ -241,11 +242,11 @@ mod tests {
         assert_eq!(redactor.exact_len(), None);
 
         // Insert mode should return None as output length depends on the inserted string
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("replacement".to_string()));
+        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("replacement".into()));
         assert_eq!(redactor.exact_len(), None);
 
         // InsertAndTag mode should return None as output length depends on inserted string and data class
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::InsertAndTag("replacement".to_string()));
+        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::InsertAndTag("replacement".into()));
         assert_eq!(redactor.exact_len(), None);
     }
 }

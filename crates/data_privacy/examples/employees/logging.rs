@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use core::fmt::Display;
-
 use data_privacy::{Classified, RedactionEngine};
 use once_cell::sync::OnceCell;
 
