@@ -167,6 +167,7 @@ mod data_class;
 mod redaction_engine;
 mod redaction_engine_builder;
 mod redactor;
+mod redactors;
 mod simple_redactor;
 
 #[cfg(feature = "xxh3")]

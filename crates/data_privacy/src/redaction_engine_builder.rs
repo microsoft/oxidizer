@@ -2,15 +2,14 @@
 // Licensed under the MIT License.
 
 use core::fmt::Debug;
-use std::collections::HashMap;
 
 use crate::redaction_engine::RedactionEngine;
-use crate::{DataClass, Redactor, SimpleRedactor, SimpleRedactorMode};
+use crate::redactors::Redactors;
+use crate::{DataClass, Redactor};
 
 /// A builder for creating a [`RedactionEngine`].
 pub struct RedactionEngineBuilder {
-    redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
-    fallback: Box<dyn Redactor + Send + Sync>,
+    redactors: Redactors,
 }
 
 impl RedactionEngineBuilder {
@@ -20,8 +19,7 @@ impl RedactionEngineBuilder {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            redactors: HashMap::new(),
-            fallback: Box::new(SimpleRedactor::with_mode(SimpleRedactorMode::Erase)),
+            redactors: Redactors::default(),
         }
     }
 
@@ -30,7 +28,7 @@ impl RedactionEngineBuilder {
     /// Whenever the redaction engine encounters data of this class, it will use the provided redactor.
     #[must_use]
     pub fn add_class_redactor(mut self, data_class: &DataClass, redactor: impl Redactor + Send + Sync + 'static) -> Self {
-        _ = self.redactors.insert(data_class.clone(), Box::new(redactor));
+        self.redactors.insert(data_class.clone(), redactor);
         self
     }
 
@@ -40,14 +38,14 @@ impl RedactionEngineBuilder {
     /// The default fallback is to use an `ErasingRedactor`, which simply erases the original string.
     #[must_use]
     pub fn set_fallback_redactor(mut self, redactor: impl Redactor + Send + Sync + 'static) -> Self {
-        self.fallback = Box::new(redactor);
+        self.redactors.set_fallback(redactor);
         self
     }
 
     /// Builds the `RedactionEngine`.
     #[must_use]
     pub fn build(self) -> RedactionEngine {
-        RedactionEngine::new(self.redactors, self.fallback)
+        RedactionEngine::new(self.redactors)
     }
 }
 
@@ -59,13 +57,14 @@ impl Default for RedactionEngineBuilder {
 
 impl Debug for RedactionEngineBuilder {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_list().entries(self.redactors.keys()).finish()
+        self.redactors.fmt(f)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SimpleRedactor, SimpleRedactorMode};
 
     fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str, expected: &str) {
         let mut output = String::new();
@@ -77,17 +76,17 @@ mod tests {
     fn new_creates_builder_with_default_values() {
         let builder = RedactionEngineBuilder::new();
         let engine = builder.build();
-        test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "");
+        test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "*");
 
         let builder = RedactionEngineBuilder::default();
         let engine = builder.build();
-        test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "");
+        test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "*");
     }
 
     #[test]
     fn add_multiple_class_redactors() {
-        let redactor1 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("XX".to_string()));
-        let redactor2 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("YY".to_string()));
+        let redactor1 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("XX".into()));
+        let redactor2 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("YY".into()));
 
         let data_class1 = DataClass::new("taxonomy", "class1");
         let data_class2 = DataClass::new("taxonomy", "class2");
@@ -100,14 +99,14 @@ mod tests {
         let engine = builder.build();
         test_redaction(&engine, &data_class1, "sensitive data", "XX");
         test_redaction(&engine, &data_class2, "sensitive data", "YY");
-        test_redaction(&engine, &data_class3, "sensitive data", "");
+        test_redaction(&engine, &data_class3, "sensitive data", "*");
     }
 
     #[test]
     fn set_fallback_redactor_overwrites_default() {
-        let redactor1 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("XX".to_string()));
-        let redactor2 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("YY".to_string()));
-        let redactor3 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("ZZ".to_string()));
+        let redactor1 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("XX".into()));
+        let redactor2 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("YY".into()));
+        let redactor3 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("ZZ".into()));
 
         let data_class1 = DataClass::new("taxonomy", "class1");
         let data_class2 = DataClass::new("taxonomy", "class2");
@@ -126,8 +125,8 @@ mod tests {
 
     #[test]
     fn debug_trait_implementation() {
-        let redactor1 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("XX".to_string()));
-        let redactor2 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("YY".to_string()));
+        let redactor1 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("XX".into()));
+        let redactor2 = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("YY".into()));
 
         let data_class1 = DataClass::new("taxonomy", "class1");
         let data_class2 = DataClass::new("taxonomy", "class2");
@@ -143,9 +142,12 @@ mod tests {
         assert!(debug_output.contains("class2"));
         assert!(debug_output.contains("taxonomy"));
 
-        // Test empty builder debug output
-        let empty_builder = RedactionEngineBuilder::new();
-        let empty_debug_output = format!("{empty_builder:?}");
-        assert_eq!(empty_debug_output, "[]");
+        // Test default builder debug output
+        let default_builder = RedactionEngineBuilder::new();
+        let default_builder_debug_output = format!("{default_builder:?}");
+        assert_eq!(
+            default_builder_debug_output,
+            r#"[DataClass { taxonomy: "common", name: "insensitive" }]"#
+        );
     }
 }
