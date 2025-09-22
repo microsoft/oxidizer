@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This crate exposes macros to generate data taxonomies.
+//! Macros to generate data taxonomies.
 //!
 //! See the documentation for the [`data_privacy`](https://docs.rs/data_privacy) crate for details.
 

@@ -19,15 +19,15 @@
 //!
 //! Before continuing, it's important to understand a few concepts:
 //!
-//! - **Data Classification**: The process of tagging sensitive data with individual data classes.
+//! * **Data Classification**: The process of tagging sensitive data with individual data classes.
 //!   Different data classes may have different rules for handling them. For example, some sensitive
 //!   data can be put into logs, but only for a limited time, while other data can never be logged.
 //!
-//! - **Data Taxonomy**: A group of related data classes that together represent a consistent set
+//! * **Data Taxonomy**: A group of related data classes that together represent a consistent set
 //!   of rules for handling sensitive data. Different companies or governments usually have their
 //!   own taxonomies.
 //!
-//! - **Redaction**: The process of removing or obscuring sensitive information from data.
+//! * **Redaction**: The process of removing or obscuring sensitive information from data.
 //!   Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
 //!   value that is not reversible. This allows the data to be used for analysis or processing
 //!   without exposing the sensitive information.
@@ -42,16 +42,16 @@
 //!
 //! This crate is built around two traits:
 //!
-//! * The [`Classified`](crate::Classified) trait is used to mark types that hold sensitive data. The trait exposes
+//! * The [`Classified`](crate::classified::Classified) trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
 //!
-//! * The [`Redactor`](crate::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
-//!   few implementations of this trait, such as [`SimpleRedactor`](crate::SimpleRedactor), but others can
+//! * The [`Redactor`](crate::redactor::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
+//!   few implementations of this trait, such as [`SimpleRedactor`](crate::simple_redactor::SimpleRedactor), but others can
 //!   be implemented and used by applications as well.
 //!
 //! # Data Classes
 //!
-//! A [`DataClass`](crate::DataClass) is a struct that represents a single data class within a taxonomy. The struct
+//! A [`DataClass`](crate::data_class::DataClass) is a struct that represents a single data class within a taxonomy. The struct
 //! contains the name of the taxonomy and the name of the data class.
 //!
 //! # Classified Containers
@@ -61,7 +61,7 @@
 //! using the [`taxonomy`](crate::taxonomy) attribute. See the documentation for the attribute to learn how you define your own
 //! taxonomy and all its data classes.
 //!
-//! Classified containers implement the [`Debug`] trait if the data they hold implements the trait. However,
+//! Classified containers implement the `Debug` trait if the data they hold implements the trait. However,
 //! the data produced by the `Debug` trait is redacted, so it does not accidentally expose the sensitive data.
 //!
 //! Applications use the classified container types around application
@@ -81,7 +81,8 @@
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
-//! * On startup, the application initializes a [`RedactionEngine`](crate::RedactionEngine) using the [`RedactionEngineBuilder`](crate::RedactionEngineBuilder) type. The engine is configured with
+//! * On startup, the application initializes a [`RedactionEngine`](crate::redaction_engine::RedactionEngine) using the [`RedactionEngineBuilder`](crate::redaction_engine_builder::RedactionEngineBuilder)
+//!   type. The engine is configured with
 //!   redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class. For example, for
 //!   a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
