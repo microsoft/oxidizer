@@ -18,3 +18,9 @@ Macros to generate data taxonomies.
 See the documentation for the [`data_privacy`](https://docs.rs/data_privacy) crate for details.
 
 <!-- cargo-rdme end -->
+
+<div style="font-size: 75%" ><hr/>
+
+This crate was developed as part of [The Oxidizer Project](https://github.com/microsoft/oxidizer).
+
+</div>

@@ -25,14 +25,14 @@ These are the crates built out of this repo:
 
 ## Repo Guidelines
 
-- Every PR submitted to this repo should follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification.
+- Every PR submitted to this repo must follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification.
 
 - Every crate built in this repo should:
   - Have an entry in the Crates section above.
   - Have an entry in [CHANGELOG.md](./CHANGELOG.md).
   - Have a README.md file generated using [`cargo-rdme`](https://docs.rs/cargo-rdme/latest/cargo_rdme/)
     with a consistent set of badges (see [crates/data_privacy/README.md](./crates/data_privacy/README.md) as an example)
-  - Have a CHANGELOG.md file generated using [`git-cliff`](https://git-cliff.org/docs/).
+  - Have a CHANGELOG.md file generated using the `release-crate.ps1` script.
   - Have a meaningful set of categories and keywords in their Cargo.toml file (see
     [crates/data_privacy/Cargo.toml](./crates/data_privacy/Cargo.toml) as an example).
     The `oxidizer` keyword should always be present.
@@ -41,17 +41,17 @@ These are the crates built out of this repo:
 ## Releasing Crate Versions
 
 Releasing new versions of crates to [crates.io](https://crates.io) is handled by
-an internal Microsoft process. To release a new version of any crate,
-bump the version in accordance to semver using the `cargo set-version` command available
-via the [`cargo-edit`](https://crates.io/crates/cargo-edit) crate.
-For example:
+an internal Microsoft automation process. To release a new version of any crate, use
+the `scripts\release-crate.ps1` script. For example:
 
 ```bash
-cargo set-version -p data_privacy_macros -p data_privacy --bump minor
+scripts\release-crate.ps1 data_privacy
 ```
 
-After the version bump is checked in, an automated process will publish the
-updated crates within 48 hours.
+Once you run this script, the version of the crate is updated and the crate's
+`CHANGELOG.md` file is updated. You can then check in those changes to the repo
+and push to GitHub. Once these changes are committed, automation will kick in
+to tag the commit and push the crate to crates.io.
 
 ## Trademarks
 
