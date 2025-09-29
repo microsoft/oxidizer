@@ -1,0 +1,19 @@
+[package]
+name = "recoverable"
+description = "recovery metadata and classification for resilience patterns"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "resilience", "metadata", "classification", "seatbelt"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+static_assertions.workspace = true

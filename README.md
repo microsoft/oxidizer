@@ -11,10 +11,11 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [Crates](#crates)
-- [Repo Guidelines](#repo-guidelines)
-- [Releasing Crate Versions](#releasing-crate-versions)
-- [Trademarks](#trademarks)
+- [The Oxidizer Project](#the-oxidizer-project)
+  - [Crates](#crates)
+  - [Repo Guidelines](#repo-guidelines)
+  - [Releasing Crate Versions](#releasing-crate-versions)
+  - [Trademarks](#trademarks)
 
 ## Crates
 
@@ -22,6 +23,7 @@ These are the crates built out of this repo:
 
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros to generate data taxonomies.
+- [`recoverable`](./crates/recoverable/README.md) - Recovery metadata and classification for resilience patterns.
 
 ## Repo Guidelines
 
