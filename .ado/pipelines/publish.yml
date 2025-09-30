@@ -48,7 +48,6 @@ extends:
       - job: determine_packages
         displayName: 'Determine packages to publish'
         variables:
-        - template: .pipelines/variables/infra.yml@self
         # Run on linux where network isolation isn't enforced yet
         pool:
           name: ${{ parameters.agentPool }}
@@ -100,7 +99,7 @@ extends:
               ${{ else }}:
                 image: windows-latest
             variables:
-            - template: .pipelines/variables/cargo-tools.yml@self
+            - template: .ado/templates/cargo-tools.yml@self
             templateContext:
               workflow: Rust
               rust:

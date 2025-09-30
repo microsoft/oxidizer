@@ -27,7 +27,7 @@ steps:
 
     $toPublish = foreach($package in $packages) {
         $previousVersion = $previousPackages | Where-Object { $_.name -eq $package.name } | Select-Object -ExpandProperty version
-        if (-not $previousVersionStr) {
+        if (-not $previousVersion) {
             Write-Host "Package $($package.name) is new, needs publishing"
             "-p $($package.name)"
             continue
