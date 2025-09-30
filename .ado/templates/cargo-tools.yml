@@ -1,0 +1,7 @@
+# Variable template for Cargo tools.
+
+# NOTE: Keep the format of the variables consistent, as the ./scripts/install-cargo-tools.ps1 script depends on it.
+# Format: "<tool-name>@<version>"
+# Keep this list alphabetically sorted.
+variables:
+  cargo-tools-cargo-release: "cargo-release@0.25.18"
