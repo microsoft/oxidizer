@@ -465,6 +465,7 @@ mod tests {
     #[test]
     fn assert_types() {
         assert_impl_all!(Recovery: Debug, PartialEq, Clone, Send, Sync);
+        assert_impl_all!(RecoveryKind: Debug, PartialEq, Clone, Eq, Copy, std::hash::Hash);
 
         // cannot be Copy because in the future we may want to add more fields that are not Copy
         assert_not_impl_all!(Recovery: Copy);
@@ -533,13 +534,48 @@ mod tests {
             }
         }
 
-        impl From<Recovery> for RecoverableType {
-            fn from(recovery: Recovery) -> Self {
-                Self(recovery)
-            }
-        }
-
         assert_impl_all!(Result<RecoverableType, RecoverableType>: Recover);
         assert_not_impl_all!(Result<RecoverableType, String>: Recover);
+    }
+
+    #[test]
+    fn recovery_delay_ok() {
+        assert_eq!(Recovery::success().recovery_delay(), None);
+        assert_eq!(Recovery::unknown().recovery_delay(), None);
+        assert_eq!(Recovery::never().recovery_delay(), None);
+        assert_eq!(Recovery::retry().recovery_delay(), None);
+        assert_eq!(
+            Recovery::retry_after(Duration::from_secs(60)).recovery_delay(),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(Recovery::unavailable(None).recovery_delay(), None);
+        assert_eq!(
+            Recovery::unavailable(Some(Duration::from_secs(300))).recovery_delay(),
+            Some(Duration::from_secs(300))
+        );
+        assert_eq!(Recovery::retry_after(Duration::from_secs(30)).to_string(), "retry-after");
+    }
+
+    #[test]
+    fn recover_trait_implementations() {
+        // Recovery implements Recover
+        assert_eq!(Recovery::retry().recovery().kind(), RecoveryKind::Retry);
+
+        // Result implements Recover
+        #[derive(Debug)]
+        struct TestType;
+        impl Recover for TestType {
+            fn recovery(&self) -> Recovery {
+                Recovery::success()
+            }
+        }
+        assert_eq!(
+            (Ok(TestType) as Result<TestType, TestType>).recovery().kind(),
+            RecoveryKind::Success
+        );
+        assert_eq!(
+            (Err(TestType) as Result<TestType, TestType>).recovery().kind(),
+            RecoveryKind::Success
+        );
     }
 }
