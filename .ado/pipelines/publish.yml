@@ -15,6 +15,9 @@ parameters:
   default:
   - dev
   - release
+- name: previousVersion
+  type: string
+  default: 'HEAD^'
 
 variables:
   MSRUSTUP_TOOLCHAIN: ms-prod
@@ -72,6 +75,7 @@ extends:
               stepName: determine_packages_internal_mirror
               workingDirectory: '$(Build.SourcesDirectory)'
               registryName: CratesIoMirror
+              previousVersion: ${{ parameters.previousVersion }}
           - template: .ado/templates/determine-publish-packages.yml@self
             parameters:
               manifestPath: '$(Build.SourcesDirectory)/Cargo.toml'
@@ -79,6 +83,7 @@ extends:
               stepName: determine_packages_crates_io
               workingDirectory: '$(Pipeline.Workspace)' # We need to be outside of the folder with .cargo/config.toml to actually get info from crates.io
               registryName: crates-io
+              previousVersion: ${{ parameters.previousVersion }}
     - stage: build
       displayName: 'Build and Test'
       dependsOn: []
