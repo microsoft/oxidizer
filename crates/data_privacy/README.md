@@ -1,4 +1,4 @@
-<div align="center">
+<div style="text-align: center">
  <img src="./logo.png" alt="Data Privacy Logo" width="128">
 
 # Data Privacy
