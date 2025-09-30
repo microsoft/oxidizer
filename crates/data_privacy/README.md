@@ -177,3 +177,9 @@ fn try_out() {
 ```
 
 <!-- cargo-rdme end -->
+
+<div style="font-size: 75%" ><hr/>
+
+This crate was developed as part of [The Oxidizer Project](https://github.com/microsoft/oxidizer).
+
+</div>

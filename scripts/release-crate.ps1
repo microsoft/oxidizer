@@ -1,0 +1,464 @@
+<#
+.SYNOPSIS
+    Updates the version of a Rust crate and generates a CHANGELOG.md file based on git history.
+
+.DESCRIPTION
+    This script automates two main tasks for releasing a Rust crate in a workspace repository:
+    1. Version Bump
+    2. Changelog Generation: It generates a CHANGELOG.md file
+
+.PARAMETER CrateName
+    The name of the crate to release. This should match the folder name inside the 'crates' directory.
+
+.PARAMETER Version
+    [Optional] The specific version to set (e.g., "1.2.3"). Can be specified with --version or -v.
+
+.EXAMPLE
+    # Increment the version for 'my-crate' and generate its changelog
+    .\release-crate.ps1 "my-crate"
+
+.EXAMPLE
+    # Set a specific version for 'my-crate'
+    .\release-crate.ps1 my-crate --version "2.5.0"
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [string]$CrateName,
+
+    [Parameter(Mandatory = $false)]
+    [Alias('v')]
+    [string]$Version
+)
+
+# --- CONFIGURATION ---
+
+# Maps commit types (e.g., 'chore') to a common group key (e.g., 'task').
+$script:TypeGroupMapping = @{
+    'chore' = 'task';
+    'doc'   = 'docs';
+    'misc'  = 'miscellaneous';
+}
+
+# Maps the final group key to a user-friendly header in the changelog.
+$script:HeaderNameMapping = @{
+    'feat'          = '✨ Features';
+    'fix'           = '🐛 Bug Fixes';
+    'perf'          = '⚡ Performance';
+    'task'          = '✔️ Tasks';
+    'refactor'      = '♻️ Code Refactoring';
+    'docs'          = '📚 Documentation';
+    'build'         = '🏗️ Build System';
+    'ci'            = '🔄 Continuous Integration';
+    'style'         = '🎨 Styling';
+    'miscellaneous' = '🧩 Miscellaneous';
+}
+
+# Defines the preferred order for commit type sections in the changelog.
+$script:TypeOrder = @('feat', 'fix', 'perf', 'docs', 'task', 'refactor', 'build', 'ci', 'style')
+
+# Defines commit types that should be excluded from the changelog.
+$script:IgnoredTypes = @('test')
+
+# --- COMPILED REGEX PATTERNS ---
+
+# Pattern for conventional commit format: type(scope): description
+$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?:\s*(.*)'
+
+# Pattern for PR references: (#123)
+$script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
+
+# Pattern for semantic version format: major.minor.patch
+$script:SemanticVersionRegex = [regex]'^\d+\.\d+\.\d+$'
+
+# Pattern for extracting version from Cargo.toml: version = "x.y.z"
+$script:CargoVersionRegex = [regex]'(?<=version\s*=\s*")[^"]+'
+
+# Pattern for GitHub repository URL matching
+$script:GitHubRepoRegex = [regex]'github\.com[/:][\w.-]+/[\w.-]+'
+
+# Pattern for regex metacharacters that need escaping
+$script:RegexEscapeRegex = [regex]'([\\\.$\^\{\[\(\|\)\*\+\?\/])'
+
+# --- HELPER FUNCTIONS ---
+
+function Test-CommandExists {
+    param([string]$Command)
+    return $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
+}
+
+function Test-ValidCrateName {
+    param([string]$crateName)
+    # Validate crate name: must contain only letters, numbers, hyphens, and underscores
+    # Must not start or end with hyphen, and must not be empty
+    return $crateName -match '^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$' -and $crateName.Length -le 64
+}
+
+function Test-ValidVersion {
+    param([string]$version)
+    if ([string]::IsNullOrEmpty($version)) {
+        return $true  # Empty version is valid (will be auto-incremented)
+    }
+    return $script:SemanticVersionRegex.IsMatch($version)
+}
+
+function Compare-SemanticVersions {
+    param(
+        [string]$version1,
+        [string]$version2
+    )
+
+    # Parse version strings into arrays of integers
+    $v1Parts = $version1.Split('.') | ForEach-Object { [int]$_ }
+    $v2Parts = $version2.Split('.') | ForEach-Object { [int]$_ }
+
+    # Ensure both arrays have 3 elements (major, minor, patch)
+    while ($v1Parts.Count -lt 3) { $v1Parts += 0 }
+    while ($v2Parts.Count -lt 3) { $v2Parts += 0 }
+
+    # Compare major, minor, patch in order
+    for ($i = 0; $i -lt 3; $i++) {
+        if ($v1Parts[$i] -gt $v2Parts[$i]) {
+            return 1  # version1 > version2
+        }
+        elseif ($v1Parts[$i] -lt $v2Parts[$i]) {
+            return -1  # version1 < version2
+        }
+    }
+
+    return 0  # versions are equal
+}
+
+function Get-CurrentVersion {
+    param([string]$cargoTomlPath)
+
+    if (-not (Test-Path $cargoTomlPath)) {
+        Write-Error "Could not find Cargo.toml file at '$cargoTomlPath'."
+        return $null
+    }
+
+    $cargoContent = Get-Content $cargoTomlPath -Raw
+    $currentVersionMatch = $script:CargoVersionRegex.Match($cargoContent)
+    if (-not $currentVersionMatch.Success) {
+        Write-Error "Could not determine current version from '$cargoTomlPath'."
+        return $null
+    }
+
+    return $currentVersionMatch.Value
+}
+
+function Invoke-GitCommand {
+    param(
+        [string]$command,
+        [string]$errorMessage = "Git command failed"
+    )
+
+    $result = Invoke-Expression "git $command" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "$errorMessage. Git command: git $command. Error: $result"
+        return $null
+    }
+
+    return $result
+}
+
+function Sort-KeysByPreferredOrder {
+    param(
+        [string[]]$allKeys,
+        [string[]]$preferredOrder
+    )
+    $sortedKeys = [System.Collections.ArrayList]::new()
+    $remainingKeys = [System.Collections.ArrayList]::new()
+    $remainingKeys.AddRange($allKeys)
+
+    foreach ($key in $preferredOrder) {
+        if ($remainingKeys.Contains($key)) {
+            $null = $sortedKeys.Add($key)
+            $null = $remainingKeys.Remove($key)
+        }
+    }
+
+    $remainingKeys.Sort()
+    $sortedKeys.AddRange($remainingKeys)
+    return $sortedKeys
+}
+
+function Format-ConventionalCommits {
+    param(
+        [string[]]$rawCommitMessages,
+        [string]$prBaseUrl
+    )
+
+    if (-not $rawCommitMessages) {
+        return @()
+    }
+
+    $groupedCommits = [ordered]@{}
+
+    foreach ($message in $rawCommitMessages) {
+        $type = "miscellaneous"
+        $description = $message
+        $isConventional = $false
+
+        $conventionalMatch = $script:ConventionalCommitRegex.Match($message)
+        if ($conventionalMatch.Success) {
+            $type = $conventionalMatch.Groups[1].Value
+            $description = $conventionalMatch.Groups[2].Value
+            $isConventional = $true
+        }
+
+        if ($isConventional -and $script:IgnoredTypes -contains $type) {
+            continue
+        }
+
+        if (-not [string]::IsNullOrEmpty($prBaseUrl)) {
+            $prMatch = $script:PrReferenceRegex.Match($description)
+            if ($prMatch.Success) {
+                $fullMatch = $prMatch.Groups[0].Value
+                $prNumber  = $prMatch.Groups[2].Value
+                $prLink    = " ([#$prNumber]($prBaseUrl/$prNumber))"
+                $description = $description.Substring(0, $description.Length - $fullMatch.Length) + $prLink
+            }
+        }
+
+        $groupKey = if ($script:TypeGroupMapping.ContainsKey($type)) { $script:TypeGroupMapping[$type] } else { $type }
+
+        if (-not $groupedCommits.Contains($groupKey)) {
+            $groupedCommits[$groupKey] = [System.Collections.ArrayList]::new()
+        }
+
+        [void]$groupedCommits[$groupKey].Add("  - $description")
+    }
+
+    $sortedKeys = Sort-KeysByPreferredOrder -allKeys $groupedCommits.Keys -preferredOrder $script:TypeOrder
+    $formattedLines = @()
+    foreach ($type in $sortedKeys) {
+        if ($groupedCommits[$type].Count -gt 0) {
+            $headerName = if ($script:HeaderNameMapping.ContainsKey($type)) { $script:HeaderNameMapping[$type] } else { $type.Substring(0, 1).ToUpper() + $type.Substring(1) }
+            $formattedLines += "- $headerName", "", $groupedCommits[$type], ""
+        }
+    }
+
+    if ($formattedLines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($formattedLines[-1])) {
+        if ($formattedLines.Count -gt 1) {
+            $formattedLines = $formattedLines[0..($formattedLines.Count - 2)]
+        } else {
+            $formattedLines = @()
+        }
+    }
+
+    return $formattedLines
+}
+
+# --- SCRIPT FUNCTIONS ---
+
+function Update-CrateVersion {
+    param(
+        [string]$crateName,
+        [string]$version,
+        [string]$crateCargoToml,
+        [string]$rootCargoToml
+    )
+
+    $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+
+    $newVersion = ""
+    if ([string]::IsNullOrEmpty($version)) {
+        $versionParts = $currentVersion.Split('.')
+        # Ensure versionParts has 3 elements (major, minor, patch)
+        while ($versionParts.Count -lt 3) {
+            $versionParts += '0'
+        }
+        $versionParts[1] = [int]$versionParts[1] + 1
+        $versionParts[2] = '0'
+        $newVersion = $versionParts -join '.'
+        Write-Host "✅ Auto-incrementing version from $currentVersion to $newVersion."
+    }
+    else {
+        $newVersion = $version
+        Write-Host "✅ Using specified version: $newVersion."
+    }
+
+    Write-Host "📝 Updating '$crateCargoToml'..."
+    (Get-Content $crateCargoToml -Raw) -replace '(?<=version\s*=\s*")[^"]+', $newVersion | Set-Content $crateCargoToml -NoNewline
+
+    Write-Host "📝 Updating '$rootCargoToml'..."
+
+    function Get-EscapedRegexSpecialChars($str) {
+        # Escape all regex metacharacters: . $ ^ { [ ( | ) * + ? \ /
+        return ($str -replace $script:RegexEscapeRegex, '\\$1')
+    }
+
+    $escapedCrateName = Get-EscapedRegexSpecialChars($crateName)
+    $crateNamePattern = $escapedCrateName.Replace('_', '[-_]')
+    $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
+    (Get-Content $rootCargoToml -Raw) -replace $regex, $newVersion | Set-Content $rootCargoToml -NoNewline
+
+    return $newVersion
+}
+
+function Write-Changelog {
+    param(
+        [string]$crateName,
+        [string]$newVersion,
+        [string]$crateFolder,
+        [string]$changelogFile,
+        [string]$prBaseUrl
+    )
+
+    $tags = Invoke-GitCommand -Command "tag --list `"$crateName-v*`"" -ErrorMessage "Failed to retrieve git tags"
+    if ($null -eq $tags) {
+        Write-Warning "Could not retrieve git tags. Changelog generation may be incomplete."
+        $tags = @()
+    } else {
+        $tags = $tags | Where-Object { $_ -match "^${crateName}-v\d+\.\d+\.\d+$" } |
+            Sort-Object { [version]($_ -replace "${crateName}-v", '') }
+    }
+
+    $changelogContent = @("# Changelog", "")
+    $currentDate = (Get-Date).ToString('yyyy-MM-dd')
+    $hasContent = $false
+
+    # Process unreleased commits
+    $latestTag = if ($tags.Count -gt 0) { $tags[-1] } else { $null }
+    $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
+    $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for unreleased commits"
+    if ($null -eq $rawCommits) {
+        $rawCommits = @()
+    }
+
+    if ($rawCommits) {
+        $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
+        if ($formattedCommits) {
+            $changelogContent += "## [$newVersion] - $currentDate", ""
+            $changelogContent += $formattedCommits
+            $changelogContent += ""
+            $hasContent = $true
+        }
+    }
+
+    # Process commits from previous tags
+    for ($i = $tags.Count - 1; $i -ge 0; $i--) {
+        $currentTag = $tags[$i]
+        $previousTag = if ($i -gt 0) { $tags[$i-1] } else { $null }
+        $range = if ($previousTag) { "$previousTag..$currentTag" } else { $currentTag }
+        $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for tag $currentTag"
+        if ($null -eq $rawCommits) {
+            continue
+        }
+
+        if ($rawCommits) {
+            $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
+            if ($formattedCommits) {
+                $currentTagVersion = $currentTag -replace "${crateName}-v", ''
+                $tagDateResult = Invoke-GitCommand -Command "log -1 --format=%ai `"$currentTag`"" -ErrorMessage "Failed to get date for tag $currentTag"
+                $tagDate = if ($tagDateResult) { $tagDateResult.Split(' ')[0] } else { "unknown" }
+                $changelogContent += "## [$currentTagVersion] - $tagDate", ""
+                $changelogContent += $formattedCommits
+                $changelogContent += ""
+                $hasContent = $true
+            }
+        }
+    }
+
+    if (-not $hasContent) {
+        Write-Warning "No relevant commits found to generate a changelog."
+        return
+    }
+
+    $changelogContent | Out-File -FilePath $changelogFile -Encoding utf8
+    Write-Host "✅ Changelog written to '$changelogFile'."
+}
+
+function Show-FinalMessage {
+    param(
+        [string]$crateName,
+        [string]$newVersion
+    )
+
+    Write-Host "---" -ForegroundColor Green
+    Write-Host "🎉 Success! Next steps:" -ForegroundColor Green
+    Write-Host "1. Review the changes in the updated files." -ForegroundColor Green
+    Write-Host "2. Commit the changes and tag the new release:" -ForegroundColor Green
+    Write-Host "   git add ." -ForegroundColor DarkGray
+    Write-Host "   git commit -m `"feat($crateName): release v$newVersion`"" -ForegroundColor DarkGray
+    Write-Host "   git push origin mybranch" -ForegroundColor DarkGray
+    Write-Host "3. Once the commit is merged to main, automation will tag the commit and release to crates.io" -ForegroundColor Green
+    Write-Host "---" -ForegroundColor Green
+}
+
+# --- SCRIPT EXECUTION ---
+
+# 1. INPUT VALIDATION
+if (-not (Test-ValidCrateName -crateName $CrateName)) {
+    Write-Error "Invalid crate name '$CrateName'. Crate names must contain only letters, numbers, hyphens, and underscores, cannot start or end with hyphen, and must be 64 characters or less."
+    return
+}
+
+if (-not (Test-ValidVersion -version $Version)) {
+    Write-Error "Invalid version format '$Version'. Version must follow semantic versioning format (e.g., '1.2.3')."
+    return
+}
+
+# 2. PRE-FLIGHT CHECKS
+if (-not (Test-CommandExists -command "git")) {
+    Write-Error "Git is not installed or not found in your PATH."
+    return
+}
+
+$repoRoot = Get-Location
+if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
+    Write-Error "This script must be run from the root of a Git repository."
+    return
+}
+
+$crateFolder = Join-Path $repoRoot "crates/$CrateName"
+if (-not (Test-Path $crateFolder)) {
+    Write-Error "Crate folder not found at '$crateFolder'. Please check the CrateName."
+    return
+}
+
+# 3. DETERMINE GITHUB REPO URL
+$prBaseUrl = $null
+$remoteUrl = Invoke-GitCommand -command "remote get-url origin" -errorMessage "Failed to get remote URL"
+if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
+    $repoIdentifier = $matches[1] -replace '\.git$', ''
+    $prBaseUrl = "https://github.com/$repoIdentifier/pull"
+} else {
+    Write-Warning "Could not determine GitHub repository from remote 'origin'. Links will not be generated."
+}
+
+# 4. DEFINE FILE PATHS
+$crateCargoToml = Join-Path $crateFolder "Cargo.toml"
+$rootCargoToml = Join-Path $repoRoot "Cargo.toml"
+$changelogFile = Join-Path $crateFolder "CHANGELOG.md"
+
+if ((-not (Test-Path $crateCargoToml)) -or (-not (Test-Path $rootCargoToml))) {
+    Write-Error "Could not find Cargo.toml file in the crate folder or repository root."
+    return
+}
+
+# 5. VERSION COMPARISON VALIDATION
+if (-not [string]::IsNullOrEmpty($Version)) {
+    $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+    if ($null -eq $currentVersion) {
+        Write-Error "Failed to get current version for comparison. Aborting."
+        return
+    }
+
+    $versionComparison = Compare-SemanticVersions -version1 $Version -version2 $currentVersion
+    if ($versionComparison -le 0) {
+        Write-Error "Specified version '$Version' must be greater than current version '$currentVersion'. Please specify a higher version number."
+        return
+    }
+}
+
+# 6. EXECUTE WORKFLOW
+$newVersion = Update-CrateVersion -crateName $CrateName -version $Version -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
+if ($null -eq $newVersion) {
+    Write-Error "Failed to update crate version. Aborting."
+    return
+}
+
+Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
+Show-FinalMessage -crateName $CrateName -newVersion $newVersion
