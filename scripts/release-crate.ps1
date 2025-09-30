@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 <#
 .SYNOPSIS
     Updates the version of a Rust crate and generates a CHANGELOG.md file based on git history.

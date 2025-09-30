@@ -38,6 +38,9 @@ These are the crates built out of this repo:
     The `oxidizer` keyword should always be present.
   - Have a Rust-inspired logo.
 
+The best way to get started with a new crate is to run `scripts\add-crate.ps1` which will create a new folder
+and populate it to get you started on a new crate.
+
 ## Releasing Crate Versions
 
 Releasing new versions of crates to [crates.io](https://crates.io) is handled by

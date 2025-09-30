@@ -1,0 +1,24 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "{{CRATE_NAME}}"
+description = "{{CRATE_DESCRIPTION}}"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", {{CRATE_KEYWORDS}}]
+categories = [{{CRATE_CATEGORIES}}]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true
