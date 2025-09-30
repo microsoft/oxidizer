@@ -73,6 +73,9 @@ pub struct Recovery(RecoveryInner);
 #[derive(Debug, PartialEq, Clone, Eq, Copy, Hash)]
 #[non_exhaustive]
 pub enum RecoveryKind {
+    /// The operation was successful and no recovery is necessary.
+    Success,
+
     /// The condition is unknown.
     Unknown,
 
@@ -82,28 +85,46 @@ pub enum RecoveryKind {
     /// such as network timeouts, brief resource contention, or rate limiting.
     /// These conditions typically resolve within seconds to minutes.
     ///
-    /// For service-wide outages that may take much longer to resolve,
-    /// use [`Recovery::outage`] instead.
+    /// For service-wide unavailability that may take much longer to resolve,
+    /// use [`Recovery::unavailable`] instead.
     Retry,
 
     /// The condition is permanent and retrying won't help.
     Never,
 
-    /// Indicates a service-wide outage or significant degradation.
+    /// Indicates a service-wide unavailability or significant degradation.
     ///
-    /// Unlike `Retry`, outages represent widespread service failures that may take
+    /// Unlike `Retry`, unavailability represents widespread service failures that may take
     /// much longer to resolve and have uncertain recovery timelines. Retry strategies
     /// should use longer delays (minutes to hours) and expect multiple failures
     /// before recovery occurs.
     ///
     /// Some resilience middleware (such as circuit breakers) may choose to skip
-    /// retry attempts entirely when an outage is detected, instead failing fast
+    /// retry attempts entirely when unavailability is detected, instead failing fast
     /// or routing to alternative services to avoid contributing to system load
-    /// during the outage.
-    Outage,
+    /// during the unavailability period.
+    Unavailable,
 }
 
 impl Recovery {
+    /// The operation was successful and no recovery is necessary.
+    ///
+    /// Use this to indicate that an operation completed successfully.
+    /// This is useful when implementing the [`Recover`] trait for `Result` types
+    /// or when you need to explicitly represent success in a recovery context.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use recoverable::{Recovery, RecoveryKind};
+    ///
+    /// let recovery = Recovery::success();
+    /// assert_eq!(recovery.kind(), RecoveryKind::Success);
+    /// ```
+    pub const fn success() -> Self {
+        Self(RecoveryInner::Success)
+    }
+
     /// Recovery cannot be determined.
     ///
     /// Use when it's unclear whether retrying would help. Consider treating
@@ -146,8 +167,8 @@ impl Recovery {
     /// These conditions typically resolve within seconds to minutes without any
     /// specific timing guidance from the service.
     ///
-    /// For service-wide outages that may take much longer to resolve,
-    /// use [`Recovery::outage`] instead. For cases where the service provides
+    /// For service-wide unavailability that may take much longer to resolve,
+    /// use [`Recovery::unavailable`] instead. For cases where the service provides
     /// explicit timing guidance, use [`Recovery::retry_after`].
     ///
     /// # Examples
@@ -193,20 +214,20 @@ impl Recovery {
         Self(RecoveryInner::RetryAfter(duration))
     }
 
-    /// Indicates a service is experiencing a widespread outage or significant degradation.
+    /// Indicates a service is experiencing a widespread unavailability or significant degradation.
     ///
-    /// Use when the failure is due to a service-wide outage that affects many users
+    /// Use when the failure is due to a service-wide unavailability that affects many users
     /// and may take an extended period to resolve (minutes to hours). Unlike
     /// [`Recovery::retry`] which suggests quick resolution, or [`Recovery::retry_after`]
-    /// which provides high-confidence timing, outages indicate uncertainty about
-    /// recovery timing and suggest that multiple retry attempts may fail before
+    /// which provides high-confidence timing, unavailability indicates uncertainty about
+    /// recovery timing and suggests that multiple retry attempts may fail before
     /// the service recovers.
     ///
     /// Retry strategies should implement exponential backoff with much longer delays
     /// than normal retries, as immediate recovery is unlikely and aggressive retrying
-    /// may worsen the outage. Some recovery strategies may choose to skip retrying
-    /// outages entirely or route to alternative services to avoid overloading the
-    /// service that is experiencing the outage.
+    /// may worsen the unavailability. Some recovery strategies may choose to skip retrying
+    /// unavailability entirely or route to alternative services to avoid overloading the
+    /// service that is experiencing the unavailability.
     ///
     /// # Parameters
     ///
@@ -222,14 +243,14 @@ impl Recovery {
     ///
     /// use recoverable::Recovery;
     ///
-    /// // Basic outage with no recovery hint
-    /// let recovery = Recovery::outage(None);
+    /// // Basic unavailability with no recovery hint
+    /// let recovery = Recovery::unavailable(None);
     ///
-    /// // Outage with low-confidence recovery estimate (chance it might recover in 5 minutes)
-    /// let recovery = Recovery::outage(Some(Duration::from_secs(300)));
+    /// // Unavailability with low-confidence recovery estimate (chance it might recover in 5 minutes)
+    /// let recovery = Recovery::unavailable(Some(Duration::from_secs(300)));
     /// ```
-    pub const fn outage(recovery_hint: Option<Duration>) -> Self {
-        Self(RecoveryInner::Outage(recovery_hint))
+    pub const fn unavailable(recovery_hint: Option<Duration>) -> Self {
+        Self(RecoveryInner::Unavailable(recovery_hint))
     }
 
     /// Returns the recovery kind.
@@ -242,6 +263,9 @@ impl Recovery {
     /// ```rust
     /// use recoverable::{Recovery, RecoveryKind};
     ///
+    /// let recovery = Recovery::success();
+    /// assert_eq!(recovery.kind(), RecoveryKind::Success);
+    ///
     /// let recovery = Recovery::unknown();
     /// assert_eq!(recovery.kind(), RecoveryKind::Unknown);
     ///
@@ -250,11 +274,12 @@ impl Recovery {
     /// ```
     pub fn kind(&self) -> RecoveryKind {
         match self.0 {
+            RecoveryInner::Success => RecoveryKind::Success,
             RecoveryInner::Unknown => RecoveryKind::Unknown,
             RecoveryInner::Never => RecoveryKind::Never,
             RecoveryInner::Retry => RecoveryKind::Retry,
             RecoveryInner::RetryAfter(_) => RecoveryKind::Retry,
-            RecoveryInner::Outage(_) => RecoveryKind::Outage,
+            RecoveryInner::Unavailable(_) => RecoveryKind::Unavailable,
         }
     }
 
@@ -270,10 +295,10 @@ impl Recovery {
     /// - [`Recovery::retry_after`] returns the specified duration (can be `Duration::ZERO` for immediate retry)
     ///   This indicates a high-confidence expectation that retry will succeed after this duration.
     /// - [`Recovery::retry`] returns `None`
-    /// - [`Recovery::outage`] returns the provided duration, or `None` if none was provided.
+    /// - [`Recovery::unavailable`] returns the provided duration, or `None` if none was provided.
     ///   When present, this represents the earliest time when recovery attempts might succeed.
     ///   Attempts before this time are expected to fail.
-    /// - [`Recovery::never`] and [`Recovery::unknown`] return `None`
+    /// - [`Recovery::success`], [`Recovery::never`] and [`Recovery::unknown`] return `None`
     ///
     /// # Examples
     ///
@@ -281,6 +306,10 @@ impl Recovery {
     /// use std::time::Duration;
     ///
     /// use recoverable::Recovery;
+    ///
+    /// // Successful operation
+    /// let success = Recovery::success();
+    /// assert_eq!(success.recovery_delay(), None);
     ///
     /// // Specific delay requested with high confidence of success
     /// let delay = Recovery::retry_after(Duration::from_secs(30));
@@ -290,14 +319,14 @@ impl Recovery {
     /// let immediate = Recovery::retry();
     /// assert_eq!(immediate.recovery_delay(), None);
     ///
-    /// // Outage with no recovery estimate
-    /// let outage = Recovery::outage(None);
-    /// assert_eq!(outage.recovery_delay(), None);
+    /// // Unavailability with no recovery estimate
+    /// let unavailable = Recovery::unavailable(None);
+    /// assert_eq!(unavailable.recovery_delay(), None);
     ///
-    /// // Outage with low-confidence recovery estimate
-    /// let outage_with_time = Recovery::outage(Some(Duration::from_secs(300)));
+    /// // Unavailability with low-confidence recovery estimate
+    /// let unavailable_with_time = Recovery::unavailable(Some(Duration::from_secs(300)));
     /// assert_eq!(
-    ///     outage_with_time.recovery_delay(),
+    ///     unavailable_with_time.recovery_delay(),
     ///     Some(Duration::from_secs(300))
     /// );
     ///
@@ -307,9 +336,10 @@ impl Recovery {
     /// ```
     pub fn recovery_delay(&self) -> Option<Duration> {
         match self.0 {
+            RecoveryInner::Success => None,
             RecoveryInner::RetryAfter(duration) => Some(duration),
             RecoveryInner::Retry => None,
-            RecoveryInner::Outage(duration) => duration,
+            RecoveryInner::Unavailable(duration) => duration,
             _ => None,
         }
     }
@@ -391,21 +421,23 @@ where
 
 #[derive(Debug, PartialEq, Clone)]
 enum RecoveryInner {
+    Success,
     Unknown,
     Never,
     Retry,
     RetryAfter(Duration),
-    Outage(Option<Duration>),
+    Unavailable(Option<Duration>),
 }
 
 impl Display for Recovery {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
+            RecoveryInner::Success => write!(f, "success"),
             RecoveryInner::Unknown => write!(f, "unknown"),
             RecoveryInner::Never => write!(f, "never"),
             RecoveryInner::Retry => write!(f, "retry"),
             RecoveryInner::RetryAfter(_) => write!(f, "retry-after"),
-            RecoveryInner::Outage(_) => write!(f, "outage"),
+            RecoveryInner::Unavailable(_) => write!(f, "unavailable"),
         }
     }
 }
@@ -413,10 +445,11 @@ impl Display for Recovery {
 impl Display for RecoveryKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            RecoveryKind::Success => write!(f, "success"),
             RecoveryKind::Unknown => write!(f, "unknown"),
             RecoveryKind::Never => write!(f, "never"),
             RecoveryKind::Retry => write!(f, "retry"),
-            RecoveryKind::Outage => write!(f, "outage"),
+            RecoveryKind::Unavailable => write!(f, "unavailable"),
         }
     }
 }
@@ -439,8 +472,9 @@ mod tests {
 
     #[test]
     fn recovery_enum() {
+        assert_eq!(Recovery::success().kind(), RecoveryKind::Success);
         assert_eq!(Recovery::unknown().kind(), RecoveryKind::Unknown);
-        assert_eq!(Recovery::outage(None).kind(), RecoveryKind::Outage);
+        assert_eq!(Recovery::unavailable(None).kind(), RecoveryKind::Unavailable);
         assert_eq!(Recovery::retry().kind(), RecoveryKind::Retry);
         assert_eq!(Recovery::retry_after(Duration::ZERO).kind(), RecoveryKind::Retry);
         assert_eq!(Recovery::never().kind(), RecoveryKind::Never);
@@ -448,18 +482,20 @@ mod tests {
 
     #[test]
     fn display_ok() {
+        assert_eq!(Recovery::success().to_string(), "success");
         assert_eq!(Recovery::unknown().to_string(), "unknown");
         assert_eq!(Recovery::never().to_string(), "never");
         assert_eq!(Recovery::retry().to_string(), "retry");
-        assert_eq!(Recovery::outage(None).to_string(), "outage");
+        assert_eq!(Recovery::unavailable(None).to_string(), "unavailable");
     }
 
     #[test]
     fn recovery_kind_display_ok() {
+        assert_eq!(RecoveryKind::Success.to_string(), "success");
         assert_eq!(RecoveryKind::Unknown.to_string(), "unknown");
         assert_eq!(RecoveryKind::Never.to_string(), "never");
         assert_eq!(RecoveryKind::Retry.to_string(), "retry");
-        assert_eq!(RecoveryKind::Outage.to_string(), "outage");
+        assert_eq!(RecoveryKind::Unavailable.to_string(), "unavailable");
     }
 
     #[test]
@@ -476,13 +512,13 @@ mod tests {
 
     #[test]
     fn outage_behavior() {
-        let recovery = Recovery::outage(None);
+        let recovery = Recovery::unavailable(None);
         assert_eq!(recovery.recovery_delay(), None);
 
-        let recovery = Recovery::outage(Some(Duration::ZERO));
+        let recovery = Recovery::unavailable(Some(Duration::ZERO));
         assert_eq!(recovery.recovery_delay(), Some(Duration::ZERO));
 
-        let recovery = Recovery::outage(Some(Duration::from_secs(1)));
+        let recovery = Recovery::unavailable(Some(Duration::from_secs(1)));
         assert_eq!(recovery.recovery_delay(), Some(Duration::from_secs(1)));
     }
 
