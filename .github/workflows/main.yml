@@ -72,6 +72,8 @@ jobs:
 
   pr-title-check:
     runs-on: ubuntu-latest
+    # The action only works for pull requests
+    if: github.event_name == 'pull_request'
     steps:
       - name: Conventional Commits
         uses: amannn/action-semantic-pull-request@v5
