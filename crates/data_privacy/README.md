@@ -1,4 +1,4 @@
-<div align="center">
+<div style="text-align: center">
  <img src="./logo.png" alt="Data Privacy Logo" width="128">
 
 # Data Privacy
@@ -177,3 +177,9 @@ fn try_out() {
 ```
 
 <!-- cargo-rdme end -->
+
+<div style="font-size: 75%" ><hr/>
+
+This crate was developed as part of [The Oxidizer Project](https://github.com/microsoft/oxidizer).
+
+</div>

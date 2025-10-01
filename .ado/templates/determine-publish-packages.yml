@@ -1,0 +1,69 @@
+parameters:
+- name: manifestPath
+  type: string
+- name: variableName
+  type: string
+- name: stepName
+  type: string
+- name: workingDirectory
+  type: string
+- name: registryName
+  type: string
+- name: previousVersion
+  type: string
+  default: 'HEAD^'
+
+steps:
+# Ideally, we'd just use cargo release --unpublished, but that doesn't work for private registries: https://github.com/crate-ci/cargo-release/issues/670
+# So instead, we use cargo info and cargo metadata to manually determine which packages to publish
+- pwsh: |
+    $packages = (cargo metadata --no-deps --format-version 1 --manifest-path ${{ parameters.manifestPath }} | ConvertFrom-Json).packages
+
+    $currentCommit = git rev-parse HEAD
+    Write-Host "Current commit: $currentCommit"
+    git checkout ${{ parameters.previousVersion }}
+    $previousPackages = (cargo metadata --no-deps --format-version 1 --manifest-path ${{ parameters.manifestPath }} | ConvertFrom-Json).packages
+    git checkout $currentCommit
+
+    $toPublish = foreach($package in $packages) {
+        $previousVersion = $previousPackages | Where-Object { $_.name -eq $package.name } | Select-Object -ExpandProperty version
+        if (-not $previousVersion) {
+            Write-Host "Package $($package.name) is new, needs publishing"
+            "-p $($package.name)"
+            continue
+        } else if ($previousVersion -eq $package.version) {
+            Write-Host "Package $($package.name) version $($package.version) unchanged, skipping"
+            continue
+        }
+
+        $info = cargo info $package.name --registry ${{ parameters.registryName }} --color never
+        [array]::Reverse($info) # cargo info outputs description first without any prefix, so we guard against version: appearing there
+        $publishedVersion = foreach($line in $info) {
+            if ($line -match '^\s*version:\s*(\S+)') {
+                $matches[1]
+                break
+            }
+        }
+        Write-Host "Package $($package.name) current version $($package.version), published version $publishedVersion"
+
+        $currentVersion = [System.Version]::Parse($package.version)
+        $publishedVersion = [System.Version]::Parse($publishedVersion)
+
+        if ($publishedVersion -lt $currentVersion) {
+            Write-Host "Package $($package.name) needs publishing"
+            $packageName = $package.name
+            "-p $packageName"
+        }
+        else {
+            Write-Host "Package $($package.name) is up to date"
+        }
+    }
+
+    $cargoReleaseArgument = $toPublish -join ' '
+    Write-Host "Determined packages to publish: $cargoReleaseArgument"
+
+    Write-Host "vso[task.setvariable variable=${{ parameters.variableName }};isOutput=true]$cargoReleaseArgument"
+    Write-Host "###vso[task.setvariable variable=${{ parameters.variableName }};isOutput=true]$cargoReleaseArgument"
+  displayName: 'Determine published packages ${{ parameters.stepName }}'
+  name: ${{ parameters.stepName }}
+  workingDirectory: ${{ parameters.workingDirectory }}

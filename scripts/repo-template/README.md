@@ -1,21 +1,21 @@
 <div style="text-align: center">
- <img src="./logo.png" alt="Data Privacy Macros Logo" width="128">
+ <img src="./logo.png" alt="{{CRATE_NAME_UPPER}} Logo" width="128">
 
-# Data Privacy Macros
+# {{CRATE_NAME_UPPER}}
 
-[![crate.io](https://img.shields.io/crates/v/data_privacy_macros.svg)](https://crates.io/crates/data_privacy_macros)
-[![docs.rs](https://docs.rs/data_privacy_macros/badge.svg)](https://docs.rs/data_privacy_macros)
+[![crate.io](https://img.shields.io/crates/v/{{CRATE_NAME}}.svg)](https://crates.io/crates/{{CRATE_NAME}})
+[![docs.rs](https://docs.rs/{{CRATE_NAME}}/badge.svg)](https://docs.rs/{{CRATE_NAME}})
 [![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
 </div>
 
+* [Summary](#summary)
+
+## Summary
+
 <!-- cargo-rdme start -->
-
-Macros to generate data taxonomies.
-
-See the documentation for the [`data_privacy`](https://docs.rs/data_privacy) crate for details.
 
 <!-- cargo-rdme end -->
 
