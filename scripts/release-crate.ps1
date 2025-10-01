@@ -45,16 +45,16 @@ $script:TypeGroupMapping = @{
 
 # Maps the final group key to a user-friendly header in the changelog.
 $script:HeaderNameMapping = @{
-    'feat'          = '✨ Features';
-    'fix'           = '🐛 Bug Fixes';
-    'perf'          = '⚡ Performance';
-    'task'          = '✔️ Tasks';
-    'refactor'      = '♻️ Code Refactoring';
-    'docs'          = '📚 Documentation';
     'build'         = '🏗️ Build System';
     'ci'            = '🔄 Continuous Integration';
-    'style'         = '🎨 Styling';
+    'docs'          = '📚 Documentation';
+    'feat'          = '✨ Features';
+    'fix'           = '🐛 Bug Fixes';
     'miscellaneous' = '🧩 Miscellaneous';
+    'perf'          = '⚡ Performance';
+    'refactor'      = '♻️ Code Refactoring';
+    'style'         = '🎨 Styling';
+    'task'          = '✔️ Tasks';
 }
 
 # Defines the preferred order for commit type sections in the changelog.
