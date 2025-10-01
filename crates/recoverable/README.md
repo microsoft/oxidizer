@@ -1,4 +1,4 @@
-<div style="text-align: center">
+<div align="center">
  <img src="./logo.png" alt="Recoverable Logo" width="128">
 
 # Recoverable
@@ -11,8 +11,7 @@
 
 </div>
 
-- [Recoverable](#recoverable)
-  - [Summary](#summary)
+- [Summary](#summary)
 
 ## Summary
 
