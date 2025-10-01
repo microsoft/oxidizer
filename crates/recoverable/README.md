@@ -1,17 +1,17 @@
-<div align="center">
- <img src="./logo.png" alt="Data Privacy Logo" width="128">
+<div style="text-align: center">
+ <img src="./logo.png" alt="Recoverable Logo" width="128">
 
-# Data Privacy
+# Recoverable
 
-[![crate.io](https://img.shields.io/crates/v/data_privacy.svg)](https://crates.io/crates/recoverable)
-[![docs.rs](https://docs.rs/data_privacy/badge.svg)](https://docs.rs/recoverable)
+[![crate.io](https://img.shields.io/crates/v/recoverable.svg)](https://crates.io/crates/recoverable)
+[![docs.rs](https://docs.rs/recoverable/badge.svg)](https://docs.rs/recoverable)
 [![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
 </div>
 
-- [Data Privacy](#data-privacy)
+- [Recoverable](#recoverable)
   - [Summary](#summary)
 
 ## Summary
@@ -32,7 +32,7 @@ enabling consistent retry behavior across different error types and resilience m
 ## Examples
 
 ```rust
-use seatbelt_recovery::{Recover, Recovery, RecoveryKind};
+use recoverable::{Recover, Recovery, RecoveryKind};
 
 #[derive(Debug)]
 enum DatabaseError {

@@ -2,12 +2,16 @@
 
 //! Recovery metadata and classification for resilience patterns.
 //!
-//! This crate provides types for classifying error conditions as recoverable or non-recoverable,
+//! This crate provides types for classifying conditions based on their **recoverability state**,
 //! enabling consistent retry behavior across different error types and resilience middleware.
+//!
+//! The recovery metadata describes whether retrying an operation might help, not whether
+//! the operation succeeded or failed. Both successful operations and permanent failures
+//! should use [`Recovery::never()`] since retrying won't change the outcome.
 //!
 //! # Core Types
 //!
-//! - [`Recovery`]: Classifies errors as recoverable (transient) or non-recoverable (permanent).
+//! - [`Recovery`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
 //! - [`Recover`]: A trait for types that can determine their recoverability.
 //! - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
 //!
@@ -26,7 +30,9 @@
 //! impl Recover for DatabaseError {
 //!     fn recovery(&self) -> Recovery {
 //!         match self {
+//!             // Transient failure - might succeed if retried
 //!             DatabaseError::ConnectionTimeout => Recovery::retry(),
+//!             // Permanent failures - retrying won't help
 //!             DatabaseError::InvalidCredentials => Recovery::never(),
 //!             DatabaseError::TableNotFound => Recovery::never(),
 //!         }
@@ -35,6 +41,10 @@
 //!
 //! let error = DatabaseError::ConnectionTimeout;
 //! assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
+//!
+//! // For successful operations, also use never() since retry is unnecessary
+//! let success_result: Result<(), DatabaseError> = Ok(());
+//! // If we had a wrapper type for success, it would also return Recovery::never()
 //! ```
 
 use std::fmt::{Display, Formatter};
@@ -73,9 +83,6 @@ pub struct Recovery(RecoveryInner);
 #[derive(Debug, PartialEq, Clone, Eq, Copy, Hash)]
 #[non_exhaustive]
 pub enum RecoveryKind {
-    /// The operation was successful and no recovery is necessary.
-    Success,
-
     /// The condition is unknown.
     Unknown,
 
@@ -90,6 +97,15 @@ pub enum RecoveryKind {
     Retry,
 
     /// The condition is permanent and retrying won't help.
+    ///
+    /// Use this for both:
+    /// - **Successful operations** - The operation completed successfully, retrying is unnecessary.
+    /// - **Permanent failures** - The operation failed permanently (e.g., malformed requests,
+    ///   authentication failures, resource not found). Retrying won't change the outcome.
+    ///
+    /// The recovery metadata describes **recoverability**, not success/failure status.
+    /// If retrying won't change the outcome, use `Never` regardless of whether the
+    /// original operation succeeded or failed.
     Never,
 
     /// Indicates a service-wide unavailability or significant degradation.
@@ -107,24 +123,6 @@ pub enum RecoveryKind {
 }
 
 impl Recovery {
-    /// The operation was successful and no recovery is necessary.
-    ///
-    /// Use this to indicate that an operation completed successfully.
-    /// This is useful when implementing the [`Recover`] trait for `Result` types
-    /// or when you need to explicitly represent success in a recovery context.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use recoverable::{Recovery, RecoveryKind};
-    ///
-    /// let recovery = Recovery::success();
-    /// assert_eq!(recovery.kind(), RecoveryKind::Success);
-    /// ```
-    pub const fn success() -> Self {
-        Self(RecoveryInner::Success)
-    }
-
     /// Recovery cannot be determined.
     ///
     /// Use when it's unclear whether retrying would help. Consider treating
@@ -138,24 +136,37 @@ impl Recovery {
     /// let recovery = Recovery::unknown();
     /// assert_eq!(recovery.kind(), RecoveryKind::Unknown);
     /// ```
+    #[must_use]
     pub const fn unknown() -> Self {
         Self(RecoveryInner::Unknown)
     }
 
     /// The condition is permanent and retrying won't help.
     ///
-    /// Examples: malformed requests, or resource not found errors.
-    /// These typically require user intervention or code changes to resolve.
+    /// Use this for both successful operations and permanent failures:
+    /// - **Successful operations**: The operation completed successfully, no retry needed.
+    /// - **Permanent failures**: Malformed requests, authentication failures, resource not found,
+    ///   or other errors that require user intervention or code changes to resolve.
+    ///
+    /// The recovery metadata describes **recoverability state**, not success/failure status.
+    /// If retrying won't change the outcome, use `never()` regardless of whether the
+    /// original operation succeeded or failed.
     ///
     /// # Examples
     ///
     /// ```rust
     /// use recoverable::{Recovery, RecoveryKind};
     ///
-    /// let recovery = Recovery::never();
-    /// assert_eq!(recovery.kind(), RecoveryKind::Never);
-    /// assert_eq!(recovery.recovery_delay(), None);
+    /// // Permanent failure - authentication failed
+    /// let auth_failure = Recovery::never();
+    /// assert_eq!(auth_failure.kind(), RecoveryKind::Never);
+    ///
+    /// // Successful operation - also uses never() since retry is unnecessary
+    /// let success = Recovery::never();
+    /// assert_eq!(success.kind(), RecoveryKind::Never);
+    /// assert_eq!(success.recovery_delay(), None);
     /// ```
+    #[must_use]
     pub const fn never() -> Self {
         Self(RecoveryInner::Never)
     }
@@ -180,6 +191,7 @@ impl Recovery {
     /// assert_eq!(recovery.kind(), RecoveryKind::Retry);
     /// assert_eq!(recovery.recovery_delay(), None);
     /// ```
+    #[must_use]
     pub const fn retry() -> Self {
         Self(RecoveryInner::Retry)
     }
@@ -210,6 +222,7 @@ impl Recovery {
     /// assert_eq!(immediate.kind(), RecoveryKind::Retry);
     /// assert_eq!(immediate.recovery_delay(), Some(Duration::ZERO));
     /// ```
+    #[must_use]
     pub const fn retry_after(duration: Duration) -> Self {
         Self(RecoveryInner::RetryAfter(duration))
     }
@@ -249,6 +262,7 @@ impl Recovery {
     /// // Unavailability with low-confidence recovery estimate (chance it might recover in 5 minutes)
     /// let recovery = Recovery::unavailable(Some(Duration::from_secs(300)));
     /// ```
+    #[must_use]
     pub const fn unavailable(recovery_hint: Option<Duration>) -> Self {
         Self(RecoveryInner::Unavailable(recovery_hint))
     }
@@ -263,22 +277,18 @@ impl Recovery {
     /// ```rust
     /// use recoverable::{Recovery, RecoveryKind};
     ///
-    /// let recovery = Recovery::success();
-    /// assert_eq!(recovery.kind(), RecoveryKind::Success);
-    ///
     /// let recovery = Recovery::unknown();
     /// assert_eq!(recovery.kind(), RecoveryKind::Unknown);
     ///
     /// let recovery = Recovery::retry();
     /// assert_eq!(recovery.kind(), RecoveryKind::Retry);
     /// ```
-    pub fn kind(&self) -> RecoveryKind {
+    #[must_use]
+    pub const fn kind(&self) -> RecoveryKind {
         match self.0 {
-            RecoveryInner::Success => RecoveryKind::Success,
             RecoveryInner::Unknown => RecoveryKind::Unknown,
             RecoveryInner::Never => RecoveryKind::Never,
-            RecoveryInner::Retry => RecoveryKind::Retry,
-            RecoveryInner::RetryAfter(_) => RecoveryKind::Retry,
+            RecoveryInner::Retry | RecoveryInner::RetryAfter(_) => RecoveryKind::Retry,
             RecoveryInner::Unavailable(_) => RecoveryKind::Unavailable,
         }
     }
@@ -298,7 +308,7 @@ impl Recovery {
     /// - [`Recovery::unavailable`] returns the provided duration, or `None` if none was provided.
     ///   When present, this represents the earliest time when recovery attempts might succeed.
     ///   Attempts before this time are expected to fail.
-    /// - [`Recovery::success`], [`Recovery::never`] and [`Recovery::unknown`] return `None`
+    /// - [`Recovery::never`] and [`Recovery::unknown`] return `None`
     ///
     /// # Examples
     ///
@@ -306,10 +316,6 @@ impl Recovery {
     /// use std::time::Duration;
     ///
     /// use recoverable::Recovery;
-    ///
-    /// // Successful operation
-    /// let success = Recovery::success();
-    /// assert_eq!(success.recovery_delay(), None);
     ///
     /// // Specific delay requested with high confidence of success
     /// let delay = Recovery::retry_after(Duration::from_secs(30));
@@ -334,11 +340,10 @@ impl Recovery {
     /// let never = Recovery::never();
     /// assert_eq!(never.recovery_delay(), None);
     /// ```
-    pub fn recovery_delay(&self) -> Option<Duration> {
+    #[must_use]
+    pub const fn recovery_delay(&self) -> Option<Duration> {
         match self.0 {
-            RecoveryInner::Success => None,
             RecoveryInner::RetryAfter(duration) => Some(duration),
-            RecoveryInner::Retry => None,
             RecoveryInner::Unavailable(duration) => duration,
             _ => None,
         }
@@ -421,7 +426,6 @@ where
 
 #[derive(Debug, PartialEq, Clone)]
 enum RecoveryInner {
-    Success,
     Unknown,
     Never,
     Retry,
@@ -432,7 +436,6 @@ enum RecoveryInner {
 impl Display for Recovery {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            RecoveryInner::Success => write!(f, "success"),
             RecoveryInner::Unknown => write!(f, "unknown"),
             RecoveryInner::Never => write!(f, "never"),
             RecoveryInner::Retry => write!(f, "retry"),
@@ -445,11 +448,10 @@ impl Display for Recovery {
 impl Display for RecoveryKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RecoveryKind::Success => write!(f, "success"),
-            RecoveryKind::Unknown => write!(f, "unknown"),
-            RecoveryKind::Never => write!(f, "never"),
-            RecoveryKind::Retry => write!(f, "retry"),
-            RecoveryKind::Unavailable => write!(f, "unavailable"),
+            Self::Unknown => write!(f, "unknown"),
+            Self::Never => write!(f, "never"),
+            Self::Retry => write!(f, "retry"),
+            Self::Unavailable => write!(f, "unavailable"),
         }
     }
 }
@@ -473,7 +475,6 @@ mod tests {
 
     #[test]
     fn recovery_enum() {
-        assert_eq!(Recovery::success().kind(), RecoveryKind::Success);
         assert_eq!(Recovery::unknown().kind(), RecoveryKind::Unknown);
         assert_eq!(Recovery::unavailable(None).kind(), RecoveryKind::Unavailable);
         assert_eq!(Recovery::retry().kind(), RecoveryKind::Retry);
@@ -483,7 +484,6 @@ mod tests {
 
     #[test]
     fn display_ok() {
-        assert_eq!(Recovery::success().to_string(), "success");
         assert_eq!(Recovery::unknown().to_string(), "unknown");
         assert_eq!(Recovery::never().to_string(), "never");
         assert_eq!(Recovery::retry().to_string(), "retry");
@@ -492,7 +492,6 @@ mod tests {
 
     #[test]
     fn recovery_kind_display_ok() {
-        assert_eq!(RecoveryKind::Success.to_string(), "success");
         assert_eq!(RecoveryKind::Unknown.to_string(), "unknown");
         assert_eq!(RecoveryKind::Never.to_string(), "never");
         assert_eq!(RecoveryKind::Retry.to_string(), "retry");
@@ -540,7 +539,6 @@ mod tests {
 
     #[test]
     fn recovery_delay_ok() {
-        assert_eq!(Recovery::success().recovery_delay(), None);
         assert_eq!(Recovery::unknown().recovery_delay(), None);
         assert_eq!(Recovery::never().recovery_delay(), None);
         assert_eq!(Recovery::retry().recovery_delay(), None);
@@ -566,16 +564,16 @@ mod tests {
         struct TestType;
         impl Recover for TestType {
             fn recovery(&self) -> Recovery {
-                Recovery::success()
+                Recovery::unknown()
             }
         }
         assert_eq!(
             (Ok(TestType) as Result<TestType, TestType>).recovery().kind(),
-            RecoveryKind::Success
+            RecoveryKind::Unknown
         );
         assert_eq!(
             (Err(TestType) as Result<TestType, TestType>).recovery().kind(),
-            RecoveryKind::Success
+            RecoveryKind::Unknown
         );
     }
 }
