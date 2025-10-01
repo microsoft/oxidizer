@@ -10,6 +10,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  MSRV: "1.88"        # used for testing, ensures the MSRV promise is kept
+  RUST_LATEST: "1.90" # used for static analysis, mutation testing, and coverage
 
 jobs:
   testing:
@@ -22,7 +24,7 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.88
+          toolchain: ${{ env.MSRV }}
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
         with:
@@ -44,7 +46,7 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.88
+          toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
       - name: Install Rust Nightly
         uses: actions-rs/toolchain@v1
@@ -87,6 +89,12 @@ jobs:
             perf
             refactor
             test
+            doc
+            docs
+            ci
+            chore
+            misc
+            miscellaneous
 
   mutation-testing:
     runs-on: ${{ matrix.os }}
@@ -98,7 +106,7 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.88
+          toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
