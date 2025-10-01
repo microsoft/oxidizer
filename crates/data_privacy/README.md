@@ -1,10 +1,11 @@
-<div style="text-align: center">
+<div align="center">
  <img src="./logo.png" alt="Data Privacy Logo" width="128">
 
 # Data Privacy
 
 [![crate.io](https://img.shields.io/crates/v/data_privacy.svg)](https://crates.io/crates/data_privacy)
 [![docs.rs](https://docs.rs/data_privacy/badge.svg)](https://docs.rs/data_privacy)
+[![MSRV](https://img.shields.io/crates/msrv/data_privacy)](https://crates.io/crates/data_privacy)
 [![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
