@@ -20,12 +20,16 @@
 
 Recovery metadata and classification for resilience patterns.
 
-This crate provides types for classifying error conditions as recoverable or non-recoverable,
-enabling consistent retry behavior across different error types and resilience middleware.
+This crate provides types for classifying conditions based on their **recoverability state**,
+enabling consistent recovery behavior across different error types and resilience middleware.
+
+The recovery metadata describes whether recovering from an operation might help, not whether
+the operation succeeded or failed. Both successful operations and permanent failures
+should use [`Recovery::never()`] since recovery won't change the outcome.
 
 ## Core Types
 
-- [`Recovery`]: Classifies errors as recoverable (transient) or non-recoverable (permanent).
+- [`Recovery`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
 - [`Recover`]: A trait for types that can determine their recoverability.
 - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
 
@@ -44,7 +48,9 @@ enum DatabaseError {
 impl Recover for DatabaseError {
     fn recovery(&self) -> Recovery {
         match self {
+            // Transient failure - might succeed if retried
             DatabaseError::ConnectionTimeout => Recovery::retry(),
+            // Permanent failures - retrying won't help
             DatabaseError::InvalidCredentials => Recovery::never(),
             DatabaseError::TableNotFound => Recovery::never(),
         }
@@ -53,6 +59,10 @@ impl Recover for DatabaseError {
 
 let error = DatabaseError::ConnectionTimeout;
 assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
+
+// For successful operations, also use never() since retry is unnecessary
+let success_result: Result<(), DatabaseError> = Ok(());
+// If we had a wrapper type for success, it would also return Recovery::never()
 ```
 
 <!-- cargo-rdme end -->
