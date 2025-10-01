@@ -33,7 +33,6 @@ resources:
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1ESPipelineTemplates
   parameters:
-    oneESTemplateTag: canary
     sdl:
       sourceAnalysisPool:
         name: $(agentPool)
@@ -48,7 +47,6 @@ extends:
       jobs:
       - job: determine_packages
         displayName: 'Determine packages to publish'
-        variables:
         # Run on linux where network isolation isn't enforced yet
         pool:
           name: $(agentPool)
@@ -93,7 +91,7 @@ extends:
           - job: build_test_${{ profile }}_${{ os }}
             displayName: 'Build and Test ${{ profile }} on ${{ os }}'
             pool:
-              name: ${{ parameters.agentPool }}
+              name: $(agentPool)
               os: ${{ os }}
               ${{ if eq(os, 'linux') }}:
                 image: ubuntu-latest
