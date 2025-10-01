@@ -492,17 +492,8 @@ mod tests {
 
     #[test]
     fn assert_result_implements_recover() {
-        #[derive(Debug)]
-        pub struct RecoverableType(Recovery);
-
-        impl Recover for RecoverableType {
-            fn recovery(&self) -> Recovery {
-                self.0.clone()
-            }
-        }
-
-        assert_impl_all!(Result<RecoverableType, RecoverableType>: Recover);
-        assert_not_impl_all!(Result<RecoverableType, String>: Recover);
+        assert_impl_all!(Result<TestType, TestType>: Recover);
+        assert_not_impl_all!(Result<TestType, String>: Recover);
     }
 
     #[test]
