@@ -1,9 +1,18 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [package]
 name = "recoverable"
-description = "recovery metadata and classification for resilience patterns"
+description = "Recovery metadata and classification for resilience patterns"
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "resilience", "metadata", "classification", "seatbelt"]
+keywords = [
+    "oxidizer",
+    "resilience",
+    "metadata",
+    "classification",
+    "error",
+]
 categories = ["data-structures"]
 
 edition.workspace = true
@@ -17,3 +26,6 @@ repository.workspace = true
 
 [dev-dependencies]
 static_assertions.workspace = true
+
+[lints]
+workspace = true
