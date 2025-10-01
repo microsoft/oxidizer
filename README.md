@@ -11,11 +11,10 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [The Oxidizer Project](#the-oxidizer-project)
-  - [Crates](#crates)
-  - [Repo Guidelines](#repo-guidelines)
-  - [Releasing Crate Versions](#releasing-crate-versions)
-  - [Trademarks](#trademarks)
+- [Crates](#crates)
+- [Repo Guidelines](#repo-guidelines)
+- [Releasing Crate Versions](#releasing-crate-versions)
+- [Trademarks](#trademarks)
 
 ## Crates
 
