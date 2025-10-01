@@ -1,4 +1,5 @@
-trigger: main
+trigger:
+- main
 
 parameters:
 - name: sourceBranch
