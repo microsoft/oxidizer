@@ -51,7 +51,7 @@ extends:
         variables:
         # Run on linux where network isolation isn't enforced yet
         pool:
-          name: ${{ parameters.agentPool }}
+          name: $(agentPool)
           os: linux
           image: ubuntu-latest
         templateContext:
@@ -187,7 +187,7 @@ extends:
         - template: .ado/templates/cargo-tools.yml@self
         # Run on linux where network isolation isn't enforced yet
         pool:
-          name: ${{ parameters.agentPool }}
+          name: $(agentPool)
           os: linux
           image: ubuntu-latest
         templateContext:
