@@ -2,10 +2,6 @@ trigger:
 - main
 
 parameters:
-- name: sourceBranch
-  displayName: 'Source branch for checkout and PR target'
-  type: string
-  default: 'main'
 - name: validationOsList
   type: object
   default:
@@ -31,7 +27,6 @@ resources:
 extends:
   template: .pipelines/templates/OxidizerGitHub.Publish.yml@ox-sdk
   parameters:
-    sourceBranch: ${{ parameters.sourceBranch }}
     validationOsList: ${{ parameters.validationOsList }}
     validationProfiles: ${{ parameters.validationProfiles }}
     previousVersion: ${{ parameters.previousVersion }}
