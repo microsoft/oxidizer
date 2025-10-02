@@ -24,13 +24,13 @@ enabling consistent recovery behavior across different error types and resilienc
 
 The recovery metadata describes whether recovering from an operation might help, not whether
 the operation succeeded or failed. Both successful operations and permanent failures
-should use [`Recovery::never()`] since recovery won't change the outcome.
+should use [`Recovery::never`](https://docs.rs/recoverable/latest/recoverable/struct.Recovery.html#method.never) since recovery won't change the outcome.
 
 ## Core Types
 
-- [`Recovery`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
-- [`Recover`]: A trait for types that can determine their recoverability.
-- [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
+- [`Recovery`](https://docs.rs/recoverable/latest/recoverable/struct.Recovery.html): Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
+- [`Recover`](https://docs.rs/recoverable/latest/recoverable/trait.Recover.html): A trait for types that can determine their recoverability.
+- [`RecoveryKind`](https://docs.rs/recoverable/latest/recoverable/enum.RecoveryKind.html): An enum representing the kind of recovery that can be attempted.
 
 ## Examples
 
