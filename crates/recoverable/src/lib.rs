@@ -51,6 +51,13 @@
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
+// Naming Convention for Get/Set:
+//
+// This type uses an unconventional naming pattern where setters use plain names (e.g., `delay()`)
+// and getters use the `get_` prefix (e.g., `get_delay()`). This deviates from standard Rust
+// conventions because setters are used much more frequently than getters in typical usage patterns.
+// The `get_` prefix on getters helps distinguish them from their corresponding setters.
+
 /// Represents the recoverability metadata associated with an operation or condition.
 ///
 /// This type describes how an operation can be recovered from, if at all. It provides
@@ -146,7 +153,7 @@ impl Recovery {
     /// // Successful operation - also uses never() since recovery is unnecessary
     /// let success = Recovery::never();
     /// assert_eq!(success.kind(), RecoveryKind::Never);
-    /// assert_eq!(success.recovery_delay(), None);
+    /// assert_eq!(success.get_delay(), None);
     /// ```
     #[must_use]
     pub const fn never() -> Self {
@@ -174,7 +181,7 @@ impl Recovery {
     ///
     /// let recovery = Recovery::retry();
     /// assert_eq!(recovery.kind(), RecoveryKind::Retry);
-    /// assert_eq!(recovery.recovery_delay(), None);
+    /// assert_eq!(recovery.get_delay(), None);
     /// ```
     #[must_use]
     pub const fn retry() -> Self {
@@ -237,15 +244,16 @@ impl Recovery {
     /// // Service indicates to retry after 30 seconds
     /// let recovery = Recovery::retry().delay(Duration::from_secs(30));
     /// assert_eq!(recovery.kind(), RecoveryKind::Retry);
-    /// assert_eq!(recovery.recovery_delay(), Some(Duration::from_secs(30)));
+    /// assert_eq!(recovery.get_delay(), Some(Duration::from_secs(30)));
     ///
     /// // Unavailability with recovery estimate
     /// let recovery = Recovery::unavailable().delay(Duration::from_secs(300));
     /// assert_eq!(recovery.kind(), RecoveryKind::Unavailable);
-    /// assert_eq!(recovery.recovery_delay(), Some(Duration::from_secs(300)));
+    /// assert_eq!(recovery.get_delay(), Some(Duration::from_secs(300)));
     /// ```
     #[must_use]
     pub const fn delay(self, delay: Duration) -> Self {
+        // See file-level "Naming Convention" comment for why this uses a plain name.
         Self {
             kind: self.kind,
             delay: Some(delay),
@@ -292,29 +300,30 @@ impl Recovery {
     ///
     /// // Specific delay requested with high confidence of success
     /// let delay = Recovery::retry().delay(Duration::from_secs(30));
-    /// assert_eq!(delay.recovery_delay(), Some(Duration::from_secs(30)));
+    /// assert_eq!(delay.get_delay(), Some(Duration::from_secs(30)));
     ///
     /// // No delay specified
     /// let immediate = Recovery::retry();
-    /// assert_eq!(immediate.recovery_delay(), None);
+    /// assert_eq!(immediate.get_delay(), None);
     ///
     /// // Unavailability with no recovery estimate
     /// let unavailable = Recovery::unavailable();
-    /// assert_eq!(unavailable.recovery_delay(), None);
+    /// assert_eq!(unavailable.get_delay(), None);
     ///
     /// // Unavailability with low-confidence recovery estimate
     /// let unavailable_with_time = Recovery::unavailable().delay(Duration::from_secs(300));
     /// assert_eq!(
-    ///     unavailable_with_time.recovery_delay(),
+    ///     unavailable_with_time.get_delay(),
     ///     Some(Duration::from_secs(300))
     /// );
     ///
     /// // Non-recoverable
     /// let never = Recovery::never();
-    /// assert_eq!(never.recovery_delay(), None);
+    /// assert_eq!(never.get_delay(), None);
     /// ```
     #[must_use]
-    pub const fn recovery_delay(&self) -> Option<Duration> {
+    pub const fn get_delay(&self) -> Option<Duration> {
+        // See file-level "Naming Convention" comment for why this uses the `get_` prefix.
         self.delay
     }
 }
@@ -469,33 +478,33 @@ mod tests {
         let thirty_seconds = Duration::from_secs(30);
         let recovery = Recovery::retry().delay(thirty_seconds);
 
-        assert_eq!(recovery.recovery_delay(), Some(thirty_seconds));
+        assert_eq!(recovery.get_delay(), Some(thirty_seconds));
         assert_eq!(recovery.kind(), RecoveryKind::Retry);
 
         // Zero duration
         let zero_duration = Recovery::retry().delay(Duration::ZERO);
-        assert_eq!(zero_duration.recovery_delay(), Some(Duration::ZERO));
+        assert_eq!(zero_duration.get_delay(), Some(Duration::ZERO));
 
         // Delay can be applied to any recovery kind
         let unavailable = Recovery::unavailable().delay(Duration::from_secs(300));
-        assert_eq!(unavailable.recovery_delay(), Some(Duration::from_secs(300)));
+        assert_eq!(unavailable.get_delay(), Some(Duration::from_secs(300)));
         assert_eq!(unavailable.kind(), RecoveryKind::Unavailable);
 
         // Applying delay multiple times replaces the previous delay
         let updated = Recovery::retry().delay(Duration::from_secs(10)).delay(Duration::from_secs(20));
-        assert_eq!(updated.recovery_delay(), Some(Duration::from_secs(20)));
+        assert_eq!(updated.get_delay(), Some(Duration::from_secs(20)));
     }
 
     #[test]
     fn unavailable_behavior() {
         let recovery = Recovery::unavailable();
-        assert_eq!(recovery.recovery_delay(), None);
+        assert_eq!(recovery.get_delay(), None);
 
         let recovery = Recovery::unavailable().delay(Duration::ZERO);
-        assert_eq!(recovery.recovery_delay(), Some(Duration::ZERO));
+        assert_eq!(recovery.get_delay(), Some(Duration::ZERO));
 
         let recovery = Recovery::unavailable().delay(Duration::from_secs(1));
-        assert_eq!(recovery.recovery_delay(), Some(Duration::from_secs(1)));
+        assert_eq!(recovery.get_delay(), Some(Duration::from_secs(1)));
     }
 
     #[test]
@@ -505,17 +514,17 @@ mod tests {
     }
 
     #[test]
-    fn recovery_delay_ok() {
-        assert_eq!(Recovery::unknown().recovery_delay(), None);
-        assert_eq!(Recovery::never().recovery_delay(), None);
-        assert_eq!(Recovery::retry().recovery_delay(), None);
+    fn get_delay_ok() {
+        assert_eq!(Recovery::unknown().get_delay(), None);
+        assert_eq!(Recovery::never().get_delay(), None);
+        assert_eq!(Recovery::retry().get_delay(), None);
         assert_eq!(
-            Recovery::retry().delay(Duration::from_secs(60)).recovery_delay(),
+            Recovery::retry().delay(Duration::from_secs(60)).get_delay(),
             Some(Duration::from_secs(60))
         );
-        assert_eq!(Recovery::unavailable().recovery_delay(), None);
+        assert_eq!(Recovery::unavailable().get_delay(), None);
         assert_eq!(
-            Recovery::unavailable().delay(Duration::from_secs(300)).recovery_delay(),
+            Recovery::unavailable().delay(Duration::from_secs(300)).get_delay(),
             Some(Duration::from_secs(300))
         );
     }
