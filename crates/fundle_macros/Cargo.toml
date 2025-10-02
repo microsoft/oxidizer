@@ -1,0 +1,31 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fundle_macros"
+description = "Procedural macros for the fundle crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "di", "proc-macro"]
+categories = ["rust-patterns", ""]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full", "extra-traits", "printing"] }
+quote.workspace = true
+proc-macro2.workspace = true
+
+[dev-dependencies]
+mutants.workspace = true
+
+[lints]
+workspace = true
