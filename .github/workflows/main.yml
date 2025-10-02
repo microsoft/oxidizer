@@ -143,3 +143,14 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           fail_ci_if_error: true
+
+  license-headers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check License Headers
+        uses: viperproject/check-license-header@v2
+        with:
+          path: .
+          config: .github/license-check/config.json
+          strict: true
