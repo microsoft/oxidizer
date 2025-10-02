@@ -12,6 +12,8 @@
 </div>
 
 - [Summary](#summary)
+- [Core Types](#core-types)
+- [Examples](#examples)
 
 ## Summary
 
