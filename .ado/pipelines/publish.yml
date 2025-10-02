@@ -19,6 +19,9 @@ parameters:
 - name: previousVersion
   type: string
   default: 'HEAD^'
+- name: agentPool
+  type: string
+  default: 'Azure-Pipelines-1ESPT-ExDShared'
 
 variables:
   MSRUSTUP_TOOLCHAIN: ms-prod
@@ -35,9 +38,9 @@ extends:
   parameters:
     sdl:
       sourceAnalysisPool:
-        name: $(agentPool)
+        name: ${{ parameters.agentPool }}
     pool:
-      name: $(agentPool)
+      name: ${{ parameters.agentPool }}
     stages:
     # Workaround for https://github.com/crate-ci/cargo-release/issues/670
     # Since --unpublished doesn't work when private repositories are in the picture, we figure out which packages to
@@ -49,7 +52,7 @@ extends:
         displayName: 'Determine packages to publish'
         # Run on linux where network isolation isn't enforced yet
         pool:
-          name: $(agentPool)
+          name: ${{ parameters.agentPool }}
           os: linux
           image: ubuntu-latest
         templateContext:
@@ -91,7 +94,7 @@ extends:
           - job: build_test_${{ profile }}_${{ os }}
             displayName: 'Build and Test ${{ profile }} on ${{ os }}'
             pool:
-              name: $(agentPool)
+              name: ${{ parameters.agentPool }}
               os: ${{ os }}
               ${{ if eq(os, 'linux') }}:
                 image: ubuntu-latest
@@ -185,7 +188,7 @@ extends:
         - template: .ado/templates/cargo-tools.yml@self
         # Run on linux where network isolation isn't enforced yet
         pool:
-          name: $(agentPool)
+          name: ${{ parameters.agentPool }}
           os: linux
           image: ubuntu-latest
         templateContext:
