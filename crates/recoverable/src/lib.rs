@@ -53,7 +53,7 @@ use std::time::Duration;
 
 /// Represents the recoverability metadata associated with an operation or condition.
 ///
-/// This type describes how the operation can be recovered from, if at all. It provides
+/// This type describes how an operation can be recovered from, if at all. It provides
 /// various ways to create recovery metadata for different scenarios, such as unknown conditions,
 /// permanent failures, transient failures, and service unavailability.
 ///
@@ -217,8 +217,8 @@ impl Recovery {
 
     /// Adds a delay hint to this recovery.
     ///
-    /// This method associates the duration of the recovery to indicate when a recovery attempt
-    /// might succeed. The meaning of the delay depends on the recovery kind:
+    /// Sets a delay hint for this recovery metadata to indicate when a recovery attempt
+    /// should be made. The meaning of the delay depends on the recovery kind:
     ///
     /// - For [`Recovery::retry`]: High-confidence timing guidance (e.g., from a
     ///   `Retry-After` header) indicating when the recovery attempt is likely to succeed.
@@ -325,7 +325,7 @@ impl Recovery {
 /// information about its state. This allows consistent handling of recoverable
 /// conditions across various types in resilience middlewares.
 ///
-/// Typical scenarios for implementing this trait is an error that can be classified
+/// Typical scenarios for implementing this trait are errors that can be classified
 /// as transient or permanent, depending on the specific error condition.
 ///
 /// # Examples
@@ -398,6 +398,10 @@ where
 
 impl Display for Recovery {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(delay) = self.delay {
+            return write!(f, "{} (delay {:?})", self.kind, delay);
+        }
+
         Display::fmt(&self.kind, f)
     }
 }
@@ -445,7 +449,11 @@ mod tests {
         assert_eq!(Recovery::never().to_string(), "never");
         assert_eq!(Recovery::retry().to_string(), "retry");
         assert_eq!(Recovery::unavailable().to_string(), "unavailable");
-        assert_eq!(Recovery::retry().delay(Duration::from_secs(30)).to_string(), "retry");
+        assert_eq!(Recovery::retry().delay(Duration::from_secs(30)).to_string(), "retry (delay 30s)");
+        assert_eq!(
+            Recovery::unavailable().delay(Duration::from_secs(300)).to_string(),
+            "unavailable (delay 300s)"
+        );
     }
 
     #[test]
