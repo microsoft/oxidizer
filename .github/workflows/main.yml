@@ -12,6 +12,8 @@ env:
   CARGO_TERM_COLOR: always
   MSRV: "1.88"        # used for testing, ensures the MSRV promise is kept
   RUST_LATEST: "1.90" # used for static analysis, mutation testing, and coverage
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   testing:
@@ -29,12 +31,16 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack@0.4.7
+      - name: Starting sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
       - name: Build
         run: cargo hack build --each-feature --verbose
       - name: Tests
-        run: cargo test --verbose
+        run: cargo test --verbose --all-features
       - name: Doc Tests
-        run: cargo test --doc --verbose
+        run: cargo test --doc --verbose --all-features
 
   static-analysis:
     runs-on: ${{ matrix.os }}
@@ -53,6 +59,10 @@ jobs:
         with:
           toolchain: nightly
           components: miri
+      - name: Starting sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
         with:
@@ -114,6 +124,10 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants@25.3.1, cargo-udeps@0.1.57
+      - name: Starting sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
       - name: Mutate
         run: cargo mutants --test-workspace=true --colors=never --jobs=2 --build-timeout=120 --cap-lints=true
 
@@ -133,6 +147,10 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.6.18
+      - name: Starting sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
       - name: Generate Coverage (all-features)
         run: cargo +nightly llvm-cov --all-features --workspace --tests --lcov --output-path lcov.info
       - name: Generate Coverage (no-default-features)
