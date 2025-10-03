@@ -62,7 +62,7 @@ impl Error for NetworkError {}
 fn handle_network_error(error: &NetworkError) {
     let recovery = error.recovery();
 
-    println!("\nError: {error:?}");
+    println!("\nError: {error}");
     println!("Recovery strategy: {recovery}");
 
     match recovery.kind() {
