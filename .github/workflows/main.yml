@@ -83,20 +83,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           types: |
-            feat
-            fix
-            doc
-            task
-            style
-            perf
-            refactor
-            test
+            build
+            chore
+            ci
             doc
             docs
-            ci
-            chore
+            feat
+            fix
             misc
             miscellaneous
+            perf
+            refactor
+            style
+            task
+            test
 
   mutation-testing:
     runs-on: ${{ matrix.os }}

@@ -4,7 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 10
+    # only security updates will be opened automatically
+    open-pull-requests-limit: 0
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
