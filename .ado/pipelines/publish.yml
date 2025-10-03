@@ -22,7 +22,7 @@ resources:
   - repository: ox-sdk
     type: git
     name: ox-sdk
-    ref: refs/heads/u/makolnek/publish-template
+    ref: refs/heads/master
 
 extends:
   template: .pipelines/templates/OxidizerGitHub.Publish.yml@ox-sdk
