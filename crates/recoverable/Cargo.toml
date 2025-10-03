@@ -23,3 +23,6 @@ static_assertions.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "recoverable_error"
