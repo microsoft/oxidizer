@@ -3,16 +3,10 @@
 
 [package]
 name = "recoverable"
-description = "Recovery metadata and classification for resilience patterns"
+description = "Recovery information and classification for resilience patterns"
 version = "0.1.0"
 readme = "README.md"
-keywords = [
-    "oxidizer",
-    "resilience",
-    "metadata",
-    "classification",
-    "error",
-]
+keywords = ["oxidizer", "resilience", "metadata", "classification", "error"]
 categories = ["data-structures"]
 
 edition.workspace = true
