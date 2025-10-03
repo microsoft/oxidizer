@@ -22,6 +22,8 @@ These are the crates built out of this repo:
 
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros to generate data taxonomies.
+- [`fundle`](./crates/fundle/README.md) - Effective dependency management for Rust.
+- [`fundle_macros`](./crates/fundle_macros/README.md) - Procedural macros for the fundle crate
 
 ## Repo Guidelines
 

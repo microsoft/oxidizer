@@ -1,0 +1,25 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fundle"
+description = "Effective dependency management for Rust."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "di"]
+categories = ["rust-patterns"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+fundle_macros.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true
