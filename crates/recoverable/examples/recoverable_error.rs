@@ -14,7 +14,6 @@ use recoverable::{Recoverable, RecoveryInfo, RecoveryKind};
 
 fn main() {
     handle_network_error(&NetworkError::DnsResolutionFailed);
-    handle_network_error(&NetworkError::ConnectionRefused);
     handle_network_error(&NetworkError::InvalidUrl);
     handle_network_error(&NetworkError::ServiceUnavailable { retry_after: None });
 }
@@ -24,8 +23,6 @@ fn main() {
 enum NetworkError {
     /// DNS resolution failed - might be transient
     DnsResolutionFailed,
-    /// Connection refused - might indicate service down
-    ConnectionRefused,
     /// Invalid URL format - permanent error
     InvalidUrl,
     /// Service is unavailable, for example circuit breaker is open
@@ -36,7 +33,6 @@ impl Recoverable for NetworkError {
     fn recovery(&self) -> RecoveryInfo {
         match self {
             Self::DnsResolutionFailed => RecoveryInfo::retry(),
-            Self::ConnectionRefused => RecoveryInfo::unavailable(),
             Self::InvalidUrl => RecoveryInfo::never(),
             Self::ServiceUnavailable { retry_after: Some(after) } => RecoveryInfo::unavailable().delay(*after),
             Self::ServiceUnavailable { retry_after: None } => RecoveryInfo::unavailable(),
@@ -48,11 +44,10 @@ impl Display for NetworkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::DnsResolutionFailed => write!(f, "DNS resolution failed"),
-            Self::ConnectionRefused => write!(f, "connection refused"),
             Self::InvalidUrl => write!(f, "invalid URL format"),
             Self::ServiceUnavailable { retry_after } => {
                 if let Some(after) = retry_after {
-                    write!(f, "service unavailable, retry after {:?}", after)
+                    write!(f, "service unavailable, retry after {after:?}")
                 } else {
                     write!(f, "service unavailable")
                 }
