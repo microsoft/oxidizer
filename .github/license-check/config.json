@@ -1,0 +1,40 @@
+[
+    {
+        "include": [
+            "**/*.rs",
+            "**/*.cs",
+            "**/*.cpp",
+            "**/*.c",
+            "**/*.h"
+        ],
+        "exclude": [
+            "target"
+        ],
+        "license": "./.github/license-check/slash-slash.txt"
+    },
+
+    {
+        "include": [
+            "**/*.toml",
+            "**/*.ps1"
+        ],
+        "exclude": [
+            "target"
+        ],
+        "license": "./.github/license-check/hash.txt"
+    },
+
+    {
+        "include": [
+            "**/*.svg",
+            "**/*.png",
+            "**/*.md",
+            "**/*.yml",
+            "**/*.yaml",
+            "**/*.json",
+            "**/*.snap",
+            "LICENSE",
+            "Cargo.lock"
+        ]
+    }
+]
