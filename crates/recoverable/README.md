@@ -19,25 +19,25 @@
 
 <!-- cargo-rdme start -->
 
-Recovery metadata and classification for resilience patterns.
+Recovery information and classification for resilience patterns.
 
 This crate provides types for classifying conditions based on their **recoverability state**,
 enabling consistent recovery behavior across different error types and resilience middleware.
 
-The recovery metadata describes whether recovering from an operation might help, not whether
+The recovery information describes whether recovering from an operation might help, not whether
 the operation succeeded or failed. Both successful operations and permanent failures
-should use [`Recovery::never`](https://docs.rs/recoverable/latest/recoverable/struct.Recovery.html#method.never) since recovery won't change the outcome.
+should use [`RecoveryInfo::never`](https://docs.rs/recoverable/latest/recoverable/struct.RecoveryInfo.html#method.never) since recovery won't change the outcome.
 
 ## Core Types
 
-- [`Recovery`](https://docs.rs/recoverable/latest/recoverable/struct.Recovery.html): Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
-- [`Recover`](https://docs.rs/recoverable/latest/recoverable/trait.Recover.html): A trait for types that can determine their recoverability.
+- [`RecoveryInfo`](https://docs.rs/recoverable/latest/recoverable/struct.RecoveryInfo.html): Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
+- [`Recoverable`](https://docs.rs/recoverable/latest/recoverable/trait.Recoverable.html): A trait for types that can determine their recoverability.
 - [`RecoveryKind`](https://docs.rs/recoverable/latest/recoverable/enum.RecoveryKind.html): An enum representing the kind of recovery that can be attempted.
 
 ## Examples
 
 ```rust
-use recoverable::{Recover, Recovery, RecoveryKind};
+use recoverable::{Recoverable, RecoveryInfo, RecoveryKind};
 
 #[derive(Debug)]
 enum DatabaseError {
@@ -46,14 +46,14 @@ enum DatabaseError {
     TableNotFound,
 }
 
-impl Recover for DatabaseError {
-    fn recovery(&self) -> Recovery {
+impl Recoverable for DatabaseError {
+    fn recovery(&self) -> RecoveryInfo {
         match self {
             // Transient failure - might succeed if retried
-            DatabaseError::ConnectionTimeout => Recovery::retry(),
+            DatabaseError::ConnectionTimeout => RecoveryInfo::retry(),
             // Permanent failures - retrying won't help
-            DatabaseError::InvalidCredentials => Recovery::never(),
-            DatabaseError::TableNotFound => Recovery::never(),
+            DatabaseError::InvalidCredentials => RecoveryInfo::never(),
+            DatabaseError::TableNotFound => RecoveryInfo::never(),
         }
     }
 }
@@ -63,7 +63,7 @@ assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
 
 // For successful operations, also use never() since retry is unnecessary
 let success_result: Result<(), DatabaseError> = Ok(());
-// If we had a wrapper type for success, it would also return Recovery::never()
+// If we had a wrapper type for success, it would also return RecoveryInfo::never()
 ```
 
 <!-- cargo-rdme end -->
