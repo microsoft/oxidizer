@@ -1,72 +1,92 @@
 name: main
 permissions:
   contents: read
+  pull-requests: read
+  security-events: write
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
+    branches: [ main ]
+  push:
     branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
   MSRV: "1.88"        # used for testing, ensures the MSRV promise is kept
   RUST_LATEST: "1.90" # used for static analysis, mutation testing, and coverage
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   testing:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
     steps:
-      - uses: actions/checkout@v5
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Start sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ env.MSRV }}
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack@0.4.7
-      - name: Starting sscache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: "v0.10.0"
+
+      # execute
       - name: Build
-        run: cargo hack build --each-feature --verbose
+        run: cargo hack build --each-feature --workspace --verbose
       - name: Tests
-        run: cargo test --verbose --all-features
+        run: cargo test --verbose --workspace --all-features
       - name: Doc Tests
-        run: cargo test --doc --verbose --all-features
+        run: cargo test --doc --verbose --workspace --all-features
 
   static-analysis:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
     steps:
-      - uses: actions/checkout@v5
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
         with:
-          toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
-      - name: Install Rust Nightly
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          components: miri
-      - name: Starting sscache
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
+      - name: Start sscache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: "v0.10.0"
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_LATEST }}
+          components: clippy, rustfmt
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit@0.21.2, cargo-udeps@0.1.57, cargo-rdme@1.4.8, cargo-workspaces@0.4.0
+          tool: cargo-audit@0.21.2, cargo-rdme@1.4.8, cargo-workspaces@0.4.0
+
+      # execute
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Audit
@@ -75,19 +95,117 @@ jobs:
         run: cargo fmt -- --check
       - name: Docs
         run: cargo doc --no-deps --workspace --all-features
+      - name: Rdme
+        run: cargo workspaces exec cargo rdme --check --no-fail-on-warnings
+
+  extended-analysis:
+    runs-on: ${{ matrix.os }}
+    needs: [testing, static-analysis]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Rust Nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          components: miri
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-udeps@0.1.57
+
+      # execute
       - name: Udeps
         run: cargo +nightly udeps --all-features --workspace
-      - name: Readme
-        run: cargo workspaces exec cargo rdme --check --no-fail-on-warnings
       - name: Miri
         run: cargo +nightly miri test --all-features --workspace
 
-  pr-title-check:
+  mutation-testing:
     runs-on: ubuntu-latest
-    # The action only works for pull requests
+    needs: testing
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Start sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_LATEST }}
+          components: clippy, rustfmt
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@25.3.1
+
+      # execute
+      - name: Mutate
+        run: cargo mutants --test-workspace=true --colors=never --jobs=2 --build-timeout=120 --cap-lints=true
+
+  coverage:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Start sscache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
+      - name: Install Rust Nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          components: llvm-tools-preview
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.6.18
+
+      # execute
+      - name: Generate Coverage (all-features)
+        run: cargo +nightly llvm-cov --all-features --workspace --tests --lcov --output-path lcov.info
+      - name: Generate Coverage (no-default-features)
+        run: cargo +nightly llvm-cov --no-default-features --workspace --tests --lcov --output-path lcov.info
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true
+
+  pr-title:
+    runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - name: Conventional Commits
+      - name: Check PR Title
         uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,67 +226,43 @@ jobs:
             task
             test
 
-  mutation-testing:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-mutants@25.3.1, cargo-udeps@0.1.57
-      - name: Starting sscache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: "v0.10.0"
-      - name: Mutate
-        run: cargo mutants --test-workspace=true --colors=never --jobs=2 --build-timeout=120 --cap-lints=true
-
-  coverage:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install Rust Nightly
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          components: llvm-tools-preview
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov@0.6.18
-      - name: Starting sscache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: "v0.10.0"
-      - name: Generate Coverage (all-features)
-        run: cargo +nightly llvm-cov --all-features --workspace --tests --lcov --output-path lcov.info
-      - name: Generate Coverage (no-default-features)
-        run: cargo +nightly llvm-cov --no-default-features --workspace --tests --lcov --output-path lcov.info
-      - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          fail_ci_if_error: true
-
   license-headers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v5
       - name: Check License Headers
         uses: viperproject/check-license-header@v2
         with:
           path: .
           config: .github/license-check/config.json
           strict: true
+
+  external-type-exposure:
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install Rust Nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly-2025-08-06-x86_64-unknown-linux-gnu
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-check-external-types@0.3.0
+
+      # execute
+      - name: Check External Type Exposure
+        run: |
+          for crate in crates/*; do
+            if [ -f "$crate/Cargo.toml" ]; then
+              if ! grep -q "^\\[lib\\]" "$crate/Cargo.toml"; then
+                echo "Checking external types in $crate"
+                cargo +nightly-2025-08-06-x86_64-unknown-linux-gnu check-external-types --manifest-path "$crate/Cargo.toml" --no-default-features
+              else
+                echo "Skipping $crate (contains [lib] section)"
+              fi
+            fi
+          done
