@@ -27,6 +27,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fundle"
+version = "0.1.0"
+dependencies = [
+ "fundle_macros",
+]
+
+[[package]]
+name = "fundle_macros"
+version = "0.1.0"
+dependencies = [
+ "mutants",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "insta"
 version = "1.43.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
