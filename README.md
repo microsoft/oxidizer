@@ -22,6 +22,7 @@ These are the crates built out of this repo:
 
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros to generate data taxonomies.
+- [`recoverable`](./crates/recoverable/README.md) - Recovery metadata and classification for resilience patterns.
 
 ## Repo Guidelines
 

@@ -1,0 +1,28 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "recoverable"
+description = "Recovery information and classification for resilience patterns"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "resilience", "metadata", "classification", "error"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+static_assertions.workspace = true
+
+[lints]
+workspace = true
+
+[[example]]
+name = "recoverable_error"
