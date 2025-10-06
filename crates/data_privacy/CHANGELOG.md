@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0] - 2025-10-06
+
+- 🐛 Bug Fixes
+
+  - Fix buffer handling optimization as per issue #36
+
+- ✔️ Tasks
+
+  - A few fixes ([#22](https://github.com//pull/22))
+  - Add add-crate.ps1 which initializes a new crate folder in the repo ([#19](https://github.com//pull/19))
+  - Get CHANGELOG and version bump handling under control ([#17](https://github.com//pull/17))
+
+- 🔄 Continuous Integration
+
+  - Add support for 'cargo check-external-types' ([#35](https://github.com//pull/35))
+
 ## [0.4.0] - 2025-09-22
 
 - ✨ Features

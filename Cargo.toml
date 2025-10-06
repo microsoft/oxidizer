@@ -19,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
-data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.4.0" }
+data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.5.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.3.0"  }
 
 # external dependencies

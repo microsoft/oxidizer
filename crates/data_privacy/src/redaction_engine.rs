@@ -82,18 +82,22 @@ impl RedactionEngine {
     {
         value.visit(|v| {
             let mut local_buf = [0u8; 128];
-            let (written, amount) = {
+            let amount = {
                 let mut cursor = Cursor::new(&mut local_buf[..]);
-                (write!(&mut cursor, "{v:?}").is_ok(), cursor.position() as usize)
+                if write!(&mut cursor, "{v:?}").is_ok() {
+                    cursor.position() as usize
+                } else {
+                    local_buf.len() + 1 // force fallback case on write errors
+                }
             };
 
-            if written {
+            if amount <= local_buf.len() {
                 // SAFETY: We know the buffer contains valid UTF-8 because the Debug impl can only write valid UTF-8.
                 let s = unsafe { core::str::from_utf8_unchecked(&local_buf[..amount]) };
 
                 self.redact(&value.data_class(), s, output);
             } else {
-                // If the value is too large to fit in the buffer, we fall back to using the debug format directly.
+                // If the value is too large to fit in the buffer, we fall back to using the Debug format directly.
                 self.redact(&value.data_class(), format!("{v:?}"), output);
             }
         });
@@ -114,18 +118,22 @@ impl RedactionEngine {
     {
         value.visit(|v| {
             let mut local_buf = [0u8; 128];
-            let (written, amount) = {
+            let amount = {
                 let mut cursor = Cursor::new(&mut local_buf[..]);
-                (write!(&mut cursor, "{v}").is_ok(), cursor.position() as usize)
+                if write!(&mut cursor, "{v}").is_ok() {
+                    cursor.position() as usize
+                } else {
+                    local_buf.len() + 1 // force fallback case on write errors
+                }
             };
 
-            if written {
-                // SAFETY: We know the buffer contains valid UTF-8 because the Debug impl can only write valid UTF-8.
+            if amount <= local_buf.len() {
+                // SAFETY: We know the buffer contains valid UTF-8 because the Display impl can only write valid UTF-8.
                 let s = unsafe { core::str::from_utf8_unchecked(&local_buf[..amount]) };
 
                 self.redact(&value.data_class(), s, output);
             } else {
-                // If the value is too large to fit in the buffer, we fall back to using the debug format directly.
+                // If the value is too large to fit in the buffer, we fall back to using the Display format directly.
                 self.redact(&value.data_class(), format!("{v}"), output);
             }
         });
