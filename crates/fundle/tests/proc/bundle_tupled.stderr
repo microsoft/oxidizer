@@ -1,0 +1,5 @@
+error: fundle::bundle only supports structs with named fields
+ --> tests/proc/bundle_tupled.rs:3:1
+  |
+3 | struct Foo(u8);
+  | ^^^^^^^^^^^^^^^

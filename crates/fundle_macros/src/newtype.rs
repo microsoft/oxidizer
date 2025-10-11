@@ -17,7 +17,11 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let inner_type = match &input.data {
         Data::Struct(data_struct) => match &data_struct.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                &fields.unnamed.first().unwrap().ty
+                &fields
+                    .unnamed
+                    .first()
+                    .expect("internal error: validated len == 1 but first() is None")
+                    .ty
             }
             _ => {
                 return syn::Error::new_spanned(

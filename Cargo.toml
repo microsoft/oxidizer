@@ -35,6 +35,7 @@ quote = { version = "1.0.38", default-features = false  }
 serde = { version = "1.0.217", default-features = false }
 serde_json = { version = "1.0.135", default-features = false  }
 syn = { version = "2.0.106", default-features = false }
+trybuild = { version = "1.0.111", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false  }
 
 [workspace.lints.rust]

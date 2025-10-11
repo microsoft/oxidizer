@@ -20,16 +20,31 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(FieldsNamed { named, .. }) => named,
-            _ => panic!("Only named fields are supported"),
+            _ => {
+                return syn::Error::new_spanned(
+                    &input,
+                    "fundle::bundle only supports structs with named fields",
+                )
+                .to_compile_error()
+                .into();
+            }
         },
-        _ => panic!("Only structs are supported"),
+        _ => {
+            return syn::Error::new_spanned(&input, "fundle::bundle can only be applied to structs")
+                .to_compile_error()
+                .into();
+        }
     };
 
     // Collect field information
     let field_info: Vec<_> = fields.iter().collect();
     let field_names: Vec<_> = field_info
         .iter()
-        .map(|f| f.ident.as_ref().unwrap())
+        .map(|f| {
+            f.ident.as_ref().expect(
+                "internal error: named field without identifier (this should be impossible after validation)",
+            )
+        })
         .collect();
     let field_types: Vec<_> = field_info.iter().map(|f| &f.ty).collect();
 

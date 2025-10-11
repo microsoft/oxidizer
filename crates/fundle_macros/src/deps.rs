@@ -55,7 +55,14 @@ pub fn deps(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let field_types: Vec<_> = fields.iter().map(|f| &f.ty).collect();
-    let field_names: Vec<_> = fields.iter().map(|f| f.ident.as_ref().unwrap()).collect();
+    let field_names: Vec<_> = fields
+        .iter()
+        .map(|f| {
+            f.ident.as_ref().expect(
+                "internal error: named field without identifier (this should be impossible after validation)",
+            )
+        })
+        .collect();
 
     let from_impl =
         generate_args_from_impl(struct_name, &field_names, &field_types, &input.generics);
