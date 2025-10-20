@@ -15,11 +15,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     let builder_name = Ident::new(&format!("{struct_name}Builder"), struct_name.span());
 
     let Fields::Named(FieldsNamed { named: fields, .. }) = &input.fields else {
-        return Ok(syn::Error::new_spanned(
-            &input,
-            "fundle::bundle only supports structs with named fields",
-        )
-        .to_compile_error());
+        return Ok(syn::Error::new_spanned(&input, "fundle::bundle only supports structs with named fields").to_compile_error());
     };
 
     // Collect field information

@@ -20,10 +20,7 @@ pub fn deps(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     };
 
     if fields.is_empty() {
-        return Err(syn::Error::new_spanned(
-            struct_name,
-            "fundle::deps requires at least one field",
-        ));
+        return Err(syn::Error::new_spanned(struct_name, "fundle::deps requires at least one field"));
     }
 
     let field_types: Vec<_> = fields.iter().map(|f| &f.ty).collect();
