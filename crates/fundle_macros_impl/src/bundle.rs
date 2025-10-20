@@ -37,14 +37,12 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     let field_types: Vec<_> = field_info.iter().map(|f| &f.ty).collect();
 
     // Parse forward attributes
-    let forward_info: Vec<_> = field_info
-        .iter()
-        .enumerate()
-        .filter_map(|(i, field)| {
-            let forward_types = parse_forward_attribute(&field.attrs)?;
-            Some((i, field_names[i], forward_types))
-        })
-        .collect();
+    let mut forward_info = Vec::new();
+    for (i, field) in field_info.iter().enumerate() {
+        if let Some(forward_types) = parse_forward_attribute(&field.attrs)? {
+            forward_info.push((i, field_names[i], forward_types));
+        }
+    }
 
     // Generate type parameters (uppercase field names)
     let type_params: Vec<_> = field_names
@@ -403,26 +401,26 @@ fn generate_build_impl(
 }
 
 #[cfg_attr(test, mutants::skip)]
-fn parse_forward_attribute(attrs: &[Attribute]) -> Option<Vec<Path>> {
+fn parse_forward_attribute(attrs: &[Attribute]) -> syn::Result<Option<Vec<Path>>> {
     for attr in attrs {
         if attr.path().is_ident("forward")
             && let Ok(meta_list) = attr.meta.require_list()
         {
-            let mut forward_types = Vec::new();
             let tokens = &meta_list.tokens;
             // Parse as a comma-separated list using syn's punctuated parsing
             let parser = syn::punctuated::Punctuated::<Path, syn::Token![,]>::parse_terminated;
-            if let Ok(punctuated) = parser.parse2(tokens.clone()) {
-                for path in punctuated {
-                    forward_types.push(path);
-                }
+            let punctuated = parser.parse2(tokens.clone())
+                .map_err(|_| syn::Error::new_spanned(attr, "fundle::bundle #[forward(...)] attribute must contain valid type paths"))?;
+
+            if punctuated.is_empty() {
+                return Err(syn::Error::new_spanned(attr, "fundle::bundle #[forward(...)] attribute cannot be empty"));
             }
-            if !forward_types.is_empty() {
-                return Some(forward_types);
-            }
+
+            let forward_types: Vec<Path> = punctuated.into_iter().collect();
+            return Ok(Some(forward_types));
         }
     }
-    None
+    Ok(None)
 }
 
 #[cfg_attr(test, mutants::skip)]
