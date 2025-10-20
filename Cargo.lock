@@ -45,6 +45,7 @@ name = "fundle_macros"
 version = "0.1.0"
 dependencies = [
  "fundle_macros_impl",
+ "mutants",
 ]
 
 [[package]]

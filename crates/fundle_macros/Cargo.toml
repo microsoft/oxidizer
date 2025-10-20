@@ -18,5 +18,9 @@ proc-macro = true
 [dependencies]
 fundle_macros_impl.workspace = true
 
+[dev-dependencies]
+mutants.workspace = true
+
+
 [lints]
 workspace = true
