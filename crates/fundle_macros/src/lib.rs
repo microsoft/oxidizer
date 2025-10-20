@@ -46,9 +46,6 @@
 
 use proc_macro::TokenStream;
 
-mod bundle;
-mod deps;
-mod newtype;
 
 /// Define an 'export' DI container.
 ///
@@ -120,9 +117,10 @@ mod newtype;
 /// }
 /// ```
 #[proc_macro_attribute]
-#[cfg_attr(test, mutants::skip)]
 pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
-    bundle::bundle(attr, item)
+    fundle_macros_impl::bundle(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
 /// Define 'import' DI dependencies.
@@ -180,9 +178,10 @@ pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - The source type must implement `AsRef<T>` for each field type
 /// - Only works with structs that have named fields
 #[proc_macro_attribute]
-#[cfg_attr(test, mutants::skip)]
 pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
-    deps::deps(attr, item)
+    fundle_macros_impl::deps(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
 /// Newtype wrappers to resolve multiple import dependencies.
@@ -228,7 +227,8 @@ pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - References to the inner type: `&Inner -> Wrapper` (cloned)
 /// - Any other type that implements `AsRef<Inner>`
 #[proc_macro_attribute]
-#[cfg_attr(test, mutants::skip)]
 pub fn newtype(attr: TokenStream, item: TokenStream) -> TokenStream {
-    newtype::newtype(attr, item)
+    fundle_macros_impl::newtype(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }

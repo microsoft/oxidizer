@@ -1,14 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use proc_macro::TokenStream;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, FieldsNamed, Type, parse_macro_input};
+use syn::{parse2, Data, DeriveInput, Fields, FieldsNamed, Type};
 
 #[cfg_attr(test, mutants::skip)]
-pub fn deps(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
+pub fn deps(_attr: TokenStream, item: TokenStream)  -> syn::Result<TokenStream>  {
+    let input: DeriveInput = parse2(item)?;
 
     let struct_name = &input.ident;
     let struct_vis = &input.vis;
@@ -18,39 +17,31 @@ pub fn deps(_attr: TokenStream, item: TokenStream) -> TokenStream {
         Data::Struct(data) => match &data.fields {
             Fields::Named(FieldsNamed { named, .. }) => {
                 if named.is_empty() {
-                    return syn::Error::new_spanned(
+                    return Err(syn::Error::new_spanned(
                         struct_name,
                         "fundle::args requires at least one field",
-                    )
-                    .to_compile_error()
-                    .into();
+                    ));
                 }
                 named
             }
             Fields::Unnamed(_) => {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     struct_name,
                     "fundle::args only supports structs with named fields",
-                )
-                .to_compile_error()
-                .into();
+                ))
             }
             Fields::Unit => {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     struct_name,
                     "fundle::args does not support unit structs",
-                )
-                .to_compile_error()
-                .into();
+                ))
             }
         },
         Data::Enum(_) | Data::Union(_) => {
-            return syn::Error::new_spanned(
+            return Err(syn::Error::new_spanned(
                 struct_name,
                 "fundle::args can only be applied to structs",
-            )
-            .to_compile_error()
-            .into();
+            ));
         }
     };
 
@@ -80,7 +71,7 @@ pub fn deps(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #from_impl
     };
 
-    TokenStream::from(expanded)
+    Ok(TokenStream::from(expanded))
 }
 
 #[cfg_attr(test, mutants::skip)]

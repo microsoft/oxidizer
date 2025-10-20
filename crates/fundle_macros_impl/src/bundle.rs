@@ -3,16 +3,15 @@
 
 use std::collections::HashMap;
 
-use proc_macro::TokenStream;
-use proc_macro2::Ident;
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parser;
-use syn::{Attribute, Data, DeriveInput, Fields, FieldsNamed, Path, Type, parse_macro_input};
+use syn::{parse2, Attribute, Data, DeriveInput, Fields, FieldsNamed, Path, Type};
 
 #[expect(clippy::too_many_lines, reason = "Generated code with many fields")]
 #[cfg_attr(test, mutants::skip)]
-pub fn bundle(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
+pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>  {
+    let input: DeriveInput  = parse2(item)?;
 
     let struct_name = &input.ident;
     let builder_name = Ident::new(&format!("{struct_name}Builder"), struct_name.span());
@@ -21,18 +20,16 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> TokenStream {
         Data::Struct(data) => match &data.fields {
             Fields::Named(FieldsNamed { named, .. }) => named,
             _ => {
-                return syn::Error::new_spanned(
+                return Ok(syn::Error::new_spanned(
                     &input,
                     "fundle::bundle only supports structs with named fields",
                 )
-                .to_compile_error()
-                .into();
+                    .to_compile_error())
             }
         },
         _ => {
-            return syn::Error::new_spanned(&input, "fundle::bundle can only be applied to structs")
-                .to_compile_error()
-                .into();
+            return Ok(syn::Error::new_spanned(&input, "fundle::bundle can only be applied to structs")
+                .to_compile_error())
         }
     };
 
@@ -196,7 +193,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #select_macro
     };
 
-    TokenStream::from(expanded)
+    Ok(TokenStream::from(expanded))
 }
 
 #[cfg_attr(test, mutants::skip)]

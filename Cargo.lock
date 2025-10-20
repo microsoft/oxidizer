@@ -44,6 +44,13 @@ dependencies = [
 name = "fundle_macros"
 version = "0.1.0"
 dependencies = [
+ "fundle_macros_impl",
+]
+
+[[package]]
+name = "fundle_macros_impl"
+version = "0.1.0"
+dependencies = [
  "mutants",
  "proc-macro2",
  "quote",

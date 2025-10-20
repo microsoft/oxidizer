@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use proc_macro::TokenStream;
+use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, parse_macro_input};
+use syn::{parse2, Data, DeriveInput, Fields};
 
 #[cfg_attr(test, mutants::skip)]
-pub fn newtype(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
+pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>  {
+    let input: DeriveInput = parse2(item)?;
     let name = &input.ident;
     let vis = &input.vis;
     let generics = &input.generics;
@@ -24,21 +24,17 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     .ty
             }
             _ => {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     &input,
                     "fundle::newtype can only be applied to tuple structs with exactly one field",
-                )
-                .to_compile_error()
-                .into();
+                ))
             }
         },
         _ => {
-            return syn::Error::new_spanned(
+            return Err(syn::Error::new_spanned(
                 &input,
                 "fundle::newtype can only be applied to structs",
-            )
-            .to_compile_error()
-            .into();
+            ))
         }
     };
 
@@ -73,5 +69,5 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    TokenStream::from(expanded)
+    Ok(TokenStream::from(expanded))
 }
