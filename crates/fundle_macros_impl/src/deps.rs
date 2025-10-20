@@ -81,37 +81,41 @@ fn generate_args_from_impl(
     field_types: &[&Type],
     generics: &syn::Generics,
 ) -> proc_macro2::TokenStream {
-    let as_ref_bounds = field_types.iter().map(|ty| quote!(AsRef<#ty>));
+    // Use a unique name for the From<T> parameter to avoid conflicts
+    // We'll use __FundleFromT as it's unlikely to conflict with user types
+    let from_param = quote::format_ident!("__FundleFromT");
 
     let field_assignments = field_names
         .iter()
         .zip(field_types.iter())
-        .map(|(name, ty)| quote!(#name: <T as AsRef<#ty>>::as_ref(&value).to_owned()));
+        .map(|(name, ty)| quote!(#name: <#from_param as AsRef<#ty>>::as_ref(&value).to_owned()));
 
-    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let (_impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    // Handle generics properly - add T to the impl generics
-    let impl_generics_with_t = if generics.params.is_empty() {
-        quote!(<T>)
+    // Add the From parameter to the generics
+    let impl_generics_with_from = if generics.params.is_empty() {
+        quote!(<#from_param>)
     } else {
-        quote!(<T, #impl_generics>)
+        let params = &generics.params;
+        quote!(<#params, #from_param>)
     };
 
-    // Handle where clause properly - if there are existing where clauses, add a comma
-    let where_clause_tokens = if where_clause.is_some() {
-        quote!(, #where_clause)
-    } else {
-        quote!()
-    };
+    let as_ref_bounds = field_types.iter().map(|ty| quote!(AsRef<#ty>));
+
+    // Handle where clause properly - extract just the predicates without the 'where' keyword
+    let additional_predicates = where_clause.map(|wc| {
+        let predicates = &wc.predicates;
+        quote!(, #predicates)
+    }).unwrap_or_else(|| quote!());
 
     quote! {
         #[allow(private_bounds)]
-        impl #impl_generics_with_t From<T> for #struct_name #ty_generics
+        impl #impl_generics_with_from From<#from_param> for #struct_name #ty_generics
         where
-            T: #(#as_ref_bounds)+*
-            #where_clause_tokens
+            #from_param: #(#as_ref_bounds)+*
+            #additional_predicates
         {
-            fn from(value: T) -> Self {
+            fn from(value: #from_param) -> Self {
                 Self {
                     #(#field_assignments),*
                 }
