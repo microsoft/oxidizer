@@ -1,0 +1,150 @@
+---
+source: crates/fundle_macros_impl/tests/bundle_forward.rs
+assertion_line: 17
+expression: expand_fundle_bundle!(item)
+---
+#[allow(non_camel_case_types, non_snake_case)]
+struct Foo {
+    x: Bar,
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl Foo {
+    pub fn builder() -> FooBuilder<::fundle::NotSet> {
+        FooBuilder::default()
+    }
+}
+#[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
+struct FooBuilder<X> {
+    x: Option<Bar>,
+    _phantom: std::marker::PhantomData<(X)>,
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl Default for FooBuilder<::fundle::NotSet> {
+    fn default() -> Self {
+        Self {
+            x: None,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+impl FooBuilder<::fundle::NotSet> {
+    pub fn x(self, f: impl Fn(&Self) -> Bar) -> FooBuilder<::fundle::Set> {
+        let x = f(&self);
+        FooBuilder {
+            x: Some(x),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl FooBuilder<::fundle::NotSet> {
+    pub fn x_try<R: std::error::Error>(
+        self,
+        f: impl Fn(&Self) -> Result<Bar, R>,
+    ) -> Result<FooBuilder<::fundle::Set>, R> {
+        let x = f(&self)?;
+        Ok(FooBuilder {
+            x: Some(x),
+            _phantom: std::marker::PhantomData,
+        })
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl FooBuilder<::fundle::NotSet> {
+    pub async fn x_async<F>(self, f: F) -> FooBuilder<::fundle::Set>
+    where
+        F: AsyncFn(&Self) -> Bar,
+    {
+        let x = f(&self).await;
+        FooBuilder {
+            x: Some(x),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl FooBuilder<::fundle::NotSet> {
+    pub async fn x_try_async<F, R: std::error::Error>(
+        self,
+        f: F,
+    ) -> Result<FooBuilder<::fundle::Set>, R>
+    where
+        F: AsyncFn(&Self) -> Result<Bar, R>,
+    {
+        let x = f(&self).await?;
+        Ok(FooBuilder {
+            x: Some(x),
+            _phantom: std::marker::PhantomData,
+        })
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl AsRef<Bar> for FooBuilder<::fundle::Set> {
+    fn as_ref(&self) -> &Bar {
+        self.x.as_ref().unwrap()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+impl AsRef<u8> for Foo {
+    fn as_ref(&self) -> &u8 {
+        self.x.as_ref()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl AsRef<u8> for FooBuilder<::fundle::Set> {
+    fn as_ref(&self) -> &u8 {
+        self.x.as_ref().unwrap().as_ref()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl AsRef<Bar> for Foo {
+    fn as_ref(&self) -> &Bar {
+        &self.x
+    }
+}
+impl fundle::exports::Exports for Foo {
+    const NUM_EXPORTS: usize = 1usize;
+}
+#[allow(clippy::items_after_statements)]
+impl fundle::exports::Export<0usize> for Foo {
+    type T = Bar;
+    fn get(&self) -> &Self::T {
+        &self.x
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+impl fundle::exports::Export<0usize> for FooBuilder<::fundle::Set> {
+    type T = Bar;
+    fn get(&self) -> &Self::T {
+        self.x.as_ref().unwrap()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+impl FooBuilder<::fundle::Set> {
+    pub fn build(self) -> Foo {
+        Foo { x: self.x.unwrap() }
+    }
+}
+#[allow(unused_macros, snake_case)]
+macro_rules! Foo {
+    (verify_field $builder_var:ident x) => {
+        { fn verify_exists < > (_ : & FooBuilder < ::fundle::Set >) {}
+        verify_exists($builder_var); }
+    };
+    (
+        select($builder_var:ident) => $($forward_type:ident ($forward_field:ident)),*
+        $(,)?
+    ) => {
+        { $(Foo!(verify_field $builder_var $forward_field);)*
+        #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+        struct Select < 'a, T1 > { builder : & 'a FooBuilder < T1 >, $($forward_type : &
+        'a $forward_type,)* } impl < 'a, > AsRef < Bar > for Select < 'a, ::fundle::Set >
+        where FooBuilder < ::fundle::Set > : AsRef < Bar >, { fn as_ref(& self) -> & Bar
+        { self.builder.as_ref() } } $(#[allow(non_camel_case_types, non_snake_case,
+        clippy::items_after_statements)] impl < 'a, T1 > AsRef < $forward_type > for
+        Select < 'a, T1 > { fn as_ref(& self) -> & $forward_type { self. $forward_type }
+        })* Select { builder : & $builder_var, $($forward_type : $builder_var .
+        $forward_field .as_ref().unwrap(),)* } }
+    };
+}
