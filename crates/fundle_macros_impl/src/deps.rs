@@ -12,23 +12,19 @@ pub fn deps(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let struct_vis = &input.vis;
     let struct_attrs = &input.attrs;
 
-    let fields = match &input.fields {
-        Fields::Named(FieldsNamed { named, .. }) => {
-            if named.is_empty() {
-                return Err(syn::Error::new_spanned(struct_name, "fundle::deps requires at least one field"));
-            }
-            named
-        }
-        Fields::Unnamed(_) => {
-            return Err(syn::Error::new_spanned(
-                struct_name,
-                "fundle::deps only supports structs with named fields",
-            ));
-        }
-        Fields::Unit => {
-            return Err(syn::Error::new_spanned(struct_name, "fundle::deps does not support unit structs"));
-        }
+    let Fields::Named(FieldsNamed { named: fields, .. }) = &input.fields else {
+        return Err(syn::Error::new_spanned(
+            struct_name,
+            "fundle::deps only supports structs with named fields",
+        ));
     };
+
+    if fields.is_empty() {
+        return Err(syn::Error::new_spanned(
+            struct_name,
+            "fundle::deps requires at least one field",
+        ));
+    }
 
     let field_types: Vec<_> = fields.iter().map(|f| &f.ty).collect();
     let field_names: Vec<_> = fields

@@ -14,15 +14,12 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     let struct_name = &input.ident;
     let builder_name = Ident::new(&format!("{struct_name}Builder"), struct_name.span());
 
-    let fields = match &input.fields {
-        Fields::Named(FieldsNamed { named, .. }) => named,
-        _ => {
-            return Ok(syn::Error::new_spanned(
-                &input,
-                "fundle::bundle only supports structs with named fields",
-            )
-            .to_compile_error());
-        }
+    let Fields::Named(FieldsNamed { named: fields, .. }) = &input.fields else {
+        return Ok(syn::Error::new_spanned(
+            &input,
+            "fundle::bundle only supports structs with named fields",
+        )
+        .to_compile_error());
     };
 
     // Collect field information

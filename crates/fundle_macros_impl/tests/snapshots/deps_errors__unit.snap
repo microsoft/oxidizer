@@ -3,5 +3,5 @@ source: crates/fundle_macros_impl/tests/deps_errors.rs
 expression: expand_fundle_deps!(item)
 ---
 ::core::compile_error! {
-    "fundle::deps does not support unit structs"
+    "fundle::deps only supports structs with named fields"
 }
