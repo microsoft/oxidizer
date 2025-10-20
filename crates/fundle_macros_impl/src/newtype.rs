@@ -5,7 +5,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Fields, ItemStruct, parse2};
 
-#[cfg_attr(test, mutants::skip)]
 pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
     let name = &input.ident;

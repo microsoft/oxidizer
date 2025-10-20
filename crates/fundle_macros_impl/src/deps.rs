@@ -5,7 +5,6 @@ use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::{Fields, FieldsNamed, ItemStruct, Type, parse2};
 
-#[cfg_attr(test, mutants::skip)]
 pub fn deps(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
 

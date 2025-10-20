@@ -8,7 +8,6 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, parse2};
 
-#[cfg_attr(test, mutants::skip)]
 pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
 
