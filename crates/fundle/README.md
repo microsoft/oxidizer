@@ -1,5 +1,6 @@
 <div align="center">
- <img src="./logo.png" alt="Fundle Logo" width="128">
+
+[//]: # ( <img src="./logo.png" alt="Fundle Logo" width="128">)
 
 # Fundle
 
