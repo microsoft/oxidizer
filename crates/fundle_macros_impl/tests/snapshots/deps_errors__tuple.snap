@@ -1,0 +1,8 @@
+---
+source: crates/fundle_macros_impl/tests/deps_errors.rs
+assertion_line: 24
+expression: expand_fundle_deps!(item)
+---
+::core::compile_error! {
+    "fundle::args only supports structs with named fields"
+}

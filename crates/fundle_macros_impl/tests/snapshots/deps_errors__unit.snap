@@ -1,0 +1,8 @@
+---
+source: crates/fundle_macros_impl/tests/deps_errors.rs
+assertion_line: 34
+expression: expand_fundle_deps!(item)
+---
+::core::compile_error! {
+    "fundle::args does not support unit structs"
+}
