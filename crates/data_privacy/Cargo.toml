@@ -43,5 +43,6 @@ path = "examples/employees/main.rs"
 allowed_external_types = [
     "serde::*",
     "serde_core::de::*",
+    "serde_core::ser::*",
     "data_privacy_macros::*",
 ]
