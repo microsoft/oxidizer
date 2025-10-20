@@ -220,7 +220,6 @@ fn generate_default_impl(builder_name: &Ident, field_names: &[&Ident], type_para
 }
 
 #[expect(clippy::cognitive_complexity, reason = "Complex builder generation logic")]
-#[expect(clippy::too_many_lines, reason = "Complex builder generation logic")]
 #[cfg_attr(test, mutants::skip)]
 fn generate_setter_impls(
     builder_name: &Ident,

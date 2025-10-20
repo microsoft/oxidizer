@@ -1,9 +1,4 @@
-#![expect(
-    missing_debug_implementations,
-    clippy::empty_structs_with_brackets,
-    clippy::must_use_candidate,
-    reason = "Unit tests"
-)]
+#![expect(missing_debug_implementations, clippy::empty_structs_with_brackets, reason = "Unit tests")]
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #![expect(dead_code, reason = "This is just an example.")]

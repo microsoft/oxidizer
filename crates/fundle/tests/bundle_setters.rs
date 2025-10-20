@@ -8,8 +8,8 @@ struct Config {}
 
 #[rustfmt::skip]
 impl Config {
-    fn new() -> Self { Self {} }
-    fn new_try() -> Result<Self, Error> { Ok(Self {}) }
+    const fn new() -> Self { Self {} }
+    const fn new_try() -> Result<Self, Error> { Ok(Self {}) }
     async fn new_async() -> Self { Self {} }
     async fn new_try_async() -> Result<Self, Error> { Ok(Self {}) }
 }
