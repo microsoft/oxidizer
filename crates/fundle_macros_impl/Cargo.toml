@@ -33,3 +33,10 @@ prettyplease.workspace = true
 
 [lints]
 workspace = true
+
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "proc_macro2::*",
+    "syn::error::*",
+]
