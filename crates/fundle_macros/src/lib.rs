@@ -117,6 +117,7 @@ use proc_macro::TokenStream;
 /// }
 /// ```
 #[proc_macro_attribute]
+#[cfg_attr(test, mutants::skip)]
 pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
     fundle_macros_impl::bundle(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
@@ -178,6 +179,7 @@ pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - The source type must implement `AsRef<T>` for each field type
 /// - Only works with structs that have named fields
 #[proc_macro_attribute]
+#[cfg_attr(test, mutants::skip)]
 pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
     fundle_macros_impl::deps(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
@@ -227,6 +229,7 @@ pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - References to the inner type: `&Inner -> Wrapper` (cloned)
 /// - Any other type that implements `AsRef<Inner>`
 #[proc_macro_attribute]
+#[cfg_attr(test, mutants::skip)]
 pub fn newtype(attr: TokenStream, item: TokenStream) -> TokenStream {
     fundle_macros_impl::newtype(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
