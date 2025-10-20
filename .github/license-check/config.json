@@ -36,5 +36,11 @@
             "LICENSE",
             "Cargo.lock"
         ]
+    },
+
+    {
+        "exclude": [
+            "**/*.stderr"
+        ]
     }
 ]
