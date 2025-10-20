@@ -10,4 +10,4 @@ coverage:
         base: auto
     fundle_macros:  # API still WIP for now
       target: auto
-      informational: true  
+      informational: true
