@@ -4,6 +4,7 @@
 use trybuild::TestCases;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn proc() {
     let t = TestCases::new();
 

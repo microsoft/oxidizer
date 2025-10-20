@@ -6,6 +6,7 @@ use syn::{ItemStruct, parse_quote};
 mod util;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn foward_explicit() {
     let item: ItemStruct = parse_quote! {
         #[bundle]
@@ -21,6 +22,7 @@ fn foward_explicit() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn unrelated_attr() {
     let item: ItemStruct = parse_quote! {
         #[bundle]

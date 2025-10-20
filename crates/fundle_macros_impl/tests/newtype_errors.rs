@@ -6,6 +6,7 @@ use syn::{ItemStruct, ItemUnion, parse_quote};
 mod util;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn empty_structs() {
     let item: ItemStruct = parse_quote! {
         #[newtype]
@@ -16,6 +17,7 @@ fn empty_structs() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn multi_field() {
     let item: ItemStruct = parse_quote! {
         #[newtype]
@@ -26,6 +28,7 @@ fn multi_field() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn multi_field_named() {
     let item: ItemStruct = parse_quote! {
         #[newtype]
@@ -39,6 +42,7 @@ fn multi_field_named() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn union() {
     let item: ItemUnion = parse_quote! {
         #[newtype]

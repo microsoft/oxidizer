@@ -6,6 +6,7 @@ use syn::{ItemStruct, parse_quote};
 mod util;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn lifetimes() {
     let item: ItemStruct = parse_quote! {
         #[deps]
@@ -18,6 +19,7 @@ fn lifetimes() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics() {
     let item: ItemStruct = parse_quote! {
         #[deps]
@@ -30,6 +32,7 @@ fn generics() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_where() {
     let item: ItemStruct = parse_quote! {
         #[deps]

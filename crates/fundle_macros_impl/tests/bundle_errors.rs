@@ -6,6 +6,7 @@ use syn::{ItemStruct, parse_quote};
 mod util;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn forward_empty() {
     let item: ItemStruct = parse_quote! {
         #[bundle]
@@ -19,6 +20,7 @@ fn forward_empty() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn forward_invalid_syntax() {
     let item: ItemStruct = parse_quote! {
         #[bundle]

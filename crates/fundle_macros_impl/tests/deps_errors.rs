@@ -6,6 +6,7 @@ use syn::{ItemStruct, ItemUnion, parse_quote};
 mod util;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn empty() {
     let item: ItemStruct = parse_quote! {
         #[deps]
@@ -16,6 +17,7 @@ fn empty() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn tuple() {
     let item: ItemStruct = parse_quote! {
         #[deps]
@@ -26,6 +28,7 @@ fn tuple() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn unit() {
     let item: ItemStruct = parse_quote! {
         #[deps]
@@ -36,6 +39,7 @@ fn unit() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn union() {
     let item: ItemUnion = parse_quote! {
         #[deps]

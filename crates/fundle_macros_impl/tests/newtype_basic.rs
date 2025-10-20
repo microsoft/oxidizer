@@ -6,6 +6,7 @@ use syn::{ItemStruct, parse_quote};
 mod util;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn basic_expansion() {
     let item: ItemStruct = parse_quote! {
         #[newtype]
