@@ -9,11 +9,6 @@
 //! can simply declare their dependencies, and applications will not compile unless all dependencies
 //! are initialized, without application authors having to pass them one-by-one,
 //!
-//! # Example
-//!
-//! ```rust
-//! # #[derive(Clone)]
-//!
 //! # Capabilities
 //!
 //! - **Type-safe builder pattern** - Each field must be set exactly once before building

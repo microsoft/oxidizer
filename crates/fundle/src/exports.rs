@@ -3,8 +3,8 @@
 
 //! Utility macros for exporting data from a bundle.
 //!
-//! Currently used, but not useful, due to Rust compiler bug #51445. Once
-//! that is fixed, the `#[forward]` macro should work without parameters.
+//! Currently used, but not useful, due to Rust compiler bug [#51445](https://github.com/rust-lang/rust/issues/51445).
+//! Once that is fixed, the `#[forward]` macro should work without parameters.
 
 /// General info for exported data.
 ///

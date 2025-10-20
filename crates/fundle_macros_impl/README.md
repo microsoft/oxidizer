@@ -1,5 +1,8 @@
 
-# Fundle Macros Implementation
+<!-- cargo-rdme start -->
+
+## Fundle Macros Implementation
 
 See the `fundle_macros` crate for more information.
 
+<!-- cargo-rdme end -->

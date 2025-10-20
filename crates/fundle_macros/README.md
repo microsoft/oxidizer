@@ -14,6 +14,9 @@
 
 * [Summary](#summary)
 * [Macros](#macros)
+  * [`#[bundle]`](#bundle)
+  * [`#[deps]`](#deps)
+  * [`#[newtype]`](#newtype)
 
 ## Summary
 

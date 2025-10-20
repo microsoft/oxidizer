@@ -29,16 +29,14 @@ Fundle if a dependency injection system for service libraries. Library authors
 can simply declare their dependencies, and applications will not compile unless all dependencies
 are initialized, without application authors having to pass them one-by-one,
 
-## Example
-
-```rust
-
+## Capabilities
 
 - **Type-safe builder pattern** - Each field must be set exactly once before building
 - **Dependency injection** - Fields can access previously set fields during construction
 - **Automatic `AsRef` implementations** - Generated for unique field types
 - **Multiple setter variants** - Regular, try (fallible), async, and async-try setters
 
+## Quick Start
 
 ```rust
 #[fundle::bundle]
