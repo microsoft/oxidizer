@@ -46,7 +46,6 @@
 
 use proc_macro::TokenStream;
 
-
 /// Define an 'export' DI container.
 ///
 /// The `bundle` macro transforms a struct into a builder pattern where each field must be

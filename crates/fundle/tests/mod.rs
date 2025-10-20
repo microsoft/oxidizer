@@ -14,5 +14,4 @@ fn proc() {
     t.compile_fail("tests/proc/bundle_tupled.rs");
     t.pass("tests/proc/deps_simple.rs");
     t.pass("tests/proc/newtype_simple.rs");
-
 }

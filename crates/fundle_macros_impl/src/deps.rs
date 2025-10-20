@@ -3,10 +3,10 @@
 
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{parse2, Data, DeriveInput, Fields, FieldsNamed, Type};
+use syn::{Data, DeriveInput, Fields, FieldsNamed, Type, parse2};
 
 #[cfg_attr(test, mutants::skip)]
-pub fn deps(_attr: TokenStream, item: TokenStream)  -> syn::Result<TokenStream>  {
+pub fn deps(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: DeriveInput = parse2(item)?;
 
     let struct_name = &input.ident;
@@ -17,10 +17,7 @@ pub fn deps(_attr: TokenStream, item: TokenStream)  -> syn::Result<TokenStream> 
         Data::Struct(data) => match &data.fields {
             Fields::Named(FieldsNamed { named, .. }) => {
                 if named.is_empty() {
-                    return Err(syn::Error::new_spanned(
-                        struct_name,
-                        "fundle::args requires at least one field",
-                    ));
+                    return Err(syn::Error::new_spanned(struct_name, "fundle::args requires at least one field"));
                 }
                 named
             }
@@ -28,20 +25,12 @@ pub fn deps(_attr: TokenStream, item: TokenStream)  -> syn::Result<TokenStream> 
                 return Err(syn::Error::new_spanned(
                     struct_name,
                     "fundle::args only supports structs with named fields",
-                ))
+                ));
             }
-            Fields::Unit => {
-                return Err(syn::Error::new_spanned(
-                    struct_name,
-                    "fundle::args does not support unit structs",
-                ))
-            }
+            Fields::Unit => return Err(syn::Error::new_spanned(struct_name, "fundle::args does not support unit structs")),
         },
         Data::Enum(_) | Data::Union(_) => {
-            return Err(syn::Error::new_spanned(
-                struct_name,
-                "fundle::args can only be applied to structs",
-            ));
+            return Err(syn::Error::new_spanned(struct_name, "fundle::args can only be applied to structs"));
         }
     };
 
@@ -49,14 +38,13 @@ pub fn deps(_attr: TokenStream, item: TokenStream)  -> syn::Result<TokenStream> 
     let field_names: Vec<_> = fields
         .iter()
         .map(|f| {
-            f.ident.as_ref().expect(
-                "internal error: named field without identifier (this should be impossible after validation)",
-            )
+            f.ident
+                .as_ref()
+                .expect("internal error: named field without identifier (this should be impossible after validation)")
         })
         .collect();
 
-    let from_impl =
-        generate_args_from_impl(struct_name, &field_names, &field_types, &input.generics);
+    let from_impl = generate_args_from_impl(struct_name, &field_names, &field_types, &input.generics);
 
     // Split generics for proper struct definition
     let (_impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -71,7 +59,7 @@ pub fn deps(_attr: TokenStream, item: TokenStream)  -> syn::Result<TokenStream> 
         #from_impl
     };
 
-    Ok(TokenStream::from(expanded))
+    Ok(expanded)
 }
 
 #[cfg_attr(test, mutants::skip)]
@@ -103,10 +91,12 @@ fn generate_args_from_impl(
     let as_ref_bounds = field_types.iter().map(|ty| quote!(AsRef<#ty>));
 
     // Handle where clause properly - extract just the predicates without the 'where' keyword
-    let additional_predicates = where_clause.map(|wc| {
-        let predicates = &wc.predicates;
-        quote!(, #predicates)
-    }).unwrap_or_else(|| quote!());
+    let additional_predicates = where_clause
+        .map(|wc| {
+            let predicates = &wc.predicates;
+            quote!(, #predicates)
+        })
+        .unwrap_or_else(|| quote!());
 
     quote! {
         #[allow(private_bounds)]

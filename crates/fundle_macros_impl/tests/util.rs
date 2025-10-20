@@ -20,15 +20,13 @@ macro_rules! expand_fundle_bundle {
         clean_item.attrs.retain(|attr| !attr.path().is_ident("bundle"));
         let item_tokens = quote::quote! { #clean_item };
 
-        let output = fundle_macros_impl::bundle(attr_args, item_tokens)
-            .unwrap_or_else(|e| e.to_compile_error());
+        let output = fundle_macros_impl::bundle(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
 
         // Parse as File - the output should be a complete set of items
         let file: syn::File = syn::parse2(output).unwrap();
         prettyplease::unparse(&file)
     }};
 }
-
 
 #[macro_export]
 macro_rules! expand_fundle_deps {
@@ -49,8 +47,7 @@ macro_rules! expand_fundle_deps {
         clean_item.attrs.retain(|attr| !attr.path().is_ident("deps"));
         let item_tokens = quote::quote! { #clean_item };
 
-        let output = fundle_macros_impl::deps(attr_args, item_tokens)
-            .unwrap_or_else(|e| e.to_compile_error());
+        let output = fundle_macros_impl::deps(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
 
         // Parse as File - the output should be a complete set of items
         let file: syn::File = syn::parse2(output).unwrap();
@@ -77,8 +74,7 @@ macro_rules! expand_fundle_newtype {
         clean_item.attrs.retain(|attr| !attr.path().is_ident("newtype"));
         let item_tokens = quote::quote! { #clean_item };
 
-        let output = fundle_macros_impl::newtype(attr_args, item_tokens)
-            .unwrap_or_else(|e| e.to_compile_error());
+        let output = fundle_macros_impl::newtype(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
 
         // Parse as File - the output should be a complete set of items
         let file: syn::File = syn::parse2(output).unwrap();

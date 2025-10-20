@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::{parse_quote,  ItemStruct};
+use syn::{ItemStruct, parse_quote};
 
 mod util;
 

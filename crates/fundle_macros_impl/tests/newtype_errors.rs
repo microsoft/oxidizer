@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::{parse_quote, ItemStruct, ItemUnion};
+use syn::{ItemStruct, ItemUnion, parse_quote};
 
 mod util;
 
@@ -37,7 +37,6 @@ fn multi_field_named() {
 
     insta::assert_snapshot!(expand_fundle_newtype!(item));
 }
-
 
 #[test]
 fn union() {

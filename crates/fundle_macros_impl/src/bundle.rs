@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parser;
-use syn::{parse2, Attribute, Data, DeriveInput, Fields, FieldsNamed, Path, Type};
+use syn::{Attribute, Data, DeriveInput, Fields, FieldsNamed, Path, Type, parse2};
 
 #[expect(clippy::too_many_lines, reason = "Generated code with many fields")]
 #[cfg_attr(test, mutants::skip)]
-pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>  {
-    let input: DeriveInput  = parse2(item)?;
+pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    let input: DeriveInput = parse2(item)?;
 
     let struct_name = &input.ident;
     let builder_name = Ident::new(&format!("{struct_name}Builder"), struct_name.span());
@@ -19,18 +19,9 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(FieldsNamed { named, .. }) => named,
-            _ => {
-                return Ok(syn::Error::new_spanned(
-                    &input,
-                    "fundle::bundle only supports structs with named fields",
-                )
-                    .to_compile_error())
-            }
+            _ => return Ok(syn::Error::new_spanned(&input, "fundle::bundle only supports structs with named fields").to_compile_error()),
         },
-        _ => {
-            return Ok(syn::Error::new_spanned(&input, "fundle::bundle can only be applied to structs")
-                .to_compile_error())
-        }
+        _ => return Ok(syn::Error::new_spanned(&input, "fundle::bundle can only be applied to structs").to_compile_error()),
     };
 
     // Collect field information
@@ -38,9 +29,9 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     let field_names: Vec<_> = field_info
         .iter()
         .map(|f| {
-            f.ident.as_ref().expect(
-                "internal error: named field without identifier (this should be impossible after validation)",
-            )
+            f.ident
+                .as_ref()
+                .expect("internal error: named field without identifier (this should be impossible after validation)")
         })
         .collect();
     let field_types: Vec<_> = field_info.iter().map(|f| &f.ty).collect();
@@ -75,11 +66,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
         let field_vis = &field.vis;
 
         // Filter out forward attributes
-        let filtered_attrs: Vec<_> = field
-            .attrs
-            .iter()
-            .filter(|attr| !attr.path().is_ident("forward"))
-            .collect();
+        let filtered_attrs: Vec<_> = field.attrs.iter().filter(|attr| !attr.path().is_ident("forward")).collect();
 
         quote! {
             #(#filtered_attrs)*
@@ -98,42 +85,31 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     };
 
     // Generate builder struct
-    let builder_struct =
-        generate_builder_struct(&builder_name, &field_names, &field_types, &type_params);
+    let builder_struct = generate_builder_struct(&builder_name, &field_names, &field_types, &type_params);
 
     // Generate Default impl for builder
     let default_impl = generate_default_impl(&builder_name, &field_names, &type_params);
 
     // Generate build method for original struct
-    let struct_build_method =
-        generate_struct_build_method(struct_name, &builder_name, &type_params);
+    let struct_build_method = generate_struct_build_method(struct_name, &builder_name, &type_params);
 
     // Generate setter methods
-    let setter_impls =
-        generate_setter_impls(&builder_name, &field_names, &field_types, &type_params);
+    let setter_impls = generate_setter_impls(&builder_name, &field_names, &field_types, &type_params);
 
     // Generate AsRef impls for unique types
-    let as_ref_impls = generate_as_ref_impls(
-        &builder_name,
-        &field_names,
-        &field_types,
-        &type_params,
-        &type_counts,
-    );
+    let as_ref_impls = generate_as_ref_impls(&builder_name, &field_names, &field_types, &type_params, &type_counts);
 
     // Generate build method
     let build_impl = generate_build_impl(&builder_name, struct_name, &field_names, &type_params);
 
     // Generate forwarded AsRef implementations
-    let forwarded_as_ref_impls =
-        generate_forwarded_as_ref_impls(struct_name, &builder_name, &type_params, &forward_info);
+    let forwarded_as_ref_impls = generate_forwarded_as_ref_impls(struct_name, &builder_name, &type_params, &forward_info);
 
     // Generate Export trait implementations
     let export_impls = generate_export_impls(struct_name, &field_types, &field_names);
 
     // Generate Export trait implementations for builder variants
-    let builder_export_impls =
-        generate_builder_export_impls(&builder_name, &field_names, &field_types, &type_params);
+    let builder_export_impls = generate_builder_export_impls(&builder_name, &field_names, &field_types, &type_params);
 
     // Generate AsRef implementations for unique field types on the main struct
     let main_struct_as_ref_impls = field_names
@@ -159,13 +135,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
         .collect::<Vec<_>>();
 
     // Generate the select macro
-    let select_macro = generate_select_macro(
-        struct_name,
-        &builder_name,
-        &field_names,
-        &field_types,
-        &type_params,
-    );
+    let select_macro = generate_select_macro(struct_name, &builder_name, &field_names, &field_types, &type_params);
 
     let expanded = quote! {
         #original_struct
@@ -193,7 +163,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
         #select_macro
     };
 
-    Ok(TokenStream::from(expanded))
+    Ok(expanded)
 }
 
 #[cfg_attr(test, mutants::skip)]
@@ -203,12 +173,9 @@ fn generate_builder_struct(
     field_types: &[&Type],
     type_params: &[Ident],
 ) -> proc_macro2::TokenStream {
-    let builder_fields = field_names
-        .iter()
-        .zip(field_types.iter())
-        .map(|(name, ty)| {
-            quote! { #name: Option<#ty> }
-        });
+    let builder_fields = field_names.iter().zip(field_types.iter()).map(|(name, ty)| {
+        quote! { #name: Option<#ty> }
+    });
 
     let phantom_types = type_params.iter().map(|param| quote!(#param));
 
@@ -221,11 +188,7 @@ fn generate_builder_struct(
     }
 }
 
-fn generate_struct_build_method(
-    struct_name: &Ident,
-    builder_name: &Ident,
-    type_params: &[Ident],
-) -> proc_macro2::TokenStream {
+fn generate_struct_build_method(struct_name: &Ident, builder_name: &Ident, type_params: &[Ident]) -> proc_macro2::TokenStream {
     let not_set_params = type_params.iter().map(|_| quote!(::fundle::NotSet));
 
     quote! {
@@ -239,11 +202,7 @@ fn generate_struct_build_method(
 }
 
 #[cfg_attr(test, mutants::skip)]
-fn generate_default_impl(
-    builder_name: &Ident,
-    field_names: &[&Ident],
-    type_params: &[Ident],
-) -> proc_macro2::TokenStream {
+fn generate_default_impl(builder_name: &Ident, field_names: &[&Ident], type_params: &[Ident]) -> proc_macro2::TokenStream {
     let not_set_params = type_params.iter().map(|_| quote!(::fundle::NotSet));
     let none_fields = field_names.iter().map(|name| quote!(#name: None));
 
@@ -260,10 +219,7 @@ fn generate_default_impl(
     }
 }
 
-#[expect(
-    clippy::cognitive_complexity,
-    reason = "Complex builder generation logic"
-)]
+#[expect(clippy::cognitive_complexity, reason = "Complex builder generation logic")]
 #[expect(clippy::too_many_lines, reason = "Complex builder generation logic")]
 #[cfg_attr(test, mutants::skip)]
 fn generate_setter_impls(
@@ -279,26 +235,14 @@ fn generate_setter_impls(
         let impl_params: Vec<_> = type_params
             .iter()
             .enumerate()
-            .map(|(j, param)| {
-                if i == j {
-                    quote!(::fundle::NotSet)
-                } else {
-                    quote!(#param)
-                }
-            })
+            .map(|(j, param)| if i == j { quote!(::fundle::NotSet) } else { quote!(#param) })
             .collect();
 
         // Create type parameter list with current one as Set, others as generic
         let return_params: Vec<_> = type_params
             .iter()
             .enumerate()
-            .map(|(j, param)| {
-                if i == j {
-                    quote!(::fundle::Set)
-                } else {
-                    quote!(#param)
-                }
-            })
+            .map(|(j, param)| if i == j { quote!(::fundle::Set) } else { quote!(#param) })
             .collect();
 
         // Other type parameters for the impl
@@ -369,8 +313,7 @@ fn generate_setter_impls(
         };
 
         // Async try setter
-        let try_async_method_name =
-            Ident::new(&format!("{field_name}_try_async"), field_name.span());
+        let try_async_method_name = Ident::new(&format!("{field_name}_try_async"), field_name.span());
         let try_async_setter = quote! {
             #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
             impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
@@ -399,11 +342,7 @@ fn generate_as_ref_impls(
     field_names: &[&Ident],
     field_types: &[&Type],
     type_params: &[Ident],
-    #[expect(
-        clippy::used_underscore_binding,
-        reason = "Parameter used conditionally"
-    )]
-    _type_counts: &HashMap<String, usize>,
+    #[expect(clippy::used_underscore_binding, reason = "Parameter used conditionally")] _type_counts: &HashMap<String, usize>,
 ) -> Vec<proc_macro2::TokenStream> {
     let mut impls = Vec::new();
 
@@ -416,13 +355,7 @@ fn generate_as_ref_impls(
             let impl_params: Vec<_> = type_params
                 .iter()
                 .enumerate()
-                .map(|(j, param)| {
-                    if i == j {
-                        quote!(::fundle::Set)
-                    } else {
-                        quote!(#param)
-                    }
-                })
+                .map(|(j, param)| if i == j { quote!(::fundle::Set) } else { quote!(#param) })
                 .collect();
 
             // Other type parameters for the impl
@@ -456,10 +389,7 @@ fn generate_build_impl(
     type_params: &[Ident],
 ) -> proc_macro2::TokenStream {
     let set_params: Vec<_> = type_params.iter().map(|_| quote!(::fundle::Set)).collect();
-    let field_moves: Vec<_> = field_names
-        .iter()
-        .map(|name| quote!(#name: self.#name.unwrap()))
-        .collect();
+    let field_moves: Vec<_> = field_names.iter().map(|name| quote!(#name: self.#name.unwrap())).collect();
 
     quote! {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
@@ -527,13 +457,7 @@ fn generate_forwarded_as_ref_impls(
             let impl_params: Vec<_> = type_params
                 .iter()
                 .enumerate()
-                .map(|(j, param)| {
-                    if *field_idx == j {
-                        quote!(::fundle::Set)
-                    } else {
-                        quote!(#param)
-                    }
-                })
+                .map(|(j, param)| if *field_idx == j { quote!(::fundle::Set) } else { quote!(#param) })
                 .collect();
 
             // Other type parameters for the impl (exclude the forwarded field's param)
@@ -559,11 +483,7 @@ fn generate_forwarded_as_ref_impls(
 }
 
 #[cfg_attr(test, mutants::skip)]
-fn generate_export_impls(
-    struct_name: &Ident,
-    field_types: &[&Type],
-    field_names: &[&Ident],
-) -> proc_macro2::TokenStream {
+fn generate_export_impls(struct_name: &Ident, field_types: &[&Type], field_names: &[&Ident]) -> proc_macro2::TokenStream {
     // Export all types, not just unique ones
     let num_exports = field_types.len();
 
@@ -610,20 +530,12 @@ fn generate_builder_export_impls(
     let mut impls = Vec::new();
 
     // For each field, generate Export impl only for that specific field when it's Set
-    for (field_idx, (field_name, field_type)) in
-        field_names.iter().zip(field_types.iter()).enumerate()
-    {
+    for (field_idx, (field_name, field_type)) in field_names.iter().zip(field_types.iter()).enumerate() {
         // Create type parameter list with this field as Set, others as generic
         let impl_params: Vec<_> = type_params
             .iter()
             .enumerate()
-            .map(|(j, param)| {
-                if field_idx == j {
-                    quote!(::fundle::Set)
-                } else {
-                    quote!(#param)
-                }
-            })
+            .map(|(j, param)| if field_idx == j { quote!(::fundle::Set) } else { quote!(#param) })
             .collect();
 
         // Other type parameters for the impl (exclude this field's param)
@@ -721,31 +633,41 @@ fn generate_select_macro(
         .collect::<Vec<_>>();
 
     // Generate individual verification patterns for each field
-    let verification_patterns = field_names.iter().enumerate().map(|(field_idx, field_name)| {
-        // Create generic type params (exclude the Set field)
-        let generic_params = select_type_params.iter().enumerate().filter_map(|(param_idx, param)| {
-            (param_idx != field_idx).then_some(param)
-        }).collect::<Vec<_>>();
+    let verification_patterns = field_names
+        .iter()
+        .enumerate()
+        .map(|(field_idx, field_name)| {
+            // Create generic type params (exclude the Set field)
+            let generic_params = select_type_params
+                .iter()
+                .enumerate()
+                .filter_map(|(param_idx, param)| (param_idx != field_idx).then_some(param))
+                .collect::<Vec<_>>();
 
-        // Create type params where this field is Set, others are generic
-        let verification_params = select_type_params.iter().enumerate().map(|(param_idx, param)| {
-            if param_idx == field_idx {
-                quote!(::fundle::Set)
-            } else {
-                quote!(#param)
+            // Create type params where this field is Set, others are generic
+            let verification_params = select_type_params
+                .iter()
+                .enumerate()
+                .map(|(param_idx, param)| {
+                    if param_idx == field_idx {
+                        quote!(::fundle::Set)
+                    } else {
+                        quote!(#param)
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            // Generate a specific macro pattern for this field
+            quote! {
+                (verify_field $builder_var:ident #field_name) => {
+                    {
+                        fn verify_exists<#(#generic_params),*>(_: &#builder_name<#(#verification_params),*>) {}
+                        verify_exists($builder_var);
+                    }
+                };
             }
-        }).collect::<Vec<_>>();
-
-        // Generate a specific macro pattern for this field
-        quote! {
-            (verify_field $builder_var:ident #field_name) => {
-                {
-                    fn verify_exists<#(#generic_params),*>(_: &#builder_name<#(#verification_params),*>) {}
-                    verify_exists($builder_var);
-                }
-            };
-        }
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     quote! {
         #[allow(unused_macros, snake_case)]

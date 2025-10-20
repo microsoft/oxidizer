@@ -3,10 +3,10 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, Data, DeriveInput, Fields};
+use syn::{Data, DeriveInput, Fields, parse2};
 
 #[cfg_attr(test, mutants::skip)]
-pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>  {
+pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: DeriveInput = parse2(item)?;
     let name = &input.ident;
     let vis = &input.vis;
@@ -27,15 +27,10 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
                 return Err(syn::Error::new_spanned(
                     &input,
                     "fundle::newtype can only be applied to tuple structs with exactly one field",
-                ))
+                ));
             }
         },
-        _ => {
-            return Err(syn::Error::new_spanned(
-                &input,
-                "fundle::newtype can only be applied to structs",
-            ))
-        }
+        _ => return Err(syn::Error::new_spanned(&input, "fundle::newtype can only be applied to structs")),
     };
 
     let expanded = quote! {
@@ -69,5 +64,5 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         }
     };
 
-    Ok(TokenStream::from(expanded))
+    Ok(expanded)
 }

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::{parse_quote, ItemStruct, ItemUnion};
+use syn::{ItemStruct, ItemUnion, parse_quote};
 
 mod util;
 
@@ -34,7 +34,6 @@ fn unit() {
 
     insta::assert_snapshot!(expand_fundle_deps!(item));
 }
-
 
 #[test]
 fn union() {
