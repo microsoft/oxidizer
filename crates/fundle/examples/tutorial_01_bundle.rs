@@ -7,8 +7,7 @@
 pub struct Logger {}
 pub struct Database {}
 
-// Our "DI" container (and in Oxidizer would be the "thread-per-core"
-// app state). Adding `fundle::bundle` adds a `::builder()` method
+// Our "DI" container. Adding `fundle::bundle` adds a `::builder()` method
 // to construct this.
 #[fundle::bundle]
 pub struct AppState {
