@@ -6,21 +6,24 @@ use std::collections::HashMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parser;
-use syn::{Attribute, Data, DeriveInput, Fields, FieldsNamed, Path, Type, parse2};
+use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, parse2};
 
 #[cfg_attr(test, mutants::skip)]
 pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let input: DeriveInput = parse2(item)?;
+    let input: ItemStruct = parse2(item)?;
 
     let struct_name = &input.ident;
     let builder_name = Ident::new(&format!("{struct_name}Builder"), struct_name.span());
 
-    let fields = match &input.data {
-        Data::Struct(data) => match &data.fields {
-            Fields::Named(FieldsNamed { named, .. }) => named,
-            _ => return Ok(syn::Error::new_spanned(&input, "fundle::bundle only supports structs with named fields").to_compile_error()),
-        },
-        _ => return Ok(syn::Error::new_spanned(&input, "fundle::bundle can only be applied to structs").to_compile_error()),
+    let fields = match &input.fields {
+        Fields::Named(FieldsNamed { named, .. }) => named,
+        _ => {
+            return Ok(syn::Error::new_spanned(
+                &input,
+                "fundle::bundle only supports structs with named fields",
+            )
+            .to_compile_error());
+        }
     };
 
     // Collect field information

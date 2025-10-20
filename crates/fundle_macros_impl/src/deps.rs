@@ -3,34 +3,31 @@
 
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, FieldsNamed, Type, parse2};
+use syn::{Fields, FieldsNamed, ItemStruct, Type, parse2};
 
 #[cfg_attr(test, mutants::skip)]
 pub fn deps(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let input: DeriveInput = parse2(item)?;
+    let input: ItemStruct = parse2(item)?;
 
     let struct_name = &input.ident;
     let struct_vis = &input.vis;
     let struct_attrs = &input.attrs;
 
-    let fields = match &input.data {
-        Data::Struct(data) => match &data.fields {
-            Fields::Named(FieldsNamed { named, .. }) => {
-                if named.is_empty() {
-                    return Err(syn::Error::new_spanned(struct_name, "fundle::args requires at least one field"));
-                }
-                named
+    let fields = match &input.fields {
+        Fields::Named(FieldsNamed { named, .. }) => {
+            if named.is_empty() {
+                return Err(syn::Error::new_spanned(struct_name, "fundle::deps requires at least one field"));
             }
-            Fields::Unnamed(_) => {
-                return Err(syn::Error::new_spanned(
-                    struct_name,
-                    "fundle::args only supports structs with named fields",
-                ));
-            }
-            Fields::Unit => return Err(syn::Error::new_spanned(struct_name, "fundle::args does not support unit structs")),
-        },
-        Data::Enum(_) | Data::Union(_) => {
-            return Err(syn::Error::new_spanned(struct_name, "fundle::args can only be applied to structs"));
+            named
+        }
+        Fields::Unnamed(_) => {
+            return Err(syn::Error::new_spanned(
+                struct_name,
+                "fundle::deps only supports structs with named fields",
+            ));
+        }
+        Fields::Unit => {
+            return Err(syn::Error::new_spanned(struct_name, "fundle::deps does not support unit structs"));
         }
     };
 

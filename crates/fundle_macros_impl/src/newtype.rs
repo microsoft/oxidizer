@@ -3,34 +3,31 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, parse2};
+use syn::{Fields, ItemStruct, parse2};
 
 #[cfg_attr(test, mutants::skip)]
 pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let input: DeriveInput = parse2(item)?;
+    let input: ItemStruct = parse2(item)?;
     let name = &input.ident;
     let vis = &input.vis;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     // Extract the inner type from the tuple struct
-    let inner_type = match &input.data {
-        Data::Struct(data_struct) => match &data_struct.fields {
-            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                &fields
-                    .unnamed
-                    .first()
-                    .expect("internal error: validated len == 1 but first() is None")
-                    .ty
-            }
-            _ => {
-                return Err(syn::Error::new_spanned(
-                    &input,
-                    "fundle::newtype can only be applied to tuple structs with exactly one field",
-                ));
-            }
-        },
-        _ => return Err(syn::Error::new_spanned(&input, "fundle::newtype can only be applied to structs")),
+    let inner_type = match &input.fields {
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+            &fields
+                .unnamed
+                .first()
+                .expect("internal error: validated len == 1 but first() is None")
+                .ty
+        }
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "fundle::newtype can only be applied to tuple structs with exactly one field",
+            ));
+        }
     };
 
     let expanded = quote! {

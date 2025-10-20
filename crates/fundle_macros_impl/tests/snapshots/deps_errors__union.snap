@@ -1,8 +1,7 @@
 ---
 source: crates/fundle_macros_impl/tests/deps_errors.rs
-assertion_line: 25
 expression: expand_fundle_deps!(item)
 ---
 ::core::compile_error! {
-    "fundle::args can only be applied to structs"
+    "expected `struct`"
 }
