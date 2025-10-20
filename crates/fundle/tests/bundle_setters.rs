@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(
+    unused_attributes,
+    clippy::empty_structs_with_brackets,
+    clippy::redundant_type_annotations,
+    clippy::items_after_statements,
+    clippy::unused_async,
+    clippy::unnecessary_wraps,
+    reason = "Unit tests"
+)]
+
 use std::io::Error;
 
 #[derive(Default, Clone)]

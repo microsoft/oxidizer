@@ -1,6 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(
+    unused_attributes,
+    clippy::empty_structs_with_brackets,
+    clippy::redundant_type_annotations,
+    clippy::items_after_statements,
+    reason = "Unit tests"
+)]
+
 #[derive(Default, Clone)]
 struct Logger {}
 #[derive(Default, Clone)]
