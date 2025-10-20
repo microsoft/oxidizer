@@ -8,6 +8,3 @@ coverage:
         target: 100
         threshold: "0"
         base: auto
-    fundle_macros_impl:  # API still WIP for now
-      target: auto
-      informational: true
