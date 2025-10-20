@@ -3,7 +3,7 @@
 
 [package]
 name = "fundle"
-description = "Effective dependency management for Rust."
+description = "Compile-time safe dependency injection for Rust."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "di"]
