@@ -22,6 +22,10 @@ syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full",
 quote.workspace = true
 proc-macro2.workspace = true
 
+[dev-dependencies.syn]
+workspace = true
+features = ["derive", "parsing", "proc-macro", "full", "extra-traits", "printing", "clone-impls"]
+
 [dev-dependencies]
 mutants.workspace = true
 insta.workspace = true

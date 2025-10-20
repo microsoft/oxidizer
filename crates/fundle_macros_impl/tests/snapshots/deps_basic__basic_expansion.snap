@@ -1,0 +1,20 @@
+---
+source: crates/fundle_macros_impl/tests/deps_basic.rs
+assertion_line: 16
+expression: expand_fundle_deps!(item)
+---
+#[allow(private_bounds)]
+struct Foo {
+    x: String,
+}
+#[allow(private_bounds)]
+impl<T> From<T> for Foo
+where
+    T: AsRef<String>,
+{
+    fn from(value: T) -> Self {
+        Self {
+            x: <T as AsRef<String>>::as_ref(&value).to_owned(),
+        }
+    }
+}

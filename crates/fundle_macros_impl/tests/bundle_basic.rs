@@ -7,7 +7,7 @@ mod util;
 #[test]
 fn basic_expansion() {
     let item: ItemStruct = parse_quote! {
-        #[fundle::bundle]
+        #[bundle]
         struct Foo {}
     };
 
