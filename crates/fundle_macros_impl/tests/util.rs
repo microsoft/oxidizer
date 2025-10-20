@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #[macro_export]
 macro_rules! expand_fundle_bundle {
     ($item:expr) => {{
