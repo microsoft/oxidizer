@@ -56,6 +56,7 @@
 //! - `#[fundle::deps]` - Generates structs that extract dependencies via `AsRef<T>`
 //! - `#[fundle::newtype]` - Creates newtype wrappers with automatic trait implementations
 
+#[doc(hidden)]
 pub mod exports;
 
 // Re-export proc macros from fundle_proc

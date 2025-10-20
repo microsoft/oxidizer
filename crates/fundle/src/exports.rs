@@ -8,7 +8,7 @@
 
 /// General info for exported data.
 ///
-/// This is implemented for each bundle, e.g., `AppState`.
+/// This is automatically implemented for each bundle by the `bundle` macro.
 pub trait Exports {
     /// Number of exports for this bundle.
     const NUM_EXPORTS: usize;
