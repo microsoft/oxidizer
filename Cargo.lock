@@ -51,7 +51,9 @@ dependencies = [
 name = "fundle_macros_impl"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "mutants",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "syn",

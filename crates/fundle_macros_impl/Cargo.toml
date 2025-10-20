@@ -24,6 +24,8 @@ proc-macro2.workspace = true
 
 [dev-dependencies]
 mutants.workspace = true
+insta.workspace = true
+prettyplease.workspace = true
 
 [lints]
 workspace = true
