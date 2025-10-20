@@ -91,12 +91,13 @@ fn generate_args_from_impl(
     let as_ref_bounds = field_types.iter().map(|ty| quote!(AsRef<#ty>));
 
     // Handle where clause properly - extract just the predicates without the 'where' keyword
-    let additional_predicates = where_clause
-        .map(|wc| {
+    let additional_predicates = where_clause.map_or_else(
+        || quote!(),
+        |wc| {
             let predicates = &wc.predicates;
             quote!(, #predicates)
-        })
-        .unwrap_or_else(|| quote!());
+        },
+    );
 
     quote! {
         #[allow(private_bounds)]

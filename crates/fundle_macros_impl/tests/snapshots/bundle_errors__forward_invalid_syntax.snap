@@ -3,5 +3,5 @@ source: crates/fundle_macros_impl/tests/bundle_errors.rs
 expression: expand_fundle_bundle!(item)
 ---
 ::core::compile_error! {
-    "fundle::bundle #[forward(...)] attribute must contain valid type paths"
+    "fundle::bundle #[forward(...)] attribute must contain valid type paths: expected identifier"
 }

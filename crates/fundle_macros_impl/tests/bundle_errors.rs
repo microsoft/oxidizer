@@ -5,7 +5,6 @@ use syn::{ItemStruct, parse_quote};
 
 mod util;
 
-
 #[test]
 fn forward_empty() {
     let item: ItemStruct = parse_quote! {

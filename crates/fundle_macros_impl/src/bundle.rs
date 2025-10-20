@@ -8,7 +8,6 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::{Attribute, Data, DeriveInput, Fields, FieldsNamed, Path, Type, parse2};
 
-#[expect(clippy::too_many_lines, reason = "Generated code with many fields")]
 #[cfg_attr(test, mutants::skip)]
 pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: DeriveInput = parse2(item)?;
@@ -409,11 +408,18 @@ fn parse_forward_attribute(attrs: &[Attribute]) -> syn::Result<Option<Vec<Path>>
             let tokens = &meta_list.tokens;
             // Parse as a comma-separated list using syn's punctuated parsing
             let parser = syn::punctuated::Punctuated::<Path, syn::Token![,]>::parse_terminated;
-            let punctuated = parser.parse2(tokens.clone())
-                .map_err(|_| syn::Error::new_spanned(attr, "fundle::bundle #[forward(...)] attribute must contain valid type paths"))?;
+            let punctuated = parser.parse2(tokens.clone()).map_err(|e| {
+                syn::Error::new_spanned(
+                    attr,
+                    format!("fundle::bundle #[forward(...)] attribute must contain valid type paths: {e}"),
+                )
+            })?;
 
             if punctuated.is_empty() {
-                return Err(syn::Error::new_spanned(attr, "fundle::bundle #[forward(...)] attribute cannot be empty"));
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "fundle::bundle #[forward(...)] attribute cannot be empty",
+                ));
             }
 
             let forward_types: Vec<Path> = punctuated.into_iter().collect();
