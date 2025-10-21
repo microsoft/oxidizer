@@ -28,7 +28,7 @@ Compile-time safe dependency injection for Rust.
 
 Fundle if a dependency injection system for service libraries. Library authors
 can simply declare their dependencies, and applications will not compile unless all dependencies
-are initialized, without application authors having to pass them one-by-one,
+are initialized, without application authors having to pass them one-by-one.
 
 ## Capabilities
 
