@@ -1,6 +1,5 @@
 <div align="center">
-
-[//]: # ( <img src="./logo.png" alt="Fundle Logo" width="128">)
+ <img src="./logo.png" alt="Fundle Logo" width="128">
 
 # Fundle
 
@@ -14,9 +13,8 @@
 </div>
 
 - [Summary](#summary)
-- [Features](#features)
+- [Capabilities](#capabilities)
 - [Quick Start](#quick-start)
-- [Macros](#macros)
 
 ## Summary
 
@@ -24,9 +22,7 @@
 
 Compile-time safe dependency injection for Rust.
 
-## Summary
-
-Fundle if a dependency injection system for service libraries. Library authors
+Fundle is a dependency injection system for service libraries. Library authors
 can simply declare their dependencies, and applications will not compile unless all dependencies
 are initialized, without application authors having to pass them one-by-one.
 
@@ -55,12 +51,6 @@ fn main() {
         .build();
 }
 ```
-
-## Macros
-
-- `#[fundle::bundle]` - Creates type-safe builders with dependency injection
-- `#[fundle::deps]` - Generates structs that extract dependencies via `AsRef<T>`
-- `#[fundle::newtype]` - Creates newtype wrappers with automatic trait implementations
 
 <!-- cargo-rdme end -->
 

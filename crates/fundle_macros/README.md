@@ -1,6 +1,5 @@
 <div align="center">
-
-[//]: # ( <img src="./logo.png" alt="Fundle Macros Logo" width="128">)
+  <img src="./logo.png" alt="Fundle Macros Logo" width="128">
 
 # Fundle Macros
 
@@ -23,7 +22,7 @@
 
 <!-- cargo-rdme start -->
 
-Procedural macros to support the `fundle` crate.
+Procedural macros to support the [`fundle`](https://docs.rs/fundle) crate. See `fundle` for more information.
 
 ## Macros
 

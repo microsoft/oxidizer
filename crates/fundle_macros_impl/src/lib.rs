@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! # Fundle Macros Implementation
-//!
-//! See the `fundle` crate for more information.
+//! Implementation details for the [`fundle`](https://docs.rs/fundle) crate.
+//! See `fundle` for more information.
 
 #![expect(clippy::missing_panics_doc, clippy::missing_errors_doc, reason = "This is a macro")]
 
