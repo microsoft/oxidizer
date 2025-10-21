@@ -117,7 +117,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
 
             Some(quote! {
                 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                impl AsRef<#field_type> for #struct_name {
+                impl ::std::convert::AsRef<#field_type> for #struct_name {
                     fn as_ref(&self) -> &#field_type {
                         &self.#field_name
                     }
@@ -166,7 +166,7 @@ fn generate_builder_struct(
     type_params: &[Ident],
 ) -> proc_macro2::TokenStream {
     let builder_fields = field_names.iter().zip(field_types.iter()).map(|(name, ty)| {
-        quote! { #name: Option<#ty> }
+        quote! { #name: ::std::option::Option<#ty> }
     });
 
     let phantom_types = type_params.iter().map(|param| quote!(#param));
@@ -175,7 +175,7 @@ fn generate_builder_struct(
         #[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
         struct #builder_name<#(#type_params),*> {
             #(#builder_fields,)*
-            _phantom: std::marker::PhantomData<(#(#phantom_types),*)>,
+            _phantom: ::std::marker::PhantomData<(#(#phantom_types),*)>,
         }
     }
 }
@@ -196,15 +196,15 @@ fn generate_struct_build_method(struct_name: &Ident, builder_name: &Ident, type_
 #[cfg_attr(test, mutants::skip)]
 fn generate_default_impl(builder_name: &Ident, field_names: &[&Ident], type_params: &[Ident]) -> proc_macro2::TokenStream {
     let not_set_params = type_params.iter().map(|_| quote!(::fundle::NotSet));
-    let none_fields = field_names.iter().map(|name| quote!(#name: None));
+    let none_fields = field_names.iter().map(|name| quote!(#name: ::std::option::Option::None));
 
     quote! {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-        impl Default for #builder_name<#(#not_set_params),*> {
+        impl ::std::default::Default for #builder_name<#(#not_set_params),*> {
             fn default() -> Self {
                 Self {
                     #(#none_fields,)*
-                    _phantom: std::marker::PhantomData,
+                    _phantom: ::std::marker::PhantomData,
                 }
             }
         }
@@ -249,7 +249,7 @@ fn generate_setter_impls(
             .enumerate()
             .map(|(j, name)| {
                 if i == j {
-                    quote!(#name: Some(#field_name))
+                    quote!(#name: ::std::option::Option::Some(#field_name))
                 } else {
                     quote!(#name: self.#name)
                 }
@@ -260,11 +260,11 @@ fn generate_setter_impls(
         let regular_setter = quote! {
             #[allow(non_camel_case_types, non_snake_case)]
             impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub fn #field_name(self, f: impl Fn(&Self) -> #field_type) -> #builder_name<#(#return_params),*> {
+                pub fn #field_name(self, f: impl ::std::ops::Fn(&Self) -> #field_type) -> #builder_name<#(#return_params),*> {
                     let #field_name = f(&self);
                     #builder_name {
                         #(#field_assignments,)*
-                        _phantom: std::marker::PhantomData,
+                        _phantom: ::std::marker::PhantomData,
                     }
                 }
             }
@@ -275,11 +275,11 @@ fn generate_setter_impls(
         let try_setter = quote! {
             #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
             impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub fn #try_method_name<R: std::error::Error>(self, f: impl Fn(&Self) -> Result<#field_type, R>) -> Result<#builder_name<#(#return_params),*>, R> {
+                pub fn #try_method_name<R: ::std::error::Error>(self, f: impl ::std::ops::Fn(&Self) -> ::std::result::Result<#field_type, R>) -> ::std::result::Result<#builder_name<#(#return_params),*>, R> {
                     let #field_name = f(&self)?;
-                    Ok(#builder_name {
+                    ::std::result::Result::Ok(#builder_name {
                         #(#field_assignments,)*
-                        _phantom: std::marker::PhantomData,
+                        _phantom: ::std::marker::PhantomData,
                     })
                 }
             }
@@ -297,7 +297,7 @@ fn generate_setter_impls(
                     let #field_name = f(&self).await;
                     #builder_name {
                         #(#field_assignments,)*
-                        _phantom: std::marker::PhantomData,
+                        _phantom: ::std::marker::PhantomData,
                     }
                 }
             }
@@ -308,14 +308,14 @@ fn generate_setter_impls(
         let try_async_setter = quote! {
             #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
             impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub async fn #try_async_method_name<F, R: std::error::Error>(self, f: F) -> Result<#builder_name<#(#return_params),*>, R>
+                pub async fn #try_async_method_name<F, R: ::std::error::Error>(self, f: F) -> ::std::result::Result<#builder_name<#(#return_params),*>, R>
                 where
-                    F: AsyncFn(&Self) -> Result<#field_type, R>,
+                    F: AsyncFn(&Self) -> ::std::result::Result<#field_type, R>,
                 {
                     let #field_name = f(&self).await?;
-                    Ok(#builder_name {
+                    ::std::result::Result::Ok(#builder_name {
                         #(#field_assignments,)*
-                        _phantom: std::marker::PhantomData,
+                        _phantom: ::std::marker::PhantomData,
                     })
                 }
             }
@@ -358,7 +358,7 @@ fn generate_as_ref_impls(
 
             let as_ref_impl = quote! {
                 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                impl<#(#other_params),*> AsRef<#field_type> for #builder_name<#(#impl_params),*> {
+                impl<#(#other_params),*> ::std::convert::AsRef<#field_type> for #builder_name<#(#impl_params),*> {
                     fn as_ref(&self) -> &#field_type {
                         self.#field_name.as_ref().unwrap()
                     }
@@ -438,7 +438,7 @@ fn generate_forwarded_as_ref_impls(
         for forward_type in forward_types {
             let as_ref_impl = quote! {
                 #[allow(non_camel_case_types, non_snake_case)]
-                impl AsRef<#forward_type> for #struct_name {
+                impl ::std::convert::AsRef<#forward_type> for #struct_name {
                     fn as_ref(&self) -> &#forward_type {
                         self.#field_name.as_ref()
                     }
@@ -467,7 +467,7 @@ fn generate_forwarded_as_ref_impls(
 
             let as_ref_impl = quote! {
                 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                impl<#(#other_params),*> AsRef<#forward_type> for #builder_name<#(#impl_params),*> {
+                impl<#(#other_params),*> ::std::convert::AsRef<#forward_type> for #builder_name<#(#impl_params),*> {
                     fn as_ref(&self) -> &#forward_type {
                         self.#field_name.as_ref().unwrap().as_ref()
                     }
@@ -487,7 +487,7 @@ fn generate_export_impls(struct_name: &Ident, field_types: &[&Type], field_names
 
     // Generate Exports implementation
     let exports_impl = quote! {
-        impl fundle::exports::Exports for #struct_name {
+        impl ::fundle::exports::Exports for #struct_name {
             const NUM_EXPORTS: usize = #num_exports;
         }
     };
@@ -500,7 +500,7 @@ fn generate_export_impls(struct_name: &Ident, field_types: &[&Type], field_names
         .map(|((index, ty), field_name)| {
             quote! {
                 #[allow(clippy::items_after_statements)]
-                impl fundle::exports::Export<#index> for #struct_name {
+                impl ::fundle::exports::Export<#index> for #struct_name {
                     type T = #ty;
 
                     fn get(&self) -> &Self::T {
@@ -545,7 +545,7 @@ fn generate_builder_export_impls(
 
         let export_impl = quote! {
             #[allow(non_camel_case_types, non_snake_case)]
-            impl<#(#other_params),*> fundle::exports::Export<#field_idx> for #builder_name<#(#impl_params),*> {
+            impl<#(#other_params),*> ::fundle::exports::Export<#field_idx> for #builder_name<#(#impl_params),*> {
                 type T = #field_type;
 
                 fn get(&self) -> &Self::T {
@@ -617,10 +617,10 @@ fn generate_select_macro(
                 .collect::<Vec<_>>();
 
             Some(quote! {
-                impl<'a, #(#other_type_params),*> AsRef<#field_type>
+                impl<'a, #(#other_type_params),*> ::std::convert::AsRef<#field_type>
                     for Select<'a, #(#impl_type_params),*>
                 where
-                    #builder_name<#(#impl_type_params),*>: AsRef<#field_type>,
+                    #builder_name<#(#impl_type_params),*>: ::std::convert::AsRef<#field_type>,
                 {
                     fn as_ref(&self) -> &#field_type {
                         self.builder.as_ref()
@@ -691,7 +691,7 @@ fn generate_select_macro(
 
                     $(
                         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                        impl<'a, #(#select_type_params),*> AsRef<$forward_type>
+                        impl<'a, #(#select_type_params),*> ::std::convert::AsRef<$forward_type>
                             for Select<'a, #(#select_type_params),*>
                         {
                             fn as_ref(&self) -> &$forward_type {

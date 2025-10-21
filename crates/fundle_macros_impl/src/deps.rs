@@ -65,7 +65,7 @@ fn generate_args_from_impl(
     let field_assignments = field_names
         .iter()
         .zip(field_types.iter())
-        .map(|(name, ty)| quote!(#name: <#from_param as AsRef<#ty>>::as_ref(&value).to_owned()));
+        .map(|(name, ty)| quote!(#name: <#from_param as ::std::convert::AsRef<#ty>>::as_ref(&value).to_owned()));
 
     let (_impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
@@ -77,7 +77,7 @@ fn generate_args_from_impl(
         quote!(<#params, #from_param>)
     };
 
-    let as_ref_bounds = field_types.iter().map(|ty| quote!(AsRef<#ty>));
+    let as_ref_bounds = field_types.iter().map(|ty| quote!(::std::convert::AsRef<#ty>));
 
     // Handle where clause properly - extract just the predicates without the 'where' keyword
     let additional_predicates = where_clause.map_or_else(
@@ -90,7 +90,7 @@ fn generate_args_from_impl(
 
     quote! {
         #[allow(private_bounds)]
-        impl #impl_generics_with_from From<#from_param> for #struct_name #ty_generics
+        impl #impl_generics_with_from ::std::convert::From<#from_param> for #struct_name #ty_generics
         where
             #from_param: #(#as_ref_bounds)+*
             #additional_predicates

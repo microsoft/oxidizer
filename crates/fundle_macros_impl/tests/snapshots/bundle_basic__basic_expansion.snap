@@ -1,6 +1,5 @@
 ---
 source: crates/fundle_macros_impl/tests/bundle_basic.rs
-assertion_line: 14
 expression: expand_fundle_bundle!(item)
 ---
 #[allow(non_camel_case_types, non_snake_case)]
@@ -13,17 +12,17 @@ impl Foo {
 }
 #[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
 struct FooBuilder {
-    _phantom: std::marker::PhantomData<()>,
+    _phantom: ::std::marker::PhantomData<()>,
 }
 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-impl Default for FooBuilder {
+impl ::std::default::Default for FooBuilder {
     fn default() -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            _phantom: ::std::marker::PhantomData,
         }
     }
 }
-impl fundle::exports::Exports for Foo {
+impl ::fundle::exports::Exports for Foo {
     const NUM_EXPORTS: usize = 0usize;
 }
 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
@@ -42,9 +41,9 @@ macro_rules! Foo {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
         struct Select < 'a, > { builder : & 'a FooBuilder < >, $($forward_type : & 'a
         $forward_type,)* } $(#[allow(non_camel_case_types, non_snake_case,
-        clippy::items_after_statements)] impl < 'a, > AsRef < $forward_type > for Select
-        < 'a, > { fn as_ref(& self) -> & $forward_type { self. $forward_type } })* Select
-        { builder : & $builder_var, $($forward_type : $builder_var . $forward_field
-        .as_ref().unwrap(),)* } }
+        clippy::items_after_statements)] impl < 'a, > ::std::convert::AsRef <
+        $forward_type > for Select < 'a, > { fn as_ref(& self) -> & $forward_type { self.
+        $forward_type } })* Select { builder : & $builder_var, $($forward_type :
+        $builder_var . $forward_field .as_ref().unwrap(),)* } }
     };
 }

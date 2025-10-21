@@ -7,13 +7,13 @@ struct Foo<T> {
     x: T,
 }
 #[allow(private_bounds)]
-impl<T, __FundleFromT> From<__FundleFromT> for Foo<T>
+impl<T, __FundleFromT> ::std::convert::From<__FundleFromT> for Foo<T>
 where
-    __FundleFromT: AsRef<T>,
+    __FundleFromT: ::std::convert::AsRef<T>,
 {
     fn from(value: __FundleFromT) -> Self {
         Self {
-            x: <__FundleFromT as AsRef<T>>::as_ref(&value).to_owned(),
+            x: <__FundleFromT as ::std::convert::AsRef<T>>::as_ref(&value).to_owned(),
         }
     }
 }

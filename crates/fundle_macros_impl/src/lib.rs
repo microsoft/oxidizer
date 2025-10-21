@@ -3,7 +3,7 @@
 
 //! # Fundle Macros Implementation
 //!
-//! See the `fundle_macros` crate for more information.
+//! See the `fundle` crate for more information.
 
 #![expect(clippy::missing_panics_doc, clippy::missing_errors_doc, reason = "This is a macro")]
 

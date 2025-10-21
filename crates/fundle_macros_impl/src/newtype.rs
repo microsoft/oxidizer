@@ -34,14 +34,14 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         .ty;
 
     let expanded = quote! {
-        #[derive(Clone)]
+        #[derive(::std::clone::Clone)]
         #[allow(dead_code)]
         #vis struct #name #generics(#inner_type) #where_clause;
 
-        impl<T> #impl_generics From<T> for #name #ty_generics
+        impl<T> #impl_generics ::std::convert::From<T> for #name #ty_generics
         where
-            T: AsRef<#inner_type>,
-            #inner_type: Clone,
+            T: ::std::convert::AsRef<#inner_type>,
+            #inner_type: ::std::clone::Clone,
             #where_clause
         {
             fn from(x: T) -> Self {
@@ -49,7 +49,7 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
             }
         }
 
-        impl #impl_generics std::ops::Deref for #name #ty_generics #where_clause {
+        impl #impl_generics ::std::ops::Deref for #name #ty_generics #where_clause {
             type Target = #inner_type;
 
             fn deref(&self) -> &Self::Target {
@@ -57,7 +57,7 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
             }
         }
 
-        impl #impl_generics std::ops::DerefMut for #name #ty_generics #where_clause {
+        impl #impl_generics ::std::ops::DerefMut for #name #ty_generics #where_clause {
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
