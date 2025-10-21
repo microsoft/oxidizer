@@ -13,6 +13,7 @@ This repository contains a set of crates that help you build robust highly scala
 
 - [Crates](#crates)
 - [Repo Guidelines](#repo-guidelines)
+- [Building This Repo](#building-this-repo)
 - [Releasing Crate Versions](#releasing-crate-versions)
 - [Trademarks](#trademarks)
 
@@ -23,8 +24,8 @@ These are the crates built out of this repo:
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros to generate data taxonomies.
 - [`fundle`](./crates/fundle/README.md) - Effective dependency management for Rust.
-- [`fundle_macros`](crates/fundle_macros/README.md) - Procedural macros for the fundle crate
-- [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Procedural macros implementation for the fundle crate
+- [`fundle_macros`](crates/fundle_macros/README.md) - Procedural macros for the `fundle` crate.
+- [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Procedural macros implementation for the `fundle` crate.
 
 ## Repo Guidelines
 
@@ -43,6 +44,25 @@ These are the crates built out of this repo:
 
 The best way to get started with a new crate is to run `scripts\add-crate.ps1` which will create a new folder
 and populate it to get you started on a new crate.
+
+## Building This Repo
+
+We use standard Rust tooling to build, test, lint, and format our source base. In addition, we rely on these
+tools, which you may wish to install:
+
+- [`cargo-audit`](https://crates.io/crates/cargo-audit) - used to ensure we don't use known-bad crate versions.
+
+- [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) - used to control the types we expose
+
+- [`cargo-hack`](https://crates.io/crates/cargo-hack) - used to exhaustively run tests against multiple features.
+
+- [`cargo miri`](https://doc.rust-lang.org/cargo/commands/cargo-miri.html) - used to statically verify unsafe code sequences.
+
+- [`cargo-mutants`](https://crates.io/crates/cargo-mutants) - used to perform mutation testing
+
+- [`cargo-rdme`](https://crates.io/crates/cargo-rdme) - generates README files based on a crate's top-level docs.
+
+- [`cargo-udeps`](https://crates.io/crates/cargo-udeps) - used to ensure crates don't declare superfluous dependencies.
 
 ## Releasing Crate Versions
 

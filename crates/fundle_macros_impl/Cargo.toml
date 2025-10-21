@@ -4,7 +4,7 @@
 [package]
 name = "fundle_macros_impl"
 description = "Procedural macros for the fundle crate."
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "di", "proc-macro"]
 categories = ["rust-patterns"]
