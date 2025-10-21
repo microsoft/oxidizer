@@ -33,6 +33,7 @@
             "**/*.yaml",
             "**/*.json",
             "**/*.snap",
+            "**/*.stderr",
             "LICENSE",
             "Cargo.lock"
         ]

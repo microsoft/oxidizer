@@ -42,5 +42,7 @@ path = "examples/employees/main.rs"
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde::*",
+    "serde_core::de::*",
+    "serde_core::ser::*",
     "data_privacy_macros::*",
 ]

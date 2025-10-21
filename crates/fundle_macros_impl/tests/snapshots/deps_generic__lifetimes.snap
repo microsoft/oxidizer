@@ -1,0 +1,20 @@
+---
+source: crates/fundle_macros_impl/tests/deps_generic.rs
+expression: expand_fundle_deps!(item)
+---
+#[allow(private_bounds)]
+struct Foo<'a> {
+    x: &'a u32,
+}
+#[allow(private_bounds)]
+impl<'a, __FundleFromT> ::std::convert::From<__FundleFromT> for Foo<'a>
+where
+    __FundleFromT: ::std::convert::AsRef<&'a u32>,
+{
+    fn from(value: __FundleFromT) -> Self {
+        Self {
+            x: <__FundleFromT as ::std::convert::AsRef<&'a u32>>::as_ref(&value)
+                .to_owned(),
+        }
+    }
+}

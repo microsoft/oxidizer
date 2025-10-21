@@ -33,3 +33,6 @@ _manifest
 .artifactIgnore
 .sarif
 ARROW
+
+# Agent files
+.claude

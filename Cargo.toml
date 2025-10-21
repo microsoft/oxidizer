@@ -21,6 +21,9 @@ repository = "https://github.com/microsoft/oxidizer"
 # local dependencies
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.5.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.3.0"  }
+fundle = { path = "crates/fundle", default-features = false, version = "0.1.0" }
+fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.1.0" }
+fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.1.0" }
 
 # external dependencies
 insta = { version = "1.42.0", default-features = false  }
@@ -33,6 +36,7 @@ quote = { version = "1.0.38", default-features = false  }
 serde = { version = "1.0.217", default-features = false }
 serde_json = { version = "1.0.135", default-features = false  }
 syn = { version = "2.0.106", default-features = false }
+trybuild = { version = "1.0.111", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false  }
 
 [workspace.lints.rust]
