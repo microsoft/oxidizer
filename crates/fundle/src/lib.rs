@@ -1,11 +1,59 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compile-time safe dependency injection for Rust.
+//! Safe compile-time dependency injection for Rust.
 //!
-//! Fundle is a dependency injection system for service libraries. Library authors
-//! can simply declare their dependencies, and applications will not compile unless all dependencies
-//! are initialized, without application authors having to pass them one-by-one.
+//! Fundle is a dependency injection system for service libraries that provides compile-time
+//! safety and zero-cost abstractions for managing complex dependency graphs in large
+//! applications.
+//!
+//! # What is Dependency Injection?
+//!
+//! Dependency injection is an implementation technique for the Inversion of Control design pattern,
+//! where objects receive their dependencies from external sources rather than creating them internally.
+//! This pattern is essential for:
+//!
+//! - **Testability**: Replace real implementations with mocks during testing
+//! - **Modularity**: Decouple components from their concrete dependencies
+//! - **Configuration**: Switch implementations based on environment (dev/prod/test)
+//! - **Maintainability**: Change implementations without modifying dependent code
+//!
+//! In large enterprise applications, components often depend on many services like databases,
+//! loggers, configuration systems, external APIs, and other business logic components. Managing
+//! these dependencies manually becomes unwieldy as the application grows. Dependency injection
+//! is intended to help.
+//!
+//! # Classic Dependency Injection
+//!
+//! Classic dependency injection frameworks (like those found in Java/.NET) suffer from several
+//! fundamental issues:
+//!
+//! - **Runtime Failures**. Dependencies are resolved at runtime, meaning missing or misconfigured dependencies only
+//!   surface when an application starts (or worse, when specific code paths execute).
+//!
+//! - **Virtual Dispatch Overhead**. Traditional DI relies heavily on interfaces and virtual dispatch, introducing performance
+//!   overhead for every method call.
+//!
+//! - **Complex Configuration**. Setting up DI containers requires extensive boilerplate and configuration that's often
+//!   error-prone and hard to maintain.
+//!
+//! # How Fundle Works
+//!
+//! Fundle takes a fundamentally different approach from classic dependency injection frameworks by
+//! using Rust's type system and compile-time guarantees.
+//!
+//! - **Compile-Time Safety**. All dependencies must be satisfied at compile time. Missing dependencies result in compilation
+//!   errors, not runtime panics.
+//!
+//! - **Zero-Cost Abstraction**. Fundle generates code that compiles down to simple struct field accesses with no virtual
+//!   dispatch. Dependencies are resolved statically, resulting in the same performance as hand-written code. And monomorphization
+//!   ensures no runtime overhead.
+//!
+//! - **Dependency Graph Validation**. Fundle automatically validates that dependency graphs are acyclic and that all required
+//!   dependencies are available when constructing each component:
+//!   As applications grow to hundreds of components, Fundle's compile-time validation prevents
+//!   the "integration hell" common in large codebases. New team members can't accidentally
+//!   break the dependency graph.
 //!
 //! # Capabilities
 //!
@@ -42,6 +90,10 @@
 //!         .build();
 //! }
 //! ```
+//!
+//! # Name Origin
+//!
+//! The name `fundle::bundle` comes from the "Take Your Daughter to Work Day" episode of the American version of The Office.
 
 #[doc(hidden)]
 pub mod exports;
