@@ -13,8 +13,12 @@
 </div>
 
 - [Summary](#summary)
+- [What is Dependency Injection](#what-is-dependency-injection)
+- [Classic Dependency Injection](#classic-dependency-injection)
+- [How Fundle Works](#how-fundle-works)
 - [Capabilities](#capabilities)
 - [Quick Start](#quick-start)
+- [Name Origin](#name-origin)
 
 ## Summary
 
