@@ -95,6 +95,13 @@
 //!
 //! The name `fundle::bundle` comes from the "Take Your Daughter to Work Day" episode of the American version of The Office.
 
+#![doc(
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fundle/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fundle/favicon.ico"
+)]
+
 #[doc(hidden)]
 pub mod exports;
 
