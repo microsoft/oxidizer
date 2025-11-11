@@ -1,9 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Macros to generate data taxonomies.
-//!
-//! See the documentation for the [`data_privacy`](https://docs.rs/data_privacy) crate for details.
+//! Procedural macros to support the [`data_privacy`](https://docs.rs/data_privacy) crate. See `data_privacy` for more information.
+
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy_macros/logo.png")]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy_macros/favicon.ico"
+)]
 
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
