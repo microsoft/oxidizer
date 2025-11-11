@@ -44,6 +44,9 @@
 //!
 //! Generates `Clone`, `From<T: AsRef<Logger>>`, `Deref`, and `DerefMut`.
 
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fundle_macros/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fundle_macros/favicon.ico")]
+
 use proc_macro::TokenStream;
 
 /// Define an 'export' DI container.

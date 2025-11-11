@@ -40,7 +40,7 @@ These are the crates built out of this repo:
   - Have a meaningful set of categories and keywords in their Cargo.toml file (see
     [crates/data_privacy/Cargo.toml](./crates/data_privacy/Cargo.toml) as an example).
     The `oxidizer` keyword should always be present.
-  - Have a Rust-inspired logo.
+  - Have a Rust-inspired logo and favicon.
 
 The best way to get started with a new crate is to run `scripts\add-crate.ps1` which will create a new folder
 and populate it to get you started on a new crate.

@@ -14,9 +14,7 @@
 
 <!-- cargo-rdme start -->
 
-Macros to generate data taxonomies.
-
-See the documentation for the [`data_privacy`](https://docs.rs/data_privacy) crate for details.
+Procedural macros to support the [`data_privacy`](https://docs.rs/data_privacy) crate. See `data_privacy` for more information.
 
 <!-- cargo-rdme end -->
 

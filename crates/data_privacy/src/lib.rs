@@ -160,6 +160,9 @@
 //! }
 //! ```
 
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico")]
+
 mod classified;
 mod classified_wrapper;
 pub mod common_taxonomy;
