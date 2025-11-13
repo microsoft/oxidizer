@@ -1,5 +1,5 @@
 ---
-source: crates/data_privacy_macros/src/lib.rs
+source: crates/data_privacy_macros/src/taxonomy.rs
 expression: pretty
 ---
 enum GovTaxonomy {
@@ -11,7 +11,7 @@ enum GovTaxonomy {
 impl GovTaxonomy {
     /// Returns the data class associated with the current variant.
     #[must_use]
-    pub fn data_class(&self) -> data_privacy::DataClass {
+    pub const fn data_class(&self) -> data_privacy::DataClass {
         match self {
             GovTaxonomy::Confidential => {
                 data_privacy::DataClass::new("tax", "confidential")
@@ -62,6 +62,7 @@ impl<T> Confidential<T> {
     ///
     /// # Returns
     /// A reference to the original payload.
+    #[must_use]
     pub fn as_declassified(&self) -> &T {
         &self.payload
     }
@@ -71,6 +72,7 @@ impl<T> Confidential<T> {
     ///
     /// # Returns
     /// A mutable reference to the original payload.
+    #[must_use]
     pub fn as_declassified_mut(&mut self) -> &mut T {
         &mut self.payload
     }
@@ -87,7 +89,8 @@ impl<T> Confidential<T> {
         data_privacy::DataClass::new("tax", "confidential")
     }
 }
-impl<T> data_privacy::Classified<T> for Confidential<T> {
+impl<T> data_privacy::Classified for Confidential<T> {
+    type Payload = T;
     fn declassify(self) -> T {
         Self::declassify(self)
     }
@@ -106,7 +109,7 @@ where
     T: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(::core::format_args!("<{}/{}:REDACTED>", "tax", "confidential"))
+        f.write_fmt(::core::format_args!("<CLASSIFIED:{}/{}>", "tax", "confidential"))
     }
 }
 impl<T> core::convert::From<T> for Confidential<T> {
@@ -175,6 +178,7 @@ impl<T> TopSecret<T> {
     ///
     /// # Returns
     /// A reference to the original payload.
+    #[must_use]
     pub fn as_declassified(&self) -> &T {
         &self.payload
     }
@@ -184,6 +188,7 @@ impl<T> TopSecret<T> {
     ///
     /// # Returns
     /// A mutable reference to the original payload.
+    #[must_use]
     pub fn as_declassified_mut(&mut self) -> &mut T {
         &mut self.payload
     }
@@ -200,7 +205,8 @@ impl<T> TopSecret<T> {
         data_privacy::DataClass::new("tax", "top_secret")
     }
 }
-impl<T> data_privacy::Classified<T> for TopSecret<T> {
+impl<T> data_privacy::Classified for TopSecret<T> {
+    type Payload = T;
     fn declassify(self) -> T {
         Self::declassify(self)
     }
@@ -219,7 +225,7 @@ where
     T: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(::core::format_args!("<{}/{}:REDACTED>", "tax", "top_secret"))
+        f.write_fmt(::core::format_args!("<CLASSIFIED:{}/{}>", "tax", "top_secret"))
     }
 }
 impl<T> core::convert::From<T> for TopSecret<T> {

@@ -11,14 +11,14 @@ pub fn set_redaction_engine_for_logging(engine: RedactionEngine) {
     REDACTION_ENGINE.set(engine).unwrap();
 }
 
-pub fn classified_display<C, T>(value: &C) -> String
+pub fn classified_display<C>(value: &C) -> String
 where
-    C: Classified<T>,
-    T: Display,
+    C: Classified,
+    C::Payload: Display,
 {
     let engine = REDACTION_ENGINE.get().unwrap();
     let mut output = String::new();
-    engine.display_redacted(value, |s| output.push_str(s));
+    engine.redacted_display(value, |s| output.push_str(s));
     output
 }
 
