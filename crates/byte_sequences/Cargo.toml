@@ -1,0 +1,58 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "byte_sequences"
+description = "Manipulate sequences of bytes for efficient I/O"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "buffers", "io", "zero-copy"]
+categories = ["data-structures", "network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+bytes = { workspace = true, features = ["std"] }
+new_zealand.workspace = true
+nm.workspace = true
+pinned_pool.workspace = true
+smallvec = { workspace = true, features = ["const_new", "union"] }
+
+[dev-dependencies]
+alloc_tracker.workspace = true
+criterion.workspace = true
+mutants.workspace = true
+static_assertions.workspace = true
+testing_aids.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+fakes = []
+
+[[bench]]
+name = "neutral"
+harness = false
+
+[[bench]]
+name = "sequence"
+harness = false
+
+[[bench]]
+name = "sequence_builder"
+harness = false
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bytes::bytes::Bytes",
+    "bytes::buf::buf_impl::Buf",
+    "bytes::buf::uninit_slice::UninitSlice",
+    "bytes::buf::buf_mut::BufMut",
+]

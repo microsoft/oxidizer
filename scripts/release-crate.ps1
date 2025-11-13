@@ -382,7 +382,7 @@ function Show-FinalMessage {
     Write-Host "---" -ForegroundColor Green
     Write-Host "🎉 Success! Next steps:" -ForegroundColor Green
     Write-Host "1. Review the changes in the updated files." -ForegroundColor Green
-    Write-Host "2. Commit the changes and tag the new release:" -ForegroundColor Green
+    Write-Host "2. Commit the changes and push the changes:" -ForegroundColor Green
     Write-Host "   git add ." -ForegroundColor DarkGray
     Write-Host "   git commit -m `"feat($crateName): release v$newVersion`"" -ForegroundColor DarkGray
     Write-Host "   git push origin mybranch" -ForegroundColor DarkGray
