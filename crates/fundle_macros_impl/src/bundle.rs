@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parser;
-use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, parse2};
+use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, parse2, Visibility};
 
 pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
@@ -77,7 +77,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     };
 
     // Generate builder struct
-    let builder_struct = generate_builder_struct(&builder_name, &field_names, &field_types, &type_params);
+    let builder_struct = generate_builder_struct(struct_vis, &builder_name, &field_names, &field_types, &type_params);
 
     // Generate Default impl for builder
     let default_impl = generate_default_impl(&builder_name, &field_names, &type_params);
@@ -160,6 +160,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
 
 #[cfg_attr(test, mutants::skip)]
 fn generate_builder_struct(
+    vis: &Visibility,
     builder_name: &Ident,
     field_names: &[&Ident],
     field_types: &[&Type],
@@ -173,7 +174,7 @@ fn generate_builder_struct(
 
     quote! {
         #[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
-        struct #builder_name<#(#type_params),*> {
+        #vis struct #builder_name<#(#type_params),*> {
             #(#builder_fields,)*
             _phantom: ::std::marker::PhantomData<(#(#phantom_types),*)>,
         }
