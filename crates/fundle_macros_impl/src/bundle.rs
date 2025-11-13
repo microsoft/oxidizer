@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parser;
-use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, parse2, Visibility};
+use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, Visibility, parse2};
 
 pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
