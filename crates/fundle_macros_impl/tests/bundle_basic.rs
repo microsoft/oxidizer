@@ -15,3 +15,14 @@ fn basic_expansion() {
 
     insta::assert_snapshot!(expand_fundle_bundle!(item));
 }
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn pub_expansion() {
+    let item: ItemStruct = parse_quote! {
+        #[bundle]
+        pub struct Foo {}
+    };
+
+    insta::assert_snapshot!(expand_fundle_bundle!(item));
+}
