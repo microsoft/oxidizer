@@ -4,7 +4,7 @@
 [package]
 name = "fundle"
 description = "Compile-time safe dependency injection for Rust."
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["oxidizer", "di"]
 categories = ["rust-patterns"]
