@@ -2,31 +2,35 @@
 // Licensed under the MIT License.
 
 use crate::DataClass;
+use core::fmt::{Result, Write};
 
 /// Represents types that can redact data.
 pub trait Redactor {
-    /// Redacts the given value and calls the output function with the redacted value.
-    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn FnMut(&str));
-
-    /// The exact length of the redacted output if it is a constant.
+    /// Redacts the given value and writes the results to the given output sink.
     ///
-    /// This can be used as a hint to optimize buffer allocations.
-    #[must_use]
-    fn exact_len(&self) -> Option<usize> {
-        None
-    }
+    /// # Errors
+    ///
+    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
+    /// this function only returns a [`Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
+    /// has occurred back up the stack.
+    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> Result;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common_taxonomy::CommonTaxonomy::Sensitive;
+    use data_privacy_macros::taxonomy;
+
+    #[taxonomy(test)]
+    enum TestTaxonomy {
+        Sensitive,
+    }
 
     struct TestRedactor;
 
     impl Redactor for TestRedactor {
-        fn redact(&self, _data_class: &DataClass, value: &str, output: &mut dyn FnMut(&str)) {
-            output(&(value.to_string() + "tomato"));
+        fn redact(&self, _data_class: &DataClass, value: &str, output: &mut dyn Write) -> Result {
+            write!(output, "{value}tomato")
         }
     }
 
@@ -34,11 +38,8 @@ mod tests {
     fn test_exact_len_default_behavior() {
         let redactor = TestRedactor;
         let mut output_buffer = String::new();
-        redactor.redact(&Sensitive.data_class(), "test_value", &mut |s| {
-            output_buffer.push_str(s);
-        });
+        _ = redactor.redact(&TestTaxonomy::Sensitive.data_class(), "test_value", &mut output_buffer);
 
-        assert_eq!(redactor.exact_len(), None);
         assert_eq!(output_buffer, "test_valuetomato");
     }
 }

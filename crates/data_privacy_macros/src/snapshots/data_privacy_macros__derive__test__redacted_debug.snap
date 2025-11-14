@@ -1,0 +1,32 @@
+---
+source: crates/data_privacy_macros/src/derive.rs
+expression: pretty
+---
+impl data_privacy::RedactedDebug for EmailAddress {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "Converting from u64 to usize, value is known to be <= 128"
+    )]
+    fn fmt(
+        &self,
+        engine: &data_privacy::RedactionEngine,
+        output: &mut std::fmt::Formatter<'_>,
+    ) -> core::fmt::Result {
+        let v = self.as_declassified();
+        let mut local_buf = [0u8; 128];
+        let amount = {
+            let mut cursor = std::io::Cursor::new(&mut local_buf[..]);
+            if std::io::Write::write_fmt(&mut cursor, format_args!("{v:?}")).is_ok() {
+                cursor.position() as usize
+            } else {
+                local_buf.len() + 1
+            }
+        };
+        if amount <= local_buf.len() {
+            let s = unsafe { core::str::from_utf8_unchecked(&local_buf[..amount]) };
+            engine.redact(&self.data_class(), s, output)
+        } else {
+            engine.redact(&self.data_class(), format!("{v:?}"), output)
+        }
+    }
+}
