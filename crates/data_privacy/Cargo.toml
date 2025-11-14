@@ -22,6 +22,7 @@ serde = { workspace = true, optional = true, default-features = false, features 
 xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
 
 [dev-dependencies]
+derive_more = { workspace = true, features = ["constructor", "from"] }
 once_cell = { workspace = true, features = ["std"] }
 mutants.workspace = true
 serde = { workspace = true, features = ["derive", "std"] }

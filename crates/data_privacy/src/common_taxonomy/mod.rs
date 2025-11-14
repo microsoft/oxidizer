@@ -52,11 +52,11 @@ mod tests {
 
     #[test]
     fn test_debug_trait() {
-        assert_eq!(format!("{:?}", Sensitive::new(2)), "<common/sensitive:REDACTED>");
-        assert_eq!(format!("{:?}", Insensitive::new("Hello")), "<common/insensitive:REDACTED>");
+        assert_eq!(format!("{:?}", Sensitive::new(2)), "<CLASSIFIED:common/sensitive>");
+        assert_eq!(format!("{:?}", Insensitive::new("Hello")), "<CLASSIFIED:common/insensitive>");
         assert_eq!(
             format!("{:?}", UnknownSensitivity::new(31.4)),
-            "<common/unknown_sensitivity:REDACTED>"
+            "<CLASSIFIED:common/unknown_sensitivity>"
         );
     }
 

@@ -43,7 +43,7 @@ use std::sync::Arc;
 ///
 ///     let mut output_buffer = String::new();
 ///
-///     engine.display_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+///     engine.redacted_display(&person.name, |s| output_buffer.write_str(s).unwrap());
 ///
 ///     // check that the data in the output buffer has indeed been redacted as expected.
 ///     assert_eq!(output_buffer, "********");
@@ -69,16 +69,16 @@ impl RedactionEngine {
 
     /// Redacts the output of a classified value's [`Debug`] trait.
     ///
-    /// Given a classified value whose payload implements the [`Debug`] trait, this method will
-    /// redact the output of that trait using the redactor registered for the data class of the value.
+    /// Given a classified value whose payload implements the [`Debug`] trait, this method
+    /// redacts the output of that trait using the redactor registered for the data class of the value.
     #[expect(
         clippy::cast_possible_truncation,
         reason = "Converting from u64 to usize, value is known to be <= 128"
     )]
-    pub fn debug_redacted<C, T>(&self, value: &C, output: impl FnMut(&str))
+    pub fn redacted_debug<C>(&self, value: &C, output: impl FnMut(&str))
     where
-        C: Classified<T>,
-        T: Debug,
+        C: Classified,
+        C::Payload: Debug,
     {
         value.visit(|v| {
             let mut local_buf = [0u8; 128];
@@ -105,16 +105,16 @@ impl RedactionEngine {
 
     /// Redacts the output of a classified value's [`Display`] trait.
     ///
-    /// Given a classified value whose payload implements the [`Display`] trait, this method will
-    /// redact the output of that trait using the redactor registered for the data class of the value.
+    /// Given a classified value whose payload implements the [`Display`] trait, this method
+    /// redacts the output of that trait using the redactor registered for the data class of the value.
     #[expect(
         clippy::cast_possible_truncation,
         reason = "Converting from u64 to usize, value is known to be <= 128"
     )]
-    pub fn display_redacted<C, T>(&self, value: &C, output: impl FnMut(&str))
+    pub fn redacted_display<C>(&self, value: &C, output: impl FnMut(&str))
     where
-        C: Classified<T>,
-        T: Display,
+        C: Classified,
+        C::Payload: Display,
     {
         value.visit(|v| {
             let mut local_buf = [0u8; 128];
@@ -139,18 +139,18 @@ impl RedactionEngine {
         });
     }
 
-    /// Redacts the output of a classified value's [`Display`] trait and returns it as a `String`.
+    /// Redacts the output of a classified value's [`ToString`] trait and returns it as a `String`.
     ///
-    /// Given a classified value whose payload implements the [`Display`] trait, this method will
-    /// redact the output of that trait using the redactor registered for the data class of the value.
+    /// Given a classified value whose payload implements the [`ToString`] trait, this method
+    /// redacts the output of that trait using the redactor registered for the data class of the value.
     #[must_use]
-    pub fn to_string_redacted<C, T>(&self, value: &C) -> String
+    pub fn to_redacted_string<C>(&self, value: &C) -> String
     where
-        C: Classified<T>,
-        T: Display,
+        C: Classified,
+        C::Payload: ToString,
     {
         let mut output = String::new();
-        self.display_redacted(value, |s| output.push_str(s));
+        self.redact(&value.data_class(), value.as_declassified().to_string(), |s| output.push_str(s));
         output
     }
 
@@ -178,11 +178,11 @@ impl Debug for RedactionEngine {
 
 #[cfg(test)]
 mod tests {
-    use core::fmt::Write;
-
     use super::*;
     use crate::common_taxonomy::{CommonTaxonomy, Insensitive, Sensitive, UnknownSensitivity};
     use crate::{RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode, taxonomy};
+    use core::fmt::Write;
+    use data_privacy_macros::classified;
 
     #[taxonomy(test, serde = false)]
     enum TestTaxonomy {
@@ -193,13 +193,13 @@ mod tests {
         SimpleRedactor::with_mode(mode)
     }
 
-    fn collect_output<C, T>(engine: &RedactionEngine, value: &C) -> String
+    fn collect_output<C>(engine: &RedactionEngine, value: &C) -> String
     where
-        C: Classified<T>,
-        T: Display,
+        C: Classified,
+        C::Payload: Display,
     {
         let mut output = String::new();
-        engine.display_redacted(value, |s| output.push_str(s));
+        engine.redacted_display(value, |s| output.push_str(s));
         output
     }
 
@@ -389,7 +389,7 @@ mod tests {
         let mut call_count = 0;
         let mut total_output = String::new();
 
-        engine.display_redacted(&sensitive_data, |s| {
+        engine.redacted_display(&sensitive_data, |s| {
             call_count += 1;
             total_output.push_str(s);
         });
@@ -401,6 +401,9 @@ mod tests {
     struct Person {
         name: Sensitive<String>, // a bit of sensitive data we should not leak in logs
     }
+
+    #[classified(CommonTaxonomy::Sensitive)]
+    struct Datum(String);
 
     #[test]
     fn test_basic() {
@@ -418,14 +421,19 @@ mod tests {
 
         let mut output_buffer = String::new();
 
-        engine.display_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+        engine.redacted_display(&person.name, |s| output_buffer.write_str(s).unwrap());
 
         assert_eq!(None, engine.exact_len(&CommonTaxonomy::Sensitive.data_class()));
         assert_eq!(output_buffer, "********");
 
         output_buffer.clear();
-        engine.debug_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+        engine.redacted_debug(&person.name, |s| output_buffer.write_str(s).unwrap());
         assert_eq!(output_buffer, "**********");
+
+        let d = Datum("A piece of data".to_string());
+        output_buffer.clear();
+        engine.redacted_debug(&d, |s| output_buffer.write_str(s).unwrap());
+        assert_eq!(output_buffer, "*****************");
     }
 
     #[test]
@@ -444,13 +452,13 @@ mod tests {
 
         let mut output_buffer = String::new();
 
-        engine.display_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+        engine.redacted_display(&person.name, |s| output_buffer.write_str(s).unwrap());
 
         assert_eq!(None, engine.exact_len(&CommonTaxonomy::Sensitive.data_class()));
         assert_eq!(output_buffer, "<common/sensitive:John Doe>");
 
         output_buffer.clear();
-        engine.debug_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+        engine.redacted_debug(&person.name, |s| output_buffer.write_str(s).unwrap());
         assert_eq!(output_buffer, "<common/sensitive:\"John Doe\">");
     }
 
@@ -550,7 +558,7 @@ mod tests {
         let classified_long_string: Sensitive<String> = long_string.clone().into();
 
         let mut output_buffer = String::new();
-        engine.debug_redacted(&classified_long_string, |s| {
+        engine.redacted_debug(&classified_long_string, |s| {
             output_buffer.push_str(s);
         });
 
@@ -558,14 +566,14 @@ mod tests {
         assert_eq!(output_buffer, expected_debug_output);
 
         output_buffer.clear();
-        engine.display_redacted(&classified_long_string, |s| {
+        engine.redacted_display(&classified_long_string, |s| {
             output_buffer.push_str(s);
         });
 
         let expected_display_output = format!("<common/sensitive:{long_string}>");
         assert_eq!(output_buffer, expected_display_output);
 
-        let result_string = engine.to_string_redacted(&classified_long_string);
+        let result_string = engine.to_redacted_string(&classified_long_string);
 
         let expected_to_string_output = format!("<common/sensitive:{long_string}>");
         assert_eq!(result_string, expected_to_string_output);

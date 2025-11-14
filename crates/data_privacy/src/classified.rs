@@ -10,6 +10,8 @@ use crate::DataClass;
 /// Although instances are encapsulated, it's possible to extract the instances when
 /// classification is no longer needed.
 ///
+/// You rarely implement this trait by hand, instead use the [`classified`](data_privacy_macros::classified) macro.
+///
 /// # Example
 ///
 /// ```rust
@@ -26,27 +28,27 @@ use crate::DataClass;
 ///     }
 /// }
 ///
-/// struct ClassifiedPerson {
-///     person: Person
-/// }
+/// struct ClassifiedPerson(Person);
 ///
 /// impl ClassifiedPerson {
 ///    fn new(person: Person) -> Self {
-///        Self { person }
+///        Self(person)
 ///    }
 /// }
 ///
-/// impl Classified<Person> for ClassifiedPerson {
+/// impl Classified for ClassifiedPerson {
+///     type Payload = Person;
+///
 ///     fn declassify(self) -> Person {
-///         self.person
+///         self.0
 ///     }
 ///
-/// fn as_declassified(&self) -> &Person {
-///         &self.person
+///     fn as_declassified(&self) -> &Person {
+///         &self.0
 ///     }
 ///
-/// fn as_declassified_mut(&mut self) -> &mut Person {
-///         &mut self.person
+///     fn as_declassified_mut(&mut self) -> &mut Person {
+///         &mut self.0
 ///     }
 ///
 ///     fn data_class(&self) -> DataClass {
@@ -54,7 +56,9 @@ use crate::DataClass;
 ///     }
 /// }
 ///  ```
-pub trait Classified<T> {
+pub trait Classified {
+    type Payload;
+
     /// Exfiltrates the payload, allowing it to be used outside the classified context.
     ///
     /// Exfiltration should be done with caution, as it may expose sensitive information.
@@ -62,7 +66,7 @@ pub trait Classified<T> {
     /// # Returns
     /// The original payload.
     #[must_use]
-    fn declassify(self) -> T;
+    fn declassify(self) -> Self::Payload;
 
     /// Provides a reference to the declassified payload, allowing read access without ownership transfer.
     ///
@@ -71,7 +75,7 @@ pub trait Classified<T> {
     /// # Returns
     /// A reference to the original payload.
     #[must_use]
-    fn as_declassified(&self) -> &T;
+    fn as_declassified(&self) -> &Self::Payload;
 
     /// Provides a mutable reference to the declassified payload, allowing write access without ownership transfer.
     ///
@@ -80,15 +84,15 @@ pub trait Classified<T> {
     /// # Returns
     /// A mutable reference to the original payload.
     #[must_use]
-    fn as_declassified_mut(&mut self) -> &mut T;
+    fn as_declassified_mut(&mut self) -> &mut Self::Payload;
 
     /// Visits the payload with the provided operation.
-    fn visit(&self, operation: impl FnOnce(&T)) {
+    fn visit(&self, operation: impl FnOnce(&Self::Payload)) {
         operation(self.as_declassified());
     }
 
     /// Visits the payload with the provided operation.
-    fn visit_mut(&mut self, operation: impl FnOnce(&mut T)) {
+    fn visit_mut(&mut self, operation: impl FnOnce(&mut Self::Payload)) {
         operation(self.as_declassified_mut());
     }
 
@@ -106,7 +110,9 @@ mod tests {
         data: u32,
     }
 
-    impl Classified<u32> for ClassifiedExample {
+    impl Classified for ClassifiedExample {
+        type Payload = u32;
+
         fn declassify(self) -> u32 {
             self.data
         }

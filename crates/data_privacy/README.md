@@ -130,7 +130,7 @@ fn try_out() {
     // doesn't compile since `Sensitive` doesn't implement `Display`
     // println!("Name: {}", person.name);
 
-    // outputs: Name: <common/sensitive:REDACTED>"
+    // outputs: Name: <CLASSIFIED:common/sensitive>"
     println!("Name: {:?}", person.name);
 
     // extract the data from the `Sensitive` type and outputs: Name: John Doe
@@ -170,7 +170,7 @@ fn try_out() {
     let mut output_buffer = String::new();
 
     // Redact the sensitive data in the person's name using the redaction engine.
-    engine.display_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+    engine.redacted_display(&person.name, |s| output_buffer.write_str(s).unwrap());
 
     // check that the data in the output buffer has indeed been redacted as expected.
     assert_eq!(output_buffer, "********");

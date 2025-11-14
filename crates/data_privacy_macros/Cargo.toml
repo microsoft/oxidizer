@@ -27,7 +27,7 @@ syn = { workspace = true, features = ["full", "parsing", "printing"] }
 [dev-dependencies]
 syn.workspace = true
 mutants.workspace = true
-insta.workspace = true
+insta = { workspace = true, features = ["yaml"] }
 prettyplease.workspace = true
 
 [lints]

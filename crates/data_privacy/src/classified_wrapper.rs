@@ -30,11 +30,17 @@ where
     T: Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!("<{}/{}:REDACTED>", self.data_class.taxonomy(), self.data_class.name()))
+        f.write_fmt(format_args!(
+            "<CLASSIFIED:{}/{}>",
+            self.data_class.taxonomy(),
+            self.data_class.name()
+        ))
     }
 }
 
-impl<T> Classified<T> for ClassifiedWrapper<T> {
+impl<T> Classified for ClassifiedWrapper<T> {
+    type Payload = T;
+
     fn declassify(self) -> T {
         self.value
     }
@@ -114,7 +120,7 @@ mod tests {
         let classified = ClassifiedWrapper::new(42, CommonTaxonomy::Sensitive.data_class());
         assert_eq!(classified.as_declassified(), &42);
         assert_eq!(classified.data_class(), CommonTaxonomy::Sensitive.data_class());
-        assert_eq!(format!("{classified:?}"), "<common/sensitive:REDACTED>");
+        assert_eq!(format!("{classified:?}"), "<CLASSIFIED:common/sensitive>");
     }
 
     #[test]
@@ -183,6 +189,6 @@ mod tests {
         assert_eq!(classified.as_declassified(), &"hello".to_string());
         assert_eq!(classified.data_class(), CommonTaxonomy::UnknownSensitivity.data_class());
         // Debug should redact and include the correct class path
-        assert_eq!(format!("{classified:?}"), "<common/unknown_sensitivity:REDACTED>");
+        assert_eq!(format!("{classified:?}"), "<CLASSIFIED:common/unknown_sensitivity>");
     }
 }

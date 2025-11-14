@@ -38,9 +38,10 @@ mod employee;
 mod example_taxonomy;
 mod logging;
 
+use crate::employee::{EmployeeID, UserAddress, UserName};
 use data_privacy::{RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode};
 use employee::Employee;
-use example_taxonomy::{ExampleTaxonomy, OrganizationallyIdentifiableInformation, PersonallyIdentifiableInformation};
+use example_taxonomy::ExampleTaxonomy;
 use logging::{log, set_redaction_engine_for_logging};
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
@@ -83,9 +84,9 @@ fn app_loop() {
 
     // pretend some UI collected some data, and we then create an Employee struct to hold this data
     let employee = Employee {
-        name: PersonallyIdentifiableInformation::new("John Doe".to_string()),
-        address: PersonallyIdentifiableInformation::new("123 Elm Street".to_string()),
-        id: OrganizationallyIdentifiableInformation::new("12345-52".to_string()),
+        name: UserName::new("John Doe".to_string()),
+        address: UserAddress::new("123 Elm Street".to_string()),
+        id: EmployeeID::new("12345-52".to_string()),
         age: 33,
     };
 

@@ -26,6 +26,7 @@ fundle_macros = { path = "crates/fundle_macros", default-features = false, versi
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.2.0" }
 
 # external dependencies
+derive_more = { version = "2.0.1", default-features = false  }
 insta = { version = "1.42.0", default-features = false  }
 mutants = { version = "0.0.3", default-features = false  }
 once_cell = { version = "1.21.3", default-features = false  }

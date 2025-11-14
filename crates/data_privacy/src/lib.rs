@@ -109,7 +109,7 @@
 //!     // doesn't compile since `Sensitive` doesn't implement `Display`
 //!     // println!("Name: {}", person.name);
 //!
-//!     // outputs: Name: <common/sensitive:REDACTED>"
+//!     // outputs: Name: <CLASSIFIED:common/sensitive>"
 //!     println!("Name: {:?}", person.name);
 //!
 //!     // extract the data from the `Sensitive` type and outputs: Name: John Doe
@@ -153,7 +153,7 @@
 //!     let mut output_buffer = String::new();
 //!
 //!     // Redact the sensitive data in the person's name using the redaction engine.
-//!     engine.display_redacted(&person.name, |s| output_buffer.write_str(s).unwrap());
+//!     engine.redacted_display(&person.name, |s| output_buffer.write_str(s).unwrap());
 //!
 //!     // check that the data in the output buffer has indeed been redacted as expected.
 //!     assert_eq!(output_buffer, "********");
@@ -183,6 +183,31 @@ extern crate self as data_privacy;
 pub use classified::Classified;
 pub use classified_wrapper::ClassifiedWrapper;
 pub use data_class::DataClass;
+
+/// Implements the [`Classified`] trait on a newtype.
+///
+/// This macro is applied to a newtype struct declaration. The newtype
+/// wraps an inner type that holds sensitive data. The macro generates
+/// an implementation of the [`Classified`], [`Debug`], [`Deref`],
+/// and [`DerefMut`] traits.
+///
+/// # Example
+///
+/// ```
+/// use data_privacy::{classified, taxonomy};
+///
+/// // Declare a taxonomy
+/// #[taxonomy(contoso)]
+/// enum ContosoTaxonomy {
+///     CustomerContent,
+///     CustomerIdentifier,
+/// }
+///
+/// // Declare a classified container
+/// #[classified(ContosoTaxonomy::CustomerIdentifier)]
+/// struct CustomerId(String);
+pub use data_privacy_macros::classified;
+
 /// Generates implementation logic and types to expose a data taxonomy.
 ///
 /// This macro is applied to an enum declaration. Each variant of the enum
@@ -209,6 +234,7 @@ pub use data_class::DataClass;
 /// }
 /// ```
 pub use data_privacy_macros::taxonomy;
+
 pub use redaction_engine::RedactionEngine;
 pub use redaction_engine_builder::RedactionEngineBuilder;
 pub use redactor::Redactor;

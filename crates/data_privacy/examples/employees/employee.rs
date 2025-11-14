@@ -1,15 +1,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::example_taxonomy::ExampleTaxonomy;
+use data_privacy_macros::classified;
+use derive_more::{Constructor, From};
 use serde::{Deserialize, Serialize};
 
-use crate::example_taxonomy::{OrganizationallyIdentifiableInformation, PersonallyIdentifiableInformation};
+#[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]
+#[derive(Clone, Serialize, Deserialize, Constructor, From)]
+pub struct UserName(String);
+
+#[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]
+#[derive(Clone, Serialize, Deserialize, Constructor, From)]
+pub struct UserAddress(String);
+
+#[classified(ExampleTaxonomy::OrganizationallyIdentifiableInformation)]
+#[derive(Clone, Serialize, Deserialize, Constructor, From)]
+pub struct EmployeeID(String);
 
 /// Holds info about a single corporate employee.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Employee {
-    pub name: PersonallyIdentifiableInformation<String>,
-    pub address: PersonallyIdentifiableInformation<String>,
-    pub id: OrganizationallyIdentifiableInformation<String>,
+    pub name: UserName,
+    pub address: UserAddress,
+    pub id: EmployeeID,
     pub age: u32,
 }
