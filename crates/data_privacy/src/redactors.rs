@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::common_taxonomy::CommonTaxonomy;
 use crate::{DataClass, Redactor, SimpleRedactor, SimpleRedactorMode};
+use core::fmt::Debug;
 use std::collections::HashMap;
-use std::fmt::Debug;
 
 pub struct Redactors {
     redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
@@ -49,9 +48,8 @@ impl Redactors {
 
 impl Default for Redactors {
     fn default() -> Self {
-        let passthrough_redactor: Box<dyn Redactor + Send + Sync> = Box::new(SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
         Self {
-            redactors: [(CommonTaxonomy::Insensitive.data_class(), passthrough_redactor)].into(),
+            redactors: HashMap::new(),
             fallback: Box::new(SimpleRedactor::with_mode(SimpleRedactorMode::Insert("*".into()))),
         }
     }
@@ -65,10 +63,16 @@ impl Debug for Redactors {
 
 #[cfg(test)]
 mod tests {
-    use crate::common_taxonomy::CommonTaxonomy;
     use crate::redactors::Redactors;
     use crate::{SimpleRedactor, SimpleRedactorMode};
+    use data_privacy_macros::taxonomy;
     use std::collections::HashMap;
+
+    #[taxonomy(test)]
+    enum TestTaxonomy {
+        Sensitive,
+        Insensitive,
+    }
 
     #[test]
     fn test_redactor_shrink() {
@@ -78,11 +82,11 @@ mod tests {
         };
 
         redactors.insert(
-            CommonTaxonomy::Sensitive.data_class(),
+            TestTaxonomy::Sensitive.data_class(),
             SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
         );
         redactors.insert(
-            CommonTaxonomy::Insensitive.data_class(),
+            TestTaxonomy::Insensitive.data_class(),
             SimpleRedactor::with_mode(SimpleRedactorMode::Replace('#')),
         );
 

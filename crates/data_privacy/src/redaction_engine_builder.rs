@@ -68,7 +68,7 @@ mod tests {
 
     fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str, expected: &str) {
         let mut output = String::new();
-        engine.redact(data_class, input, |s| output.push_str(s));
+        engine.redact(data_class, input, &mut output).unwrap();
         assert_eq!(output, expected);
     }
 
@@ -145,9 +145,6 @@ mod tests {
         // Test default builder debug output
         let default_builder = RedactionEngineBuilder::new();
         let default_builder_debug_output = format!("{default_builder:?}");
-        assert_eq!(
-            default_builder_debug_output,
-            r#"[DataClass { taxonomy: "common", name: "insensitive" }]"#
-        );
+        assert_eq!(default_builder_debug_output, "[]");
     }
 }
