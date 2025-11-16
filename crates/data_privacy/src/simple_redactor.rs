@@ -3,6 +3,7 @@
 
 use crate::{DataClass, Redactor};
 use std::borrow::Cow;
+use std::fmt::Write;
 
 /// Mode of operation for the `SimpleRedactor`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -56,30 +57,34 @@ impl SimpleRedactor {
 
 impl Redactor for SimpleRedactor {
     #[cfg_attr(test, mutants::skip)]
-    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn FnMut(&str)) {
+    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
         static ASTERISKS: &str = "********************************";
 
         match &self.mode {
             SimpleRedactorMode::Erase => {
                 // nothing
+                Ok(())
             }
+
             SimpleRedactorMode::EraseAndTag => {
-                output(format!("<{data_class}:>").as_str());
+                write!(output, "<{data_class}:>")
             }
+
             SimpleRedactorMode::Passthrough => {
-                output(value);
+                write!(output, "{value}")
             }
+
             SimpleRedactorMode::PassthroughAndTag => {
-                output(format!("<{data_class}:{value}>").as_str());
+                write!(output, "<{data_class}:{value}>")
             }
 
             #[expect(clippy::string_slice, reason = "No problem with UTF-8 here")]
             SimpleRedactorMode::Replace(c) => {
                 let len = value.len();
                 if *c == '*' && len < ASTERISKS.len() {
-                    output(&ASTERISKS[0..len]);
+                    write!(output, "{}", &ASTERISKS[0..len])
                 } else {
-                    output(c.to_string().repeat(len).as_str());
+                    write!(output, "{}", c.to_string().repeat(len))
                 }
             }
 
@@ -87,22 +92,20 @@ impl Redactor for SimpleRedactor {
             SimpleRedactorMode::ReplaceAndTag(c) => {
                 let len = value.len();
                 if *c == '*' && len < ASTERISKS.len() {
-                    output(format!("<{data_class}:{}>", &ASTERISKS[0..len]).as_str());
+                    write!(output, "<{data_class}:{}>", &ASTERISKS[0..len])
                 } else {
-                    output(format!("<{data_class}:{}>", (*c.to_string()).repeat(len).as_str()).as_str());
+                    write!(output, "<{data_class}:{}>", (*c.to_string()).repeat(len))
                 }
             }
+
             SimpleRedactorMode::Insert(s) => {
-                output(s);
+                write!(output, "{s}")
             }
+
             SimpleRedactorMode::InsertAndTag(s) => {
-                output(format!("<{data_class}:{s}>").as_str());
+                write!(output, "<{data_class}:{s}>")
             }
         }
-    }
-
-    fn exact_len(&self) -> Option<usize> {
-        matches!(&self.mode, SimpleRedactorMode::Erase).then_some(0)
     }
 }
 
@@ -121,7 +124,7 @@ mod tests {
 
     fn redact_to_string(redactor: &SimpleRedactor, data_class: &DataClass, value: &str) -> String {
         let mut output = String::new();
-        redactor.redact(data_class, value, &mut |s| output.push_str(s));
+        _ = redactor.redact(data_class, value, &mut output);
         output
     }
 
@@ -213,40 +216,5 @@ mod tests {
         let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::InsertAndTag("replacement".into()));
         let result = redact_to_string(&redactor, &TEST_CLASS_ID, TEST_VALUE);
         assert_eq!(result, format!("<{TEST_CLASS_ID}:replacement>"));
-    }
-
-    #[test]
-    fn exact_len_should_return_expected_values_for_all_modes() {
-        // Erase mode should return Some(0) as it produces no output
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
-        assert_eq!(redactor.exact_len(), Some(0));
-
-        // EraseAndTag mode should return None as output length depends on data class
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::EraseAndTag);
-        assert_eq!(redactor.exact_len(), None);
-
-        // Passthrough mode should return None as output length depends on input
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough);
-        assert_eq!(redactor.exact_len(), None);
-
-        // PassthroughAndTag mode should return None as output length depends on input and data class
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag);
-        assert_eq!(redactor.exact_len(), None);
-
-        // Replace mode should return None as output length depends on input length
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*'));
-        assert_eq!(redactor.exact_len(), None);
-
-        // ReplaceAndTag mode should return None as output length depends on input length and data class
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::ReplaceAndTag('*'));
-        assert_eq!(redactor.exact_len(), None);
-
-        // Insert mode should return None as output length depends on the inserted string
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("replacement".into()));
-        assert_eq!(redactor.exact_len(), None);
-
-        // InsertAndTag mode should return None as output length depends on inserted string and data class
-        let redactor = SimpleRedactor::with_mode(SimpleRedactorMode::InsertAndTag("replacement".into()));
-        assert_eq!(redactor.exact_len(), None);
     }
 }

@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use xxhash_rust::xxh3::xxh3_64_with_secret;
-
 use crate::{DataClass, Redactor};
+use core::fmt::{Result, Write};
+use xxhash_rust::xxh3::xxh3_64_with_secret;
 
 const REDACTED_LEN: usize = 16;
 
@@ -43,16 +43,12 @@ impl xxH3Redactor {
 }
 
 impl Redactor for xxH3Redactor {
-    fn redact(&self, _: &DataClass, value: &str, output: &mut dyn FnMut(&str)) {
+    fn redact(&self, _: &DataClass, value: &str, output: &mut dyn Write) -> Result {
         let hash = xxh3_64_with_secret(value.as_bytes(), &self.secret);
         let buffer = u64_to_hex_array(hash);
 
         // SAFETY: The buffer is guaranteed to be valid UTF-8 because it only contains hex digits.
-        output(unsafe { core::str::from_utf8_unchecked(&buffer) });
-    }
-
-    fn exact_len(&self) -> Option<usize> {
-        Some(REDACTED_LEN)
+        write!(output, "{}", unsafe { core::str::from_utf8_unchecked(&buffer) })
     }
 }
 
@@ -90,12 +86,6 @@ mod tests {
     }
 
     #[test]
-    fn test_exact_len_returns_correct_length() {
-        let redactor = get_test_redactor();
-        assert_eq!(redactor.exact_len(), Some(REDACTED_LEN));
-    }
-
-    #[test]
     fn test_redact_produces_consistent_output() {
         let redactor = get_test_redactor();
         let data_class = DataClass::new("test_taxonomy", "test_class");
@@ -104,8 +94,8 @@ mod tests {
         let mut output1 = String::new();
         let mut output2 = String::new();
 
-        redactor.redact(&data_class, input, &mut |s| output1.push_str(s));
-        redactor.redact(&data_class, input, &mut |s| output2.push_str(s));
+        redactor.redact(&data_class, input, &mut output1).unwrap();
+        redactor.redact(&data_class, input, &mut output2).unwrap();
 
         assert_eq!(output1, output2);
         assert_eq!(output1.len(), REDACTED_LEN);
@@ -118,7 +108,7 @@ mod tests {
         let input = "test_input";
 
         let mut output = String::new();
-        redactor.redact(&data_class, input, &mut |s| output.push_str(s));
+        redactor.redact(&data_class, input, &mut output).unwrap();
 
         assert_eq!(output.len(), REDACTED_LEN);
         assert!(output.chars().all(|c| c.is_ascii_hexdigit()));
@@ -133,8 +123,8 @@ mod tests {
         let mut output1 = String::new();
         let mut output2 = String::new();
 
-        redactor.redact(&data_class, "input1", &mut |s| output1.push_str(s));
-        redactor.redact(&data_class, "input2", &mut |s| output2.push_str(s));
+        redactor.redact(&data_class, "input1", &mut output1).unwrap();
+        redactor.redact(&data_class, "input2", &mut output2).unwrap();
 
         assert_ne!(output1, output2);
     }
@@ -150,8 +140,8 @@ mod tests {
         let mut output1 = String::new();
         let mut output2 = String::new();
 
-        redactor1.redact(&data_class, input, &mut |s| output1.push_str(s));
-        redactor2.redact(&data_class, input, &mut |s| output2.push_str(s));
+        redactor1.redact(&data_class, input, &mut output1).unwrap();
+        redactor2.redact(&data_class, input, &mut output2).unwrap();
 
         assert_ne!(output1, output2);
     }
@@ -162,7 +152,7 @@ mod tests {
         let data_class = DataClass::new("test_taxonomy", "test_class");
 
         let mut output = String::new();
-        redactor.redact(&data_class, "", &mut |s| output.push_str(s));
+        redactor.redact(&data_class, "", &mut output).unwrap();
 
         assert_eq!(output.len(), REDACTED_LEN);
         assert!(output.chars().all(|c| c.is_ascii_hexdigit()));
@@ -175,7 +165,7 @@ mod tests {
         let input = "こんにちは世界"; // "Hello World" in Japanese
 
         let mut output = String::new();
-        redactor.redact(&data_class, input, &mut |s| output.push_str(s));
+        redactor.redact(&data_class, input, &mut output).unwrap();
 
         assert_eq!(output.len(), REDACTED_LEN);
         assert!(output.chars().all(|c| c.is_ascii_hexdigit()));
@@ -211,8 +201,8 @@ mod tests {
         let mut output1 = String::new();
         let mut output2 = String::new();
 
-        original.redact(&data_class, input, &mut |s| output1.push_str(s));
-        cloned.redact(&data_class, input, &mut |s| output2.push_str(s));
+        original.redact(&data_class, input, &mut output1).unwrap();
+        cloned.redact(&data_class, input, &mut output2).unwrap();
 
         assert_eq!(output1, output2);
     }
@@ -240,8 +230,8 @@ mod tests {
         let mut output1 = String::new();
         let mut output2 = String::new();
 
-        redactor.redact(&data_class1, input, &mut |s| output1.push_str(s));
-        redactor.redact(&data_class2, input, &mut |s| output2.push_str(s));
+        redactor.redact(&data_class1, input, &mut output1).unwrap();
+        redactor.redact(&data_class2, input, &mut output2).unwrap();
 
         // The data_class parameter is ignored in the redaction process
         assert_eq!(output1, output2);

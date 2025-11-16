@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use core::fmt::Display;
-use data_privacy::{Classified, RedactionEngine};
+use data_privacy::{RedactedDisplay, RedactionEngine};
 use once_cell::sync::OnceCell;
 
 static REDACTION_ENGINE: OnceCell<RedactionEngine> = OnceCell::new();
@@ -11,14 +10,9 @@ pub fn set_redaction_engine_for_logging(engine: RedactionEngine) {
     REDACTION_ENGINE.set(engine).unwrap();
 }
 
-pub fn classified_display<C>(value: &C) -> String
-where
-    C: Classified,
-    C::Payload: Display,
-{
-    let engine = REDACTION_ENGINE.get().unwrap();
+pub fn redacted_display(value: &impl RedactedDisplay) -> String {
     let mut output = String::new();
-    engine.redacted_display(value, |s| output.push_str(s));
+    _ = REDACTION_ENGINE.get().unwrap().redacted_display(value, &mut output);
     output
 }
 
@@ -32,7 +26,7 @@ macro_rules! log {
     };
 
     (@fmt ($name:ident):@ = $value:expr) => {
-        format!("{}={}", stringify!($name), crate::logging::classified_display(&$value))
+        format!("{}={}", stringify!($name), crate::logging::redacted_display(&$value))
     };
 
     ($($name:ident $(: $kind:tt)? = $value:expr),* $(,)?) => {

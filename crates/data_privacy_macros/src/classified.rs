@@ -62,6 +62,7 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
     let field_type = &unnamed_fields.unnamed[0].ty;
 
     Ok(quote! {
+        #[derive(data_privacy_macros::ClassifiedDebug, data_privacy_macros::RedactedDebug, data_privacy_macros::RedactedDisplay, data_privacy_macros::RedactedToString)]
         #input
 
         impl #impl_generics #struct_name #ty_generics #where_clause {
@@ -122,18 +123,6 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
 
             fn data_class(&self) -> #data_privacy_path::DataClass {
                 Self::data_class(self)
-            }
-        }
-
-        impl #impl_generics core::fmt::Debug for #struct_name #ty_generics #where_clause {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_fmt(::core::format_args!("<CLASSIFIED:{}>", self.data_class()))
-            }
-        }
-
-        impl #impl_generics core::fmt::Display for #struct_name #ty_generics #where_clause {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_fmt(::core::format_args!("<CLASSIFIED:{}>", self.data_class()))
             }
         }
 
