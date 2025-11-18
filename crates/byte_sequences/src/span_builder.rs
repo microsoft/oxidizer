@@ -85,7 +85,7 @@ use crate::{BlockRef, BlockSize, Span};
 /// [3]: Self::consume
 /// [4]: Self::inspect
 #[derive(Debug)]
-pub struct SpanBuilder {
+pub(crate) struct SpanBuilder {
     block_ref: BlockRef,
 
     // Pointer to the start of the span builder's capacity. This region includes both the memory

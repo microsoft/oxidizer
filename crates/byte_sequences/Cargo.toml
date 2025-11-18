@@ -18,9 +18,9 @@ repository.workspace = true
 
 [dependencies]
 bytes = { workspace = true, features = ["std"] }
+infinity_pool.workspace = true
 new_zealand.workspace = true
 nm.workspace = true
-pinned_pool.workspace = true
 smallvec = { workspace = true, features = ["const_new", "union"] }
 
 [dev-dependencies]

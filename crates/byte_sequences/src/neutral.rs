@@ -2,15 +2,15 @@
 // Licensed under the MIT License.
 
 use std::cell::UnsafeCell;
-use std::iter;
-use std::mem::{MaybeUninit, offset_of};
+use std::mem::{self, MaybeUninit, offset_of};
 use std::num::NonZero;
 use std::ptr::NonNull;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
+use std::{iter, ptr};
 
+use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use new_zealand::nz;
-use pinned_pool::PinnedPool;
 
 use crate::constants::ERR_POISONED_LOCK;
 use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory, SequenceBuilder};
@@ -93,13 +93,17 @@ struct NeutralMemoryPoolInner {
     // correctly returning it to the pool, we will never find out because it will look like that
     // memory is still in use. We might be able to supplement this with metrics to help detect
     // mysteriously growing pools, thereby mitigating this risk somewhat.
-    block_pool: Arc<Mutex<PinnedPool<NeutralBlock>>>,
+    //
+    // We delay-initialize each item in the pool because the items own their own pool handles.
+    // Therefore, they must be wrapped in MaybeUninit. Once actually in use, always guaranteed
+    // to be initialized, however - we only use MaybeUninit capabilities during insertion.
+    block_pool: Arc<Mutex<RawPinnedPool<MaybeUninit<NeutralBlock>>>>,
 }
 
 impl NeutralMemoryPoolInner {
     fn new() -> Self {
         Self {
-            block_pool: Arc::new(Mutex::new(PinnedPool::new())),
+            block_pool: Arc::new(Mutex::new(RawPinnedPool::new())),
         }
     }
 
@@ -109,26 +113,37 @@ impl NeutralMemoryPoolInner {
         let mut pool = self.block_pool.lock().expect(ERR_POISONED_LOCK);
 
         let blocks = iter::repeat_with(|| {
-            let inserter = pool.begin_insert();
+            let initialize_block = |place: &mut MaybeUninit<NeutralBlock>, handle: RawPooledMut<NeutralBlock>| {
+                // The BlockMeta wants a shared handle, so we need to downgrade immediately.
+                // Handles are not references so we can still create exclusive references
+                // for as long as we can unsafely guarantee no aliasing violations exist.
+                let handle = handle.into_shared();
 
-            let meta = BlockMeta {
-                block_pool: Arc::clone(&self.block_pool),
-                key: inserter.key(),
-                ref_count: AtomicUsize::new(1),
+                let meta = BlockMeta {
+                    block_pool: Arc::clone(&self.block_pool),
+                    handle,
+                    ref_count: AtomicUsize::new(1),
+                };
+
+                in_place_initialize_block(place, meta);
+
+                handle
             };
 
-            // SAFETY: We correctly initialize the block - that is what the called function is for.
-            let block = unsafe {
-                inserter.insert_with(|block| {
-                    in_place_initialize_block(block, meta);
-                })
-            };
+            // SAFETY: We are not allowed to dereference the handle until this returns (we do not)
+            // and we are required to fully initialize the object before returning (we do).
+            let handle = unsafe { insert_with_handle_to_self(&mut *pool, initialize_block) };
 
-            // This is only accessed via shared references.
+            // SAFETY: After initialization (above), we only access the block via shared references.
+            let block = unsafe { handle.as_ref() };
+
+            // This is only accessed via shared references in the future.
             let meta_ptr = NonNull::from(&block.meta);
 
             // This is accessed via pointers and custom logic, which we "unlock" via UnsafeCell.
-            let capacity_ptr = NonNull::new(block.memory.get()).expect("pool cannot return null");
+            //
+            // SAFETY: UnsafeCell pointer is never null.
+            let capacity_ptr = unsafe { NonNull::new_unchecked(block.memory.get()) };
 
             // SAFETY: meta_ptr must remain valid for reads and writes until drop()
             // is called via the dynamic fns. Yep, it does - the dynamic impl type takes ownership.
@@ -164,22 +179,29 @@ struct NeutralBlock {
     memory: UnsafeCell<[MaybeUninit<u8>; BLOCK_SIZE_BYTES.get() as usize]>,
 }
 
+// SAFETY: Usage of the the memory capacity is controlled on a byte slice level by custom logic
+// in Span and SpanBuilder, which work together to ensure that only immutable slices are shared
+// and mutable slices are exclusively owned, ensuring no concurrent access to them. The metadata
+// is either naturally thread-safe or is protected by atomics as part of the block handles,
+// depending on the exact field.
+unsafe impl Sync for NeutralBlock {}
+
 /// Carries the metadata of the block, used to manage lifecycle and return it to the pool.
 #[derive(Debug)]
 struct BlockMeta {
     /// The pool that this block is to be returned to. See comments in `NeutralMemoryPoolInner`.
-    block_pool: Arc<Mutex<PinnedPool<NeutralBlock>>>,
+    block_pool: Arc<Mutex<RawPinnedPool<MaybeUninit<NeutralBlock>>>>,
 
-    /// The block knows its own key. When the last user of the block releases it,
-    /// this key is used to return the block to the pool.
-    key: pinned_pool::Key,
+    /// The block has a handle to itself. This is used by the last reference to return
+    /// the capacity to the pool once the last reference is dropped.
+    handle: RawPooled<NeutralBlock>,
 
     /// Whoever decrements this to zero is responsible for returning the block to the pool.
     ref_count: AtomicUsize,
 }
 
 #[cfg_attr(test, mutants::skip)] // Failure to initialize can violate memory safety.
-const fn in_place_initialize_block(block: &mut MaybeUninit<NeutralBlock>, meta: BlockMeta) {
+fn in_place_initialize_block(block: &mut MaybeUninit<NeutralBlock>, meta: BlockMeta) {
     let block_ptr = block.as_mut_ptr();
 
     // SAFETY: We are making a pointer to a known field at a compiler-guaranteed offset.
@@ -191,6 +213,38 @@ const fn in_place_initialize_block(block: &mut MaybeUninit<NeutralBlock>, meta: 
     }
 
     // We do not need to initialize the `memory` field - it starts as fully uninitialized.
+}
+
+/// Inserts a `T` into a pool of `MaybeUninit<T>`, providing the object
+/// its own handle on creation.
+///
+/// After this method returns, the object in the pool is guaranteed to be initialized.
+/// Correspondingly, the handle it is provided is stripped of the `MaybeUninit` wrapper.
+///
+/// # Safety
+///
+/// The `initialize` function must fully initialize the object before returning.
+///
+/// The provided handle may only be dereferenced after this function returns.
+unsafe fn insert_with_handle_to_self<F, T, R>(pool: &mut RawPinnedPool<MaybeUninit<T>>, initialize: F) -> R
+where
+    F: FnOnce(&mut MaybeUninit<T>, RawPooledMut<T>) -> R,
+{
+    // SAFETY: We are required to fully initialize the object. We "do" because the entire
+    // object `T` is wrapped in MaybeUninit, so we are not required to do anything at all.
+    // We do this purely to get the handle, because we need the handle to do the real
+    // initialization.
+    let handle = unsafe { pool.insert_with(|_| {}) };
+
+    // SAFETY: This is the only reference that exists, ensuring no conflicts.
+    let object_uninit = unsafe { handle.ptr().as_mut() };
+
+    // SAFETY: After this function returns, the object is guaranteed to be initialized.
+    // The provided handle may only be dereferenced after this function returns. Therefore,
+    // the handle can only be used to access the object when already initialized.
+    let handle = unsafe { mem::transmute::<RawPooledMut<MaybeUninit<T>>, RawPooledMut<T>>(handle) };
+
+    initialize(object_uninit, handle)
 }
 
 const BLOCK_REF_FNS: BlockRefVTable<BlockMeta> = BlockRefVTable::from_trait();
@@ -231,11 +285,19 @@ unsafe impl BlockRefDynamic for BlockMeta {
         atomic::fence(atomic::Ordering::Acquire);
 
         // We make local copies of what we need because the next part will invalidate `state`.
-        let key = state.key;
-        let pool = Arc::clone(&state.block_pool);
+        // We are essentially inside a ManuallyDrop<state> here, just not expressed as such.
+        let handle = state.handle;
+
+        // SAFETY: We are moving out of state part of manual drop logic.
+        let pool = unsafe { ptr::read(&raw const state.block_pool) };
 
         let mut pool = pool.lock().expect(ERR_POISONED_LOCK);
-        pool.remove(key);
+
+        // SAFETY: We must promise that it is no longer references and is still in the pool.
+        // Sure, we can promise that because tracking that is the entire purpose of this type.
+        unsafe {
+            pool.remove(handle);
+        }
     }
 }
 

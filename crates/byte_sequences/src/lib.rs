@@ -26,8 +26,8 @@
 //! ```
 //! # let memory = byte_sequences::NeutralMemoryPool::new();
 //! # let message = Sequence::copy_from_slice(b"1234123412341234", &memory);
-//! use bytes::Buf;
 //! use byte_sequences::Sequence;
+//! use bytes::Buf;
 //!
 //! fn consume_message(mut message: Sequence) {
 //!     // We read the message and calculate the sum of all the words in it.
@@ -59,8 +59,8 @@
 //! ```
 //! # let memory = byte_sequences::NeutralMemoryPool::new();
 //! # let mut sequence = Sequence::copy_from_slice(b"1234123412341234", &memory);
-//! use bytes::Buf;
 //! use byte_sequences::Sequence;
+//! use bytes::Buf;
 //!
 //! let len = sequence.len();
 //! let mut chunk_lengths = Vec::new();
@@ -82,8 +82,8 @@
 //! ```
 //! # let memory = byte_sequences::NeutralMemoryPool::new();
 //! # let mut sequence = Sequence::copy_from_slice(b"1234123412341234", &memory);
-//! use bytes::Buf;
 //! use byte_sequences::Sequence;
+//! use bytes::Buf;
 //!
 //! assert_eq!(sequence.len(), 16);
 //!
@@ -265,10 +265,6 @@
 //! Note that there is no requirement that the memory capacity of the sequence builder and the
 //! memory capacity of the sequence being appended come from the same memory provider. It is valid
 //! to mix and match memory from different providers, though this may disable some optimizations.
-//!
-//! # Automatically Extending Sequence Builder Capacity
-//!
-//! See `Work Item 5840368: Support automatically extending SequenceBuilder via Writer trait`
 //!
 //! # Implementing APIs that Consume Byte Sequences
 //!
@@ -629,10 +625,10 @@ pub use neutral::*;
 pub use opaque_memory::*;
 pub use sequence::*;
 pub use sequence_builder::*;
-pub(crate) use span::Span;
-pub(crate) use span_builder::{InspectSpanBuilderData, SpanBuilder};
+pub(crate) use span::*;
+pub(crate) use span_builder::*;
 pub use transparent::*;
-pub(crate) use write_adapter::SequenceBuilderWrite;
+pub(crate) use write_adapter::*;
 
 #[cfg(test)]
 mod testing;

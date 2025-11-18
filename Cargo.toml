@@ -3,9 +3,7 @@
 
 [workspace]
 resolver = "3"
-members = [
-    "crates/*",
-]
+members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
@@ -21,7 +19,7 @@ repository = "https://github.com/microsoft/oxidizer"
 # local dependencies
 byte_sequences = { path = "crates/byte_sequences", default-features = false, version = "0.1.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.5.0" }
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.3.0"  }
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.3.0" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.2.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.2.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.2.0" }
@@ -31,29 +29,29 @@ testing_aids = { path = "crates/testing_aids", default-features = false, version
 alloc_tracker = { version = "0.5.9", default-features = false }
 bytes = { version = "1.10.1", default-features = false }
 criterion = { version = "0.7.0", default-features = false }
-derive_more = { version = "2.0.1", default-features = false  }
-futures = { version = "0.3.31", default-features = false  }
-insta = { version = "1.43.2", default-features = false  }
-mockall = { version = "0.13.1", default-features = false  }
-mutants = { version = "0.0.3", default-features = false  }
+derive_more = { version = "2.0.1", default-features = false }
+futures = { version = "0.3.31", default-features = false }
+infinity_pool = { version = "0.8.1", default-features = false }
+insta = { version = "1.43.2", default-features = false }
+mockall = { version = "0.13.1", default-features = false }
+mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }
-once_cell = { version = "1.21.3", default-features = false  }
-pinned_pool = { version = "0.1.22", default-features = false }
-prettyplease = { version = "0.2.37", default-features = false  }
-proc-macro-crate = { version = "3.4.0", default-features = false  }
-proc-macro2 = { version = "1.0.103", default-features = true  }
-quote = { version = "1.0.42", default-features = false  }
+once_cell = { version = "1.21.3", default-features = false }
+prettyplease = { version = "0.2.37", default-features = false }
+proc-macro-crate = { version = "3.4.0", default-features = false }
+proc-macro2 = { version = "1.0.103", default-features = true }
+quote = { version = "1.0.42", default-features = false }
 rand = { version = "0.9.2", default-features = false }
 serde = { version = "1.0.228", default-features = false }
-serde_json = { version = "1.0.145", default-features = false  }
+serde_json = { version = "1.0.145", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
 syn = { version = "2.0.110", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
-xxhash-rust = { version = "0.8.15", default-features = false  }
+xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]
 ambiguous_negative_literals = "warn"
@@ -102,11 +100,18 @@ unused_result_ok = "warn"
 
 # This lint in many cases produces a less readable code and is not worth the trouble.
 option_if_let_else = "allow"
+# Just because a fn can be const does not mean it should be const. Const is a promise, part of the
+# API contract, and removing it is a breaking change so we need to be careful where we commit to const.
+missing_const_for_fn = "allow"
+# This sometimes prevents marking crate-scoped items as pub(crate), so is not welcome.
+redundant_pub_crate = "allow"
 # Testing panic messages is not universally applicable - panic messages are not an API contract.
 should_panic_without_expect = "allow"
 # This just misfires a lot and claims we can drop values that actually need to remain borrowed.
 # It also often results in much less readable code for no benefit.
 significant_drop_tightening = "allow"
+# Blocked by Clippy bug: https://github.com/rust-lang/rust-clippy/issues/15036
+wildcard_imports = "allow"
 
 [profile.release]
 debug = "line-tables-only"

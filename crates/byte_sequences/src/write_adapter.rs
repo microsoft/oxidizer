@@ -16,7 +16,7 @@ use crate::{Memory, SequenceBuilder};
 ///
 /// [1]: crate::SequenceBuilder::as_write
 #[derive(Debug)]
-pub struct SequenceBuilderWrite<'sb, 'm, M: Memory> {
+pub(crate) struct SequenceBuilderWrite<'sb, 'm, M: Memory> {
     inner: &'sb mut SequenceBuilder,
     memory: &'m M,
 }

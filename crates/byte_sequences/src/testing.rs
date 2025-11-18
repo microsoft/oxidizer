@@ -11,13 +11,13 @@ use std::sync::atomic::{self, AtomicUsize};
 
 use crate::{Block, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
 
-/// A memory block for testing purposes, exposing unsual functionality that does not make
+/// A memory block for testing purposes, exposing unusual functionality that does not make
 /// sense for a real memory block (e.g. attaching arbitrary object as metadata).
 ///
 /// The memory block is owned by the caller. Dropping the last `BlockRef` to this block does
 /// nothing - the caller can choose when to drop the block. This facilitates testing of
 /// `BlockRef` lifetime handling.
-pub struct TestMemoryBlock {
+pub(crate) struct TestMemoryBlock {
     capacity_ptr: NonNull<MaybeUninit<u8>>,
     len: NonZero<BlockSize>,
 

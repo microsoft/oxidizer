@@ -361,8 +361,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn from_trait_with_meta_creates_vtable_with_meta_fn() {
-        // Create a vtable using from_trait_with_meta at runtime
-        // We leak the Box to get a 'static reference, which is fine for tests
+        // Create a vtable using from_trait_with_meta at runtime to ensure we measure test coverage.
+        // We leak the Box to get a 'static reference, which is okay as long as Miri is not looking.
         let vtable: &'static BlockRefVTable<TestBlock> = Box::leak(Box::new(BlockRefVTable::from_trait_with_meta()));
 
         // Verify that the vtable has a meta function pointer set
@@ -400,8 +400,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn from_trait_creates_vtable_without_meta_fn() {
-        // Create a vtable using from_trait (without meta) at runtime
-        // We leak the Box to get a 'static reference, which is fine for tests
+        // Create a vtable using from_trait (without meta) at runtime to ensure we measure test coverage.
+        // We leak the Box to get a 'static reference, which is okay as long as Miri is not looking.
         let vtable: &'static BlockRefVTable<TestBlock> = Box::leak(Box::new(BlockRefVTable::from_trait()));
 
         // Verify that the vtable does NOT have a meta function pointer
@@ -431,7 +431,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn from_trait_with_meta_vtable_handles_clone_correctly() {
-        // Create vtable at runtime for test coverage
+        // Create vtable at runtime to ensure we measure test coverage.
+        // We leak the Box to get a 'static reference, which is okay as long as Miri is not looking.
         let vtable: &'static BlockRefVTable<TestBlock> = Box::leak(Box::new(BlockRefVTable::from_trait_with_meta()));
 
         let block_ptr = NonNull::new(Box::into_raw(Box::new(TestBlock {
@@ -468,7 +469,8 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn from_trait_vtable_handles_clone_correctly() {
-        // Create vtable at runtime for test coverage
+        // Create vtable at runtime to ensure we measure test coverage.
+        // We leak the Box to get a 'static reference, which is okay as long as Miri is not looking.
         let vtable: &'static BlockRefVTable<TestBlock> = Box::leak(Box::new(BlockRefVTable::from_trait()));
 
         let block_ptr = NonNull::new(Box::into_raw(Box::new(TestBlock {

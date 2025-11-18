@@ -22,7 +22,7 @@ use crate::{BlockRef, BlockSize};
 /// Sub-slices of a span may be formed by calling [`.slice()`]. This does not copy the data,
 /// merely creates a new and independent view over the same immutable memory.
 #[derive(Clone)]
-pub struct Span {
+pub(crate) struct Span {
     block_ref: BlockRef,
 
     start: NonNull<u8>,
@@ -182,10 +182,11 @@ unsafe impl Sync for Span {}
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use bytes::BufMut;
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
-    use std::num::NonZero;
     use testing_aids::assert_panic;
 
     use super::*;
