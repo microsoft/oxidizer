@@ -26,6 +26,8 @@ These are the crates built out of this repo:
 - [`fundle`](./crates/fundle/README.md) - Effective dependency management for Rust.
 - [`fundle_macros`](crates/fundle_macros/README.md) - Procedural macros for the `fundle` crate.
 - [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Procedural macros implementation for the `fundle` crate.
+- [`ohno`](./crates/ohno/README.md) - High quality Rust error handling
+- [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the ohno crate.
 
 ## Repo Guidelines
 

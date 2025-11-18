@@ -187,13 +187,13 @@ jobs:
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov@0.6.18
+          tool: cargo-llvm-cov@0.6.21
 
       # execute
       - name: Generate Coverage (all-features)
-        run: cargo +nightly llvm-cov --all-features --workspace --tests --lcov --output-path lcov.info
+        run: cargo +nightly llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Generate Coverage (no-default-features)
-        run: cargo +nightly llvm-cov --no-default-features --workspace --tests --lcov --output-path lcov.info
+        run: cargo +nightly llvm-cov --no-default-features --workspace --lcov --output-path lcov.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

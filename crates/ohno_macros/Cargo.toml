@@ -2,11 +2,11 @@
 # Licensed under the MIT License.
 
 [package]
-name = "data_privacy_macros"
-description = "Procedural macros for data privacy."
-version = "0.3.0"
+name = "ohno_macros"
+description = "Macros for the ohno crate."
+version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
+keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]
 
 edition.workspace = true
@@ -22,12 +22,11 @@ proc-macro = true
 [dependencies]
 proc-macro2.workspace = true
 quote.workspace = true
-syn = { workspace = true, features = ["full", "parsing", "printing", "proc-macro"] }
+syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro"] }
 
 [dev-dependencies]
-syn.workspace = true
 mutants.workspace = true
-insta = { workspace = true, features = ["yaml"] }
+pretty_assertions = { workspace = true, features = ["std"] }
 prettyplease.workspace = true
 
 [lints]
