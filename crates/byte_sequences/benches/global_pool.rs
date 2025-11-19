@@ -4,7 +4,7 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use byte_sequences::{BytesView, GlobalMemoryPool};
+use byte_sequences::{BytesView, GlobalPool};
 use bytes::BufMut;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use testing_aids::repeating_incrementing_bytes;
@@ -20,12 +20,12 @@ const ONE_MB: usize = 1024 * 1024;
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 
-    let warm_memory = GlobalMemoryPool::new();
+    let warm_memory = GlobalPool::new();
 
     // Allocate some memory to pre-warm the pool.
     drop(warm_memory.reserve(10 * ONE_MB));
 
-    let mut group = c.benchmark_group("GlobalMemoryPool");
+    let mut group = c.benchmark_group("GlobalPool");
 
     let allocs_op = allocs.operation("fill_1mb");
     group.bench_function("fill_1mb", |b| {
@@ -39,7 +39,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("fill_1mb_cold");
     group.bench_function("fill_1mb_cold", |b| {
         b.iter_batched(
-            GlobalMemoryPool::new,
+            GlobalPool::new,
             |memory| {
                 let _span = allocs_op.measure_thread();
                 let mut sb = memory.reserve(ONE_MB);
@@ -62,7 +62,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("copied_from_slice_cold");
     group.bench_function("copied_from_slice_cold", |b| {
         b.iter_batched(
-            GlobalMemoryPool::new,
+            GlobalPool::new,
             |memory| {
                 let _span = allocs_op.measure_thread();
                 BytesView::copied_from_slice(&test_data, &memory)

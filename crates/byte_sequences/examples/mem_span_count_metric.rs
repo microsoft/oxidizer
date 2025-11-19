@@ -7,12 +7,12 @@
 //!
 //! Reporting via metrics pipeline (e.g. OpenTelemetry) is also possible but out of scope here.
 
-use byte_sequences::{BytesView, GlobalMemoryPool};
+use byte_sequences::{BytesView, GlobalPool};
 use nm::Report;
 
 fn main() {
     // In a real-world app, the memory provider would be supplied by the application framework.
-    let memory = GlobalMemoryPool::new();
+    let memory = GlobalPool::new();
 
     // First a simple sequence with a single span.
     let sample1 = BytesView::copied_from_slice(b"Hello, world!", &memory);

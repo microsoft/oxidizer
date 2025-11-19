@@ -11,7 +11,7 @@
 
 use std::ptr;
 
-use byte_sequences::{BytesBuf, GlobalMemoryPool};
+use byte_sequences::{BytesBuf, GlobalPool};
 use bytes::BufMut;
 
 const LUCKY_NUMBER: usize = 8888;
@@ -19,7 +19,7 @@ const FAVORITE_COLOR: &[u8] = b"octarine";
 
 fn main() {
     // The global memory pool in a real application would be provided by the framework.
-    let memory = GlobalMemoryPool::new();
+    let memory = GlobalPool::new();
 
     // We emit the favorite color. For maximal happiness, we repeat it LUCKY_NUMBER times.
     let capacity_required = LUCKY_NUMBER * FAVORITE_COLOR.len();

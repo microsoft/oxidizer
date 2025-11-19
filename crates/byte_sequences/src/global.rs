@@ -18,11 +18,11 @@ use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesBu
 /// A memory pool for general-purpose memory used for storage/processing of byte sequences.
 #[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
 #[derive(Clone, Debug)]
-pub struct GlobalMemoryPool {
-    inner: Arc<GlobalMemoryPoolInner>,
+pub struct GlobalPool {
+    inner: Arc<GlobalPoolInner>,
 }
 
-impl GlobalMemoryPool {
+impl GlobalPool {
     /// Creates a new instance of the global memory pool.
     ///
     /// # Efficiency
@@ -39,7 +39,7 @@ impl GlobalMemoryPool {
     )]
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(GlobalMemoryPoolInner::new()),
+            inner: Arc::new(GlobalPoolInner::new()),
         }
     }
 
@@ -66,7 +66,7 @@ impl GlobalMemoryPool {
     }
 }
 
-impl Memory for GlobalMemoryPool {
+impl Memory for GlobalPool {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
@@ -74,7 +74,7 @@ impl Memory for GlobalMemoryPool {
 }
 
 #[derive(Debug)]
-struct GlobalMemoryPoolInner {
+struct GlobalPoolInner {
     // This is guarded by a mutex because memory providers need to be thread-safe. The point is
     // not so much that memory will be requested from multiple threads (though it might) but that
     // even if memory is requested from a thread-specific pool, it may later be released on a
@@ -100,7 +100,7 @@ struct GlobalMemoryPoolInner {
     block_pool: Arc<Mutex<RawPinnedPool<MaybeUninit<NeutralBlock>>>>,
 }
 
-impl GlobalMemoryPoolInner {
+impl GlobalPoolInner {
     fn new() -> Self {
         Self {
             block_pool: Arc::new(Mutex::new(RawPinnedPool::new())),
@@ -189,7 +189,7 @@ unsafe impl Sync for NeutralBlock {}
 /// Carries the metadata of the block, used to manage lifecycle and return it to the pool.
 #[derive(Debug)]
 struct BlockMeta {
-    /// The pool that this block is to be returned to. See comments in `GlobalMemoryPoolInner`.
+    /// The pool that this block is to be returned to. See comments in `GlobalPoolInner`.
     block_pool: Arc<Mutex<RawPinnedPool<MaybeUninit<NeutralBlock>>>>,
 
     /// The block has a handle to itself. This is used by the last reference to return
@@ -313,11 +313,11 @@ mod tests {
     use super::*;
     use crate::MemoryShared;
 
-    assert_impl_all!(GlobalMemoryPool: MemoryShared);
+    assert_impl_all!(GlobalPool: MemoryShared);
 
     #[test]
     fn smoke_test() {
-        let memory = GlobalMemoryPool::new();
+        let memory = GlobalPool::new();
 
         // Nothing to assert with 0-sized, any capacity is acceptable. Just as long as it works.
         _ = memory.reserve(0);
@@ -346,7 +346,7 @@ mod tests {
         const SEQUENCE_SIZE_BYTES: BlockSize = 1000;
 
         // We grab a block of memory and split the single block into multiple sequences piece by piece.
-        let memory = GlobalMemoryPool::new();
+        let memory = GlobalPool::new();
 
         let mut sb = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
 
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn release_on_other_thread() {
-        let memory = GlobalMemoryPool::new();
+        let memory = GlobalPool::new();
 
         let mut sb = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
         sb.put_bytes(42, BLOCK_SIZE_BYTES.get() as usize);
@@ -401,7 +401,7 @@ mod tests {
 
         let pattern = testing_aids::repeating_incrementing_bytes().take(SIZE_10MB).collect::<Vec<_>>();
 
-        let memory = GlobalMemoryPool::new();
+        let memory = GlobalPool::new();
 
         let mut sb = memory.reserve(SIZE_10MB);
 
@@ -425,7 +425,7 @@ mod tests {
             .take(SIZE_10MB)
             .collect::<Vec<_>>();
 
-        let memory = GlobalMemoryPool::new();
+        let memory = GlobalPool::new();
 
         // Create first sequence with ascending pattern
         let mut sb1 = memory.reserve(SIZE_10MB);

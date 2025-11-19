@@ -2,14 +2,14 @@
 // Licensed under the MIT License.
 
 //! Showcases how to implement the `HasMemory` trait
-//! using the `GlobalMemoryPool` implementation strategy.
+//! using the `GlobalPool` implementation strategy.
 
-use byte_sequences::{BytesView, GlobalMemoryPool, HasMemory, MemoryShared};
+use byte_sequences::{BytesView, GlobalPool, HasMemory, MemoryShared};
 use bytes::Buf;
 
 fn main() {
     // The global memory pool in a real application would be provided by the framework.
-    let global_memory_pool = GlobalMemoryPool::new();
+    let global_memory_pool = GlobalPool::new();
 
     let mut checksum_calculator = ChecksumCalculator::new(global_memory_pool);
 
@@ -37,18 +37,18 @@ fn main() {
 /// This type does not benefit from any specific memory configuration - it consumes bytes no
 /// matter what sort of memory they are in. It also does not pass the bytes to some other type.
 ///
-/// Therefore, we simply use `GlobalMemoryPool` as the memory provider we publish, as this is
+/// Therefore, we simply use `GlobalPool` as the memory provider we publish, as this is
 /// the default choice when there is no specific provider to prefer.
 #[derive(Debug)]
 struct ChecksumCalculator {
     // The application logic must provide this - it is our dependency.
-    memory_provider: GlobalMemoryPool,
+    memory_provider: GlobalPool,
 
     checksum: u64,
 }
 
 impl ChecksumCalculator {
-    pub const fn new(memory_provider: GlobalMemoryPool) -> Self {
+    pub const fn new(memory_provider: GlobalPool) -> Self {
         Self {
             memory_provider,
             checksum: 0,

@@ -3,7 +3,7 @@
 
 //! Showcases how a type can support an "optimal path" if an optimized memory
 //! configuration is used, reverting to a less optimal "fallback path" if
-//! non-optimized memory is used (e.g. from `GlobalMemoryPool`).
+//! non-optimized memory is used (e.g. from `GlobalPool`).
 //!
 //! The most common use case for this is when performing I/O operations using operating
 //! system provided I/O APIs. These often have preferences on what sort of memory they
@@ -15,11 +15,11 @@
 
 use std::num::NonZero;
 
-use byte_sequences::{BlockSize, BytesView, BytesBuf, CallbackMemory, GlobalMemoryPool, HasMemory, MemoryShared};
+use byte_sequences::{BlockSize, BytesBuf, BytesView, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
 
 fn main() {
     // In a real application, both of these would be provided by the framework.
-    let global_memory_pool = GlobalMemoryPool::new();
+    let global_memory_pool = GlobalPool::new();
     let io_context = IoContext::new();
 
     let mut connection = Connection::new(io_context);

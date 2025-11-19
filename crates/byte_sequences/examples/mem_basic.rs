@@ -4,12 +4,12 @@
 //! Basics of working with byte sequences. We obtain some memory, encode a message into it,
 //! and then receive this message in another function and write a status report to the terminal.
 
-use byte_sequences::{BytesView, GlobalMemoryPool, Memory};
+use byte_sequences::{BytesView, GlobalPool, Memory};
 use bytes::{Buf, BufMut};
 
 fn main() {
     // The global memory pool in a real application would be provided by the framework.
-    let memory = GlobalMemoryPool::new();
+    let memory = GlobalPool::new();
 
     let message = produce_message(&memory);
     consume_message(message);

@@ -963,7 +963,7 @@ mod tests {
 
     use super::*;
     use crate::testing::TestMemoryBlock;
-    use crate::{FixedBlockTestMemory, GlobalMemoryPool};
+    use crate::{FixedBlockTestMemory, GlobalPool};
 
     const U64_SIZE: usize = size_of::<u64>();
     const TWO_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>();
@@ -1720,7 +1720,7 @@ mod tests {
 
     #[test]
     fn from_sequence() {
-        let memory = GlobalMemoryPool::new();
+        let memory = GlobalPool::new();
 
         let s1 = BytesView::copied_from_slice(b"bla bla bla", &memory);
 

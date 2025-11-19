@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 //! Showcases how you can easily and cheaply reuse byte sequences and parts of byte sequences.
-use byte_sequences::{BytesView, GlobalMemoryPool};
+use byte_sequences::{BytesView, GlobalPool};
 use bytes::{Buf, BufMut};
 
 fn main() {
     // The global memory pool in a real application would be provided by the framework.
-    let memory = GlobalMemoryPool::new();
+    let memory = GlobalPool::new();
 
     let hello_world = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
