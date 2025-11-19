@@ -11,23 +11,4 @@ macro_rules! assert_panic {
         ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| -> () { _ = { $stmt } }))
             .expect_err("assert_panic! argument did not panic")
     };
-    ($stmt:stmt, $expected:expr$(,)?) => {
-        #[allow(clippy::multi_assignments, reason = "macro untidiness")]
-        #[expect(clippy::allow_attributes, reason = "macro untidiness")]
-        match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| -> () { _ = { $stmt } })) {
-            Ok(_) => panic!("assert_panic! argument did not panic"),
-            Err(err) => {
-                let panic_msg = err
-                    .downcast_ref::<String>()
-                    .map(|s| s.asr())
-                    .or_else(|| err.downcast_ref::<&str>().copied())
-                    .expect("panic message must be a string");
-                assert_eq!(
-                    panic_msg, $expected,
-                    "expected panic message '{}', but got '{}'",
-                    $expected, panic_msg
-                );
-            }
-        }
-    };
 }
