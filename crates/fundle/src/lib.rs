@@ -114,8 +114,9 @@ pub use fundle_macros::{bundle, deps, newtype};
 //     config: Config,
 // }
 // ```
-// It will generate an `AppStateBuilder<LOGGER, CONFIG>` and then use `Set` and `NotSet`
-// as marker types to govern when `AsRef` and various helpers are implemented.
+// It will generate an `AppStateBuilder<RW, LOGGER, CONFIG>` and then use `Set` and `NotSet`
+// as marker types to govern when `AsRef` and various helpers are implemented. `Read` and `Write`
+// are used to control whether the builder is read-only mode, or when setting.
 
 #[doc(hidden)]
 #[derive(Debug)]
@@ -124,3 +125,19 @@ pub struct Set;
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct NotSet;
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct Read;
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct Write;
+
+pub trait Reader {
+    type Writer;
+}
+
+pub trait Writer {
+    type Reader;
+}

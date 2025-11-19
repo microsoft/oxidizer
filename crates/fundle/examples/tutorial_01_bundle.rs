@@ -3,6 +3,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use fundle::{Reader, Write};
+
 // Assume these are random dependencies we want to create and inject.
 pub struct Logger {}
 pub struct Database {}
@@ -19,3 +21,4 @@ fn main() {
     // Create a new instance of `AppState`.
     let _ = AppState::builder().logger(|_| Logger {}).database(|_| Database {}).build();
 }
+

@@ -103,6 +103,12 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     // Generate Export trait implementations for builder variants
     let builder_export_impls = generate_builder_export_impls(&builder_name, &field_names, &field_types, &type_params);
 
+    // Generate Writer and Reader trait implementations
+    let reader_writer_impls = generate_reader_writer_impls(&builder_name, &type_params);
+
+    // Generate read() toggle method
+    let read_toggle_impl = generate_read_toggle(&builder_name, &field_names, &type_params);
+
     // Generate AsRef implementations for unique field types on the main struct
     let main_struct_as_ref_impls = field_names
         .iter()
@@ -137,6 +143,10 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
         #builder_struct
 
         #default_impl
+
+        #reader_writer_impls
+
+        #read_toggle_impl
 
         #(#setter_impls)*
 
@@ -174,9 +184,9 @@ fn generate_builder_struct(
 
     quote! {
         #[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
-        #vis struct #builder_name<#(#type_params),*> {
+        #vis struct #builder_name<RW, #(#type_params),*> {
             #(#builder_fields,)*
-            _phantom: ::std::marker::PhantomData<(#(#phantom_types),*)>,
+            _phantom: ::std::marker::PhantomData<(RW, #(#phantom_types),*)>,
         }
     }
 }
@@ -187,7 +197,7 @@ fn generate_struct_build_method(struct_name: &Ident, builder_name: &Ident, type_
     quote! {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
         impl #struct_name {
-            pub fn builder() -> #builder_name<#(#not_set_params),*> {
+            pub fn builder() -> #builder_name<::fundle::Write, #(#not_set_params),*> {
                 #builder_name::default()
             }
         }
@@ -201,7 +211,7 @@ fn generate_default_impl(builder_name: &Ident, field_names: &[&Ident], type_para
 
     quote! {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-        impl ::std::default::Default for #builder_name<#(#not_set_params),*> {
+        impl ::std::default::Default for #builder_name<::fundle::Write, #(#not_set_params),*> {
             fn default() -> Self {
                 Self {
                     #(#none_fields,)*
@@ -244,85 +254,73 @@ fn generate_setter_impls(
             .filter_map(|(j, param)| (i != j).then_some(param))
             .collect();
 
-        // Field assignments
-        let field_assignments: Vec<_> = field_names
+        // Try setter
+        let try_method_name = Ident::new(&format!("{field_name}_try"), field_name.span());
+        let try_async_method_name = Ident::new(&format!("{field_name}_try_async"), field_name.span());
+        let async_method_name = Ident::new(&format!("{field_name}_async"), field_name.span());
+
+        // Field assignments for rebuilding (using read.field instead of self.field)
+        let field_assignments_from_read: Vec<_> = field_names
             .iter()
             .enumerate()
             .map(|(j, name)| {
                 if i == j {
                     quote!(#name: ::std::option::Option::Some(#field_name))
                 } else {
-                    quote!(#name: self.#name)
+                    quote!(#name: read.#name)
                 }
             })
             .collect();
 
         // Regular setter
-        let regular_setter = quote! {
+        let setter = quote! {
             #[allow(non_camel_case_types, non_snake_case)]
-            impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub fn #field_name(self, f: impl ::std::ops::Fn(&Self) -> #field_type) -> #builder_name<#(#return_params),*> {
-                    let #field_name = f(&self);
+            impl<#(#other_params),*> #builder_name<::fundle::Write, #(#impl_params),*> {
+                pub fn #field_name(self, f: impl ::std::ops::Fn(&<Self as ::fundle::Writer>::Reader) -> #field_type) -> #builder_name<::fundle::Write, #(#return_params),*> {
+                    let read = self.read();
+                    let #field_name = f(&read);
                     #builder_name {
-                        #(#field_assignments,)*
+                        #(#field_assignments_from_read,)*
+                        _phantom: ::std::marker::PhantomData,
+                    }
+                }
+
+                pub fn #try_method_name<R: ::std::error::Error>(self, f: impl ::std::ops::Fn(&<Self as ::fundle::Writer>::Reader) -> ::std::result::Result<#field_type, R>) -> ::std::result::Result<#builder_name<::fundle::Write, #(#return_params),*>, R> {
+                    let read = self.read();
+                    let #field_name = f(&read)?;
+                    ::std::result::Result::Ok(#builder_name {
+                        #(#field_assignments_from_read,)*
+                        _phantom: ::std::marker::PhantomData,
+                    })
+                }
+
+                pub async fn #try_async_method_name<F, R: ::std::error::Error>(self, f: F) -> ::std::result::Result<#builder_name<::fundle::Write, #(#return_params),*>, R>
+                where
+                    F: AsyncFn(&<Self as ::fundle::Writer>::Reader) -> ::std::result::Result<#field_type, R>,
+                {
+                    let read = self.read();
+                    let #field_name = f(&read).await?;
+                    ::std::result::Result::Ok(#builder_name {
+                        #(#field_assignments_from_read,)*
+                        _phantom: ::std::marker::PhantomData,
+                    })
+                }
+
+                pub async fn #async_method_name<F>(self, f: F) -> #builder_name<::fundle::Write, #(#return_params),*>
+                where
+                    F: AsyncFn(&<Self as ::fundle::Writer>::Reader) -> #field_type,
+                {
+                    let read = self.read();
+                    let #field_name = f(&read).await;
+                    #builder_name {
+                        #(#field_assignments_from_read,)*
                         _phantom: ::std::marker::PhantomData,
                     }
                 }
             }
         };
 
-        // Try setter
-        let try_method_name = Ident::new(&format!("{field_name}_try"), field_name.span());
-        let try_setter = quote! {
-            #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-            impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub fn #try_method_name<R: ::std::error::Error>(self, f: impl ::std::ops::Fn(&Self) -> ::std::result::Result<#field_type, R>) -> ::std::result::Result<#builder_name<#(#return_params),*>, R> {
-                    let #field_name = f(&self)?;
-                    ::std::result::Result::Ok(#builder_name {
-                        #(#field_assignments,)*
-                        _phantom: ::std::marker::PhantomData,
-                    })
-                }
-            }
-        };
-
-        // Async setter
-        let async_method_name = Ident::new(&format!("{field_name}_async"), field_name.span());
-        let async_setter = quote! {
-            #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-            impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub async fn #async_method_name<F>(self, f: F) -> #builder_name<#(#return_params),*>
-                where
-                    F: AsyncFn(&Self) -> #field_type,
-                {
-                    let #field_name = f(&self).await;
-                    #builder_name {
-                        #(#field_assignments,)*
-                        _phantom: ::std::marker::PhantomData,
-                    }
-                }
-            }
-        };
-
-        // Async try setter
-        let try_async_method_name = Ident::new(&format!("{field_name}_try_async"), field_name.span());
-        let try_async_setter = quote! {
-            #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-            impl<#(#other_params),*> #builder_name<#(#impl_params),*> {
-                pub async fn #try_async_method_name<F, R: ::std::error::Error>(self, f: F) -> ::std::result::Result<#builder_name<#(#return_params),*>, R>
-                where
-                    F: AsyncFn(&Self) -> ::std::result::Result<#field_type, R>,
-                {
-                    let #field_name = f(&self).await?;
-                    ::std::result::Result::Ok(#builder_name {
-                        #(#field_assignments,)*
-                        _phantom: ::std::marker::PhantomData,
-                    })
-                }
-            }
-        };
-
-        impls.extend([regular_setter, try_setter, async_setter, try_async_setter]);
+        impls.extend([setter]);
     }
 
     impls
@@ -359,7 +357,7 @@ fn generate_as_ref_impls(
 
             let as_ref_impl = quote! {
                 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                impl<#(#other_params),*> ::std::convert::AsRef<#field_type> for #builder_name<#(#impl_params),*> {
+                impl<RW, #(#other_params),*> ::std::convert::AsRef<#field_type> for #builder_name<RW, #(#impl_params),*> {
                     fn as_ref(&self) -> &#field_type {
                         self.#field_name.as_ref().unwrap()
                     }
@@ -385,7 +383,7 @@ fn generate_build_impl(
 
     quote! {
         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-        impl #builder_name<#(#set_params),*> {
+        impl #builder_name<::fundle::Write, #(#set_params),*> {
             pub fn build(self) -> #struct_name {
                 #struct_name {
                     #(#field_moves),*
@@ -468,7 +466,7 @@ fn generate_forwarded_as_ref_impls(
 
             let as_ref_impl = quote! {
                 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                impl<#(#other_params),*> ::std::convert::AsRef<#forward_type> for #builder_name<#(#impl_params),*> {
+                impl<RW, #(#other_params),*> ::std::convert::AsRef<#forward_type> for #builder_name<RW, #(#impl_params),*> {
                     fn as_ref(&self) -> &#forward_type {
                         self.#field_name.as_ref().unwrap().as_ref()
                     }
@@ -546,7 +544,7 @@ fn generate_builder_export_impls(
 
         let export_impl = quote! {
             #[allow(non_camel_case_types, non_snake_case)]
-            impl<#(#other_params),*> ::fundle::exports::Export<#field_idx> for #builder_name<#(#impl_params),*> {
+            impl<RW, #(#other_params),*> ::fundle::exports::Export<#field_idx> for #builder_name<RW, #(#impl_params),*> {
                 type T = #field_type;
 
                 fn get(&self) -> &Self::T {
@@ -618,10 +616,10 @@ fn generate_select_macro(
                 .collect::<Vec<_>>();
 
             Some(quote! {
-                impl<'a, #(#other_type_params),*> ::std::convert::AsRef<#field_type>
-                    for Select<'a, #(#impl_type_params),*>
+                impl<'a, RW, #(#other_type_params),*> ::std::convert::AsRef<#field_type>
+                    for Select<'a, RW, #(#impl_type_params),*>
                 where
-                    #builder_name<#(#impl_type_params),*>: ::std::convert::AsRef<#field_type>,
+                    #builder_name<RW, #(#impl_type_params),*>: ::std::convert::AsRef<#field_type>,
                 {
                     fn as_ref(&self) -> &#field_type {
                         self.builder.as_ref()
@@ -660,7 +658,7 @@ fn generate_select_macro(
             quote! {
                 (verify_field $builder_var:ident #field_name) => {
                     {
-                        fn verify_exists<#(#generic_params),*>(_: &#builder_name<#(#verification_params),*>) {}
+                        fn verify_exists<RW, #(#generic_params),*>(_: &#builder_name<RW, #(#verification_params),*>) {}
                         verify_exists($builder_var);
                     }
                 };
@@ -683,8 +681,8 @@ fn generate_select_macro(
                     )*
 
                     #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                    struct Select<'a, #(#select_type_params),*> {
-                        builder: &'a #builder_name<#(#select_type_params),*>,
+                    struct Select<'a, RW, #(#select_type_params),*> {
+                        builder: &'a #builder_name<RW, #(#select_type_params),*>,
                         $($forward_type: &'a $forward_type,)*
                     }
 
@@ -692,8 +690,8 @@ fn generate_select_macro(
 
                     $(
                         #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-                        impl<'a, #(#select_type_params),*> ::std::convert::AsRef<$forward_type>
-                            for Select<'a, #(#select_type_params),*>
+                        impl<'a, RW, #(#select_type_params),*> ::std::convert::AsRef<$forward_type>
+                            for Select<'a, RW, #(#select_type_params),*>
                         {
                             fn as_ref(&self) -> &$forward_type {
                                 self.$forward_type
@@ -707,6 +705,40 @@ fn generate_select_macro(
                     }
                 }
             };
+        }
+    }
+}
+
+#[cfg_attr(test, mutants::skip)]
+fn generate_reader_writer_impls(builder_name: &Ident, type_params: &[Ident]) -> proc_macro2::TokenStream {
+    quote! {
+        #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+        impl<#(#type_params),*> ::fundle::Writer for #builder_name<::fundle::Write, #(#type_params),*> {
+            type Reader = #builder_name<::fundle::Read, #(#type_params),*>;
+        }
+
+        #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+        impl<#(#type_params),*> ::fundle::Reader for #builder_name<::fundle::Read, #(#type_params),*> {
+            type Writer = #builder_name<::fundle::Write, #(#type_params),*>;
+        }
+    }
+}
+
+#[cfg_attr(test, mutants::skip)]
+fn generate_read_toggle(builder_name: &Ident, field_names: &[&Ident], type_params: &[Ident]) -> proc_macro2::TokenStream {
+    let field_assignments = field_names.iter().map(|name| {
+        quote! { #name: self.#name }
+    });
+
+    quote! {
+        #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+        impl<#(#type_params),*> #builder_name<::fundle::Write, #(#type_params),*> {
+            pub fn read(self) -> #builder_name<::fundle::Read, #(#type_params),*> {
+                #builder_name {
+                    #(#field_assignments,)*
+                    _phantom: ::std::marker::PhantomData,
+                }
+            }
         }
     }
 }
