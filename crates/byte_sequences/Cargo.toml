@@ -38,15 +38,15 @@ default = []
 fakes = []
 
 [[bench]]
-name = "neutral"
+name = "buf"
 harness = false
 
 [[bench]]
-name = "sequence"
+name = "global_pool"
 harness = false
 
 [[bench]]
-name = "sequence_builder"
+name = "view"
 harness = false
 
 [package.metadata.cargo_check_external_types]
