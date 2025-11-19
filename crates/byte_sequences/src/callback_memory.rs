@@ -5,7 +5,7 @@ use std::any::type_name;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::{Memory, SequenceBuilder};
+use crate::{ByteSequenceBuilder, Memory};
 
 /// Implements [`MemoryShared`][crate::MemoryShared] by delegating to a closure.
 ///
@@ -13,14 +13,14 @@ use crate::{Memory, SequenceBuilder};
 /// on top of an existing memory provider.
 pub struct CallbackMemory<FReserve>
 where
-    FReserve: Fn(usize) -> SequenceBuilder + Send + Sync + 'static,
+    FReserve: Fn(usize) -> ByteSequenceBuilder + Send + Sync + 'static,
 {
     reserve_fn: Arc<FReserve>,
 }
 
 impl<FReserve> CallbackMemory<FReserve>
 where
-    FReserve: Fn(usize) -> SequenceBuilder + Send + Sync + 'static,
+    FReserve: Fn(usize) -> ByteSequenceBuilder + Send + Sync + 'static,
 {
     /// Creates a new instance implemented via the provided callback.
     pub fn new(reserve_fn: FReserve) -> Self {
@@ -31,7 +31,7 @@ where
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`SequenceBuilder`] that can be used to fill the reserved memory with data.
+    /// Returns an empty [`ByteSequenceBuilder`] that can be used to fill the reserved memory with data.
     ///
     /// The memory provider may provide more memory than requested.
     ///
@@ -40,31 +40,31 @@ where
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`SequenceBuilder`]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
     ///
     /// May panic if the operating system runs out of memory.
     #[must_use]
-    pub fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    pub fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         (self.reserve_fn)(min_bytes)
     }
 }
 
 impl<FReserve> Memory for CallbackMemory<FReserve>
 where
-    FReserve: Fn(usize) -> SequenceBuilder + Send + Sync + 'static,
+    FReserve: Fn(usize) -> ByteSequenceBuilder + Send + Sync + 'static,
 {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn reserve(&self, min_bytes: usize) -> SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> ByteSequenceBuilder {
         self.reserve(min_bytes)
     }
 }
 
 impl<FReserve> Clone for CallbackMemory<FReserve>
 where
-    FReserve: Fn(usize) -> SequenceBuilder + Send + Sync + 'static,
+    FReserve: Fn(usize) -> ByteSequenceBuilder + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -75,12 +75,12 @@ where
 
 impl<FReserve> fmt::Debug for CallbackMemory<FReserve>
 where
-    FReserve: Fn(usize) -> SequenceBuilder + Send + Sync + 'static,
+    FReserve: Fn(usize) -> ByteSequenceBuilder + Send + Sync + 'static,
 {
     #[cfg_attr(test, mutants::skip)] // We have no API contract for this.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
-            .field("reserve_fn", &"Fn(usize) -> SequenceBuilder")
+            .field("reserve_fn", &"Fn(usize) -> ByteSequenceBuilder")
             .finish()
     }
 }
@@ -94,7 +94,7 @@ mod tests {
     use super::*;
     use crate::{MemoryShared, TransparentTestMemory};
 
-    assert_impl_all!(CallbackMemory<fn(usize) -> SequenceBuilder>: MemoryShared);
+    assert_impl_all!(CallbackMemory<fn(usize) -> ByteSequenceBuilder>: MemoryShared);
 
     #[test]
     fn calls_back_to_provided_fn() {
@@ -151,7 +151,7 @@ mod tests {
         assert!(debug_output.contains("CallbackMemory"), "Debug output should contain type name");
         assert!(debug_output.contains("reserve_fn"), "Debug output should contain field name");
         assert!(
-            debug_output.contains("Fn(usize) -> SequenceBuilder"),
+            debug_output.contains("Fn(usize) -> ByteSequenceBuilder"),
             "Debug output should contain function signature description"
         );
     }

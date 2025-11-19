@@ -4,7 +4,7 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use byte_sequences::{NeutralMemoryPool, Sequence};
+use byte_sequences::{ByteSequence, NeutralMemoryPool};
 use bytes::BufMut;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use testing_aids::repeating_incrementing_bytes;
@@ -55,7 +55,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("copy_from_slice", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_thread();
-            Sequence::copy_from_slice(&test_data, &warm_memory)
+            ByteSequence::copy_from_slice(&test_data, &warm_memory)
         });
     });
 
@@ -65,7 +65,7 @@ fn entrypoint(c: &mut Criterion) {
             NeutralMemoryPool::new,
             |memory| {
                 let _span = allocs_op.measure_thread();
-                Sequence::copy_from_slice(&test_data, &memory)
+                ByteSequence::copy_from_slice(&test_data, &memory)
             },
             BatchSize::LargeInput,
         );

@@ -5,7 +5,7 @@
 //! strategy that obtains memory from a memory provider specific to a particular purpose, with
 //! a configuration optimal for that purpose.
 
-use byte_sequences::{CallbackMemory, HasMemory, Memory, MemoryShared, Sequence, SequenceBuilder, TransparentTestMemory};
+use byte_sequences::{ByteSequence, ByteSequenceBuilder, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::BufMut;
 
 fn main() {
@@ -48,7 +48,7 @@ impl UdpConnection {
         clippy::needless_pass_by_value,
         reason = "for example realism"
     )]
-    pub fn write(&mut self, packet: Sequence) {
+    pub fn write(&mut self, packet: ByteSequence) {
         // Note: making use of optimally configured memory may need some additional logic here.
         // This is out of scope of this example, because this example targets targeting how to
         // implement HasMemory. See `mem_optimal_path.rs` for an example of a type that
@@ -89,7 +89,7 @@ impl IoContext {
     }
 
     #[expect(clippy::unused_self, reason = "for example realism")]
-    pub fn reserve_io_memory(&self, min_len: usize, _memory_configuration: MemoryConfiguration) -> SequenceBuilder {
+    pub fn reserve_io_memory(&self, min_len: usize, _memory_configuration: MemoryConfiguration) -> ByteSequenceBuilder {
         // This is a wrong way to implement this! Only to make the example compile.
         let memory = TransparentTestMemory::new();
         memory.reserve(min_len)

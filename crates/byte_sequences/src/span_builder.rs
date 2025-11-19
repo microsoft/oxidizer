@@ -45,7 +45,7 @@ use crate::{BlockRef, BlockSize, Span};
 /// of the memory block (the part that has not been detached as a `Span`).
 ///
 /// Note: `Span` and `SpanBuilder` are private APIs and not exposed in the public API
-/// surface. The public API only works with `Sequence` and `SequenceBuilder`.
+/// surface. The public API only works with `ByteSequence` and `ByteSequenceBuilder`.
 ///
 /// Memory blocks are reference counted to avoid lifetime parameter pollution and provide
 /// flexibility in usage. This also implies that we are not using the Rust borrow checker to
@@ -56,7 +56,7 @@ use crate::{BlockRef, BlockSize, Span};
 /// 1. The only way to write to a memory block is to own a [`SpanBuilder`] that can be used
 ///    to append data to the block on the fly via `bytes::BufMut` or to read into the block
 ///    via elementary I/O operations issued to the operating system (typically via participating
-///    in a [`SequenceBuilder`][crate::SequenceBuilder] vectored read that fills multiple memory blocks simultaneously).
+///    in a [`ByteSequenceBuilder`][crate::ByteSequenceBuilder] vectored read that fills multiple memory blocks simultaneously).
 /// 2. Reading from a memory block is only possible once the block (or a slice of it) has been
 ///    filled with data and the filled region separated into a [`Span`], detaching it from
 ///    the [`SpanBuilder`]. At this point further mutation of the detached slice is impossible.

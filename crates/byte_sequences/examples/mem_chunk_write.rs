@@ -11,7 +11,7 @@
 
 use std::ptr;
 
-use byte_sequences::{NeutralMemoryPool, SequenceBuilder};
+use byte_sequences::{ByteSequenceBuilder, NeutralMemoryPool};
 use bytes::BufMut;
 
 const LUCKY_NUMBER: usize = 8888;
@@ -38,7 +38,7 @@ fn main() {
     );
 }
 
-fn emit_favorite_color(sequence_builder: &mut SequenceBuilder) {
+fn emit_favorite_color(sequence_builder: &mut ByteSequenceBuilder) {
     assert!(sequence_builder.has_remaining_mut(), "no remaining capacity in sequence builder");
 
     let mut payload_to_write = FAVORITE_COLOR;

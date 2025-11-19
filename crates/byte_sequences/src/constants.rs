@@ -6,7 +6,7 @@
 pub(crate) const ERR_POISONED_LOCK: &str =
     "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
 
-/// If a `Sequence` or `SequenceBuilder` needs to track no more than this many spans, its metadata
+/// If a `ByteSequence` or `ByteSequenceBuilder` needs to track no more than this many spans, its metadata
 /// (and only its metadata) will be entirely allocated inline, without a separate heap allocation.
 ///
 /// The idea is that a typical byte sequence is short and at most experiences non-contiguous memory

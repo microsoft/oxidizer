@@ -3,7 +3,7 @@
 
 use std::num::NonZero;
 
-use crate::{BlockSize, Memory, SequenceBuilder, std_alloc_block};
+use crate::{BlockSize, ByteSequenceBuilder, Memory, std_alloc_block};
 
 /// A memory provider that simply delegates 1:1 to the Rust global allocator.
 ///
@@ -28,14 +28,14 @@ impl TransparentTestMemory {
     }
 
     /// Reserves `len` bytes of mutable memory, returning an empty
-    /// [`SequenceBuilder`] whose capacity is backed by the reserved memory.
+    /// [`ByteSequenceBuilder`] whose capacity is backed by the reserved memory.
     ///
     /// The memory reservation request will always be fulfilled, obtaining more memory from the
     /// operating system if necessary.
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`SequenceBuilder`]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
@@ -43,21 +43,21 @@ impl TransparentTestMemory {
     /// May panic if the operating system runs out of memory.
     #[must_use]
     #[expect(clippy::unused_self, reason = "for potential future functionality enrichment")]
-    pub fn reserve(&self, len: usize) -> crate::SequenceBuilder {
+    pub fn reserve(&self, len: usize) -> crate::ByteSequenceBuilder {
         reserve(len)
     }
 }
 
 impl Memory for TransparentTestMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         self.reserve(min_bytes)
     }
 }
 
-fn reserve(min_bytes: usize) -> crate::SequenceBuilder {
+fn reserve(min_bytes: usize) -> crate::ByteSequenceBuilder {
     let Some(min_bytes) = NonZero::new(min_bytes) else {
-        return SequenceBuilder::default();
+        return ByteSequenceBuilder::default();
     };
 
     let block_count = min_bytes.get().div_ceil(BlockSize::MAX as usize);
@@ -80,7 +80,7 @@ fn reserve(min_bytes: usize) -> crate::SequenceBuilder {
         blocks.push(std_alloc_block::allocate(bytes_in_block));
     }
 
-    SequenceBuilder::from_blocks(blocks)
+    ByteSequenceBuilder::from_blocks(blocks)
 }
 
 #[cfg(test)]
@@ -123,6 +123,6 @@ mod tests {
         assert_eq!(sb.capacity(), 5_000_000_000);
 
         // NB! We cannot simply check the first chunk length because there is no guarantee on which
-        // order a SequenceBuilder consumes its blocks in - the first might not be u32::MAX here!
+        // order a ByteSequenceBuilder consumes its blocks in - the first might not be u32::MAX here!
     }
 }

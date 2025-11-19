@@ -13,7 +13,7 @@ use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use new_zealand::nz;
 
 use crate::constants::ERR_POISONED_LOCK;
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory, SequenceBuilder};
+use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, ByteSequenceBuilder, Memory};
 
 /// A memory pool for general-purpose memory used for storage/processing of byte sequences.
 #[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
@@ -45,7 +45,7 @@ impl NeutralMemoryPool {
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`SequenceBuilder`] that can be used to fill the reserved memory with data.
+    /// Returns an empty [`ByteSequenceBuilder`] that can be used to fill the reserved memory with data.
     ///
     /// The memory provider may provide more memory than requested.
     ///
@@ -54,21 +54,21 @@ impl NeutralMemoryPool {
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`SequenceBuilder`]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
     ///
     /// May panic if the operating system runs out of memory.
     #[must_use]
-    pub fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    pub fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         self.inner.reserve(min_bytes)
     }
 }
 
 impl Memory for NeutralMemoryPool {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         self.reserve(min_bytes)
     }
 }
@@ -107,7 +107,7 @@ impl NeutralMemoryPoolInner {
         }
     }
 
-    fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         let block_count = min_bytes.div_ceil(BLOCK_SIZE_BYTES.get() as usize);
 
         let mut pool = self.block_pool.lock().expect(ERR_POISONED_LOCK);
@@ -157,7 +157,7 @@ impl NeutralMemoryPoolInner {
         })
         .take(block_count);
 
-        SequenceBuilder::from_blocks(blocks)
+        ByteSequenceBuilder::from_blocks(blocks)
     }
 }
 

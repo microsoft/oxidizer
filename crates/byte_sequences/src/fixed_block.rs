@@ -5,7 +5,7 @@ use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
-use crate::{BlockSize, Memory, SequenceBuilder, std_alloc_block};
+use crate::{BlockSize, ByteSequenceBuilder, Memory, std_alloc_block};
 
 /// A memory provider that cuts the memory allocation into blocks of fixed size
 /// and delegates to the Rust global allocator for allocating those blocks.
@@ -30,7 +30,7 @@ impl FixedBlockTestMemory {
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`SequenceBuilder`] that can be used to fill the reserved memory with data.
+    /// Returns an empty [`ByteSequenceBuilder`] that can be used to fill the reserved memory with data.
     ///
     /// The memory provider may provide more memory than requested.
     ///
@@ -39,21 +39,21 @@ impl FixedBlockTestMemory {
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`SequenceBuilder`]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
     ///
     /// May panic if the operating system runs out of memory.
     #[must_use]
-    pub fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    pub fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         self.inner.reserve(min_bytes)
     }
 }
 
 impl Memory for FixedBlockTestMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         self.reserve(min_bytes)
     }
 }
@@ -71,16 +71,16 @@ impl FixedBlockTestMemoryInner {
 }
 
 impl FixedBlockTestMemoryInner {
-    fn reserve(&self, min_bytes: usize) -> crate::SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
         let Some(min_bytes) = NonZero::new(min_bytes) else {
-            return SequenceBuilder::default();
+            return ByteSequenceBuilder::default();
         };
 
         let blocks_required = min_bytes.get().div_ceil(self.block_size.get() as usize);
 
         let blocks = iter::repeat_with(|| std_alloc_block::allocate(self.block_size)).take(blocks_required);
 
-        SequenceBuilder::from_blocks(blocks)
+        ByteSequenceBuilder::from_blocks(blocks)
     }
 }
 
@@ -90,7 +90,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::{MemoryShared, Sequence};
+    use crate::{ByteSequence, MemoryShared};
 
     assert_impl_all!(FixedBlockTestMemory: MemoryShared);
 
@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(sb.len(), 0);
         assert_eq!(sb.capacity(), 0);
 
-        let mut sequence = Sequence::copy_from_slice(b"Hello, world", &memory);
+        let mut sequence = ByteSequence::copy_from_slice(b"Hello, world", &memory);
         assert_eq!(sequence, b"Hello, world");
 
         assert_eq!(sequence.chunk().len(), 1);

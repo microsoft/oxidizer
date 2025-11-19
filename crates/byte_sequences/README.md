@@ -1,7 +1,7 @@
 <div align="center">
- <img src="./logo.png" alt="Byte Sequence Logo" width="128">
+ <img src="./logo.png" alt="Byte ByteSequence Logo" width="128">
 
-# Byte Sequence
+# Byte ByteSequence
 
 [![crate.io](https://img.shields.io/crates/v/byte_sequences.svg)](https://crates.io/crates/byte_sequences)
 [![docs.rs](https://docs.rs/byte_sequences/badge.svg)](https://docs.rs/byte_sequences)
@@ -13,10 +13,10 @@
 </div>
 
 * [Summary](#summary)
-* [Consuming Byte Sequences](#consuming-byte-sequences)
-* [Producing Byte Sequences](#producing-byte-sequences)
-* [Automatically Extending Sequence Builder Capacity](#automatically-extending-sequence-builder-capacity)
-* [Implementing APIs that Consume Byte Sequences](#implementing-apis-that-consume-byte-sequences)
+* [Consuming Byte ByteSequences](#consuming-byte-sequences)
+* [Producing Byte ByteSequences](#producing-byte-sequences)
+* [Automatically Extending ByteSequence Builder Capacity](#automatically-extending-sequence-builder-capacity)
+* [Implementing APIs that Consume Byte ByteSequences](#implementing-apis-that-consume-byte-sequences)
 * [Compatibility with the `bytes` Crate](#compatibility-with-the-bytes-crate)
 * [Static Data](#static-data)
 * [Testing](#testing)
@@ -27,21 +27,21 @@
 
 Types for producing or consuming byte sequences.
 
-A byte sequence (or simply [`Sequence`]) is a logical sequence of zero or more bytes
+A byte sequence (or simply [`ByteSequence`]) is a logical sequence of zero or more bytes
 stored in memory, similar to a slice `&[u8]` but with some key differences:
 
 * The bytes in a sequence are not required to be consecutive in memory.
-* The bytes in a byte sequence are always immutable, even if you own the [`Sequence`].
+* The bytes in a byte sequence are always immutable, even if you own the [`ByteSequence`].
 
 In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
 treated as one logical sequence of bytes. The types in this crate provide a way to work with
 byte sequences using an API that is reasonably convenient while also being compatible with
 the requirements of high-performance zero-copy I/O operations.
 
-## Consuming Byte Sequences
+## Consuming Byte ByteSequences
 
-The standard model for using bytes of data from a [`Sequence`] is to consume them via the
-[`bytes::buf::Buf`][17] trait, which is implemented by [`Sequence`].
+The standard model for using bytes of data from a [`ByteSequence`] is to consume them via the
+[`bytes::buf::Buf`][17] trait, which is implemented by [`ByteSequence`].
 
 There are many helper methods on this trait that will read bytes from the beginning of the
 sequence and simultaneously remove the read bytes from the sequence, shrinking it to only
@@ -49,9 +49,9 @@ the remaining bytes.
 
 ```rust
 use bytes::Buf;
-use byte_sequences::Sequence;
+use byte_sequences::ByteSequence;
 
-fn consume_message(mut message: Sequence) {
+fn consume_message(mut message: ByteSequence) {
     // We read the message and calculate the sum of all the words in it.
     let mut sum: u64 = 0;
 
@@ -79,7 +79,7 @@ more fundamental methods of the [`bytes::buf::Buf`][17] trait such as:
 
 ```rust
 use bytes::Buf;
-use byte_sequences::Sequence;
+use byte_sequences::ByteSequence;
 
 let len = sequence.len();
 let mut chunk_lengths = Vec::new();
@@ -100,7 +100,7 @@ zero-copy operation.
 
 ```rust
 use bytes::Buf;
-use byte_sequences::Sequence;
+use byte_sequences::ByteSequence;
 
 assert_eq!(sequence.len(), 16);
 
@@ -114,7 +114,7 @@ assert_eq!(sequence_clone.len(), 8);
 assert_eq!(sequence.len(), 16);
 ```
 
-## Producing Byte Sequences
+## Producing Byte ByteSequences
 
 For creating a byte sequence, you first need some memory capacity to put the bytes into. This
 means you need a memory provider, which is a type that implements the [`Memory`] trait.
@@ -134,7 +134,7 @@ from the following list:
    with no framework), you can create your own instance via `NeutralMemoryPool::new()`.
 
 Once you have a memory provider, you can reserve memory from it by calling
-[`Memory::reserve()`][14] on it. This returns a [`SequenceBuilder`] with the requested
+[`Memory::reserve()`][14] on it. This returns a [`ByteSequenceBuilder`] with the requested
 memory capacity.
 
 ```rust
@@ -145,9 +145,9 @@ let memory = connection.memory();
 let mut sequence_builder = memory.reserve(100);
 ```
 
-Now that you have the memory capacity and a [`SequenceBuilder`], you can fill the memory
+Now that you have the memory capacity and a [`ByteSequenceBuilder`], you can fill the memory
 capacity with bytes of data. The standard pattern for this is to use the
-[`bytes::buf::BufMut`][20] trait, which is implemented by [`SequenceBuilder`].
+[`bytes::buf::BufMut`][20] trait, which is implemented by [`ByteSequenceBuilder`].
 
 Helper methods on this trait allow you to write bytes to the sequence builder up to the
 extent of the reserved memory capacity.
@@ -180,7 +180,7 @@ using the more fundamental methods of the [`bytes::buf::BufMut`][20] trait such 
 See `examples/mem_chunk_write.rs` for an example of how to use these methods.
 
 If you do not know exactly how much memory you need in advance, you can extend the sequence
-builder capacity on demand if you run out by calling [`SequenceBuilder::reserve()`][13],
+builder capacity on demand if you run out by calling [`ByteSequenceBuilder::reserve()`][13],
 which will reserve more memory capacity. You can use [`bytes::buf::BufMut::remaining_mut()`][26]
 on the sequence builder to identify how much unused memory capacity is available for writing.
 
@@ -203,7 +203,7 @@ assert!(sequence_builder.remaining_mut() >= 80);
 ```
 
 When you have filled the memory capacity with the bytes you wanted to write, you can consume
-the data in the sequence builder, turning it into a [`Sequence`] of immutable bytes.
+the data in the sequence builder, turning it into a [`ByteSequence`] of immutable bytes.
 
 ```rust
 use bytes::buf::BufMut;
@@ -242,8 +242,8 @@ sequence_builder.put(b"Hello, world!".as_slice());
 let final_contents = sequence_builder.consume_all();
 ```
 
-If you already have a [`Sequence`] that you want to write into a [`SequenceBuilder`], call
-[`SequenceBuilder::append()`][26]. This is a highly efficient zero-copy operation
+If you already have a [`ByteSequence`] that you want to write into a [`ByteSequenceBuilder`], call
+[`ByteSequenceBuilder::append()`][26]. This is a highly efficient zero-copy operation
 that reuses the memory capacity of the sequence you are appending.
 
 ```rust
@@ -265,11 +265,11 @@ Note that there is no requirement that the memory capacity of the sequence build
 memory capacity of the sequence being appended come from the same memory provider. It is valid
 to mix and match memory from different providers, though this may disable some optimizations.
 
-## Automatically Extending Sequence Builder Capacity
+## Automatically Extending ByteSequence Builder Capacity
 
-See `Work Item 5840368: Support automatically extending SequenceBuilder via Writer trait`
+See `Work Item 5840368: Support automatically extending ByteSequenceBuilder via Writer trait`
 
-## Implementing APIs that Consume Byte Sequences
+## Implementing APIs that Consume Byte ByteSequences
 
 If you are implementing a type that accepts byte sequences, you should implement the
 [`HasMemory`] trait to make it possible for the caller to use optimally
@@ -297,7 +297,7 @@ Example of forwarding the memory provider (see `examples/mem_has_provider_forwar
 for full code):
 
 ```rust
-use byte_sequences::{HasMemory, MemoryShared, Sequence};
+use byte_sequences::{HasMemory, MemoryShared, ByteSequence};
 
 /// Counts the number of 0x00 bytes in a sequence before
 /// writing that sequence to a network connection.
@@ -322,7 +322,7 @@ impl ConnectionZeroCounter {
         }
     }
 
-    pub fn write(&mut self, sequence: Sequence) {
+    pub fn write(&mut self, sequence: ByteSequence) {
         // TODO: Count zeros.
 
         self.connection.write(sequence);
@@ -342,7 +342,7 @@ Example of returning a memory provider that performs configuration for optimal m
 `examples/mem_has_provider_optimizing.rs` for full code):
 
 ```rust
-use byte_sequences::{CallbackMemory, HasMemory, MemoryShared, Sequence};
+use byte_sequences::{CallbackMemory, HasMemory, MemoryShared, ByteSequence};
 
 /// # Implementation strategy for `HasMemory`
 ///
@@ -435,9 +435,9 @@ Example of identifying whether a byte sequence uses the optimal memory configura
 `examples/mem_optimal_path.rs` for full code):
 
 ```rust
-use byte_sequences::Sequence;
+use byte_sequences::ByteSequence;
 
-pub fn write(&mut self, message: Sequence) {
+pub fn write(&mut self, message: ByteSequence) {
     // We now need to identify whether the message actually uses memory that allows us to
     // ues the optimal I/O path. There is no requirement that the data passed to us contains
     // only memory with our preferred configuration.
@@ -474,14 +474,14 @@ checked for compatibility.
 
 The popular [`Bytes`][18] type from the `bytes` crate is often used in the Rust ecosystem to
 represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
-type, this crate offers conversion methods to translate between [`Sequence`] and [`Bytes`][18]:
+type, this crate offers conversion methods to translate between [`ByteSequence`] and [`Bytes`][18]:
 
-* [`Sequence::into_bytes()`][16] converts a [`Sequence`] into a [`Bytes`][18] instance. This
+* [`ByteSequence::into_bytes()`][16] converts a [`ByteSequence`] into a [`Bytes`][18] instance. This
   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
   You are discouraged from using this method in any performance-relevant logic path.
-* See `Work Item 5861368: Sequence::into_bytes_iter()`
-* `Sequence::from(Bytes)` or `let s: Sequence = bytes.into()` converts a [`Bytes`][18] instance
-  into a [`Sequence`]. This is an efficient zero-copy operation that reuses the memory of the
+* See `Work Item 5861368: ByteSequence::into_bytes_iter()`
+* `ByteSequence::from(Bytes)` or `let s: ByteSequence = bytes.into()` converts a [`Bytes`][18] instance
+  into a [`ByteSequence`]. This is an efficient zero-copy operation that reuses the memory of the
   `Bytes` instance.
 
 ## Static Data
@@ -498,42 +498,42 @@ Optimal processing of static data requires satisfying multiple requirements:
 * We want to use memory that is optimally configured for the context in which the data is
   consumed (e.g. network connection, file, etc).
 
-The standard pattern here is to use [`OnceLock`][27] to lazily initialize a [`Sequence`] from
+The standard pattern here is to use [`OnceLock`][27] to lazily initialize a [`ByteSequence`] from
 the static data on first use, using memory from a memory provider that is optimal for the
 intended usage.
 
 ```rust
 use std::sync::OnceLock;
-use byte_sequences::Sequence;
+use byte_sequences::ByteSequence;
 
 const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";
 
-// We transform the static data into a Sequence on first use, via OnceLock.
+// We transform the static data into a ByteSequence on first use, via OnceLock.
 //
 // You are expected to reuse this variable as long as the context does not change.
 // For example, it is typically fine to share this across multiple network connections
 // because they all likely use the same memory configuration. However, writing to files
 // may require a different memory configuration for optimality, so you would need a different
-// `Sequence` for that. Such details will typically be documented in the API documentation
-// of the type that consumes the `Sequence` (e.g. a network connection or a file writer).
-let header_prefix = OnceLock::<Sequence>::new();
+// `ByteSequence` for that. Such details will typically be documented in the API documentation
+// of the type that consumes the `ByteSequence` (e.g. a network connection or a file writer).
+let header_prefix = OnceLock::<ByteSequence>::new();
 
 for _ in 0..10 {
     let mut connection = Connection::accept();
 
-    // The static data is transformed into a Sequence on first use,
+    // The static data is transformed into a ByteSequence on first use,
     // using memory optimally configured for a network connection.
     let header_prefix = header_prefix
-        .get_or_init(|| Sequence::copy_from_slice(HEADER_PREFIX, &connection.memory()));
+        .get_or_init(|| ByteSequence::copy_from_slice(HEADER_PREFIX, &connection.memory()));
 
-    // Now we can use the `header_prefix` Sequence in the connection logic.
-    // Cloning a Sequence is a cheap zero-copy operation.
+    // Now we can use the `header_prefix` ByteSequence in the connection logic.
+    // Cloning a ByteSequence is a cheap zero-copy operation.
     connection.write(header_prefix.clone());
 }
 ```
 
 Different usages (e.g. file vs network) may require differently configured memory for optimal
-performance, so you may need a different `Sequence` if the same static data is to be used
+performance, so you may need a different `ByteSequence` if the same static data is to be used
 in different contexts.
 
 ## Testing
@@ -549,9 +549,9 @@ processing in your code:
   you want to ensure that your code works well even if a byte sequence consists of
   non-consecutive memory. You can go down to as low as 1 byte per block!
 
-[13]: SequenceBuilder::reserve
+[13]: ByteSequenceBuilder::reserve
 [14]: Memory::reserve
-[16]: Sequence::into_bytes
+[16]: ByteSequence::into_bytes
 [17]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
 [18]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 [20]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html

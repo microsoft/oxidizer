@@ -10,32 +10,33 @@ use bytes::{Buf, BufMut};
 use smallvec::SmallVec;
 
 use crate::{
-    Block, BlockSize, InspectSpanBuilderData, MAX_INLINE_SPANS, Memory, MemoryGuard, Sequence, SequenceBuilderWrite, Span, SpanBuilder,
+    Block, BlockSize, ByteSequence, ByteSequenceBuilderWrite, InspectSpanBuilderData, MAX_INLINE_SPANS, Memory, MemoryGuard, Span,
+    SpanBuilder,
 };
 
 /// Owns some memory capacity in which it allows you to place a sequence of bytes that
-/// you can thereafter extract as one or more [`Sequence`]s.
+/// you can thereafter extract as one or more [`ByteSequence`]s.
 ///
-/// The capacity of the `SequenceBuilder` must be reserved in advance via [`reserve()`][3] before
+/// The capacity of the `ByteSequenceBuilder` must be reserved in advance via [`reserve()`][3] before
 /// you can fill it with data.
 ///
 /// # Memory capacity
 ///
-/// A single `SequenceBuilder` can use memory capacity from any [memory provider][7], including a
-/// mix of different memory providers for the same `SequenceBuilder` instance. All methods that
+/// A single `ByteSequenceBuilder` can use memory capacity from any [memory provider][7], including a
+/// mix of different memory providers for the same `ByteSequenceBuilder` instance. All methods that
 /// extend the memory capacity require the caller to provide a reference to the memory provider.
 ///
 /// # Conceptual design
 ///
-/// The memory owned by a `SequenceBuilder` (its capacity) can be viewed as two regions:
+/// The memory owned by a `ByteSequenceBuilder` (its capacity) can be viewed as two regions:
 ///
 /// * Filled memory - these bytes have been written to but have not yet been consumed as a
-///   [`Sequence`]. They may be inspected (via [`inspect()`][4]) or consumed (via [`consume()`][5]).
+///   [`ByteSequence`]. They may be inspected (via [`inspect()`][4]) or consumed (via [`consume()`][5]).
 /// * Available memory - these bytes have not yet been written to and are available for writing via
 ///   [`bytes::buf::BufMut`][1] or [`begin_vectored_write()`][Self::begin_vectored_write].
 ///
-/// Existing [`Sequence`]s can be appended to the [`SequenceBuilder`] via [`append()`][6] without
-/// consuming capacity (each appended [`Sequence`] brings its own backing memory capacity).
+/// Existing [`ByteSequence`]s can be appended to the [`ByteSequenceBuilder`] via [`append()`][6] without
+/// consuming capacity (each appended [`ByteSequence`] brings its own backing memory capacity).
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
 /// [1]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
@@ -45,7 +46,7 @@ use crate::{
 /// [6]: Self::append
 /// [7]: crate::Memory
 #[derive(Default)]
-pub struct SequenceBuilder {
+pub struct ByteSequenceBuilder {
     // The frozen spans are at the front of the sequence being built and have already become
     // immutable (or already arrived in that form). They will be consumed first.
     //
@@ -94,7 +95,7 @@ pub struct SequenceBuilder {
     available: usize,
 }
 
-impl SequenceBuilder {
+impl ByteSequenceBuilder {
     /// Creates an instance with 0 bytes of capacity.
     #[must_use]
     pub fn new() -> Self {
@@ -104,11 +105,11 @@ impl SequenceBuilder {
     /// Creates an instance that takes exclusive ownership of the capacity in the
     /// provided memory blocks.
     ///
-    /// This is used by implementations of memory providers. To obtain a `SequenceBuilder` with
+    /// This is used by implementations of memory providers. To obtain a `ByteSequenceBuilder` with
     /// available memory capacity, you need to use an implementation of [`Memory`] that
-    /// provides you instances of `SequenceBuilder`.
+    /// provides you instances of `ByteSequenceBuilder`.
     ///
-    /// There is no guarantee that the `SequenceBuilder` uses the blocks in the order provided to
+    /// There is no guarantee that the `ByteSequenceBuilder` uses the blocks in the order provided to
     /// this function. Blocks may be used in any order.
     pub fn from_blocks<I>(blocks: I) -> Self
     where
@@ -172,7 +173,7 @@ impl SequenceBuilder {
     /// This automatically extends the builder's capacity with the memory capacity used of the
     /// appended sequence, for a net zero change in remaining available capacity.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn append(&mut self, sequence: Sequence) {
+    pub fn append(&mut self, sequence: ByteSequence) {
         if !sequence.has_remaining() {
             return;
         }
@@ -198,7 +199,7 @@ impl SequenceBuilder {
             .checked_add(sequence_len)
             .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
 
-        // Any appended Sequence is frozen by definition, as contents of a Sequence are immutable.
+        // Any appended ByteSequence is frozen by definition, as contents of a ByteSequence are immutable.
         self.frozen = self
             .frozen
             .checked_add(sequence_len)
@@ -208,7 +209,7 @@ impl SequenceBuilder {
     /// Inspects the contents of the filled bytes region of the sequence builder.
     /// Typically used to identify whether and which contents may be consumed.
     #[must_use]
-    pub fn inspect(&self) -> SequenceBuilderInspector<'_, '_> {
+    pub fn inspect(&self) -> ByteSequenceBuilderInspector<'_, '_> {
         let cursor = if !self.frozen_spans.is_empty() {
             InspectCursor::FrozenSpan {
                 span_index: 0,
@@ -223,7 +224,7 @@ impl SequenceBuilder {
             InspectCursor::End
         };
 
-        SequenceBuilderInspector {
+        ByteSequenceBuilderInspector {
             builder: self,
             cursor,
             remaining: self.len(),
@@ -283,22 +284,22 @@ impl SequenceBuilder {
     }
 
     /// Consumes `len` bytes from the beginning of the filled bytes region,
-    /// returning a [`Sequence`] with those bytes.
+    /// returning a [`ByteSequence`] with those bytes.
     ///
     /// # Panics
     ///
     /// Panics if the filled bytes region does not contain at least `len` bytes.
-    pub fn consume(&mut self, len: usize) -> Sequence {
+    pub fn consume(&mut self, len: usize) -> ByteSequence {
         self.consume_checked(len)
             .expect("attempted to consume more bytes than available in builder")
     }
 
     /// Consumes `len` bytes from the beginning of the filled bytes region,
-    /// returning a [`Sequence`] with those bytes.
+    /// returning a [`ByteSequence`] with those bytes.
     ///
     /// Returns `None` if the filled bytes region does not contain at least `len` bytes.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn consume_checked(&mut self, len: usize) -> Option<Sequence> {
+    pub fn consume_checked(&mut self, len: usize) -> Option<ByteSequence> {
         if len > self.len() {
             return None;
         }
@@ -328,14 +329,14 @@ impl SequenceBuilder {
         }
 
         // We extend the result spans with the (storage-order) fully detached spans.
-        // SequenceBuilder stores the frozen spans in content order, so we must reverse.
+        // ByteSequenceBuilder stores the frozen spans in content order, so we must reverse.
         result_spans_reversed.extend(self.frozen_spans.drain(..manifest.detach_complete_frozen_spans).rev());
 
         self.len = self.len.checked_sub(len).expect("guarded by if-block above");
 
         self.frozen = self.frozen.checked_sub(len).expect("any data consumed must have first been frozen");
 
-        Some(Sequence::from_spans_reversed(result_spans_reversed))
+        Some(ByteSequence::from_spans_reversed(result_spans_reversed))
     }
 
     fn prepare_consume(&self, mut len: usize) -> ConsumeManifest {
@@ -372,8 +373,8 @@ impl SequenceBuilder {
         }
     }
 
-    /// Consumes all filled bytes (if any), returning a [`Sequence`] with those bytes.
-    pub fn consume_all(&mut self) -> Sequence {
+    /// Consumes all filled bytes (if any), returning a [`ByteSequence`] with those bytes.
+    pub fn consume_all(&mut self) -> ByteSequence {
         self.consume_checked(self.len()).unwrap_or_default()
     }
 
@@ -506,7 +507,7 @@ impl SequenceBuilder {
     /// # Panics
     ///
     /// Panics if `max_len` is greater than the remaining capacity of the sequence builder.
-    pub fn begin_vectored_write(&mut self, max_len: Option<usize>) -> SequenceBuilderVectoredWrite<'_> {
+    pub fn begin_vectored_write(&mut self, max_len: Option<usize>) -> ByteSequenceBuilderVectoredWrite<'_> {
         self.begin_vectored_write_checked(max_len)
             .expect("attempted to begin a vectored write with a max_len that was greater than the remaining capacity")
     }
@@ -522,20 +523,20 @@ impl SequenceBuilder {
     /// # Returns
     ///
     /// Returns `None` if `max_len` is greater than the remaining capacity of the sequence builder.
-    pub fn begin_vectored_write_checked(&mut self, max_len: Option<usize>) -> Option<SequenceBuilderVectoredWrite<'_>> {
+    pub fn begin_vectored_write_checked(&mut self, max_len: Option<usize>) -> Option<ByteSequenceBuilderVectoredWrite<'_>> {
         if let Some(max_len) = max_len
             && max_len > self.remaining_mut()
         {
             return None;
         }
 
-        Some(SequenceBuilderVectoredWrite { builder: self, max_len })
+        Some(ByteSequenceBuilderVectoredWrite { builder: self, max_len })
     }
 
-    fn iter_available_capacity(&mut self, max_len: Option<usize>) -> SequenceBuilderAvailableIterator<'_> {
+    fn iter_available_capacity(&mut self, max_len: Option<usize>) -> ByteSequenceBuilderAvailableIterator<'_> {
         let next_span_builder_index = if self.span_builders_reversed.is_empty() { None } else { Some(0) };
 
-        SequenceBuilderAvailableIterator {
+        ByteSequenceBuilderAvailableIterator {
             builder: self,
             next_span_builder_index,
             max_len,
@@ -545,8 +546,8 @@ impl SequenceBuilder {
     /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
     /// backing memory capacity for this sequence builder.
     ///
-    /// This can be useful when unsafe code is used to reference the contents of a `SequenceBuilder`
-    /// and it is possible to reach a condition where the `SequenceBuilder` itself no longer exists,
+    /// This can be useful when unsafe code is used to reference the contents of a `ByteSequenceBuilder`
+    /// and it is possible to reach a condition where the `ByteSequenceBuilder` itself no longer exists,
     /// even though the contents are referenced (e.g. because this is happening in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
         MemoryGuard::new(
@@ -560,17 +561,17 @@ impl SequenceBuilder {
 
     /// Exposes the instance through the [`Write`][std::io::Write] trait.
     ///
-    /// The memory capacity of the `SequenceBuilder` will be automatically extended on demand
+    /// The memory capacity of the `ByteSequenceBuilder` will be automatically extended on demand
     /// with additional capacity from the supplied memory provider.
     #[inline]
     pub fn as_write<M: Memory>(&mut self, memory: &M) -> impl std::io::Write {
-        SequenceBuilderWrite::new(self, memory)
+        ByteSequenceBuilderWrite::new(self, memory)
     }
 }
 
 // SAFETY: The trait documentation does not define any safety requirements we need to fulfill.
 // It is unclear why the trait is marked unsafe in the first place.
-unsafe impl BufMut for SequenceBuilder {
+unsafe impl BufMut for ByteSequenceBuilder {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     #[inline]
     fn remaining_mut(&self) -> usize {
@@ -593,7 +594,7 @@ unsafe impl BufMut for SequenceBuilder {
     }
 }
 
-impl std::fmt::Debug for SequenceBuilder {
+impl std::fmt::Debug for ByteSequenceBuilder {
     #[cfg_attr(test, mutants::skip)] // We have no API contract here.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let frozen_spans = self.frozen_spans.iter().map(|x| x.len().to_string()).collect::<Vec<_>>().join(", ");
@@ -612,7 +613,7 @@ impl std::fmt::Debug for SequenceBuilder {
             .collect::<Vec<_>>()
             .join(", ");
 
-        f.debug_struct("SequenceBuilder")
+        f.debug_struct("ByteSequenceBuilder")
             .field("len", &self.len)
             .field("frozen", &self.frozen)
             .field("available", &self.available)
@@ -648,11 +649,11 @@ impl ConsumeManifest {
 /// Allows a sequence in the middle of being built to be inspected, typically to identify whether
 /// it contains the expected data that allows it (or a part of it) to be consumed.
 #[derive(Debug)]
-pub struct SequenceBuilderInspector<'b, 'i>
+pub struct ByteSequenceBuilderInspector<'b, 'i>
 where
     'b: 'i,
 {
-    builder: &'b SequenceBuilder,
+    builder: &'b ByteSequenceBuilder,
     cursor: InspectCursor<'i>,
     remaining: usize,
 }
@@ -665,7 +666,7 @@ enum InspectCursor<'i> {
     End,
 }
 
-impl Buf for SequenceBuilderInspector<'_, '_> {
+impl Buf for ByteSequenceBuilderInspector<'_, '_> {
     fn remaining(&self) -> usize {
         self.remaining
     }
@@ -778,38 +779,38 @@ impl Buf for SequenceBuilderInspector<'_, '_> {
 }
 
 /// A vectored write is an operation that concurrently writes data into multiple chunks
-/// of memory owned by a `SequenceBuilder`.
+/// of memory owned by a `ByteSequenceBuilder`.
 ///
-/// The operation takes exclusive ownership of the `SequenceBuilder`. During the vectored write,
-/// the remaining capacity of the `SequenceBuilder` is exposed as `MaybeUninit<u8>` slices
+/// The operation takes exclusive ownership of the `ByteSequenceBuilder`. During the vectored write,
+/// the remaining capacity of the `ByteSequenceBuilder` is exposed as `MaybeUninit<u8>` slices
 /// that at the end of the operation must be filled sequentially and in order, without gaps,
 /// in any desired amount (from 0 bytes written to all slices filled).
 ///
 /// The capacity used during the operation can optionally be limited to `max_len` bytes.
 ///
 /// The operation is completed by calling `.commit()` on the instance, after which the instance is
-/// consumed and the exclusive ownership of the `SequenceBuilder` released.
+/// consumed and the exclusive ownership of the `ByteSequenceBuilder` released.
 ///
 /// If the type is dropped without committing, the operation is aborted and all remaining capacity
 /// is left in a potentially uninitialized state.
 #[derive(Debug)]
-pub struct SequenceBuilderVectoredWrite<'a> {
-    builder: &'a mut SequenceBuilder,
+pub struct ByteSequenceBuilderVectoredWrite<'a> {
+    builder: &'a mut ByteSequenceBuilder,
     max_len: Option<usize>,
 }
 
-impl SequenceBuilderVectoredWrite<'_> {
+impl ByteSequenceBuilderVectoredWrite<'_> {
     /// Iterates over the chunks of available capacity in the sequence builder,
     /// allowing them to be filled with data.
-    pub fn iter_chunks_mut(&mut self) -> SequenceBuilderAvailableIterator<'_> {
+    pub fn iter_chunks_mut(&mut self) -> ByteSequenceBuilderAvailableIterator<'_> {
         self.builder.iter_available_capacity(self.max_len)
     }
 
     /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
     /// backing memory capacity for this sequence builder.
     ///
-    /// This can be useful when unsafe code is used to reference the contents of a `SequenceBuilder`
-    /// and it is possible to reach a condition where the `SequenceBuilder` itself no longer exists,
+    /// This can be useful when unsafe code is used to reference the contents of a `ByteSequenceBuilder`
+    /// and it is possible to reach a condition where the `ByteSequenceBuilder` itself no longer exists,
     /// even though the contents are referenced (e.g. because this is happening in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
         self.builder.extend_lifetime()
@@ -864,18 +865,18 @@ impl SequenceBuilderVectoredWrite<'_> {
 /// Iterates over the available capacity of a sequence builder as part of a vectored write
 /// operation, returning a sequence of `MaybeUninit<u8>` slices.
 #[derive(Debug)]
-pub struct SequenceBuilderAvailableIterator<'a> {
-    builder: &'a mut SequenceBuilder,
+pub struct ByteSequenceBuilderAvailableIterator<'a> {
+    builder: &'a mut ByteSequenceBuilder,
     next_span_builder_index: Option<usize>,
 
     // Self-imposed constraint on how much of the available capacity is made visible through
     // this iterator. This can be useful to limit the amount of data that can be written into
-    // a `SequenceBuilder` during a vectored write operation without having to limit the
-    // actual capacity of the `SequenceBuilder`.
+    // a `ByteSequenceBuilder` during a vectored write operation without having to limit the
+    // actual capacity of the `ByteSequenceBuilder`.
     max_len: Option<usize>,
 }
 
-impl<'a> Iterator for SequenceBuilderAvailableIterator<'a> {
+impl<'a> Iterator for ByteSequenceBuilderAvailableIterator<'a> {
     type Item = &'a mut [MaybeUninit<u8>];
 
     #[cfg_attr(test, mutants::skip)] // This gets mutated into an infinite loop which is not very helpful.
@@ -913,10 +914,10 @@ impl<'a> Iterator for SequenceBuilderAvailableIterator<'a> {
 
         // SAFETY: There is nothing Rust can do to promise the reference we return is valid for 'a
         // but we can make such a promise ourselves. In essence, returning the references with 'a
-        // this will extend the exclusive ownership of `SequenceBuilder` until all returned chunk
+        // this will extend the exclusive ownership of `ByteSequenceBuilder` until all returned chunk
         // references are dropped, even if the iterator itself is dropped earlier. We can do this
-        // because we know that to access the chunks requires a reference to the `SequenceBuilder`,
-        // so as long as a chunk reference exists, access via the `SequenceBuilder` is blocked.
+        // because we know that to access the chunks requires a reference to the `ByteSequenceBuilder`,
+        // so as long as a chunk reference exists, access via the `ByteSequenceBuilder` is blocked.
         // TODO: It would be good to have a (ui) test to verify this.
         let uninit_slice_mut = unsafe { mem::transmute::<&mut [MaybeUninit<u8>], &'a mut [MaybeUninit<u8>]>(&mut *uninit_slice_mut) };
 
@@ -945,8 +946,8 @@ impl<'a> Iterator for SequenceBuilderAvailableIterator<'a> {
     }
 }
 
-impl From<Sequence> for SequenceBuilder {
-    fn from(value: Sequence) -> Self {
+impl From<ByteSequence> for ByteSequenceBuilder {
+    fn from(value: ByteSequence) -> Self {
         let mut sb = Self::new();
         sb.append(value);
         sb
@@ -1029,7 +1030,7 @@ mod tests {
 
     #[test]
     fn extend() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1095,7 +1096,7 @@ mod tests {
         builder2.append(to_append2);
 
         // Appending an empty sequence does nothing.
-        builder2.append(Sequence::default());
+        builder2.append(ByteSequence::default());
 
         // Add some custom data at the end.
         builder2.put_u64(7777);
@@ -1114,7 +1115,7 @@ mod tests {
 
     #[test]
     fn consume_all_mixed() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Reserve some capacity and add initial data.
@@ -1126,7 +1127,7 @@ mod tests {
         let _ = builder.consume(8);
 
         // Append a sequence (the 3333).
-        let mut append_builder = SequenceBuilder::new();
+        let mut append_builder = ByteSequenceBuilder::new();
         append_builder.reserve(8, &memory);
         append_builder.put_u64(3333);
         let sequence = append_builder.consume_all();
@@ -1148,7 +1149,7 @@ mod tests {
     #[test]
     #[expect(clippy::cognitive_complexity, reason = "test code")]
     fn inspect_basic() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1238,7 +1239,7 @@ mod tests {
 
     #[test]
     fn consume_part_of_frozen_span() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1267,7 +1268,7 @@ mod tests {
 
     #[test]
     fn empty_builder() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
         assert!(builder.is_empty());
         assert!(!builder.inspect().has_remaining());
         assert_eq!(0, builder.chunk_mut().len());
@@ -1281,12 +1282,12 @@ mod tests {
 
     #[test]
     fn thread_safe_type() {
-        assert_impl_all!(SequenceBuilder: Send, Sync);
+        assert_impl_all!(ByteSequenceBuilder: Send, Sync);
     }
 
     #[test]
     fn iter_available_empty_with_capacity() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1317,7 +1318,7 @@ mod tests {
 
     #[test]
     fn iter_available_nonempty() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1363,7 +1364,7 @@ mod tests {
 
     #[test]
     fn iter_available_empty_no_capacity() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1372,7 +1373,7 @@ mod tests {
 
     #[test]
     fn vectored_write_zero() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1398,7 +1399,7 @@ mod tests {
 
     #[test]
     fn vectored_write_one_chunk() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1434,7 +1435,7 @@ mod tests {
 
     #[test]
     fn vectored_write_multiple_chunks() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1496,7 +1497,7 @@ mod tests {
 
     #[test]
     fn vectored_write_max_len() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1559,7 +1560,7 @@ mod tests {
 
     #[test]
     fn vectored_write_max_len_overflow() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
@@ -1575,7 +1576,7 @@ mod tests {
 
     #[test]
     fn vectored_write_overcommit() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1600,7 +1601,7 @@ mod tests {
 
     #[test]
     fn vectored_write_abort() {
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         assert_eq!(builder.capacity(), 0);
         assert_eq!(builder.remaining_mut(), 0);
@@ -1650,7 +1651,7 @@ mod tests {
             // SAFETY: We guarantee exclusive access to the memory capacity.
             let block2 = unsafe { block2.as_ref().to_block() };
 
-            let mut builder = SequenceBuilder::from_blocks([block1, block2]);
+            let mut builder = ByteSequenceBuilder::from_blocks([block1, block2]);
 
             // Freezes first span of 8, retains one span builder.
             builder.put_u64(1234);
@@ -1694,7 +1695,7 @@ mod tests {
             // SAFETY: We guarantee exclusive access to the memory capacity.
             let block2 = unsafe { block2.as_ref().to_block() };
 
-            let mut builder = SequenceBuilder::from_blocks([block1, block2]);
+            let mut builder = ByteSequenceBuilder::from_blocks([block1, block2]);
 
             // Freezes first span of 8, retains one span builder.
             builder.put_u64(1234);
@@ -1724,9 +1725,9 @@ mod tests {
     fn from_sequence() {
         let memory = NeutralMemoryPool::new();
 
-        let s1 = Sequence::copy_from_slice(b"bla bla bla", &memory);
+        let s1 = ByteSequence::copy_from_slice(b"bla bla bla", &memory);
 
-        let mut sb: SequenceBuilder = s1.clone().into();
+        let mut sb: ByteSequenceBuilder = s1.clone().into();
 
         let s2 = sb.consume_all();
 
@@ -1737,7 +1738,7 @@ mod tests {
     fn consume_manifest_correctly_calculated() {
         let memory = FixedBlockTestMemory::new(nz!(10));
 
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
         builder.reserve(100, &memory);
 
         // 32 bytes in 3 spans.
@@ -1794,14 +1795,14 @@ mod tests {
         // The point of this is not to say that we expect it to have a specific size but to allow
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
-        assert_eq!(size_of::<SequenceBuilder>(), 552);
+        assert_eq!(size_of::<ByteSequenceBuilder>(), 552);
     }
 
     #[test]
     fn debug_fmt_mixed_state() {
         let memory = FixedBlockTestMemory::new(nz!(8));
 
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
 
         // Reserve 2 blocks (16 bytes).
         // State: available=16, span_builders="8, 8"
@@ -1828,7 +1829,7 @@ mod tests {
 
         assert_eq!(
             debug_string,
-            "SequenceBuilder { len: 14, frozen: 12, available: 10, frozen_spans: \"8, 4\", span_builders: \"2 + 2, 8\" }"
+            "ByteSequenceBuilder { len: 14, frozen: 12, available: 10, frozen_spans: \"8, 4\", span_builders: \"2 + 2, 8\" }"
         );
     }
 
@@ -1836,7 +1837,7 @@ mod tests {
     fn inspect_advance_past_end_panics() {
         let memory = FixedBlockTestMemory::new(nz!(16));
 
-        let mut builder = SequenceBuilder::new();
+        let mut builder = ByteSequenceBuilder::new();
         builder.reserve(16, &memory);
 
         // Write some data.

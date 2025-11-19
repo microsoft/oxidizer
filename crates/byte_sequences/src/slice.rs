@@ -3,16 +3,16 @@
 
 use bytes::Bytes;
 
-use crate::Sequence;
+use crate::ByteSequence;
 
-impl From<&'static [u8]> for Sequence {
+impl From<&'static [u8]> for ByteSequence {
     fn from(value: &'static [u8]) -> Self {
         let bytes = Bytes::from_static(value);
         bytes.into()
     }
 }
 
-impl<const LEN: usize> From<&'static [u8; LEN]> for Sequence {
+impl<const LEN: usize> From<&'static [u8; LEN]> for ByteSequence {
     fn from(value: &'static [u8; LEN]) -> Self {
         value.as_slice().into()
     }
@@ -26,7 +26,7 @@ mod tests {
     fn from_slice() {
         let data: &'static [u8] = b"hello";
 
-        let seq = Sequence::from(data);
+        let seq = ByteSequence::from(data);
 
         assert_eq!(seq, data);
     }
@@ -35,7 +35,7 @@ mod tests {
     fn from_array() {
         let data = b"world";
 
-        let seq = Sequence::from(data);
+        let seq = ByteSequence::from(data);
 
         assert_eq!(seq, data);
     }

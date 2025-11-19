@@ -6,29 +6,29 @@ use std::io::Write;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use byte_sequences::{HasMemory, Memory, MemoryShared, Sequence, TransparentTestMemory};
+use byte_sequences::{ByteSequence, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::{Buf, BufMut};
 
 // We often want to write this static data to network connections.
 const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";
 
 fn main() {
-    // We transform the static data into a Sequence on first use, via OnceLock.
-    let header_prefix = OnceLock::<Sequence>::new();
+    // We transform the static data into a ByteSequence on first use, via OnceLock.
+    let header_prefix = OnceLock::<ByteSequence>::new();
 
     // Accept some connections and send a response to each of them.
     for _ in 0..10 {
         let mut connection = Connection::accept();
 
-        // The static data is transformed into a Sequence on first use,
+        // The static data is transformed into a ByteSequence on first use,
         // using memory optimally configured for a network connection.
-        let header_prefix = header_prefix.get_or_init(|| Sequence::copy_from_slice(HEADER_PREFIX, &connection.memory()));
+        let header_prefix = header_prefix.get_or_init(|| ByteSequence::copy_from_slice(HEADER_PREFIX, &connection.memory()));
 
-        // Note that reused Sequences do not consume any memory capacity from the builder,
+        // Note that reused ByteSequences do not consume any memory capacity from the builder,
         // so we only need to account for the timestamp bytes and the trailing CRLFs.
         let mut response_builder = connection.memory().reserve(TIMESTAMP_MAX_LEN + 4);
 
-        // Reuse the byte sequence. Cloning a Sequence is a cheap zero-copy operation.
+        // Reuse the byte sequence. Cloning a ByteSequence is a cheap zero-copy operation.
         response_builder.append(header_prefix.clone());
 
         let mut stringification_buffer = [0u8; TIMESTAMP_MAX_LEN];
@@ -74,7 +74,7 @@ impl Connection {
     }
 
     #[expect(clippy::needless_pass_by_ref_mut, clippy::unused_self, reason = "for example realism")]
-    fn write(&mut self, mut message: Sequence) {
+    fn write(&mut self, mut message: ByteSequence) {
         print!("Sent message: ");
 
         while message.has_remaining() {

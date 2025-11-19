@@ -3,22 +3,22 @@
 
 use std::fmt::Debug;
 
-use crate::SequenceBuilder;
+use crate::ByteSequenceBuilder;
 
 /// Provides memory capacity for byte sequences.
 ///
-/// Call [`reserve()`][Self::reserve] to reserve memory capacity and obtain a [`SequenceBuilder`]
+/// Call [`reserve()`][Self::reserve] to reserve memory capacity and obtain a [`ByteSequenceBuilder`]
 /// that can be used to fill the reserved memory with data.
 #[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
 ///
 /// # Resource management
 ///
-/// The reserved memory is released when the last [`SequenceBuilder`] or
-/// [`Sequence`][crate::Sequence] referencing it is dropped.
+/// The reserved memory is released when the last [`ByteSequenceBuilder`] or
+/// [`ByteSequence`][crate::ByteSequence] referencing it is dropped.
 pub trait Memory: Debug {
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`SequenceBuilder`] that can be used to fill the reserved memory with data.
+    /// Returns an empty [`ByteSequenceBuilder`] that can be used to fill the reserved memory with data.
     ///
     /// The memory provider may provide more memory than requested.
     ///
@@ -27,12 +27,12 @@ pub trait Memory: Debug {
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`SequenceBuilder`]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
     ///
     /// May panic if the operating system runs out of memory.
     #[must_use]
-    fn reserve(&self, min_bytes: usize) -> SequenceBuilder;
+    fn reserve(&self, min_bytes: usize) -> ByteSequenceBuilder;
 }

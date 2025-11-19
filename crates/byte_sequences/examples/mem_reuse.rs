@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Showcases how you can easily and cheaply reuse Sequences and parts of Sequences.
-use byte_sequences::{NeutralMemoryPool, Sequence};
+//! Showcases how you can easily and cheaply reuse ByteSequences and parts of ByteSequences.
+use byte_sequences::{ByteSequence, NeutralMemoryPool};
 use bytes::{Buf, BufMut};
 
 fn main() {
     // The neutral memory pool in a real application would be provided by the framework.
     let memory = NeutralMemoryPool::new();
 
-    let hello_world = Sequence::copy_from_slice(b"Hello, world!", &memory);
+    let hello_world = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
     inspect_sequence(&hello_world);
 
@@ -21,7 +21,7 @@ fn main() {
     inspect_sequence(&world);
 
     // You can glue the parts back together if you wish. Again, this is a cheap zero-copy operation.
-    let hello_world_reconstructed = Sequence::from_sequences([hello, world]);
+    let hello_world_reconstructed = ByteSequence::from_sequences([hello, world]);
 
     inspect_sequence(&hello_world_reconstructed);
 
@@ -38,7 +38,7 @@ fn main() {
     inspect_sequence(&fox_story);
 }
 
-fn inspect_sequence(sequence: &Sequence) {
+fn inspect_sequence(sequence: &ByteSequence) {
     let len = sequence.len();
     let mut chunk_lengths = Vec::new();
 

@@ -3,10 +3,10 @@
 
 //! Compatibility layer for types in the `bytes` crate.
 //!
-//! We support bidirectional translation between `Bytes` and `Sequence` types.
+//! We support bidirectional translation between `Bytes` and `ByteSequence` types.
 //!
-//! `Bytes` to `Sequence` is always zero-copy. `Sequence` to `Bytes` is opportunistically zero-copy,
-//! depending on the memory layout of the `Sequence` instance.
+//! `Bytes` to `ByteSequence` is always zero-copy. `ByteSequence` to `Bytes` is opportunistically zero-copy,
+//! depending on the memory layout of the `ByteSequence` instance.
 //!
 //! Besides this module, some functionality is also present directly in the `byte_sequences` types
 //! where the logic requires access to private fields of our types for efficiency.
@@ -19,20 +19,20 @@ use std::sync::atomic::{self, AtomicUsize};
 use bytes::{BufMut, Bytes};
 use smallvec::SmallVec;
 
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, MAX_INLINE_SPANS, Sequence, Span};
+use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, ByteSequence, MAX_INLINE_SPANS, Span};
 
-impl From<Bytes> for Sequence {
-    /// Converts a `Bytes` instance into a `Sequence`.
+impl From<Bytes> for ByteSequence {
+    /// Converts a `Bytes` instance into a `ByteSequence`.
     fn from(value: Bytes) -> Self {
-        // A Bytes instance may contain any number of bytes, same as a Sequence. However, each
-        // block of memory inside Sequence is limited to BlockSize::MAX, which is a smaller size.
+        // A Bytes instance may contain any number of bytes, same as a ByteSequence. However, each
+        // block of memory inside ByteSequence is limited to BlockSize::MAX, which is a smaller size.
         // Therefore, we may need to chop up the Bytes into smaller slices, so each slice fits in
         // a BlockSize. This iterator does the job.
         let bytes_blocks = BytesBlockIterator::new(value);
 
         let blocks = bytes_blocks.map(|bytes| {
             // SAFETY: We must treat the provided memory capacity as immutable. We do, only using
-            // it to create a `Sequence` over the immutable data that already exists within.
+            // it to create a `ByteSequence` over the immutable data that already exists within.
             // Note that this requirement also extends down the stack - no code that runs in this
             // function is allowed to create an exclusive reference over the data of the `Bytes`,
             // even if that exclusive reference is not used for writes (Miri will tell you if you
@@ -55,9 +55,9 @@ impl From<Bytes> for Sequence {
             span_builder.consume(len)
         });
 
-        // NB! We cannot use `SequenceBuilder::from_blocks` because it is not guaranteed to use the
+        // NB! We cannot use `ByteSequenceBuilder::from_blocks` because it is not guaranteed to use the
         // blocks in the same order as they are provided. Instead, we directly construct the inner
-        // span array in the Sequence, which lets us avoid any temporary allocations and resizing.
+        // span array in the ByteSequence, which lets us avoid any temporary allocations and resizing.
         let mut spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> = spans.collect();
 
         // Not ideal but 99.999% of the case this is a 1-element array, so it does not matter.
@@ -210,12 +210,12 @@ mod tests {
 
         let bytes_data_ptr = bytes.as_ptr();
 
-        let sequence: Sequence = bytes.into();
+        let sequence: ByteSequence = bytes.into();
 
         assert_eq!(sequence.len(), 13);
         assert_eq!(sequence, b"Hello, world!");
 
-        // We expect this to be zero-copy - Bytes to Sequence always is.
+        // We expect this to be zero-copy - Bytes to ByteSequence always is.
         assert_eq!(sequence.chunk().as_ptr(), bytes_data_ptr);
     }
 
@@ -223,7 +223,7 @@ mod tests {
     fn test_sequence_to_bytes() {
         let memory = TransparentTestMemory::new();
 
-        let sequence = Sequence::copy_from_slice(b"Hello, world!", &memory);
+        let sequence = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
         let sequence_chunk_ptr = sequence.chunk().as_ptr();
 
@@ -239,9 +239,9 @@ mod tests {
     fn test_multi_block_sequence_to_bytes() {
         let memory = TransparentTestMemory::new();
 
-        let hello = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let world = Sequence::copy_from_slice(b"world!", &memory);
-        let sequence = Sequence::from_sequences([hello, world]);
+        let hello = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let world = ByteSequence::copy_from_slice(b"world!", &memory);
+        let sequence = ByteSequence::from_sequences([hello, world]);
 
         let bytes = sequence.into_bytes();
         assert_eq!(bytes.as_ref(), b"Hello, world!");
@@ -256,7 +256,7 @@ mod tests {
 
         let bytes = bytes.freeze();
 
-        let sequence: Sequence = bytes.into();
+        let sequence: ByteSequence = bytes.into();
         assert_eq!(sequence.len(), 5_000_000_000);
         assert_eq!(sequence.chunk().len(), u32::MAX as usize);
         assert_eq!(sequence.into_spans_reversed().len(), 2);

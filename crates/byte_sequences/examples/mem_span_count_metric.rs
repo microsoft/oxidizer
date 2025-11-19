@@ -7,7 +7,7 @@
 //!
 //! Reporting via metrics pipeline (e.g. OpenTelemetry) is also possible but out of scope here.
 
-use byte_sequences::{NeutralMemoryPool, Sequence};
+use byte_sequences::{ByteSequence, NeutralMemoryPool};
 use nm::Report;
 
 fn main() {
@@ -15,13 +15,13 @@ fn main() {
     let memory = NeutralMemoryPool::new();
 
     // First a simple sequence with a single span.
-    let sample1 = Sequence::copy_from_slice(b"Hello, world!", &memory);
+    let sample1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
     // Which repeated 4 times gives us a sequence made up of 4 spans.
-    let sample4 = Sequence::from_sequences([sample1.clone(), sample1.clone(), sample1.clone(), sample1]);
+    let sample4 = ByteSequence::from_sequences([sample1.clone(), sample1.clone(), sample1.clone(), sample1]);
 
     // Which repeated 4 times gives us a sequence made up of 16 spans.
-    let _sample16 = Sequence::from_sequences([sample4.clone(), sample4.clone(), sample4.clone(), sample4]);
+    let _sample16 = ByteSequence::from_sequences([sample4.clone(), sample4.clone(), sample4.clone(), sample4]);
 
     // Dump metrics to stdout.
     println!("{}", Report::collect());

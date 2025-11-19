@@ -4,7 +4,7 @@
 //! Showcases how to implement the `HasMemory` trait using the forwarding
 //! implementation strategy, whereby the memory provider of a dependency is used.
 
-use byte_sequences::{HasMemory, Memory, MemoryShared, Sequence, SequenceBuilder, TransparentTestMemory};
+use byte_sequences::{ByteSequence, ByteSequenceBuilder, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::{Buf, BufMut};
 
 const PAYLOAD_LEN: usize = 12345;
@@ -20,7 +20,7 @@ fn main() {
     println!("Sent {PAYLOAD_LEN} bytes, of which {} were 0x00 bytes.", zero_counter.zero_count());
 }
 
-fn create_payload(memory: &impl Memory) -> Sequence {
+fn create_payload(memory: &impl Memory) -> ByteSequence {
     let mut sequence_builder = memory.reserve(PAYLOAD_LEN);
 
     // We write PAYLOAD_LEN bytes, incrementing the value
@@ -56,14 +56,14 @@ impl ConnectionZeroCounter {
         Self { connection, zero_count: 0 }
     }
 
-    pub fn write(&mut self, sequence: Sequence) {
-        // Cloning a Sequence is a cheap zero-copy operation,
+    pub fn write(&mut self, sequence: ByteSequence) {
+        // Cloning a ByteSequence is a cheap zero-copy operation,
         self.count_zeros(sequence.clone());
 
         self.connection.write(sequence);
     }
 
-    fn count_zeros(&mut self, mut sequence: Sequence) {
+    fn count_zeros(&mut self, mut sequence: ByteSequence) {
         while sequence.has_remaining() {
             if sequence.get_u8() == 0 {
                 self.zero_count = self.zero_count.wrapping_add(1);
@@ -85,7 +85,7 @@ impl HasMemory for ConnectionZeroCounter {
 }
 
 impl Memory for ConnectionZeroCounter {
-    fn reserve(&self, min_bytes: usize) -> SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> ByteSequenceBuilder {
         self.connection.reserve(min_bytes)
     }
 }
@@ -104,7 +104,7 @@ impl Connection {
     }
 
     #[expect(clippy::needless_pass_by_ref_mut, clippy::unused_self, reason = "for example realism")]
-    fn write(&mut self, mut _message: Sequence) {}
+    fn write(&mut self, mut _message: ByteSequence) {}
 }
 
 impl HasMemory for Connection {
@@ -115,7 +115,7 @@ impl HasMemory for Connection {
 }
 
 impl Memory for Connection {
-    fn reserve(&self, min_bytes: usize) -> SequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> ByteSequenceBuilder {
         // This is a wrong way to implement this trait! Only to make the example compile.
         TransparentTestMemory::new().reserve(min_bytes)
     }

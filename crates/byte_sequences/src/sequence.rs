@@ -18,16 +18,16 @@ use crate::{BlockSize, MAX_INLINE_SPANS, Memory, MemoryGuard, Span};
 ///
 /// Note that only the contents of a sequence are immutable - the sequence itself can be
 /// mutated in terms of progressively marking its contents as consumed until it becomes empty.
-/// The typical mechanism for consuming the contents of a `Sequence` is the [`bytes::buf::Buf`][1]
+/// The typical mechanism for consuming the contents of a `ByteSequence` is the [`bytes::buf::Buf`][1]
 /// trait that it implements.
 ///
-/// To create a `Sequence`, use a [`SequenceBuilder`][3] or clone/slice an existing `Sequence`.
+/// To create a `ByteSequence`, use a [`ByteSequenceBuilder`][3] or clone/slice an existing `ByteSequence`.
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
 /// [1]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
-/// [3]: crate::SequenceBuilder
+/// [3]: crate::ByteSequenceBuilder
 #[derive(Clone, Debug)]
-pub struct Sequence {
+pub struct ByteSequence {
     /// The spans of the sequence, stored in reverse order for efficient consumption
     /// by popping items off the end of the collection.
     spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>,
@@ -36,12 +36,12 @@ pub struct Sequence {
     len: usize,
 }
 
-impl Sequence {
+impl ByteSequence {
     /// Returns an empty sequence.
     ///
-    /// Use a [`SequenceBuilder`][1] to create a sequence that contains data.
+    /// Use a [`ByteSequenceBuilder`][1] to create a sequence that contains data.
     ///
-    /// [1]: crate::SequenceBuilder
+    /// [1]: crate::ByteSequenceBuilder
     #[cfg_attr(test, mutants::skip)] // Generates no-op mutations, not useful.
     #[must_use]
     pub const fn new() -> Self {
@@ -107,7 +107,7 @@ impl Sequence {
         Self { spans_reversed, len }
     }
 
-    /// Shorthand to copy a byte slice into a new `Sequence`, which is a common operation.
+    /// Shorthand to copy a byte slice into a new `ByteSequence`, which is a common operation.
     #[must_use]
     pub fn copy_from_slice(bytes: &[u8], memory_provider: &impl Memory) -> Self {
         let mut buffer = memory_provider.reserve(bytes.len());
@@ -137,8 +137,8 @@ impl Sequence {
     /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
     /// backing memory capacity for this sequence.
     ///
-    /// This can be useful when unsafe code is used to reference the contents of a `Sequence` and it
-    /// is possible to reach a condition where the `Sequence` itself no longer exists, even though
+    /// This can be useful when unsafe code is used to reference the contents of a `ByteSequence` and it
+    /// is possible to reach a condition where the `ByteSequence` itself no longer exists, even though
     /// the contents are referenced (e.g. because this is happening in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
         MemoryGuard::new(self.spans_reversed.iter().map(Span::block_ref).map(Clone::clone))
@@ -370,7 +370,7 @@ impl Sequence {
 
     /// Consumes the sequence and returns an instance of `Bytes`.
     ///
-    /// We do not expose `From<Sequence> for Bytes` because this is not guaranteed to be a cheap
+    /// We do not expose `From<ByteSequence> for Bytes` because this is not guaranteed to be a cheap
     /// operation and may involve data copying, so `.into_bytes()` must be explicitly called to
     /// make the conversion obvious.
     ///
@@ -478,13 +478,13 @@ impl Sequence {
     /// Iterates over the metadata of all the chunks in the sequence.
     ///
     /// A chunk is any consecutive span of memory that would be returned by `chunk()` at some point
-    /// during the consumption of a [`Sequence`].
+    /// during the consumption of a [`ByteSequence`].
     ///
     /// You may wish to iterate over the metadata to determine in advance which implementation
     /// strategy to use for a function, depending on what the metadata indicates about the
     /// configuration of the memory blocks backing the byte sequence.
-    pub fn iter_chunk_metas(&self) -> SequenceChunkMetasIterator<'_> {
-        SequenceChunkMetasIterator::new(self)
+    pub fn iter_chunk_metas(&self) -> ByteSequenceChunkMetasIterator<'_> {
+        ByteSequenceChunkMetasIterator::new(self)
     }
 
     /// Marks the first `count` bytes of the sequence as consumed, dropping them from the sequence.
@@ -540,13 +540,13 @@ impl Sequence {
     }
 }
 
-impl Default for Sequence {
+impl Default for ByteSequence {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Buf for Sequence {
+impl Buf for ByteSequence {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn remaining(&self) -> usize {
         self.len()
@@ -568,7 +568,7 @@ impl Buf for Sequence {
     }
 }
 
-impl PartialEq for Sequence {
+impl PartialEq for ByteSequence {
     fn eq(&self, other: &Self) -> bool {
         // We do not care about the structure, only the contents.
         if self.remaining() != other.remaining() {
@@ -616,7 +616,7 @@ impl PartialEq for Sequence {
     }
 }
 
-impl PartialEq<&[u8]> for Sequence {
+impl PartialEq<&[u8]> for ByteSequence {
     fn eq(&self, other: &&[u8]) -> bool {
         let mut other = *other;
 
@@ -661,42 +661,42 @@ impl PartialEq<&[u8]> for Sequence {
     }
 }
 
-impl PartialEq<Sequence> for &[u8] {
-    fn eq(&self, other: &Sequence) -> bool {
+impl PartialEq<ByteSequence> for &[u8] {
+    fn eq(&self, other: &ByteSequence) -> bool {
         other.eq(self)
     }
 }
 
-impl<const LEN: usize> PartialEq<&[u8; LEN]> for Sequence {
+impl<const LEN: usize> PartialEq<&[u8; LEN]> for ByteSequence {
     fn eq(&self, other: &&[u8; LEN]) -> bool {
         self.eq(&other.as_slice())
     }
 }
 
-impl<const LEN: usize> PartialEq<Sequence> for &[u8; LEN] {
-    fn eq(&self, other: &Sequence) -> bool {
+impl<const LEN: usize> PartialEq<ByteSequence> for &[u8; LEN] {
+    fn eq(&self, other: &ByteSequence) -> bool {
         other.eq(&self.as_slice())
     }
 }
 
-/// Iterator over all `chunk_meta()` results that a [`Sequence`] may return.
+/// Iterator over all `chunk_meta()` results that a [`ByteSequence`] may return.
 ///
-/// Returned by [`Sequence::iter_chunk_metas()`][Sequence::iter_chunk_metas] and allows you to
+/// Returned by [`ByteSequence::iter_chunk_metas()`][ByteSequence::iter_chunk_metas] and allows you to
 /// inspect the metadata of each chunk in the sequence without first consuming previous chunks.
 #[must_use]
 #[derive(Debug)]
-pub struct SequenceChunkMetasIterator<'s> {
+pub struct ByteSequenceChunkMetasIterator<'s> {
     // This starts off as a clone of the parent sequence, just for ease of implementation.
     // We consume the parts of the sequence we have already iterated over.
-    sequence: Sequence,
+    sequence: ByteSequence,
 
     // We keep a reference to the sequence we are iterating over, even though
     // the current implementation does not use it (because a future one might).
-    _parent: PhantomData<&'s Sequence>,
+    _parent: PhantomData<&'s ByteSequence>,
 }
 
-impl<'s> SequenceChunkMetasIterator<'s> {
-    pub(crate) fn new(sequence: &'s Sequence) -> Self {
+impl<'s> ByteSequenceChunkMetasIterator<'s> {
+    pub(crate) fn new(sequence: &'s ByteSequence) -> Self {
         Self {
             sequence: sequence.clone(),
             _parent: PhantomData,
@@ -704,7 +704,7 @@ impl<'s> SequenceChunkMetasIterator<'s> {
     }
 }
 
-impl<'s> Iterator for SequenceChunkMetasIterator<'s> {
+impl<'s> Iterator for ByteSequenceChunkMetasIterator<'s> {
     type Item = Option<&'s dyn Any>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -718,11 +718,11 @@ impl<'s> Iterator for SequenceChunkMetasIterator<'s> {
         // next() only has an implicit lifetime for `&self`, which cannot be named in `Item`.
         // However, we can take advantage of the fact that a `BlockRef` implementation is required
         // to guarantee that the metadata lives as long as any clone of the memory block. Because
-        // the iterator has borrowed the parent `Sequence` we know that the memory block must live
+        // the iterator has borrowed the parent `ByteSequence` we know that the memory block must live
         // for as long as the iterator lives.
         //
         // Therefor we can just re-stamp the return value with the 's lifetime to indicate that it
-        // is valid for as long as the iterator has borrowed the parent Sequence for.
+        // is valid for as long as the iterator has borrowed the parent ByteSequence for.
         let meta_with_s = unsafe { mem::transmute::<Option<&dyn Any>, Option<&'s dyn Any>>(meta) };
 
         // Seek forward to the next chunk before we return.
@@ -767,7 +767,7 @@ mod tests {
 
     use super::*;
     use crate::testing::TestMemoryBlock;
-    use crate::{SequenceBuilder, TransparentTestMemory, std_alloc_block};
+    use crate::{ByteSequenceBuilder, TransparentTestMemory, std_alloc_block};
 
     #[test]
     fn smoke_test() {
@@ -785,7 +785,7 @@ mod tests {
         assert_eq!(span2.remaining(), 3);
         assert_eq!(span3.remaining(), 3);
 
-        let mut sequence = Sequence::from_spans(vec![span1, span2, span3]);
+        let mut sequence = ByteSequence::from_spans(vec![span1, span2, span3]);
 
         assert!(!sequence.is_empty());
         assert_eq!(10, sequence.remaining());
@@ -818,7 +818,7 @@ mod tests {
         let span2 = builder.consume(nz!(3));
         let span3 = builder.consume(nz!(3));
 
-        let mut sequence = Sequence::from_spans(vec![span1, span2, span3]);
+        let mut sequence = ByteSequence::from_spans(vec![span1, span2, span3]);
 
         assert_eq!(10, sequence.remaining());
 
@@ -852,7 +852,7 @@ mod tests {
             let span1 = builder1.consume(nz!(8));
             let span2 = builder2.consume(nz!(8));
 
-            let sequence = Sequence::from_spans(vec![span1, span2]);
+            let sequence = ByteSequence::from_spans(vec![span1, span2]);
 
             sequence.extend_lifetime()
         };
@@ -880,10 +880,10 @@ mod tests {
         let span1 = builder.consume(nz!(8));
         let span2 = builder.consume(nz!(8));
 
-        let sequence1 = Sequence::from_spans(vec![span1]);
-        let sequence2 = Sequence::from_spans(vec![span2]);
+        let sequence1 = ByteSequence::from_spans(vec![span1]);
+        let sequence2 = ByteSequence::from_spans(vec![span2]);
 
-        let mut combined = Sequence::from_sequences(vec![sequence1, sequence2]);
+        let mut combined = ByteSequence::from_sequences(vec![sequence1, sequence2]);
 
         assert_eq!(16, combined.remaining());
 
@@ -893,7 +893,7 @@ mod tests {
 
     #[test]
     fn empty_sequence() {
-        let sequence = Sequence::default();
+        let sequence = ByteSequence::default();
 
         assert!(sequence.is_empty());
         assert_eq!(0, sequence.remaining());
@@ -913,8 +913,8 @@ mod tests {
         let span1 = builder.consume(nz!(8));
         let span2 = builder.consume(nz!(8));
 
-        let sequence_single_span = Sequence::from_spans(vec![span1.clone()]);
-        let sequence_multi_span = Sequence::from_spans(vec![span1, span2]);
+        let sequence_single_span = ByteSequence::from_spans(vec![span1.clone()]);
+        let sequence_multi_span = ByteSequence::from_spans(vec![span1, span2]);
 
         let mut bytes = sequence_single_span.clone().into_bytes();
         assert_eq!(8, bytes.len());
@@ -932,7 +932,7 @@ mod tests {
 
     #[test]
     fn thread_safe_type() {
-        assert_impl_all!(Sequence: Send, Sync);
+        assert_impl_all!(ByteSequence: Send, Sync);
     }
 
     #[test]
@@ -940,7 +940,7 @@ mod tests {
         // A very simple sequence to start with, consisting of just one 100 byte span.
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = SequenceBuilder::from_span_builders([span_builder]);
+        let mut sb = ByteSequenceBuilder::from_span_builders([span_builder]);
 
         for i in 0..100 {
             #[expect(
@@ -984,7 +984,7 @@ mod tests {
             .take(10)
             .collect::<Vec<_>>();
 
-        let mut sb = SequenceBuilder::from_span_builders(span_builders);
+        let mut sb = ByteSequenceBuilder::from_span_builders(span_builders);
 
         for i in 0..100 {
             #[expect(
@@ -1025,7 +1025,7 @@ mod tests {
     fn slice_indexing_kinds() {
         let span_builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        let mut sb = SequenceBuilder::from_span_builders([span_builder]);
+        let mut sb = ByteSequenceBuilder::from_span_builders([span_builder]);
         sb.put_u8(0);
         sb.put_u8(1);
         sb.put_u8(2);
@@ -1071,7 +1071,7 @@ mod tests {
 
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = SequenceBuilder::from_span_builders([span_builder]);
+        let mut sb = ByteSequenceBuilder::from_span_builders([span_builder]);
         sb.put_u8(0);
         sb.put_u8(1);
         sb.put_u8(2);
@@ -1108,7 +1108,7 @@ mod tests {
     fn slice_oob_is_panic() {
         let span_builder = std_alloc_block::allocate(nz!(1000)).into_span_builder();
 
-        let mut sb = SequenceBuilder::from_span_builders([span_builder]);
+        let mut sb = ByteSequenceBuilder::from_span_builders([span_builder]);
         sb.put_bytes(0, 100);
 
         let sequence = sb.consume_all();
@@ -1126,7 +1126,7 @@ mod tests {
     fn slice_at_boundary_is_not_panic() {
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = SequenceBuilder::from_span_builders([span_builder]);
+        let mut sb = ByteSequenceBuilder::from_span_builders([span_builder]);
         sb.put_bytes(0, 100);
 
         let sequence = sb.consume_all();
@@ -1146,7 +1146,7 @@ mod tests {
     fn slice_empty_is_empty_if_not_oob() {
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = SequenceBuilder::from_span_builders([span_builder]);
+        let mut sb = ByteSequenceBuilder::from_span_builders([span_builder]);
 
         for i in 0..100 {
             #[expect(
@@ -1178,7 +1178,7 @@ mod tests {
             .take(10)
             .collect::<Vec<_>>();
 
-        let mut sb = SequenceBuilder::from_span_builders(span_builders);
+        let mut sb = ByteSequenceBuilder::from_span_builders(span_builders);
 
         for i in 0..100 {
             #[expect(
@@ -1212,7 +1212,7 @@ mod tests {
 
     #[test]
     fn multithreaded_usage() {
-        fn post_to_another_thread(s: Sequence) {
+        fn post_to_another_thread(s: ByteSequence) {
             thread::spawn(move || {
                 let mut s = s;
                 assert_eq!(s.get_u8(), b'H');
@@ -1226,7 +1226,7 @@ mod tests {
         }
 
         let memory = TransparentTestMemory::new();
-        let s = Sequence::copy_from_slice(b"Hello, world!", &memory);
+        let s = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
         post_to_another_thread(s);
     }
@@ -1234,10 +1234,10 @@ mod tests {
     #[test]
     fn vectored_read_as_io_slice() {
         let memory = TransparentTestMemory::new();
-        let segment1 = Sequence::copy_from_slice(b"Hello, world!", &memory);
-        let segment2 = Sequence::copy_from_slice(b"Hello, another world!", &memory);
+        let segment1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
+        let segment2 = ByteSequence::copy_from_slice(b"Hello, another world!", &memory);
 
-        let sequence = Sequence::from_sequences(vec![segment1.clone(), segment2.clone()]);
+        let sequence = ByteSequence::from_sequences(vec![segment1.clone(), segment2.clone()]);
 
         let mut io_slices = vec![];
         let ioslice_count = Buf::chunks_vectored(&sequence, &mut io_slices);
@@ -1254,10 +1254,10 @@ mod tests {
     #[test]
     fn vectored_read_as_slice() {
         let memory = TransparentTestMemory::new();
-        let segment1 = Sequence::copy_from_slice(b"Hello, world!", &memory);
-        let segment2 = Sequence::copy_from_slice(b"Hello, another world!", &memory);
+        let segment1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
+        let segment2 = ByteSequence::copy_from_slice(b"Hello, another world!", &memory);
 
-        let sequence = Sequence::from_sequences(vec![segment1.clone(), segment2.clone()]);
+        let sequence = ByteSequence::from_sequences(vec![segment1.clone(), segment2.clone()]);
 
         let mut slices: Vec<&[u8]> = vec![];
         let slice_count = sequence.chunks_as_slices_vectored(&mut slices);
@@ -1275,27 +1275,27 @@ mod tests {
     fn eq_sequence() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = Sequence::copy_from_slice(b"Hello, world!", &memory);
-        let s2 = Sequence::copy_from_slice(b"Hello, world!", &memory);
+        let s1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
+        let s2 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
         assert_eq!(s1, s2);
 
-        let s3 = Sequence::copy_from_slice(b"Jello, world!", &memory);
+        let s3 = ByteSequence::copy_from_slice(b"Jello, world!", &memory);
 
         assert_ne!(s1, s3);
 
-        let s4 = Sequence::copy_from_slice(b"Hello, world! ", &memory);
+        let s4 = ByteSequence::copy_from_slice(b"Hello, world! ", &memory);
 
         assert_ne!(s1, s4);
 
-        let s5_part1 = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let s5_part2 = Sequence::copy_from_slice(b"world!", &memory);
-        let s5 = Sequence::from_sequences([s5_part1, s5_part2]);
+        let s5_part1 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let s5_part2 = ByteSequence::copy_from_slice(b"world!", &memory);
+        let s5 = ByteSequence::from_sequences([s5_part1, s5_part2]);
 
         assert_eq!(s1, s5);
         assert_ne!(s5, s3);
 
-        let s6 = Sequence::copy_from_slice(b"Hello, ", &memory);
+        let s6 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
 
         assert_ne!(s1, s6);
         assert_ne!(s5, s6);
@@ -1305,7 +1305,7 @@ mod tests {
     fn eq_slice() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = Sequence::copy_from_slice(b"Hello, world!", &memory);
+        let s1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
         assert_eq!(s1, b"Hello, world!".as_slice());
         assert_ne!(s1, b"Jello, world!".as_slice());
@@ -1315,9 +1315,9 @@ mod tests {
         assert_ne!(b"Jello, world!".as_slice(), s1);
         assert_ne!(b"Hello, world! ".as_slice(), s1);
 
-        let s2_part1 = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let s2_part2 = Sequence::copy_from_slice(b"world!", &memory);
-        let s2 = Sequence::from_sequences([s2_part1, s2_part2]);
+        let s2_part1 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let s2_part2 = ByteSequence::copy_from_slice(b"world!", &memory);
+        let s2 = ByteSequence::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s2, b"Hello, world!".as_slice());
         assert_ne!(s2, b"Jello, world!".as_slice());
@@ -1334,7 +1334,7 @@ mod tests {
     fn eq_array() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = Sequence::copy_from_slice(b"Hello, world!", &memory);
+        let s1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
         assert_eq!(s1, b"Hello, world!");
         assert_ne!(s1, b"Jello, world!");
@@ -1344,9 +1344,9 @@ mod tests {
         assert_ne!(b"Jello, world!", s1);
         assert_ne!(b"Hello, world! ", s1);
 
-        let s2_part1 = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let s2_part2 = Sequence::copy_from_slice(b"world!", &memory);
-        let s2 = Sequence::from_sequences([s2_part1, s2_part2]);
+        let s2_part1 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let s2_part2 = ByteSequence::copy_from_slice(b"world!", &memory);
+        let s2 = ByteSequence::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s2, b"Hello, world!");
         assert_ne!(s2, b"Jello, world!");
@@ -1363,10 +1363,10 @@ mod tests {
     fn meta_none() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let s2 = Sequence::copy_from_slice(b"world!", &memory);
+        let s1 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let s2 = ByteSequence::copy_from_slice(b"world!", &memory);
 
-        let s = Sequence::from_sequences([s1, s2]);
+        let s = ByteSequence::from_sequences([s1, s2]);
 
         let mut metas_iter = s.iter_chunk_metas();
 
@@ -1396,7 +1396,7 @@ mod tests {
         // SAFETY: We guarantee exclusive access to the memory capacity.
         let block2 = unsafe { block2.as_ref().to_block() };
 
-        let mut builder = SequenceBuilder::from_blocks([block1, block2]);
+        let mut builder = ByteSequenceBuilder::from_blocks([block1, block2]);
 
         // Add enough bytes to make use of both blocks.
         builder.put_bytes(123, 166);
@@ -1405,7 +1405,7 @@ mod tests {
 
         let mut metas_iter = s.iter_chunk_metas();
 
-        // NB! There is no requirement that the SequenceBuilder use the blocks in the order we gave
+        // NB! There is no requirement that the ByteSequenceBuilder use the blocks in the order we gave
         // them in. We use white-box knowledge here to know that it actually reverses the order.
         // This behavior may change in a future version - be ready to change the test if so.
 
@@ -1425,8 +1425,8 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two single-span sequences
-        let mut s1 = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let s2 = Sequence::copy_from_slice(b"world!", &memory);
+        let mut s1 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let s2 = ByteSequence::copy_from_slice(b"world!", &memory);
 
         assert_eq!(s1.len(), 7);
         assert_eq!(s2.len(), 6);
@@ -1442,13 +1442,13 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two multi-span sequences (2 spans each)
-        let s1_part1 = Sequence::copy_from_slice(b"AAA", &memory);
-        let s1_part2 = Sequence::copy_from_slice(b"BBB", &memory);
-        let mut s1 = Sequence::from_sequences([s1_part1, s1_part2]);
+        let s1_part1 = ByteSequence::copy_from_slice(b"AAA", &memory);
+        let s1_part2 = ByteSequence::copy_from_slice(b"BBB", &memory);
+        let mut s1 = ByteSequence::from_sequences([s1_part1, s1_part2]);
 
-        let s2_part1 = Sequence::copy_from_slice(b"CCC", &memory);
-        let s2_part2 = Sequence::copy_from_slice(b"DDD", &memory);
-        let s2 = Sequence::from_sequences([s2_part1, s2_part2]);
+        let s2_part1 = ByteSequence::copy_from_slice(b"CCC", &memory);
+        let s2_part2 = ByteSequence::copy_from_slice(b"DDD", &memory);
+        let s2 = ByteSequence::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s1.len(), 6);
         assert_eq!(s2.len(), 6);
@@ -1463,15 +1463,15 @@ mod tests {
     fn append_empty_sequences() {
         let memory = TransparentTestMemory::new();
 
-        let mut s1 = Sequence::copy_from_slice(b"Hello", &memory);
-        let s2 = Sequence::new();
+        let mut s1 = ByteSequence::copy_from_slice(b"Hello", &memory);
+        let s2 = ByteSequence::new();
 
         s1.append(s2);
         assert_eq!(s1.len(), 5);
         assert_eq!(s1, b"Hello");
 
-        let mut s3 = Sequence::new();
-        let s4 = Sequence::copy_from_slice(b"world", &memory);
+        let mut s3 = ByteSequence::new();
+        let s4 = ByteSequence::copy_from_slice(b"world", &memory);
 
         s3.append(s4);
         assert_eq!(s3.len(), 5);
@@ -1483,8 +1483,8 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two single-span sequences
-        let s1 = Sequence::copy_from_slice(b"Hello, ", &memory);
-        let s2 = Sequence::copy_from_slice(b"world!", &memory);
+        let s1 = ByteSequence::copy_from_slice(b"Hello, ", &memory);
+        let s2 = ByteSequence::copy_from_slice(b"world!", &memory);
 
         assert_eq!(s1.len(), 7);
         assert_eq!(s2.len(), 6);
@@ -1505,13 +1505,13 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two multi-span sequences (2 spans each)
-        let s1_part1 = Sequence::copy_from_slice(b"AAA", &memory);
-        let s1_part2 = Sequence::copy_from_slice(b"BBB", &memory);
-        let s1 = Sequence::from_sequences([s1_part1, s1_part2]);
+        let s1_part1 = ByteSequence::copy_from_slice(b"AAA", &memory);
+        let s1_part2 = ByteSequence::copy_from_slice(b"BBB", &memory);
+        let s1 = ByteSequence::from_sequences([s1_part1, s1_part2]);
 
-        let s2_part1 = Sequence::copy_from_slice(b"CCC", &memory);
-        let s2_part2 = Sequence::copy_from_slice(b"DDD", &memory);
-        let s2 = Sequence::from_sequences([s2_part1, s2_part2]);
+        let s2_part1 = ByteSequence::copy_from_slice(b"CCC", &memory);
+        let s2_part2 = ByteSequence::copy_from_slice(b"DDD", &memory);
+        let s2 = ByteSequence::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s1.len(), 6);
         assert_eq!(s2.len(), 6);
@@ -1531,15 +1531,15 @@ mod tests {
     fn concat_empty_sequences() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = Sequence::copy_from_slice(b"Hello", &memory);
-        let s2 = Sequence::new();
+        let s1 = ByteSequence::copy_from_slice(b"Hello", &memory);
+        let s2 = ByteSequence::new();
 
         let s3 = s1.concat(s2);
         assert_eq!(s3.len(), 5);
         assert_eq!(s3, b"Hello");
 
-        let s4 = Sequence::new();
-        let s5 = Sequence::copy_from_slice(b"world", &memory);
+        let s4 = ByteSequence::new();
+        let s5 = ByteSequence::copy_from_slice(b"world", &memory);
 
         let s6 = s4.concat(s5);
         assert_eq!(s6.len(), 5);
@@ -1551,6 +1551,6 @@ mod tests {
         // The point of this is not to say that we expect it to have a specific size but to allow
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
-        assert_eq!(size_of::<Sequence>(), 272);
+        assert_eq!(size_of::<ByteSequence>(), 272);
     }
 }
