@@ -5,7 +5,7 @@
 //! strategy that obtains memory from a memory provider specific to a particular purpose, with
 //! a configuration optimal for that purpose.
 
-use byte_sequences::{BytesView, BytesBuf, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
+use byte_sequences::{BytesBuf, BytesView, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::BufMut;
 
 fn main() {

@@ -4,7 +4,7 @@
 //! Showcases how to implement the `HasMemory` trait using the forwarding
 //! implementation strategy, whereby the memory provider of a dependency is used.
 
-use byte_sequences::{BytesView, BytesBuf, HasMemory, Memory, MemoryShared, TransparentTestMemory};
+use byte_sequences::{BytesBuf, BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::{Buf, BufMut};
 
 const PAYLOAD_LEN: usize = 12345;
