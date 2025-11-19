@@ -27,7 +27,7 @@
 
 Types for producing or consuming byte sequences.
 
-A [`BytesView`] is a logical sequence of zero or more bytes
+A [`BytesView`] is a view over a logical sequence of zero or more bytes
 stored in memory, similar to a slice `&[u8]` but with some key differences:
 
 * The bytes in a byte sequence are not required to be consecutive in memory.
