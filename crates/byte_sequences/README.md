@@ -27,10 +27,10 @@
 
 Types for producing or consuming byte sequences.
 
-A byte sequence (or simply [`ByteSequence`]) is a logical sequence of zero or more bytes
+A [`ByteSequence`] is a logical sequence of zero or more bytes
 stored in memory, similar to a slice `&[u8]` but with some key differences:
 
-* The bytes in a sequence are not required to be consecutive in memory.
+* The bytes in a byte sequence are not required to be consecutive in memory.
 * The bytes in a byte sequence are always immutable, even if you own the [`ByteSequence`].
 
 In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
@@ -38,7 +38,7 @@ treated as one logical sequence of bytes. The types in this crate provide a way 
 byte sequences using an API that is reasonably convenient while also being compatible with
 the requirements of high-performance zero-copy I/O operations.
 
-## Consuming Byte ByteSequences
+## Consuming Byte Sequences
 
 The standard model for using bytes of data from a [`ByteSequence`] is to consume them via the
 [`bytes::buf::Buf`][17] trait, which is implemented by [`ByteSequence`].
@@ -48,8 +48,8 @@ sequence and simultaneously remove the read bytes from the sequence, shrinking i
 the remaining bytes.
 
 ```rust
-use bytes::Buf;
 use byte_sequences::ByteSequence;
+use bytes::Buf;
 
 fn consume_message(mut message: ByteSequence) {
     // We read the message and calculate the sum of all the words in it.
@@ -78,8 +78,8 @@ more fundamental methods of the [`bytes::buf::Buf`][17] trait such as:
   chunks of data at the same time.
 
 ```rust
-use bytes::Buf;
 use byte_sequences::ByteSequence;
+use bytes::Buf;
 
 let len = sequence.len();
 let mut chunk_lengths = Vec::new();
@@ -99,8 +99,8 @@ To reuse a byte sequence, clone it before consuming the contents. This is a chea
 zero-copy operation.
 
 ```rust
-use bytes::Buf;
 use byte_sequences::ByteSequence;
+use bytes::Buf;
 
 assert_eq!(sequence.len(), 16);
 
@@ -114,7 +114,7 @@ assert_eq!(sequence_clone.len(), 8);
 assert_eq!(sequence.len(), 16);
 ```
 
-## Producing Byte ByteSequences
+## Producing Byte Sequences
 
 For creating a byte sequence, you first need some memory capacity to put the bytes into. This
 means you need a memory provider, which is a type that implements the [`Memory`] trait.
@@ -129,10 +129,9 @@ from the following list:
    give you memory with the configuration that is optimal for delivering bytes to that
    specific instance.
 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-   instance of [`GlobalMemoryPool`] to obtain memory from the Rust global memory allocator.
-   In a typical web application framework, this is a service exposed by the application framework.
-   In a different context (e.g. example or test code with no framework), you can create your own
-   instance via `GlobalMemoryPool::new()`.
+   instance of [`GlobalMemoryPool`]. In a typical web application framework, this is a service
+   exposed by the application framework. In a different context (e.g. example or test code
+   with no framework), you can create your own instance via `GlobalMemoryPool::new()`.
 
 Once you have a memory provider, you can reserve memory from it by calling
 [`Memory::reserve()`][14] on it. This returns a [`ByteSequenceBuilder`] with the requested
@@ -266,11 +265,7 @@ Note that there is no requirement that the memory capacity of the sequence build
 memory capacity of the sequence being appended come from the same memory provider. It is valid
 to mix and match memory from different providers, though this may disable some optimizations.
 
-## Automatically Extending ByteSequence Builder Capacity
-
-See `Work Item 5840368: Support automatically extending ByteSequenceBuilder via Writer trait`
-
-## Implementing APIs that Consume Byte ByteSequences
+## Implementing APIs that Consume Byte Sequences
 
 If you are implementing a type that accepts byte sequences, you should implement the
 [`HasMemory`] trait to make it possible for the caller to use optimally
@@ -287,7 +282,7 @@ The recommended implementation strategy for [`HasMemory`] is as follows:
 * If your type always passes the data to another type that implements [`HasMemory`],
   simply forward the memory provider from the other type.
 * If your type can take advantage of optimizations enabled by specific memory configurations,
-  (e.g. because it uses operating system APIs that unlock better performacne when the memory
+  (e.g. because it uses operating system APIs that unlock better performance when the memory
   is appropriately configured), return a memory provider that performs the necessary
   configuration.
 * If your type neither passes the data to another type that implements [`HasMemory`]
@@ -389,7 +384,7 @@ Example of returning a usage-neutral memory provider (see `examples/mem_has_prov
 full code):
 
 ```rust
-use byte_sequences::{HasMemory, MemoryShared, GlobalMemoryPool};
+use byte_sequences::{GlobalMemoryPool, HasMemory, MemoryShared};
 
 /// Calculates a checksum for a given byte sequence.
 ///
