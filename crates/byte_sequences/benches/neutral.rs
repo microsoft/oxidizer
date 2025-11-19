@@ -51,21 +51,21 @@ fn entrypoint(c: &mut Criterion) {
 
     let test_data = repeating_incrementing_bytes().take(ONE_MB).collect::<Vec<u8>>();
 
-    let allocs_op = allocs.operation("copy_from_slice");
-    group.bench_function("copy_from_slice", |b| {
+    let allocs_op = allocs.operation("copied_from_slice");
+    group.bench_function("copied_from_slice", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_thread();
-            BytesView::copy_from_slice(&test_data, &warm_memory)
+            BytesView::copied_from_slice(&test_data, &warm_memory)
         });
     });
 
-    let allocs_op = allocs.operation("copy_from_slice_cold");
-    group.bench_function("copy_from_slice_cold", |b| {
+    let allocs_op = allocs.operation("copied_from_slice_cold");
+    group.bench_function("copied_from_slice_cold", |b| {
         b.iter_batched(
             GlobalMemoryPool::new,
             |memory| {
                 let _span = allocs_op.measure_thread();
-                BytesView::copy_from_slice(&test_data, &memory)
+                BytesView::copied_from_slice(&test_data, &memory)
             },
             BatchSize::LargeInput,
         );

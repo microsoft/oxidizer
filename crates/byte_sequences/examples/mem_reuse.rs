@@ -9,7 +9,7 @@ fn main() {
     // The global memory pool in a real application would be provided by the framework.
     let memory = GlobalMemoryPool::new();
 
-    let hello_world = BytesView::copy_from_slice(b"Hello, world!", &memory);
+    let hello_world = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
     inspect_sequence(&hello_world);
 

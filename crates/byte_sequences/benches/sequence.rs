@@ -33,7 +33,7 @@ fn entrypoint(c: &mut Criterion) {
 
     let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
 
-    let test_data_as_seq = BytesView::copy_from_slice(TEST_DATA, &memory);
+    let test_data_as_seq = BytesView::copied_from_slice(TEST_DATA, &memory);
 
     let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
 

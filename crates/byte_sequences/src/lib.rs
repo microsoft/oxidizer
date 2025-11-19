@@ -3,7 +3,7 @@
 
 //! Types for producing or consuming byte sequences.
 //!
-//! A [`BytesView`] is a logical sequence of zero or more bytes
+//! A [`BytesView`] is a view over a logical sequence of zero or more bytes
 //! stored in memory, similar to a slice `&[u8]` but with some key differences:
 //!
 //! * The bytes in a byte sequence are not required to be consecutive in memory.
@@ -25,7 +25,7 @@
 //!
 //! ```
 //! # let memory = byte_sequences::GlobalMemoryPool::new();
-//! # let message = BytesView::copy_from_slice(b"1234123412341234", &memory);
+//! # let message = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use byte_sequences::BytesView;
 //! use bytes::Buf;
 //!
@@ -58,7 +58,7 @@
 //!
 //! ```
 //! # let memory = byte_sequences::GlobalMemoryPool::new();
-//! # let mut sequence = BytesView::copy_from_slice(b"1234123412341234", &memory);
+//! # let mut sequence = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use byte_sequences::BytesView;
 //! use bytes::Buf;
 //!
@@ -81,7 +81,7 @@
 //!
 //! ```
 //! # let memory = byte_sequences::GlobalMemoryPool::new();
-//! # let mut sequence = BytesView::copy_from_slice(b"1234123412341234", &memory);
+//! # let mut sequence = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use byte_sequences::BytesView;
 //! use bytes::Buf;
 //!
@@ -543,7 +543,7 @@
 //!     // The static data is transformed into a BytesView on first use,
 //!     // using memory optimally configured for a network connection.
 //!     let header_prefix = header_prefix
-//!         .get_or_init(|| BytesView::copy_from_slice(HEADER_PREFIX, &connection.memory()));
+//!         .get_or_init(|| BytesView::copied_from_slice(HEADER_PREFIX, &connection.memory()));
 //!
 //!     // Now we can use the `header_prefix` BytesView in the connection logic.
 //!     // Cloning a BytesView is a cheap zero-copy operation.

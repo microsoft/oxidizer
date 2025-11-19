@@ -15,7 +15,7 @@ fn main() {
     let memory = GlobalMemoryPool::new();
 
     // First a simple sequence with a single span.
-    let sample1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
+    let sample1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
     // Which repeated 4 times gives us a sequence made up of 4 spans.
     let sample4 = BytesView::from_sequences([sample1.clone(), sample1.clone(), sample1.clone(), sample1]);

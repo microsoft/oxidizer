@@ -1722,7 +1722,7 @@ mod tests {
     fn from_sequence() {
         let memory = GlobalMemoryPool::new();
 
-        let s1 = BytesView::copy_from_slice(b"bla bla bla", &memory);
+        let s1 = BytesView::copied_from_slice(b"bla bla bla", &memory);
 
         let mut sb: BytesBuf = s1.clone().into();
 

@@ -22,7 +22,7 @@ fn main() {
 
         // The static data is transformed into a BytesView on first use,
         // using memory optimally configured for a network connection.
-        let header_prefix = header_prefix.get_or_init(|| BytesView::copy_from_slice(HEADER_PREFIX, &connection.memory()));
+        let header_prefix = header_prefix.get_or_init(|| BytesView::copied_from_slice(HEADER_PREFIX, &connection.memory()));
 
         // Note that reused BytesViews do not consume any memory capacity from the builder,
         // so we only need to account for the timestamp bytes and the trailing CRLFs.

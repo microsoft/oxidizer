@@ -520,7 +520,7 @@ for _ in 0..10 {
     // The static data is transformed into a BytesView on first use,
     // using memory optimally configured for a network connection.
     let header_prefix = header_prefix
-        .get_or_init(|| BytesView::copy_from_slice(HEADER_PREFIX, &connection.memory()));
+        .get_or_init(|| BytesView::copied_from_slice(HEADER_PREFIX, &connection.memory()));
 
     // Now we can use the `header_prefix` BytesView in the connection logic.
     // Cloning a BytesView is a cheap zero-copy operation.

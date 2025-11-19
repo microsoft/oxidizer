@@ -26,11 +26,11 @@ fn main() {
     let connection_memory = connection.memory();
 
     // This message uses the connection's memory provider, which provides optimal memory.
-    let message1 = BytesView::copy_from_slice(b"Example message 1: hello, world!", &connection_memory);
+    let message1 = BytesView::copied_from_slice(b"Example message 1: hello, world!", &connection_memory);
     connection.write(message1.clone());
 
     // This message uses the global memory pool, which does not provide optimal memory.
-    let message2 = BytesView::copy_from_slice(b"Message 2: goodbye", &global_memory_pool);
+    let message2 = BytesView::copied_from_slice(b"Message 2: goodbye", &global_memory_pool);
     connection.write(message2.clone());
 
     // This message uses a combination of both memory providers. This will not use the optimal

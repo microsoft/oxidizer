@@ -19,9 +19,9 @@ fn main() {
 
     // These byte sequences are meant to be passed to the checksum calculator,
     // so they use the memory provider we obtained from the checksum calculator.
-    let data1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
-    let data2 = BytesView::copy_from_slice(b"Goodbye, world!", &memory);
-    let data3 = BytesView::copy_from_slice(b"Goodbye, universe!", &memory);
+    let data1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    let data2 = BytesView::copied_from_slice(b"Goodbye, world!", &memory);
+    let data3 = BytesView::copied_from_slice(b"Goodbye, universe!", &memory);
 
     checksum_calculator.add_bytes(data1);
     checksum_calculator.add_bytes(data2);

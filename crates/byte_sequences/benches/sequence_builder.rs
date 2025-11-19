@@ -7,7 +7,7 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use byte_sequences::{BlockSize, BytesView, BytesBuf, FixedBlockTestMemory};
+use byte_sequences::{BlockSize, BytesBuf, BytesView, FixedBlockTestMemory};
 use bytes::{Buf, BufMut};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
@@ -33,7 +33,7 @@ fn entrypoint(c: &mut Criterion) {
 
     let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
 
-    let test_data_as_seq = BytesView::copy_from_slice(TEST_DATA, &memory);
+    let test_data_as_seq = BytesView::copied_from_slice(TEST_DATA, &memory);
 
     let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
     let max_inline_as_seq = BytesView::from_sequences(max_inline.iter().cloned());
@@ -100,11 +100,7 @@ fn entrypoint(c: &mut Criterion) {
     });
 
     group.bench_function("reserve", |b| {
-        b.iter_batched_ref(
-            BytesBuf::new,
-            |sb| sb.reserve(black_box(1), &memory),
-            BatchSize::SmallInput,
-        );
+        b.iter_batched_ref(BytesBuf::new, |sb| sb.reserve(black_box(1), &memory), BatchSize::SmallInput);
     });
 
     let allocs_op = allocs.operation("append_clean");

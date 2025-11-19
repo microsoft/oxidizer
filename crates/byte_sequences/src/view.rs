@@ -109,7 +109,7 @@ impl BytesView {
 
     /// Shorthand to copy a byte slice into a new `BytesView`, which is a common operation.
     #[must_use]
-    pub fn copy_from_slice(bytes: &[u8], memory_provider: &impl Memory) -> Self {
+    pub fn copied_from_slice(bytes: &[u8], memory_provider: &impl Memory) -> Self {
         let mut buffer = memory_provider.reserve(bytes.len());
         buffer.put_slice(bytes);
         buffer.consume_all()
@@ -1226,7 +1226,7 @@ mod tests {
         }
 
         let memory = TransparentTestMemory::new();
-        let s = BytesView::copy_from_slice(b"Hello, world!", &memory);
+        let s = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
         post_to_another_thread(s);
     }
@@ -1234,8 +1234,8 @@ mod tests {
     #[test]
     fn vectored_read_as_io_slice() {
         let memory = TransparentTestMemory::new();
-        let segment1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
-        let segment2 = BytesView::copy_from_slice(b"Hello, another world!", &memory);
+        let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
         let sequence = BytesView::from_sequences(vec![segment1.clone(), segment2.clone()]);
 
@@ -1254,8 +1254,8 @@ mod tests {
     #[test]
     fn vectored_read_as_slice() {
         let memory = TransparentTestMemory::new();
-        let segment1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
-        let segment2 = BytesView::copy_from_slice(b"Hello, another world!", &memory);
+        let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
         let sequence = BytesView::from_sequences(vec![segment1.clone(), segment2.clone()]);
 
@@ -1275,27 +1275,27 @@ mod tests {
     fn eq_sequence() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
-        let s2 = BytesView::copy_from_slice(b"Hello, world!", &memory);
+        let s1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let s2 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
         assert_eq!(s1, s2);
 
-        let s3 = BytesView::copy_from_slice(b"Jello, world!", &memory);
+        let s3 = BytesView::copied_from_slice(b"Jello, world!", &memory);
 
         assert_ne!(s1, s3);
 
-        let s4 = BytesView::copy_from_slice(b"Hello, world! ", &memory);
+        let s4 = BytesView::copied_from_slice(b"Hello, world! ", &memory);
 
         assert_ne!(s1, s4);
 
-        let s5_part1 = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let s5_part2 = BytesView::copy_from_slice(b"world!", &memory);
+        let s5_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let s5_part2 = BytesView::copied_from_slice(b"world!", &memory);
         let s5 = BytesView::from_sequences([s5_part1, s5_part2]);
 
         assert_eq!(s1, s5);
         assert_ne!(s5, s3);
 
-        let s6 = BytesView::copy_from_slice(b"Hello, ", &memory);
+        let s6 = BytesView::copied_from_slice(b"Hello, ", &memory);
 
         assert_ne!(s1, s6);
         assert_ne!(s5, s6);
@@ -1305,7 +1305,7 @@ mod tests {
     fn eq_slice() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
+        let s1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
         assert_eq!(s1, b"Hello, world!".as_slice());
         assert_ne!(s1, b"Jello, world!".as_slice());
@@ -1315,8 +1315,8 @@ mod tests {
         assert_ne!(b"Jello, world!".as_slice(), s1);
         assert_ne!(b"Hello, world! ".as_slice(), s1);
 
-        let s2_part1 = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let s2_part2 = BytesView::copy_from_slice(b"world!", &memory);
+        let s2_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let s2_part2 = BytesView::copied_from_slice(b"world!", &memory);
         let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s2, b"Hello, world!".as_slice());
@@ -1334,7 +1334,7 @@ mod tests {
     fn eq_array() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
+        let s1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
         assert_eq!(s1, b"Hello, world!");
         assert_ne!(s1, b"Jello, world!");
@@ -1344,8 +1344,8 @@ mod tests {
         assert_ne!(b"Jello, world!", s1);
         assert_ne!(b"Hello, world! ", s1);
 
-        let s2_part1 = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let s2_part2 = BytesView::copy_from_slice(b"world!", &memory);
+        let s2_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let s2_part2 = BytesView::copied_from_slice(b"world!", &memory);
         let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s2, b"Hello, world!");
@@ -1363,8 +1363,8 @@ mod tests {
     fn meta_none() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let s2 = BytesView::copy_from_slice(b"world!", &memory);
+        let s1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let s2 = BytesView::copied_from_slice(b"world!", &memory);
 
         let s = BytesView::from_sequences([s1, s2]);
 
@@ -1425,8 +1425,8 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two single-span sequences
-        let mut s1 = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let s2 = BytesView::copy_from_slice(b"world!", &memory);
+        let mut s1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let s2 = BytesView::copied_from_slice(b"world!", &memory);
 
         assert_eq!(s1.len(), 7);
         assert_eq!(s2.len(), 6);
@@ -1442,12 +1442,12 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two multi-span sequences (2 spans each)
-        let s1_part1 = BytesView::copy_from_slice(b"AAA", &memory);
-        let s1_part2 = BytesView::copy_from_slice(b"BBB", &memory);
+        let s1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
+        let s1_part2 = BytesView::copied_from_slice(b"BBB", &memory);
         let mut s1 = BytesView::from_sequences([s1_part1, s1_part2]);
 
-        let s2_part1 = BytesView::copy_from_slice(b"CCC", &memory);
-        let s2_part2 = BytesView::copy_from_slice(b"DDD", &memory);
+        let s2_part1 = BytesView::copied_from_slice(b"CCC", &memory);
+        let s2_part2 = BytesView::copied_from_slice(b"DDD", &memory);
         let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s1.len(), 6);
@@ -1463,7 +1463,7 @@ mod tests {
     fn append_empty_sequences() {
         let memory = TransparentTestMemory::new();
 
-        let mut s1 = BytesView::copy_from_slice(b"Hello", &memory);
+        let mut s1 = BytesView::copied_from_slice(b"Hello", &memory);
         let s2 = BytesView::new();
 
         s1.append(s2);
@@ -1471,7 +1471,7 @@ mod tests {
         assert_eq!(s1, b"Hello");
 
         let mut s3 = BytesView::new();
-        let s4 = BytesView::copy_from_slice(b"world", &memory);
+        let s4 = BytesView::copied_from_slice(b"world", &memory);
 
         s3.append(s4);
         assert_eq!(s3.len(), 5);
@@ -1483,8 +1483,8 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two single-span sequences
-        let s1 = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let s2 = BytesView::copy_from_slice(b"world!", &memory);
+        let s1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let s2 = BytesView::copied_from_slice(b"world!", &memory);
 
         assert_eq!(s1.len(), 7);
         assert_eq!(s2.len(), 6);
@@ -1505,12 +1505,12 @@ mod tests {
         let memory = TransparentTestMemory::new();
 
         // Create two multi-span sequences (2 spans each)
-        let s1_part1 = BytesView::copy_from_slice(b"AAA", &memory);
-        let s1_part2 = BytesView::copy_from_slice(b"BBB", &memory);
+        let s1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
+        let s1_part2 = BytesView::copied_from_slice(b"BBB", &memory);
         let s1 = BytesView::from_sequences([s1_part1, s1_part2]);
 
-        let s2_part1 = BytesView::copy_from_slice(b"CCC", &memory);
-        let s2_part2 = BytesView::copy_from_slice(b"DDD", &memory);
+        let s2_part1 = BytesView::copied_from_slice(b"CCC", &memory);
+        let s2_part2 = BytesView::copied_from_slice(b"DDD", &memory);
         let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
 
         assert_eq!(s1.len(), 6);
@@ -1531,7 +1531,7 @@ mod tests {
     fn concat_empty_sequences() {
         let memory = TransparentTestMemory::new();
 
-        let s1 = BytesView::copy_from_slice(b"Hello", &memory);
+        let s1 = BytesView::copied_from_slice(b"Hello", &memory);
         let s2 = BytesView::new();
 
         let s3 = s1.concat(s2);
@@ -1539,7 +1539,7 @@ mod tests {
         assert_eq!(s3, b"Hello");
 
         let s4 = BytesView::new();
-        let s5 = BytesView::copy_from_slice(b"world", &memory);
+        let s5 = BytesView::copied_from_slice(b"world", &memory);
 
         let s6 = s4.concat(s5);
         assert_eq!(s6.len(), 5);

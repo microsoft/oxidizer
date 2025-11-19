@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(sb.len(), 0);
         assert_eq!(sb.capacity(), 0);
 
-        let mut sequence = BytesView::copy_from_slice(b"Hello, world", &memory);
+        let mut sequence = BytesView::copied_from_slice(b"Hello, world", &memory);
         assert_eq!(sequence, b"Hello, world");
 
         assert_eq!(sequence.chunk().len(), 1);

@@ -223,7 +223,7 @@ mod tests {
     fn test_sequence_to_bytes() {
         let memory = TransparentTestMemory::new();
 
-        let sequence = BytesView::copy_from_slice(b"Hello, world!", &memory);
+        let sequence = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
         let sequence_chunk_ptr = sequence.chunk().as_ptr();
 
@@ -239,8 +239,8 @@ mod tests {
     fn test_multi_block_sequence_to_bytes() {
         let memory = TransparentTestMemory::new();
 
-        let hello = BytesView::copy_from_slice(b"Hello, ", &memory);
-        let world = BytesView::copy_from_slice(b"world!", &memory);
+        let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let world = BytesView::copied_from_slice(b"world!", &memory);
         let sequence = BytesView::from_sequences([hello, world]);
 
         let bytes = sequence.into_bytes();
