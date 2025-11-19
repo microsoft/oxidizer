@@ -1,5 +1,5 @@
 ---
-source: crates/fundle_macros_impl/tests/newtype_basic.rs
+source: crates/fundle_macros/src/newtype.rs
 expression: expand_fundle_newtype!(item)
 ---
 #[derive(::std::clone::Clone)]

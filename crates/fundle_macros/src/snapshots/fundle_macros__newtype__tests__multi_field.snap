@@ -1,6 +1,5 @@
 ---
-source: crates/fundle_macros_impl/tests/newtype_errors.rs
-assertion_line: 24
+source: crates/fundle_macros/src/newtype.rs
 expression: expand_fundle_newtype!(item)
 ---
 ::core::compile_error! {

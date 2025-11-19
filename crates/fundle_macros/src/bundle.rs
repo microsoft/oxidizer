@@ -8,7 +8,7 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, Visibility, parse2};
 
-pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+pub fn bundle_impl(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
 
     let struct_name = &input.ident;
@@ -708,5 +708,116 @@ fn generate_select_macro(
                 }
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    macro_rules! expand_fundle_bundle {
+        ($item:expr) => {{
+            // Extract just the arguments from inside the attribute (empty in this case)
+            let attr_args = if let Some(attr) = $item.attrs.iter().find(|a| a.path().is_ident("bundle")) {
+                match &attr.meta {
+                    syn::Meta::Path(_) => quote::quote! {},       // #[bundle] with no args
+                    syn::Meta::List(list) => list.tokens.clone(), // #[bundle(...)]
+                    syn::Meta::NameValue(_) => quote::quote! {},  // shouldn't happen for your use case
+                }
+            } else {
+                quote::quote! {}
+            };
+
+            // Create a clean item without the bundle attribute
+            let mut clean_item = $item.clone();
+            clean_item.attrs.retain(|attr| !attr.path().is_ident("bundle"));
+            let item_tokens = quote::quote! { #clean_item };
+
+            let output = crate::bundle::bundle_impl(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
+
+            // Parse as File - the output should be a complete set of items
+            let file: syn::File = syn::parse2(output).unwrap();
+            prettyplease::unparse(&file)
+        }};
+    }
+
+    use syn::{ItemStruct, parse_quote};
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn basic_expansion() {
+        let item: ItemStruct = parse_quote! {
+            #[bundle]
+            struct Foo {}
+        };
+
+        insta::assert_snapshot!(expand_fundle_bundle!(item));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn pub_expansion() {
+        let item: ItemStruct = parse_quote! {
+            #[bundle]
+            pub struct Foo {}
+        };
+
+        insta::assert_snapshot!(expand_fundle_bundle!(item));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn forward_empty() {
+        let item: ItemStruct = parse_quote! {
+            #[bundle]
+            struct Foo {
+                #[forward()]
+                x: Bar
+            }
+        };
+
+        insta::assert_snapshot!(expand_fundle_bundle!(item));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn forward_invalid_syntax() {
+        let item: ItemStruct = parse_quote! {
+            #[bundle]
+            struct Foo {
+                #[forward(123)]
+                x: Bar
+            }
+        };
+
+        insta::assert_snapshot!(expand_fundle_bundle!(item));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn foward_explicit() {
+        let item: ItemStruct = parse_quote! {
+            #[bundle]
+            struct Foo {
+                #[forward(u8, u16)]
+                x: Bar,
+                #[something_else]
+                y: Bar
+            }
+        };
+
+        insta::assert_snapshot!(expand_fundle_bundle!(item));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn unrelated_attr() {
+        let item: ItemStruct = parse_quote! {
+        #[bundle]
+        struct Foo {
+                #[something_else]
+                x: Bar
+            }
+        };
+
+        insta::assert_snapshot!(expand_fundle_bundle!(item));
     }
 }

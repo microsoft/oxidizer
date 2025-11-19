@@ -75,15 +75,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros"
-version = "0.2.1"
-dependencies = [
- "fundle_macros_impl",
- "mutants",
-]
-
-[[package]]
-name = "fundle_macros_impl"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "insta",
  "mutants",

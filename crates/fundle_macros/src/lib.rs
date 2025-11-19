@@ -49,6 +49,10 @@
 
 use proc_macro::TokenStream;
 
+mod bundle;
+mod deps;
+mod newtype;
+
 /// Define an 'export' DI container.
 ///
 /// The `bundle` macro transforms a struct into a builder pattern where each field must be
@@ -121,7 +125,7 @@ use proc_macro::TokenStream;
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
 pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
-    fundle_macros_impl::bundle(attr.into(), item.into())
+    bundle::bundle_impl(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
@@ -183,7 +187,7 @@ pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
 pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
-    fundle_macros_impl::deps(attr.into(), item.into())
+    deps::deps_impl(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
@@ -233,7 +237,7 @@ pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
 pub fn newtype(attr: TokenStream, item: TokenStream) -> TokenStream {
-    fundle_macros_impl::newtype(attr.into(), item.into())
+    newtype::newtype_impl(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }

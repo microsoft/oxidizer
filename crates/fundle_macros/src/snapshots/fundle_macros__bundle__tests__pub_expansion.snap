@@ -1,9 +1,9 @@
 ---
-source: crates/fundle_macros_impl/tests/bundle_basic.rs
+source: crates/fundle_macros/src/bundle.rs
 expression: expand_fundle_bundle!(item)
 ---
 #[allow(non_camel_case_types, non_snake_case)]
-struct Foo {}
+pub struct Foo {}
 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
 impl Foo {
     pub fn builder() -> FooBuilder {
@@ -11,7 +11,7 @@ impl Foo {
     }
 }
 #[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
-struct FooBuilder {
+pub struct FooBuilder {
     _phantom: ::std::marker::PhantomData<()>,
 }
 #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]

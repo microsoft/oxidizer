@@ -1,5 +1,5 @@
 ---
-source: crates/fundle_macros_impl/tests/bundle_errors.rs
+source: crates/fundle_macros/src/bundle.rs
 expression: expand_fundle_bundle!(item)
 ---
 ::core::compile_error! {

@@ -1,5 +1,5 @@
 ---
-source: crates/fundle_macros_impl/tests/bundle_forward.rs
+source: crates/fundle_macros/src/bundle.rs
 expression: expand_fundle_bundle!(item)
 ---
 #[allow(non_camel_case_types, non_snake_case)]
