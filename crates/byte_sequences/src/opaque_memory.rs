@@ -23,7 +23,7 @@ impl OpaqueMemory {
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`ByteSequenceBuilder`][1] that can be used to fill the reserved memory with data.
+    /// Returns an empty [`BytesBuf`][1] that can be used to fill the reserved memory with data.
     ///
     /// The memory provider may provide more memory than requested.
     ///
@@ -32,23 +32,23 @@ impl OpaqueMemory {
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`][1]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`BytesBuf`][1]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
     ///
     /// May panic if the operating system runs out of memory.
     ///
-    /// [1]: crate::ByteSequenceBuilder
+    /// [1]: crate::BytesBuf
     #[must_use]
-    pub fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
+    pub fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.inner.reserve(min_bytes)
     }
 }
 
 impl Memory for OpaqueMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
     }
 }

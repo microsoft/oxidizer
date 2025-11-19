@@ -11,12 +11,12 @@ use crate::{BlockRef, SpanBuilder};
 ///
 /// Many operating system APIs are limited to 32-bit memory block sizes, so we match it.
 ///
-/// A [`ByteSequence`][crate::ByteSequence] may contain more data than `BlockSize` by being composed of
+/// A [`BytesView`][crate::BytesView] may contain more data than `BlockSize` by being composed of
 /// multiple blocks but a single block is always limited to `BlockSize`.
 pub type BlockSize = u32;
 
 /// Describes an exclusively owned memory block that can be used as part of the capacity
-/// of a newly created [`ByteSequenceBuilder`][crate::ByteSequenceBuilder].
+/// of a newly created [`BytesBuf`][crate::BytesBuf].
 #[derive(Debug)]
 pub struct Block {
     ptr: NonNull<MaybeUninit<u8>>,

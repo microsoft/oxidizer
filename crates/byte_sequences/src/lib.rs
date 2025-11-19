@@ -3,11 +3,11 @@
 
 //! Types for producing or consuming byte sequences.
 //!
-//! A [`ByteSequence`] is a logical sequence of zero or more bytes
+//! A [`BytesView`] is a logical sequence of zero or more bytes
 //! stored in memory, similar to a slice `&[u8]` but with some key differences:
 //!
 //! * The bytes in a byte sequence are not required to be consecutive in memory.
-//! * The bytes in a byte sequence are always immutable, even if you own the [`ByteSequence`].
+//! * The bytes in a byte sequence are always immutable, even if you own the [`BytesView`].
 //!
 //! In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
 //! treated as one logical sequence of bytes. The types in this crate provide a way to work with
@@ -16,8 +16,8 @@
 //!
 //! # Consuming Byte Sequences
 //!
-//! The standard model for using bytes of data from a [`ByteSequence`] is to consume them via the
-//! [`bytes::buf::Buf`][17] trait, which is implemented by [`ByteSequence`].
+//! The standard model for using bytes of data from a [`BytesView`] is to consume them via the
+//! [`bytes::buf::Buf`][17] trait, which is implemented by [`BytesView`].
 //!
 //! There are many helper methods on this trait that will read bytes from the beginning of the
 //! sequence and simultaneously remove the read bytes from the sequence, shrinking it to only
@@ -25,11 +25,11 @@
 //!
 //! ```
 //! # let memory = byte_sequences::GlobalMemoryPool::new();
-//! # let message = ByteSequence::copy_from_slice(b"1234123412341234", &memory);
-//! use byte_sequences::ByteSequence;
+//! # let message = BytesView::copy_from_slice(b"1234123412341234", &memory);
+//! use byte_sequences::BytesView;
 //! use bytes::Buf;
 //!
-//! fn consume_message(mut message: ByteSequence) {
+//! fn consume_message(mut message: BytesView) {
 //!     // We read the message and calculate the sum of all the words in it.
 //!     let mut sum: u64 = 0;
 //!
@@ -58,8 +58,8 @@
 //!
 //! ```
 //! # let memory = byte_sequences::GlobalMemoryPool::new();
-//! # let mut sequence = ByteSequence::copy_from_slice(b"1234123412341234", &memory);
-//! use byte_sequences::ByteSequence;
+//! # let mut sequence = BytesView::copy_from_slice(b"1234123412341234", &memory);
+//! use byte_sequences::BytesView;
 //! use bytes::Buf;
 //!
 //! let len = sequence.len();
@@ -81,8 +81,8 @@
 //!
 //! ```
 //! # let memory = byte_sequences::GlobalMemoryPool::new();
-//! # let mut sequence = ByteSequence::copy_from_slice(b"1234123412341234", &memory);
-//! use byte_sequences::ByteSequence;
+//! # let mut sequence = BytesView::copy_from_slice(b"1234123412341234", &memory);
+//! use byte_sequences::BytesView;
 //! use bytes::Buf;
 //!
 //! assert_eq!(sequence.len(), 16);
@@ -117,7 +117,7 @@
 //!    with no framework), you can create your own instance via `GlobalMemoryPool::new()`.
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
-//! [`Memory::reserve()`][14] on it. This returns a [`ByteSequenceBuilder`] with the requested
+//! [`Memory::reserve()`][14] on it. This returns a [`BytesBuf`] with the requested
 //! memory capacity.
 //!
 //! ```
@@ -131,9 +131,9 @@
 //! let mut sequence_builder = memory.reserve(100);
 //! ```
 //!
-//! Now that you have the memory capacity and a [`ByteSequenceBuilder`], you can fill the memory
+//! Now that you have the memory capacity and a [`BytesBuf`], you can fill the memory
 //! capacity with bytes of data. The standard pattern for this is to use the
-//! [`bytes::buf::BufMut`][20] trait, which is implemented by [`ByteSequenceBuilder`].
+//! [`bytes::buf::BufMut`][20] trait, which is implemented by [`BytesBuf`].
 //!
 //! Helper methods on this trait allow you to write bytes to the sequence builder up to the
 //! extent of the reserved memory capacity.
@@ -169,7 +169,7 @@
 //! See `examples/mem_chunk_write.rs` for an example of how to use these methods.
 //!
 //! If you do not know exactly how much memory you need in advance, you can extend the sequence
-//! builder capacity on demand if you run out by calling [`ByteSequenceBuilder::reserve()`][13],
+//! builder capacity on demand if you run out by calling [`BytesBuf::reserve()`][13],
 //! which will reserve more memory capacity. You can use [`bytes::buf::BufMut::remaining_mut()`][26]
 //! on the sequence builder to identify how much unused memory capacity is available for writing.
 //!
@@ -195,7 +195,7 @@
 //! ```
 //!
 //! When you have filled the memory capacity with the bytes you wanted to write, you can consume
-//! the data in the sequence builder, turning it into a [`ByteSequence`] of immutable bytes.
+//! the data in the sequence builder, turning it into a [`BytesView`] of immutable bytes.
 //!
 //! ```
 //! # struct Connection {}
@@ -240,8 +240,8 @@
 //! let final_contents = sequence_builder.consume_all();
 //! ```
 //!
-//! If you already have a [`ByteSequence`] that you want to write into a [`ByteSequenceBuilder`], call
-//! [`ByteSequenceBuilder::append()`][26]. This is a highly efficient zero-copy operation
+//! If you already have a [`BytesView`] that you want to write into a [`BytesBuf`], call
+//! [`BytesBuf::append()`][26]. This is a highly efficient zero-copy operation
 //! that reuses the memory capacity of the sequence you are appending.
 //!
 //! ```
@@ -294,7 +294,7 @@
 //! for full code):
 //!
 //! ```
-//! use byte_sequences::{HasMemory, MemoryShared, ByteSequence};
+//! use byte_sequences::{HasMemory, MemoryShared, BytesView};
 //!
 //! /// Counts the number of 0x00 bytes in a sequence before
 //! /// writing that sequence to a network connection.
@@ -319,7 +319,7 @@
 //!         }
 //!     }
 //!
-//!     pub fn write(&mut self, sequence: ByteSequence) {
+//!     pub fn write(&mut self, sequence: BytesView) {
 //!         // TODO: Count zeros.
 //!
 //!         self.connection.write(sequence);
@@ -334,7 +334,7 @@
 //!     }
 //! }
 //! # #[derive(Debug)] struct Connection;
-//! # impl Connection { fn write(&mut self, mut _message: ByteSequence) {} }
+//! # impl Connection { fn write(&mut self, mut _message: BytesView) {} }
 //! # impl HasMemory for Connection { fn memory(&self) -> impl MemoryShared { byte_sequences::TransparentTestMemory::new() } }
 //! ```
 //!
@@ -342,7 +342,7 @@
 //! `examples/mem_has_provider_optimizing.rs` for full code):
 //!
 //! ```
-//! use byte_sequences::{CallbackMemory, HasMemory, MemoryShared, ByteSequence};
+//! use byte_sequences::{CallbackMemory, HasMemory, MemoryShared, BytesView};
 //!
 //! /// # Implementation strategy for `HasMemory`
 //! ///
@@ -382,7 +382,7 @@
 //!     }
 //! }
 //!
-//! # use byte_sequences::ByteSequenceBuilder;
+//! # use byte_sequences::BytesBuf;
 //! # #[derive(Clone, Debug)]
 //! # struct IoContext;
 //! # impl IoContext {
@@ -390,7 +390,7 @@
 //! #         &self,
 //! #         min_len: usize,
 //! #         _memory_configuration: MemoryConfiguration,
-//! #     ) -> ByteSequenceBuilder {
+//! #     ) -> BytesBuf {
 //! #         todo!()
 //! #     }
 //! # }
@@ -449,10 +449,10 @@
 //!
 //! ```
 //! # struct Foo;
-//! use byte_sequences::ByteSequence;
+//! use byte_sequences::BytesView;
 //!
 //! # impl Foo {
-//! pub fn write(&mut self, message: ByteSequence) {
+//! pub fn write(&mut self, message: BytesView) {
 //!     // We now need to identify whether the message actually uses memory that allows us to
 //!     // ues the optimal I/O path. There is no requirement that the data passed to us contains
 //!     // only memory with our preferred configuration.
@@ -479,8 +479,8 @@
 //!         self.write_fallback(message);
 //!     }
 //! }
-//! # fn write_optimal(&mut self, _message: ByteSequence) { }
-//! # fn write_fallback(&mut self, _message: ByteSequence) { }
+//! # fn write_optimal(&mut self, _message: BytesView) { }
+//! # fn write_fallback(&mut self, _message: BytesView) { }
 //! # }
 //! # struct MemoryConfiguration { requires_registered_memory: bool }
 //! ```
@@ -493,14 +493,14 @@
 //!
 //! The popular [`Bytes`][18] type from the `bytes` crate is often used in the Rust ecosystem to
 //! represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
-//! type, this crate offers conversion methods to translate between [`ByteSequence`] and [`Bytes`][18]:
+//! type, this crate offers conversion methods to translate between [`BytesView`] and [`Bytes`][18]:
 //!
-//! * [`ByteSequence::into_bytes()`][16] converts a [`ByteSequence`] into a [`Bytes`][18] instance. This
+//! * [`BytesView::into_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
 //!   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
 //!   You are discouraged from using this method in any performance-relevant logic path.
-//! * See `Work Item 5861368: ByteSequence::into_bytes_iter()`
-//! * `ByteSequence::from(Bytes)` or `let s: ByteSequence = bytes.into()` converts a [`Bytes`][18] instance
-//!   into a [`ByteSequence`]. This is an efficient zero-copy operation that reuses the memory of the
+//! * See `Work Item 5861368: BytesView::into_bytes_iter()`
+//! * `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][18] instance
+//!   into a [`BytesView`]. This is an efficient zero-copy operation that reuses the memory of the
 //!   `Bytes` instance.
 //!
 //! # Static Data
@@ -517,48 +517,48 @@
 //! * We want to use memory that is optimally configured for the context in which the data is
 //!   consumed (e.g. network connection, file, etc).
 //!
-//! The standard pattern here is to use [`OnceLock`][27] to lazily initialize a [`ByteSequence`] from
+//! The standard pattern here is to use [`OnceLock`][27] to lazily initialize a [`BytesView`] from
 //! the static data on first use, using memory from a memory provider that is optimal for the
 //! intended usage.
 //!
 //! ```
 //! use std::sync::OnceLock;
-//! use byte_sequences::ByteSequence;
+//! use byte_sequences::BytesView;
 //!
 //! const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";
 //!
-//! // We transform the static data into a ByteSequence on first use, via OnceLock.
+//! // We transform the static data into a BytesView on first use, via OnceLock.
 //! //
 //! // You are expected to reuse this variable as long as the context does not change.
 //! // For example, it is typically fine to share this across multiple network connections
 //! // because they all likely use the same memory configuration. However, writing to files
 //! // may require a different memory configuration for optimality, so you would need a different
-//! // `ByteSequence` for that. Such details will typically be documented in the API documentation
-//! // of the type that consumes the `ByteSequence` (e.g. a network connection or a file writer).
-//! let header_prefix = OnceLock::<ByteSequence>::new();
+//! // `BytesView` for that. Such details will typically be documented in the API documentation
+//! // of the type that consumes the `BytesView` (e.g. a network connection or a file writer).
+//! let header_prefix = OnceLock::<BytesView>::new();
 //!
 //! for _ in 0..10 {
 //!     let mut connection = Connection::accept();
 //!
-//!     // The static data is transformed into a ByteSequence on first use,
+//!     // The static data is transformed into a BytesView on first use,
 //!     // using memory optimally configured for a network connection.
 //!     let header_prefix = header_prefix
-//!         .get_or_init(|| ByteSequence::copy_from_slice(HEADER_PREFIX, &connection.memory()));
+//!         .get_or_init(|| BytesView::copy_from_slice(HEADER_PREFIX, &connection.memory()));
 //!
-//!     // Now we can use the `header_prefix` ByteSequence in the connection logic.
-//!     // Cloning a ByteSequence is a cheap zero-copy operation.
+//!     // Now we can use the `header_prefix` BytesView in the connection logic.
+//!     // Cloning a BytesView is a cheap zero-copy operation.
 //!     connection.write(header_prefix.clone());
 //! }
 //! # struct Connection;
 //! # impl Connection {
 //! #     fn accept() -> Self { Connection }
 //! #     fn memory(&self) -> impl byte_sequences::Memory { byte_sequences::GlobalMemoryPool::new() }
-//! #     fn write(&self, _sequence: ByteSequence) {}
+//! #     fn write(&self, _sequence: BytesView) {}
 //! # }
 //! ```
 //!
 //! Different usages (e.g. file vs network) may require differently configured memory for optimal
-//! performance, so you may need a different `ByteSequence` if the same static data is to be used
+//! performance, so you may need a different `BytesView` if the same static data is to be used
 //! in different contexts.
 //!
 //! # Testing
@@ -574,9 +574,9 @@
 //!   you want to ensure that your code works well even if a byte sequence consists of
 //!   non-consecutive memory. You can go down to as low as 1 byte per block!
 //!
-//! [13]: ByteSequenceBuilder::reserve
+//! [13]: BytesBuf::reserve
 //! [14]: Memory::reserve
-//! [16]: ByteSequence::into_bytes
+//! [16]: BytesView::into_bytes
 //! [17]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
 //! [18]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [20]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
@@ -593,6 +593,7 @@
 
 mod block;
 mod block_ref;
+mod buf;
 mod bytes;
 mod callback_memory;
 mod constants;
@@ -603,17 +604,17 @@ mod memory;
 mod memory_guard;
 mod memory_shared;
 mod opaque_memory;
-mod sequence;
-mod sequence_builder;
 mod slice;
 mod span;
 mod span_builder;
 mod transparent;
 mod vec;
+mod view;
 mod write_adapter;
 
 pub use block::*;
 pub use block_ref::*;
+pub use buf::*;
 pub use callback_memory::*;
 pub use constants::*;
 pub use fixed_block::*;
@@ -623,11 +624,10 @@ pub use memory::*;
 pub use memory_guard::*;
 pub use memory_shared::*;
 pub use opaque_memory::*;
-pub use sequence::*;
-pub use sequence_builder::*;
 pub(crate) use span::*;
 pub(crate) use span_builder::*;
 pub use transparent::*;
+pub use view::*;
 pub(crate) use write_adapter::*;
 
 #[cfg(test)]

@@ -15,7 +15,7 @@
 
 use std::num::NonZero;
 
-use byte_sequences::{BlockSize, ByteSequence, ByteSequenceBuilder, CallbackMemory, GlobalMemoryPool, HasMemory, MemoryShared};
+use byte_sequences::{BlockSize, BytesView, BytesBuf, CallbackMemory, GlobalMemoryPool, HasMemory, MemoryShared};
 
 fn main() {
     // In a real application, both of these would be provided by the framework.
@@ -26,16 +26,16 @@ fn main() {
     let connection_memory = connection.memory();
 
     // This message uses the connection's memory provider, which provides optimal memory.
-    let message1 = ByteSequence::copy_from_slice(b"Example message 1: hello, world!", &connection_memory);
+    let message1 = BytesView::copy_from_slice(b"Example message 1: hello, world!", &connection_memory);
     connection.write(message1.clone());
 
     // This message uses the global memory pool, which does not provide optimal memory.
-    let message2 = ByteSequence::copy_from_slice(b"Message 2: goodbye", &global_memory_pool);
+    let message2 = BytesView::copy_from_slice(b"Message 2: goodbye", &global_memory_pool);
     connection.write(message2.clone());
 
     // This message uses a combination of both memory providers. This will not use the optimal
     // I/O path because the optimal I/O path requires all memory in a byte sequence to be optimal.
-    let message3 = ByteSequence::from_sequences([message1, message2]);
+    let message3 = BytesView::from_sequences([message1, message2]);
     connection.write(message3);
 }
 
@@ -59,7 +59,7 @@ impl Connection {
         Self { io_context }
     }
 
-    pub fn write(&mut self, message: ByteSequence) {
+    pub fn write(&mut self, message: BytesView) {
         // We now need to identify whether the message actually uses memory that allows us to
         // ues the optimal I/O path. There is no requirement that the data passed to us contains
         // only memory with our preferred configuration.
@@ -92,7 +92,7 @@ impl Connection {
         clippy::needless_pass_by_value,
         reason = "for example realism"
     )]
-    fn write_optimal(&mut self, message: ByteSequence) {
+    fn write_optimal(&mut self, message: BytesView) {
         println!("Sending message of {} bytes using optimal path.", message.len());
     }
 
@@ -102,7 +102,7 @@ impl Connection {
         clippy::needless_pass_by_value,
         reason = "for example realism"
     )]
-    fn write_fallback(&mut self, message: ByteSequence) {
+    fn write_fallback(&mut self, message: BytesView) {
         println!("Sending message of {} bytes using fallback path.", message.len());
     }
 }
@@ -139,18 +139,18 @@ impl IoContext {
     }
 
     #[expect(clippy::unused_self, reason = "for example realism")]
-    pub fn reserve_io_memory(&self, min_len: usize, memory_configuration: MemoryConfiguration) -> ByteSequenceBuilder {
+    pub fn reserve_io_memory(&self, min_len: usize, memory_configuration: MemoryConfiguration) -> BytesBuf {
         let min_len: BlockSize = min_len
             .try_into()
             .expect("this example is limited to max allocation size of BlockSize, just to keep it simple");
 
         let Some(min_len) = NonZero::new(min_len) else {
-            return ByteSequenceBuilder::new();
+            return BytesBuf::new();
         };
 
         let block = io_memory::allocate(min_len, memory_configuration);
 
-        ByteSequenceBuilder::from_blocks([block])
+        BytesBuf::from_blocks([block])
     }
 }
 

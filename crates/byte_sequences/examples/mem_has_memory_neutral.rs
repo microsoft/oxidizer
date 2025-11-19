@@ -4,7 +4,7 @@
 //! Showcases how to implement the `HasMemory` trait
 //! using the `GlobalMemoryPool` implementation strategy.
 
-use byte_sequences::{ByteSequence, GlobalMemoryPool, HasMemory, MemoryShared};
+use byte_sequences::{BytesView, GlobalMemoryPool, HasMemory, MemoryShared};
 use bytes::Buf;
 
 fn main() {
@@ -19,9 +19,9 @@ fn main() {
 
     // These byte sequences are meant to be passed to the checksum calculator,
     // so they use the memory provider we obtained from the checksum calculator.
-    let data1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
-    let data2 = ByteSequence::copy_from_slice(b"Goodbye, world!", &memory);
-    let data3 = ByteSequence::copy_from_slice(b"Goodbye, universe!", &memory);
+    let data1 = BytesView::copy_from_slice(b"Hello, world!", &memory);
+    let data2 = BytesView::copy_from_slice(b"Goodbye, world!", &memory);
+    let data3 = BytesView::copy_from_slice(b"Goodbye, universe!", &memory);
 
     checksum_calculator.add_bytes(data1);
     checksum_calculator.add_bytes(data2);
@@ -55,7 +55,7 @@ impl ChecksumCalculator {
         }
     }
 
-    pub fn add_bytes(&mut self, mut bytes: ByteSequence) {
+    pub fn add_bytes(&mut self, mut bytes: BytesView) {
         while !bytes.is_empty() {
             let b = bytes.get_u8();
             self.checksum = self.checksum.wrapping_add(u64::from(b));

@@ -7,7 +7,7 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use byte_sequences::{BlockSize, ByteSequence, ByteSequenceBuilder, FixedBlockTestMemory};
+use byte_sequences::{BlockSize, BytesView, BytesBuf, FixedBlockTestMemory};
 use bytes::{Buf, BufMut};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
@@ -33,32 +33,32 @@ fn entrypoint(c: &mut Criterion) {
 
     let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
 
-    let test_data_as_seq = ByteSequence::copy_from_slice(TEST_DATA, &memory);
+    let test_data_as_seq = BytesView::copy_from_slice(TEST_DATA, &memory);
 
     let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
-    let max_inline_as_seq = ByteSequence::from_sequences(max_inline.iter().cloned());
+    let max_inline_as_seq = BytesView::from_sequences(max_inline.iter().cloned());
 
     let many = iter::repeat_n(test_data_as_seq.clone(), MANY_SPANS).collect::<Vec<_>>();
-    let many_as_seq = ByteSequence::from_sequences(many.iter().cloned());
+    let many_as_seq = BytesView::from_sequences(many.iter().cloned());
 
-    let mut group = c.benchmark_group("ByteSequenceBuilder");
+    let mut group = c.benchmark_group("BytesBuf");
 
     let new_allocs = allocs.operation("new");
     group.bench_function("new", |b| {
         b.iter(|| {
             let _span = new_allocs.measure_thread();
-            ByteSequenceBuilder::new()
+            BytesBuf::new()
         });
     });
 
     group.bench_function("len_empty", |b| {
-        b.iter_batched_ref(ByteSequenceBuilder::new, |sb| sb.len(), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |sb| sb.len(), BatchSize::SmallInput);
     });
 
     group.bench_function("len_many", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(many_as_seq.clone());
                 sb
             },
@@ -68,13 +68,13 @@ fn entrypoint(c: &mut Criterion) {
     });
 
     group.bench_function("is_empty_empty", |b| {
-        b.iter_batched_ref(ByteSequenceBuilder::new, |sb| sb.is_empty(), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |sb| sb.is_empty(), BatchSize::SmallInput);
     });
 
     group.bench_function("is_empty_many", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(many_as_seq.clone());
                 sb
             },
@@ -84,13 +84,13 @@ fn entrypoint(c: &mut Criterion) {
     });
 
     group.bench_function("capacity_empty", |b| {
-        b.iter_batched_ref(ByteSequenceBuilder::new, |sb| sb.capacity(), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |sb| sb.capacity(), BatchSize::SmallInput);
     });
 
     group.bench_function("capacity_many", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(many_as_seq.clone());
                 sb
             },
@@ -101,7 +101,7 @@ fn entrypoint(c: &mut Criterion) {
 
     group.bench_function("reserve", |b| {
         b.iter_batched_ref(
-            ByteSequenceBuilder::new,
+            BytesBuf::new,
             |sb| sb.reserve(black_box(1), &memory),
             BatchSize::SmallInput,
         );
@@ -110,7 +110,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("append_clean");
     group.bench_function("append_clean", |b| {
         b.iter_batched_ref(
-            ByteSequenceBuilder::new,
+            BytesBuf::new,
             |sb| {
                 let _span = allocs_op.measure_thread();
                 sb.append(test_data_as_seq.clone());
@@ -123,7 +123,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("append_dirty", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
                 sb.put_u8(123);
                 sb
@@ -140,7 +140,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("consume_one_span", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(many_as_seq.clone());
                 sb
             },
@@ -156,7 +156,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("consume_max_inline_spans", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(max_inline_as_seq.clone());
                 sb
             },
@@ -172,7 +172,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("consume_many_spans", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(many_as_seq.clone());
                 sb
             },
@@ -188,7 +188,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("extend_lifetime", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(test_data_as_seq.clone());
                 sb
             },
@@ -207,7 +207,7 @@ fn entrypoint(c: &mut Criterion) {
 
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.reserve(BLOCK_SIZE.get() as usize, &memory);
                 sb
             },
@@ -232,7 +232,7 @@ fn entrypoint(c: &mut Criterion) {
 
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.reserve(BLOCK_SIZE.get() as usize * MAX_INLINE_SPANS, &memory);
                 sb
             },
@@ -257,7 +257,7 @@ fn entrypoint(c: &mut Criterion) {
 
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.reserve(BLOCK_SIZE.get() as usize * MANY_SPANS, &memory);
                 sb
             },
@@ -283,7 +283,7 @@ fn entrypoint(c: &mut Criterion) {
 
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.reserve(BLOCK_SIZE.get() as usize, &memory);
                 sb
             },
@@ -302,7 +302,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("inspect_frozen_all", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.append(many_as_seq.clone());
                 sb
             },
@@ -323,7 +323,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("inspect_unfrozen_all", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = ByteSequenceBuilder::new();
+                let mut sb = BytesBuf::new();
                 sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
                 sb.put_u8(123);
                 sb

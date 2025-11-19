@@ -13,7 +13,7 @@ use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use new_zealand::nz;
 
 use crate::constants::ERR_POISONED_LOCK;
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, ByteSequenceBuilder, Memory};
+use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesBuf, Memory};
 
 /// A memory pool for general-purpose memory used for storage/processing of byte sequences.
 #[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
@@ -45,7 +45,7 @@ impl GlobalMemoryPool {
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`ByteSequenceBuilder`] that can be used to fill the reserved memory with data.
+    /// Returns an empty [`BytesBuf`] that can be used to fill the reserved memory with data.
     ///
     /// The memory provider may provide more memory than requested.
     ///
@@ -54,21 +54,21 @@ impl GlobalMemoryPool {
     ///
     /// # Zero-sized reservations
     ///
-    /// Reserving zero bytes of memory is a valid operation and will return a [`ByteSequenceBuilder`]
+    /// Reserving zero bytes of memory is a valid operation and will return a [`BytesBuf`]
     /// with zero or more bytes of capacity.
     ///
     /// # Panics
     ///
     /// May panic if the operating system runs out of memory.
     #[must_use]
-    pub fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
+    pub fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.inner.reserve(min_bytes)
     }
 }
 
 impl Memory for GlobalMemoryPool {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
     }
 }
@@ -107,7 +107,7 @@ impl GlobalMemoryPoolInner {
         }
     }
 
-    fn reserve(&self, min_bytes: usize) -> crate::ByteSequenceBuilder {
+    fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         let block_count = min_bytes.div_ceil(BLOCK_SIZE_BYTES.get() as usize);
 
         let mut pool = self.block_pool.lock().expect(ERR_POISONED_LOCK);
@@ -157,7 +157,7 @@ impl GlobalMemoryPoolInner {
         })
         .take(block_count);
 
-        ByteSequenceBuilder::from_blocks(blocks)
+        BytesBuf::from_blocks(blocks)
     }
 }
 

@@ -4,7 +4,7 @@
 //! Basics of working with byte sequences. We obtain some memory, encode a message into it,
 //! and then receive this message in another function and write a status report to the terminal.
 
-use byte_sequences::{ByteSequence, GlobalMemoryPool, Memory};
+use byte_sequences::{BytesView, GlobalMemoryPool, Memory};
 use bytes::{Buf, BufMut};
 
 fn main() {
@@ -15,7 +15,7 @@ fn main() {
     consume_message(message);
 }
 
-fn produce_message(memory: &impl Memory) -> ByteSequence {
+fn produce_message(memory: &impl Memory) -> BytesView {
     // Our message consists of this many "words" of data.
     const MESSAGE_LEN_WORDS: usize = 123_456;
 
@@ -41,7 +41,7 @@ fn produce_message(memory: &impl Memory) -> ByteSequence {
     sequence_builder.consume_all()
 }
 
-fn consume_message(mut message: ByteSequence) {
+fn consume_message(mut message: BytesView) {
     // We read the message and calculate the sum of all the words in it.
     let mut sum: u64 = 0;
 

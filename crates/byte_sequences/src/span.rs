@@ -10,7 +10,7 @@ use bytes::{Buf, Bytes};
 use crate::{BlockRef, BlockSize};
 
 /// A span of immutable bytes backed by memory from a memory block. This type is used as a building
-/// block for [`ByteSequence`][crate::ByteSequence]s.
+/// block for [`BytesView`][crate::BytesView]s.
 ///
 /// While the contents are immutable, the span itself is not - its size may be constrained by
 /// cutting off pieces from the front (consuming them) as the read cursor is advanced when calling

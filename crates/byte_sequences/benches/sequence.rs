@@ -7,7 +7,7 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use byte_sequences::{BlockSize, ByteSequence, FixedBlockTestMemory};
+use byte_sequences::{BlockSize, BytesView, FixedBlockTestMemory};
 use bytes::Buf;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
@@ -33,24 +33,24 @@ fn entrypoint(c: &mut Criterion) {
 
     let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
 
-    let test_data_as_seq = ByteSequence::copy_from_slice(TEST_DATA, &memory);
+    let test_data_as_seq = BytesView::copy_from_slice(TEST_DATA, &memory);
 
     let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
 
     let many = iter::repeat_n(test_data_as_seq.clone(), MANY_SPANS).collect::<Vec<_>>();
-    let many_as_seq = ByteSequence::from_sequences(many.iter().cloned());
+    let many_as_seq = BytesView::from_sequences(many.iter().cloned());
     let many_as_bytes = many_as_seq.clone().into_bytes();
 
     let ten = iter::repeat_n(test_data_as_seq.clone(), 10).collect::<Vec<_>>();
-    let ten_as_seq = ByteSequence::from_sequences(ten.iter().cloned());
+    let ten_as_seq = BytesView::from_sequences(ten.iter().cloned());
 
-    let mut group = c.benchmark_group("ByteSequence");
+    let mut group = c.benchmark_group("BytesView");
 
     let allocs_op = allocs.operation("new");
     group.bench_function("new", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_thread();
-            ByteSequence::new()
+            BytesView::new()
         });
     });
 
@@ -163,7 +163,7 @@ fn entrypoint(c: &mut Criterion) {
 
     let allocs_op = allocs.operation("to_bytes_single_chunk");
     group.bench_function("to_bytes_single_chunk", |b| {
-        let seq = ByteSequence::from(test_data_as_seq.clone().into_bytes());
+        let seq = BytesView::from(test_data_as_seq.clone().into_bytes());
 
         b.iter(|| {
             let _span = allocs_op.measure_process();
@@ -173,7 +173,7 @@ fn entrypoint(c: &mut Criterion) {
 
     group.finish();
 
-    let mut group = c.benchmark_group("ByteSequence_slow");
+    let mut group = c.benchmark_group("BytesView_slow");
 
     group.bench_function("eq_self", |b| {
         b.iter_batched_ref(
@@ -209,7 +209,7 @@ fn entrypoint(c: &mut Criterion) {
             || many.iter().cloned(),
             |many_clones| {
                 let _span = allocs_op.measure_thread();
-                ByteSequence::from_sequences(black_box(many_clones))
+                BytesView::from_sequences(black_box(many_clones))
             },
             BatchSize::SmallInput,
         );
@@ -229,7 +229,7 @@ fn entrypoint(c: &mut Criterion) {
             || max_inline.iter().cloned(),
             |max_inline_clones| {
                 let _span = allocs_op.measure_thread();
-                ByteSequence::from_sequences(black_box(max_inline_clones))
+                BytesView::from_sequences(black_box(max_inline_clones))
             },
             BatchSize::SmallInput,
         );

@@ -2,14 +2,14 @@
 // Licensed under the MIT License.
 
 //! Showcases how you can easily and cheaply reuse byte sequences and parts of byte sequences.
-use byte_sequences::{ByteSequence, GlobalMemoryPool};
+use byte_sequences::{BytesView, GlobalMemoryPool};
 use bytes::{Buf, BufMut};
 
 fn main() {
     // The global memory pool in a real application would be provided by the framework.
     let memory = GlobalMemoryPool::new();
 
-    let hello_world = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
+    let hello_world = BytesView::copy_from_slice(b"Hello, world!", &memory);
 
     inspect_sequence(&hello_world);
 
@@ -21,7 +21,7 @@ fn main() {
     inspect_sequence(&world);
 
     // You can glue the parts back together if you wish. Again, this is a cheap zero-copy operation.
-    let hello_world_reconstructed = ByteSequence::from_sequences([hello, world]);
+    let hello_world_reconstructed = BytesView::from_sequences([hello, world]);
 
     inspect_sequence(&hello_world_reconstructed);
 
@@ -38,7 +38,7 @@ fn main() {
     inspect_sequence(&fox_story);
 }
 
-fn inspect_sequence(sequence: &ByteSequence) {
+fn inspect_sequence(sequence: &BytesView) {
     let len = sequence.len();
     let mut chunk_lengths = Vec::new();
 
