@@ -210,4 +210,4 @@ if ($depsInsertionIndex -ne -1) {
 Write-Host "Crate '$crateName' created successfully!"
 Write-Host "Next steps:"
 Write-Host "1. Review the generated files in 'crates/$crateName'."
-Write-Host "2. Create a new logo.png for the crate and place it in the crate's directory."
+Write-Host "2. Create new logo.png and favicon.ico files for the crate and place them in the crate's directory."

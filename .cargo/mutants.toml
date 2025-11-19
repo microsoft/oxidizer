@@ -1,16 +1,11 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# Everything outside this folder is dev/test stuff not worth mutation testing.
 examine_globs = ["crates/**"]
-
-# We have mutation-optimized settings that speed up the builds a lot.
+exclude_globs = ["crates/testing_aids/**"]
+all_features = true
+cap_lints = true
 profile = "mutants"
-
-additional_cargo_args = [
-    # TODO: Migrate to separate setting once we upgrade cargo-mutants.
-    "--all-features"
-]
 
 # Only run unit tests and integration tests, not doctests, benchmarks or examples.
 additional_cargo_test_args = [ "--tests" ]
