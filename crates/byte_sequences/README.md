@@ -129,9 +129,10 @@ from the following list:
    give you memory with the configuration that is optimal for delivering bytes to that
    specific instance.
 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-   instance of [`NeutralMemoryPool`]. In a typical web application framework, this is a service
-   exposed by the application framework. In a different context (e.g. example or test code
-   with no framework), you can create your own instance via `NeutralMemoryPool::new()`.
+   instance of [`GlobalMemoryPool`] to obtain memory from the Rust global memory allocator.
+   In a typical web application framework, this is a service exposed by the application framework.
+   In a different context (e.g. example or test code with no framework), you can create your own
+   instance via `GlobalMemoryPool::new()`.
 
 Once you have a memory provider, you can reserve memory from it by calling
 [`Memory::reserve()`][14] on it. This returns a [`ByteSequenceBuilder`] with the requested
@@ -291,7 +292,7 @@ The recommended implementation strategy for [`HasMemory`] is as follows:
   configuration.
 * If your type neither passes the data to another type that implements [`HasMemory`]
   nor can take advantage of optimizations enabled by specific memory configurations, obtain
-  an instance of [`NeutralMemoryPool`] as a dependency and return it as the memory provider.
+  an instance of [`GlobalMemoryPool`] as a dependency and return it as the memory provider.
 
 Example of forwarding the memory provider (see `examples/mem_has_provider_forwarding.rs`
 for full code):
@@ -384,11 +385,11 @@ impl HasMemory for UdpConnection {
 
 ```
 
-Example of returning a neutral memory provider (see `examples/mem_has_provider_neutral.rs` for
+Example of returning a usage-neutral memory provider (see `examples/mem_has_provider_neutral.rs` for
 full code):
 
 ```rust
-use byte_sequences::{HasMemory, MemoryShared, NeutralMemoryPool};
+use byte_sequences::{HasMemory, MemoryShared, GlobalMemoryPool};
 
 /// Calculates a checksum for a given byte sequence.
 ///
@@ -397,16 +398,16 @@ use byte_sequences::{HasMemory, MemoryShared, NeutralMemoryPool};
 /// This type does not benefit from any specific memory configuration - it consumes bytes no
 /// matter what sort of memory they are in. It also does not pass the bytes to some other type.
 ///
-/// Therefore, we simply use `NeutralMemoryPool` as the memory provider we publish, as this is
+/// Therefore, we simply use `GlobalMemoryPool` as the memory provider we publish, as this is
 /// the default choice when there is no specific provider to prefer.
 #[derive(Debug)]
 struct ChecksumCalculator {
     // The application logic must provide this - it is our dependency.
-    memory_provider: NeutralMemoryPool,
+    memory_provider: GlobalMemoryPool,
 }
 
 impl ChecksumCalculator {
-    pub fn new(memory_provider: NeutralMemoryPool) -> Self {
+    pub fn new(memory_provider: GlobalMemoryPool) -> Self {
         Self { memory_provider }
     }
 }

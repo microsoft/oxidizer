@@ -3,7 +3,7 @@
 
 //! Showcases how a type can support an "optimal path" if an optimized memory
 //! configuration is used, reverting to a less optimal "fallback path" if
-//! non-optimized memory is used (e.g. from `NeutralMemoryPool`).
+//! non-optimized memory is used (e.g. from `GlobalMemoryPool`).
 //!
 //! The most common use case for this is when performing I/O operations using operating
 //! system provided I/O APIs. These often have preferences on what sort of memory they
@@ -15,11 +15,11 @@
 
 use std::num::NonZero;
 
-use byte_sequences::{BlockSize, ByteSequence, ByteSequenceBuilder, CallbackMemory, HasMemory, MemoryShared, NeutralMemoryPool};
+use byte_sequences::{BlockSize, ByteSequence, ByteSequenceBuilder, CallbackMemory, GlobalMemoryPool, HasMemory, MemoryShared};
 
 fn main() {
     // In a real application, both of these would be provided by the framework.
-    let neutral_memory_pool = NeutralMemoryPool::new();
+    let global_memory_pool = GlobalMemoryPool::new();
     let io_context = IoContext::new();
 
     let mut connection = Connection::new(io_context);
@@ -29,8 +29,8 @@ fn main() {
     let message1 = ByteSequence::copy_from_slice(b"Example message 1: hello, world!", &connection_memory);
     connection.write(message1.clone());
 
-    // This message uses the neutral memory pool, which does not provide optimal memory.
-    let message2 = ByteSequence::copy_from_slice(b"Message 2: goodbye", &neutral_memory_pool);
+    // This message uses the global memory pool, which does not provide optimal memory.
+    let message2 = ByteSequence::copy_from_slice(b"Message 2: goodbye", &global_memory_pool);
     connection.write(message2.clone());
 
     // This message uses a combination of both memory providers. This will not use the optimal

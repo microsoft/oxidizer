@@ -11,15 +11,15 @@
 
 use std::ptr;
 
-use byte_sequences::{ByteSequenceBuilder, NeutralMemoryPool};
+use byte_sequences::{ByteSequenceBuilder, GlobalMemoryPool};
 use bytes::BufMut;
 
 const LUCKY_NUMBER: usize = 8888;
 const FAVORITE_COLOR: &[u8] = b"octarine";
 
 fn main() {
-    // The neutral memory pool in a real application would be provided by the framework.
-    let memory = NeutralMemoryPool::new();
+    // The global memory pool in a real application would be provided by the framework.
+    let memory = GlobalMemoryPool::new();
 
     // We emit the favorite color. For maximal happiness, we repeat it LUCKY_NUMBER times.
     let capacity_required = LUCKY_NUMBER * FAVORITE_COLOR.len();

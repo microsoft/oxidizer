@@ -58,13 +58,13 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::NeutralMemoryPool;
+    use crate::GlobalMemoryPool;
 
     assert_impl_all!(OpaqueMemory: MemoryShared);
 
     #[test]
     fn wraps_inner() {
-        let provider = NeutralMemoryPool::new();
+        let provider = GlobalMemoryPool::new();
         let memory = OpaqueMemory::new(provider);
 
         let builder = memory.reserve(1024);
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn memory_trait() {
-        let provider = NeutralMemoryPool::new();
+        let provider = GlobalMemoryPool::new();
         let memory = OpaqueMemory::new(provider);
 
         // Call reserve via the Memory trait to verify the impl block

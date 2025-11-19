@@ -24,7 +24,7 @@
 //! the remaining bytes.
 //!
 //! ```
-//! # let memory = byte_sequences::NeutralMemoryPool::new();
+//! # let memory = byte_sequences::GlobalMemoryPool::new();
 //! # let message = ByteSequence::copy_from_slice(b"1234123412341234", &memory);
 //! use byte_sequences::ByteSequence;
 //! use bytes::Buf;
@@ -57,7 +57,7 @@
 //!   chunks of data at the same time.
 //!
 //! ```
-//! # let memory = byte_sequences::NeutralMemoryPool::new();
+//! # let memory = byte_sequences::GlobalMemoryPool::new();
 //! # let mut sequence = ByteSequence::copy_from_slice(b"1234123412341234", &memory);
 //! use byte_sequences::ByteSequence;
 //! use bytes::Buf;
@@ -80,7 +80,7 @@
 //! zero-copy operation.
 //!
 //! ```
-//! # let memory = byte_sequences::NeutralMemoryPool::new();
+//! # let memory = byte_sequences::GlobalMemoryPool::new();
 //! # let mut sequence = ByteSequence::copy_from_slice(b"1234123412341234", &memory);
 //! use byte_sequences::ByteSequence;
 //! use bytes::Buf;
@@ -112,9 +112,9 @@
 //!    give you memory with the configuration that is optimal for delivering bytes to that
 //!    specific instance.
 //! 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-//!    instance of [`NeutralMemoryPool`]. In a typical web application framework, this is a service
+//!    instance of [`GlobalMemoryPool`]. In a typical web application framework, this is a service
 //!    exposed by the application framework. In a different context (e.g. example or test code
-//!    with no framework), you can create your own instance via `NeutralMemoryPool::new()`.
+//!    with no framework), you can create your own instance via `GlobalMemoryPool::new()`.
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
 //! [`Memory::reserve()`][14] on it. This returns a [`ByteSequenceBuilder`] with the requested
@@ -122,7 +122,7 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::NeutralMemoryPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalMemoryPool::new() } }
 //! # let connection = Connection {};
 //! use byte_sequences::Memory;
 //!
@@ -140,7 +140,7 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::NeutralMemoryPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalMemoryPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
 //! use byte_sequences::Memory;
@@ -175,7 +175,7 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::NeutralMemoryPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalMemoryPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
 //! use byte_sequences::Memory;
@@ -199,7 +199,7 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::NeutralMemoryPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalMemoryPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
 //! use byte_sequences::Memory;
@@ -220,7 +220,7 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::NeutralMemoryPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalMemoryPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
 //! use byte_sequences::Memory;
@@ -246,7 +246,7 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::NeutralMemoryPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalMemoryPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
 //! use byte_sequences::Memory;
@@ -288,7 +288,7 @@
 //!   configuration.
 //! * If your type neither passes the data to another type that implements [`HasMemory`]
 //!   nor can take advantage of optimizations enabled by specific memory configurations, obtain
-//!   an instance of [`NeutralMemoryPool`] as a dependency and return it as the memory provider.
+//!   an instance of [`GlobalMemoryPool`] as a dependency and return it as the memory provider.
 //!
 //! Example of forwarding the memory provider (see `examples/mem_has_provider_forwarding.rs`
 //! for full code):
@@ -397,11 +397,11 @@
 //! # struct MemoryConfiguration { requires_page_alignment: bool, zero_memory_on_release: bool, requires_registered_memory: bool }
 //! ```
 //!
-//! Example of returning a neutral memory provider (see `examples/mem_has_provider_neutral.rs` for
+//! Example of returning a usage-neutral memory provider (see `examples/mem_has_provider_neutral.rs` for
 //! full code):
 //!
 //! ```
-//! use byte_sequences::{HasMemory, MemoryShared, NeutralMemoryPool};
+//! use byte_sequences::{GlobalMemoryPool, HasMemory, MemoryShared};
 //!
 //! /// Calculates a checksum for a given byte sequence.
 //! ///
@@ -410,16 +410,16 @@
 //! /// This type does not benefit from any specific memory configuration - it consumes bytes no
 //! /// matter what sort of memory they are in. It also does not pass the bytes to some other type.
 //! ///
-//! /// Therefore, we simply use `NeutralMemoryPool` as the memory provider we publish, as this is
+//! /// Therefore, we simply use `GlobalMemoryPool` as the memory provider we publish, as this is
 //! /// the default choice when there is no specific provider to prefer.
 //! #[derive(Debug)]
 //! struct ChecksumCalculator {
 //!     // The application logic must provide this - it is our dependency.
-//!     memory_provider: NeutralMemoryPool,
+//!     memory_provider: GlobalMemoryPool,
 //! }
 //!
 //! impl ChecksumCalculator {
-//!     pub fn new(memory_provider: NeutralMemoryPool) -> Self {
+//!     pub fn new(memory_provider: GlobalMemoryPool) -> Self {
 //!         Self { memory_provider }
 //!     }
 //! }
@@ -552,7 +552,7 @@
 //! # struct Connection;
 //! # impl Connection {
 //! #     fn accept() -> Self { Connection }
-//! #     fn memory(&self) -> impl byte_sequences::Memory { byte_sequences::NeutralMemoryPool::new() }
+//! #     fn memory(&self) -> impl byte_sequences::Memory { byte_sequences::GlobalMemoryPool::new() }
 //! #     fn write(&self, _sequence: ByteSequence) {}
 //! # }
 //! ```
@@ -597,11 +597,11 @@ mod bytes;
 mod callback_memory;
 mod constants;
 mod fixed_block;
+mod global;
 mod has_memory;
 mod memory;
 mod memory_guard;
 mod memory_shared;
-mod neutral;
 mod opaque_memory;
 mod sequence;
 mod sequence_builder;
@@ -617,11 +617,11 @@ pub use block_ref::*;
 pub use callback_memory::*;
 pub use constants::*;
 pub use fixed_block::*;
+pub use global::*;
 pub use has_memory::*;
 pub use memory::*;
 pub use memory_guard::*;
 pub use memory_shared::*;
-pub use neutral::*;
 pub use opaque_memory::*;
 pub use sequence::*;
 pub use sequence_builder::*;

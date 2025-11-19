@@ -10,10 +10,10 @@ use crate::{BlockSize, ByteSequenceBuilder, Memory, std_alloc_block};
 /// This is meant for test scenarios where the minimal set of memory provider
 /// functionality is desired, to establish maximally controlled conditions.
 ///
-/// For general-purpose public use, the [`NeutralMemoryPool`][1] should be used instead,
+/// For general-purpose public use, the [`GlobalMemoryPool`][1] should be used instead,
 /// as it is geared for actual efficiency - this here is just a simple passthrough implementation.
 ///
-/// [1]: crate::NeutralMemoryPool
+/// [1]: crate::GlobalMemoryPool
 #[derive(Clone, Debug, Default)]
 pub struct TransparentTestMemory {
     // We may add more fields later, so this is a placeholder to ensure we do not empty-type this.

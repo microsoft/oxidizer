@@ -7,12 +7,12 @@
 //!
 //! Reporting via metrics pipeline (e.g. OpenTelemetry) is also possible but out of scope here.
 
-use byte_sequences::{ByteSequence, NeutralMemoryPool};
+use byte_sequences::{ByteSequence, GlobalMemoryPool};
 use nm::Report;
 
 fn main() {
     // In a real-world app, the memory provider would be supplied by the application framework.
-    let memory = NeutralMemoryPool::new();
+    let memory = GlobalMemoryPool::new();
 
     // First a simple sequence with a single span.
     let sample1 = ByteSequence::copy_from_slice(b"Hello, world!", &memory);

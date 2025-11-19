@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Showcases how you can easily and cheaply reuse ByteSequences and parts of ByteSequences.
-use byte_sequences::{ByteSequence, NeutralMemoryPool};
+//! Showcases how you can easily and cheaply reuse byte sequences and parts of byte sequences.
+use byte_sequences::{ByteSequence, GlobalMemoryPool};
 use bytes::{Buf, BufMut};
 
 fn main() {
-    // The neutral memory pool in a real application would be provided by the framework.
-    let memory = NeutralMemoryPool::new();
+    // The global memory pool in a real application would be provided by the framework.
+    let memory = GlobalMemoryPool::new();
 
     let hello_world = ByteSequence::copy_from_slice(b"Hello, world!", &memory);
 
