@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+#![allow(clippy::too_many_lines, reason = "Complex generated macro logic")]
 
 use std::collections::HashMap;
 
