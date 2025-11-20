@@ -253,7 +253,7 @@ checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
 
 [[package]]
 name = "fundle"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "fundle_macros",
  "trybuild",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "fundle_macros_impl",
  "mutants",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros_impl"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "insta",
  "mutants",
