@@ -14,7 +14,7 @@
 use std::io::Error;
 
 #[derive(Default, Clone)]
-struct Config {}
+pub struct Config {}
 
 #[rustfmt::skip]
 impl Config {

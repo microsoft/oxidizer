@@ -10,11 +10,11 @@
 )]
 
 #[derive(Default, Clone)]
-struct Logger {}
+pub struct Logger {}
 #[derive(Default, Clone)]
-struct Config {}
+pub struct Config {}
 #[derive(Default, Clone)]
-struct Telemetry {}
+pub struct Telemetry {}
 
 mod gpu {
     #[derive(Clone, Default)]

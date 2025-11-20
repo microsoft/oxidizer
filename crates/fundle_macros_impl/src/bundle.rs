@@ -94,8 +94,9 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     // Generate build method
     let build_impl = generate_build_impl(&builder_name, struct_name, &field_names, &type_params);
 
-    // Generate forwarded AsRef implementations
-    let forwarded_as_ref_impls = generate_forwarded_as_ref_impls(struct_name, &builder_name, &type_params, &forward_info);
+    // Generate forwarded AsRef implementations (split into struct and builder parts)
+    let (forwarded_struct_as_ref_impls, forwarded_builder_as_ref_impls) =
+        generate_forwarded_as_ref_impls(struct_name, &builder_name, &type_params, &forward_info);
 
     // Generate Export trait implementations
     let export_impls = generate_export_impls(struct_name, &field_types, &field_names);
@@ -138,34 +139,46 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     // Generate the select macro
     let select_macro = generate_select_macro(struct_name, &builder_name, &field_names, &field_types, &type_params);
 
+    // Create module name (underscore-prefixed struct name)
+    let module_name = Ident::new(&format!("_{struct_name}"), struct_name.span());
+
     let expanded = quote! {
         #original_struct
 
         #struct_build_method
 
-        #builder_struct
-
-        #default_impl
-
-        #reader_writer_impls
-
-        #read_toggle_impl
-
-        #(#setter_impls)*
-
-        #(#reader_getters)*
-
-        #(#as_ref_impls)*
-
-        #(#forwarded_as_ref_impls)*
-
         #(#main_struct_as_ref_impls)*
+
+        #(#forwarded_struct_as_ref_impls)*
 
         #export_impls
 
-        #(#builder_export_impls)*
+        #[allow(non_snake_case)]
+        mod #module_name {
+            use super::*;
 
-        #build_impl
+            #builder_struct
+
+            #default_impl
+
+            #reader_writer_impls
+
+            #read_toggle_impl
+
+            #(#setter_impls)*
+
+            #(#reader_getters)*
+
+            #(#as_ref_impls)*
+
+            #(#forwarded_builder_as_ref_impls)*
+
+            #(#builder_export_impls)*
+
+            #build_impl
+        }
+
+        #struct_vis use #module_name::#builder_name;
 
         #select_macro
     };
@@ -175,7 +188,7 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
 
 #[cfg_attr(test, mutants::skip)]
 fn generate_builder_struct(
-    vis: &Visibility,
+    _vis: &Visibility,
     builder_name: &Ident,
     field_names: &[&Ident],
     field_types: &[&Type],
@@ -189,7 +202,7 @@ fn generate_builder_struct(
 
     quote! {
         #[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
-        #vis struct #builder_name<RW, #(#type_params),*> {
+        pub struct #builder_name<RW, #(#type_params),*> {
             #(#builder_fields,)*
             _phantom: ::std::marker::PhantomData<(RW, #(#phantom_types),*)>,
         }
@@ -434,8 +447,9 @@ fn generate_forwarded_as_ref_impls(
     builder_name: &Ident,
     type_params: &[Ident],
     forward_info: &[(usize, &Ident, Vec<Path>)],
-) -> Vec<proc_macro2::TokenStream> {
-    let mut impls = Vec::new();
+) -> (Vec<proc_macro2::TokenStream>, Vec<proc_macro2::TokenStream>) {
+    let mut struct_impls = Vec::new();
+    let mut builder_impls = Vec::new();
 
     // Generate AsRef impls for the final struct (all fields Set)
     for (_, field_name, forward_types) in forward_info {
@@ -448,7 +462,7 @@ fn generate_forwarded_as_ref_impls(
                     }
                 }
             };
-            impls.push(as_ref_impl);
+            struct_impls.push(as_ref_impl);
         }
     }
 
@@ -477,11 +491,11 @@ fn generate_forwarded_as_ref_impls(
                     }
                 }
             };
-            impls.push(as_ref_impl);
+            builder_impls.push(as_ref_impl);
         }
     }
 
-    impls
+    (struct_impls, builder_impls)
 }
 
 #[cfg_attr(test, mutants::skip)]
@@ -706,7 +720,7 @@ fn generate_select_macro(
 
                     Select {
                         builder: &$builder_var,
-                        $($forward_type: $builder_var.$forward_field.as_ref().unwrap(),)*
+                        $($forward_type: $builder_var.$forward_field(),)*
                     }
                 }
             };

@@ -10,43 +10,53 @@ impl Foo {
         FooBuilder::default()
     }
 }
-#[allow(non_camel_case_types, dead_code, non_snake_case, clippy::items_after_statements)]
-struct FooBuilder<RW> {
-    _phantom: ::std::marker::PhantomData<(RW,)>,
-}
-#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-impl ::std::default::Default for FooBuilder<::fundle::Write> {
-    fn default() -> Self {
-        Self {
-            _phantom: ::std::marker::PhantomData,
-        }
-    }
-}
-#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-impl ::fundle::Writer for FooBuilder<::fundle::Write> {
-    type Reader = FooBuilder<::fundle::Read>;
-}
-#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-impl ::fundle::Reader for FooBuilder<::fundle::Read> {
-    type Writer = FooBuilder<::fundle::Write>;
-}
-#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-impl FooBuilder<::fundle::Write> {
-    pub fn read(self) -> FooBuilder<::fundle::Read> {
-        FooBuilder {
-            _phantom: ::std::marker::PhantomData,
-        }
-    }
-}
 impl ::fundle::exports::Exports for Foo {
     const NUM_EXPORTS: usize = 0usize;
 }
-#[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
-impl FooBuilder<::fundle::Write> {
-    pub fn build(self) -> Foo {
-        Foo {}
+#[allow(non_snake_case)]
+mod _Foo {
+    use super::*;
+    #[allow(
+        non_camel_case_types,
+        dead_code,
+        non_snake_case,
+        clippy::items_after_statements
+    )]
+    pub struct FooBuilder<RW> {
+        _phantom: ::std::marker::PhantomData<(RW,)>,
+    }
+    #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+    impl ::std::default::Default for FooBuilder<::fundle::Write> {
+        fn default() -> Self {
+            Self {
+                _phantom: ::std::marker::PhantomData,
+            }
+        }
+    }
+    #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+    impl ::fundle::Writer for FooBuilder<::fundle::Write> {
+        type Reader = FooBuilder<::fundle::Read>;
+    }
+    #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+    impl ::fundle::Reader for FooBuilder<::fundle::Read> {
+        type Writer = FooBuilder<::fundle::Write>;
+    }
+    #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+    impl FooBuilder<::fundle::Write> {
+        pub fn read(self) -> FooBuilder<::fundle::Read> {
+            FooBuilder {
+                _phantom: ::std::marker::PhantomData,
+            }
+        }
+    }
+    #[allow(non_camel_case_types, non_snake_case, clippy::items_after_statements)]
+    impl FooBuilder<::fundle::Write> {
+        pub fn build(self) -> Foo {
+            Foo {}
+        }
     }
 }
+use _Foo::FooBuilder;
 #[allow(unused_macros, snake_case)]
 macro_rules! Foo {
     (
@@ -60,6 +70,6 @@ macro_rules! Foo {
         clippy::items_after_statements)] impl < 'a, RW, > ::std::convert::AsRef <
         $forward_type > for Select < 'a, RW, > { fn as_ref(& self) -> & $forward_type {
         self. $forward_type } })* Select { builder : & $builder_var, $($forward_type :
-        $builder_var . $forward_field .as_ref().unwrap(),)* } }
+        $builder_var . $forward_field (),)* } }
     };
 }
