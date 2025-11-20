@@ -27,8 +27,6 @@ pub struct AppState {
 fn main() {
     let _ = AppState::builder()
         .logger(|_| Logger {})
-        .database(|x| {
-            Database::new(x.logger())})
+        .database(|x| Database::new(x.logger()))
         .build();
 }
-
