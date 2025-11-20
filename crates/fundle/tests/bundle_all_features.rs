@@ -9,11 +9,11 @@
     reason = "Unit tests"
 )]
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Logger {}
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Config {}
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Telemetry {}
 
 mod gpu {
@@ -57,4 +57,5 @@ fn file_compiles() {
         })
         .gpu(|_| gpu::GpuBundle::default())
         .build();
+
 }
