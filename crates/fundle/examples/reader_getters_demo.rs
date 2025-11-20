@@ -43,10 +43,7 @@ fn main() {
             // Use both logger() and config() getters
             let logger = reader.logger();
             let config = reader.config();
-            println!(
-                "Creating database with logger: {} and config: {}",
-                logger.name, config.env
-            );
+            println!("Creating database with logger: {} and config: {}", logger.name, config.env);
             Database {
                 url: format!("postgres://{}@localhost", config.env),
             }
@@ -61,12 +58,8 @@ fn main() {
     // Demonstrate manual read() usage
     println!("\n--- Manual read() demonstration ---");
     let builder = AppState::builder()
-        .logger(|_| Logger {
-            name: "test".to_string(),
-        })
-        .config(|_| Config {
-            env: "dev".to_string(),
-        });
+        .logger(|_| Logger { name: "test".to_string() })
+        .config(|_| Config { env: "dev".to_string() });
 
     // Convert to read mode
     let reader = builder.read();

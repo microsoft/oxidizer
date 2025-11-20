@@ -13,7 +13,7 @@
 
 use std::io::Error;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Config {}
 
 #[rustfmt::skip]

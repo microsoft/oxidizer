@@ -57,5 +57,4 @@ fn file_compiles() {
         })
         .gpu(|_| gpu::GpuBundle::default())
         .build();
-
 }

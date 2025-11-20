@@ -54,4 +54,3 @@ fn f() {
             Telemetry::default()
         });
 }
-

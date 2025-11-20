@@ -29,7 +29,9 @@ fn test_rw_functionality() {
             // and we can access the logger through AsRef
             let logger: &Logger = x.as_ref();
             assert_eq!(logger.name, "main");
-            Database { url: "postgresql://localhost".to_string() }
+            Database {
+                url: "postgresql://localhost".to_string(),
+            }
         })
         .build();
 
@@ -40,8 +42,7 @@ fn test_rw_functionality() {
 #[test]
 fn test_writer_trait() {
     // Test that Writer trait is implemented
-    let builder = AppState::builder()
-        .logger(|_| Logger { name: "test".to_string() });
+    let builder = AppState::builder().logger(|_| Logger { name: "test".to_string() });
 
     fn takes_writer<T: fundle::Writer>(_: T) {}
     takes_writer(builder);
@@ -50,8 +51,7 @@ fn test_writer_trait() {
 #[test]
 fn test_reader_trait() {
     // Test that Reader trait is implemented
-    let builder = AppState::builder()
-        .logger(|_| Logger { name: "test".to_string() });
+    let builder = AppState::builder().logger(|_| Logger { name: "test".to_string() });
 
     // Convert to read mode
     let reader = builder.read();
@@ -63,8 +63,7 @@ fn test_reader_trait() {
 #[test]
 fn test_read_toggle() {
     // Test the read() method
-    let builder = AppState::builder()
-        .logger(|_| Logger { name: "test".to_string() });
+    let builder = AppState::builder().logger(|_| Logger { name: "test".to_string() });
 
     let reader = builder.read();
 
@@ -76,8 +75,9 @@ fn test_read_toggle() {
 #[test]
 fn test_reader_getters() {
     // Test that getter methods work in Read mode
-    let builder = AppState::builder()
-        .logger(|_| Logger { name: "test_logger".to_string() });
+    let builder = AppState::builder().logger(|_| Logger {
+        name: "test_logger".to_string(),
+    });
 
     let reader = builder.read();
 
@@ -90,8 +90,12 @@ fn test_reader_getters() {
 fn test_reader_getters_multiple_fields() {
     // Test getters with multiple fields set
     let builder = AppState::builder()
-        .logger(|_| Logger { name: "main_logger".to_string() })
-        .database(|_| Database { url: "postgres://localhost".to_string() });
+        .logger(|_| Logger {
+            name: "main_logger".to_string(),
+        })
+        .database(|_| Database {
+            url: "postgres://localhost".to_string(),
+        });
 
     let reader = builder.read();
 
@@ -112,7 +116,9 @@ fn test_reader_getter_in_closure() {
             // Use the getter method instead of AsRef
             let logger = x.logger();
             assert_eq!(logger.name, "first");
-            Database { url: format!("db_for_{}", logger.name) }
+            Database {
+                url: format!("db_for_{}", logger.name),
+            }
         })
         .build();
 
