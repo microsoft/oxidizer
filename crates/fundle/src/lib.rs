@@ -134,10 +134,12 @@ pub struct Read;
 #[derive(Debug)]
 pub struct Write;
 
+#[doc(hidden)]
 pub trait Reader {
     type Writer;
 }
 
+#[doc(hidden)]
 pub trait Writer {
     type Reader;
 }
