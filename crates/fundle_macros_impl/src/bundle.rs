@@ -109,6 +109,9 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
     // Generate read() toggle method
     let read_toggle_impl = generate_read_toggle(&builder_name, &field_names, &type_params);
 
+    // Generate getter methods for Read mode
+    let reader_getters = generate_reader_getters(&builder_name, &field_names, &field_types, &type_params);
+
     // Generate AsRef implementations for unique field types on the main struct
     let main_struct_as_ref_impls = field_names
         .iter()
@@ -149,6 +152,8 @@ pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream>
         #read_toggle_impl
 
         #(#setter_impls)*
+
+        #(#reader_getters)*
 
         #(#as_ref_impls)*
 
@@ -741,4 +746,43 @@ fn generate_read_toggle(builder_name: &Ident, field_names: &[&Ident], type_param
             }
         }
     }
+}
+
+#[cfg_attr(test, mutants::skip)]
+fn generate_reader_getters(
+    builder_name: &Ident,
+    field_names: &[&Ident],
+    field_types: &[&Type],
+    type_params: &[Ident],
+) -> Vec<proc_macro2::TokenStream> {
+    let mut impls = Vec::new();
+
+    for (i, (field_name, field_type)) in field_names.iter().zip(field_types.iter()).enumerate() {
+        // Create type parameter list with current one as Set, others as generic
+        let impl_params: Vec<_> = type_params
+            .iter()
+            .enumerate()
+            .map(|(j, param)| if i == j { quote!(::fundle::Set) } else { quote!(#param) })
+            .collect();
+
+        // Other type parameters for the impl (exclude current field's param)
+        let other_params: Vec<_> = type_params
+            .iter()
+            .enumerate()
+            .filter_map(|(j, param)| (i != j).then_some(param))
+            .collect();
+
+        let getter = quote! {
+            #[allow(non_camel_case_types, non_snake_case)]
+            impl<#(#other_params),*> #builder_name<::fundle::Read, #(#impl_params),*> {
+                pub fn #field_name(&self) -> &#field_type {
+                    self.#field_name.as_ref().unwrap()
+                }
+            }
+        };
+
+        impls.push(getter);
+    }
+
+    impls
 }

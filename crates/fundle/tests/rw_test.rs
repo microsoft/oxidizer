@@ -72,3 +72,49 @@ fn test_read_toggle() {
     let logger: &Logger = reader.as_ref();
     assert_eq!(logger.name, "test");
 }
+
+#[test]
+fn test_reader_getters() {
+    // Test that getter methods work in Read mode
+    let builder = AppState::builder()
+        .logger(|_| Logger { name: "test_logger".to_string() });
+
+    let reader = builder.read();
+
+    // Use the getter method
+    let logger = reader.logger();
+    assert_eq!(logger.name, "test_logger");
+}
+
+#[test]
+fn test_reader_getters_multiple_fields() {
+    // Test getters with multiple fields set
+    let builder = AppState::builder()
+        .logger(|_| Logger { name: "main_logger".to_string() })
+        .database(|_| Database { url: "postgres://localhost".to_string() });
+
+    let reader = builder.read();
+
+    // Use getter methods for both fields
+    let logger = reader.logger();
+    assert_eq!(logger.name, "main_logger");
+
+    let database = reader.database();
+    assert_eq!(database.url, "postgres://localhost");
+}
+
+#[test]
+fn test_reader_getter_in_closure() {
+    // Test that getter methods can be used in closures
+    let app = AppState::builder()
+        .logger(|_| Logger { name: "first".to_string() })
+        .database(|x| {
+            // Use the getter method instead of AsRef
+            let logger = x.logger();
+            assert_eq!(logger.name, "first");
+            Database { url: format!("db_for_{}", logger.name) }
+        })
+        .build();
+
+    assert_eq!(app.database.url, "db_for_first");
+}

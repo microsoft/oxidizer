@@ -162,6 +162,18 @@ impl<X> FooBuilder<::fundle::Write, X, ::fundle::NotSet> {
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
+impl<Y> FooBuilder<::fundle::Read, ::fundle::Set, Y> {
+    pub fn x(&self) -> &Bar {
+        self.x.as_ref().unwrap()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+impl<X> FooBuilder<::fundle::Read, X, ::fundle::Set> {
+    pub fn y(&self) -> &Bar {
+        self.y.as_ref().unwrap()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
 impl ::std::convert::AsRef<u8> for Foo {
     fn as_ref(&self) -> &u8 {
         self.x.as_ref()
