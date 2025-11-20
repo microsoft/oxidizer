@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-struct Bar {
+pub struct Bar {
     x: u8,
     y: u16,
 }

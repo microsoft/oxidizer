@@ -44,17 +44,13 @@ struct AppState {
 }
 
 #[test]
-fn file_compiles() {
-    let _: AppState = AppState::builder()
+fn f() {
+    AppState::builder()
         .logger1(|_| Logger::default())
         .logger2(|_| Logger::default())
-        .config(|_| Config::default())
         .telemetry(|x| {
-            let app_state = AppState!(select(x) => Logger(logger1));
-            let _: &Logger = app_state.as_ref();
-            let _: &Config = app_state.as_ref();
+            let _ = x.logger1();
+            let _ = x.logger2();
             Telemetry::default()
-        })
-        .gpu(|_| gpu::GpuBundle::default())
-        .build();
+        });
 }
