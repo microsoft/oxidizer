@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ohno::{Error, ErrorExt, ErrorSpan, OhnoCore, TraceInfo, error_span};
+use ohno::{Error, ErrorExt, ErrorSpan, OhnoCore, SpanInfo, error_span};
 
 #[macro_use]
 mod util;
@@ -335,7 +335,7 @@ fn context_iter_reverse_order() {
     let traces = ["trace 1", "trace 2", "trace 3", "trace 4", "trace 5"];
     for (i, &msg) in traces.iter().enumerate() {
         #[expect(clippy::cast_possible_truncation, reason = "Test")]
-        let trace = TraceInfo::detailed(msg, "test.rs", (i + 1) as u32 * 10);
+        let trace = SpanInfo::detailed(msg, "test.rs", (i + 1) as u32 * 10);
         core.add_error_span(trace);
     }
 

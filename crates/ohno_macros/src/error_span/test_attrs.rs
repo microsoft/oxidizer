@@ -21,7 +21,7 @@ fn preserves_pub_visibility() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -48,7 +48,7 @@ fn preserves_pub_crate_visibility() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -75,7 +75,7 @@ fn preserves_pub_super_visibility() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -102,7 +102,7 @@ fn preserves_const_modifier() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -129,7 +129,7 @@ fn preserves_unsafe_modifier() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -156,7 +156,7 @@ fn preserves_generic_type_parameter() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -183,7 +183,7 @@ fn preserves_generic_with_trait_bound() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -210,7 +210,7 @@ fn preserves_multiple_generics_with_bounds() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -243,7 +243,7 @@ fn preserves_where_clause() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -278,7 +278,7 @@ fn preserves_complex_where_clause() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -305,7 +305,7 @@ fn preserves_lifetime_parameters() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -332,7 +332,7 @@ fn preserves_multiple_lifetime_parameters() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -359,7 +359,7 @@ fn preserves_lifetimes_and_generics_combined() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -386,7 +386,7 @@ fn preserves_extern_abi() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -417,7 +417,7 @@ fn preserves_attributes() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -448,7 +448,7 @@ fn preserves_doc_comments() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -475,7 +475,7 @@ fn preserves_impl_trait_params() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -502,7 +502,7 @@ fn preserves_impl_trait_with_bounds() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -529,7 +529,7 @@ fn preserves_dyn_trait_params() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -596,7 +596,7 @@ fn preserves_all_features_combined() {
                 let trace_msg = format!("operation failed: {}", operation_name);
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })

@@ -53,7 +53,7 @@ fn impl_error_span_attribute(trace_args: proc_macro2::TokenStream, mut fn_defini
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
                 let trace_msg = #trace_expr;
-                ohno::ErrorSpan::add_error_span(&mut e, ohno::TraceInfo::detailed(trace_msg, file!(), line!()));
+                ohno::ErrorSpan::add_error_span(&mut e, ohno::SpanInfo::detailed(trace_msg, file!(), line!()));
                 e
             })
         }

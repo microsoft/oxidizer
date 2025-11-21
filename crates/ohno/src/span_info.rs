@@ -27,16 +27,16 @@ impl fmt::Display for Location {
     }
 }
 
-/// A trace entry that can include location information.
+/// A span entry that can include location information.
 #[derive(Debug, Clone)]
-pub struct TraceInfo {
-    /// The trace message
+pub struct SpanInfo {
+    /// The span message
     pub message: Cow<'static, str>,
-    /// Optional location where the trace was added
+    /// Optional location where the span was added
     pub location: Option<Location>,
 }
 
-impl TraceInfo {
+impl SpanInfo {
     /// Creates a new context with just a message.
     pub fn new(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -60,7 +60,7 @@ impl TraceInfo {
     }
 }
 
-impl fmt::Display for TraceInfo {
+impl fmt::Display for SpanInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)?;
         if let Some(location) = &self.location {
@@ -76,12 +76,12 @@ mod tests {
 
     #[test]
     fn test_trace_info() {
-        let ctx1 = TraceInfo::new("simple trace");
+        let ctx1 = SpanInfo::new("simple span");
         assert!(!ctx1.has_location());
-        assert_eq!(ctx1.to_string(), "simple trace");
+        assert_eq!(ctx1.to_string(), "simple span");
 
-        let ctx2 = TraceInfo::detailed("detailed trace", "main.rs", 42);
+        let ctx2 = SpanInfo::detailed("detailed span", "main.rs", 42);
         assert!(ctx2.has_location());
-        assert_eq!(ctx2.to_string(), "detailed trace (at main.rs:42)");
+        assert_eq!(ctx2.to_string(), "detailed span (at main.rs:42)");
     }
 }

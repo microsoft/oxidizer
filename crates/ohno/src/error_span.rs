@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::error::Error as StdError;
 
-use crate::{OhnoCore, TraceInfo};
+use crate::{OhnoCore, SpanInfo};
 
 /// Base trait for adding error span to error types.
 ///
@@ -14,7 +14,7 @@ pub trait ErrorSpan {
     /// Adds error span information to the error.
     ///
     /// This is the core method that other error span methods build upon.
-    fn add_error_span(&mut self, trace: TraceInfo);
+    fn add_error_span(&mut self, trace: SpanInfo);
 }
 
 /// Extension trait providing ergonomic error span addition methods.
@@ -29,7 +29,7 @@ pub trait ErrorSpanExt: ErrorSpan {
     where
         Self: Sized,
     {
-        self.add_error_span(TraceInfo::new(trace));
+        self.add_error_span(SpanInfo::new(trace));
         self
     }
 
@@ -39,7 +39,7 @@ pub trait ErrorSpanExt: ErrorSpan {
     where
         Self: Sized,
     {
-        self.add_error_span(TraceInfo::detailed(trace, file, line));
+        self.add_error_span(SpanInfo::detailed(trace, file, line));
         self
     }
 
@@ -51,7 +51,7 @@ pub trait ErrorSpanExt: ErrorSpan {
         R: Into<Cow<'static, str>>,
         Self: Sized,
     {
-        self.add_error_span(TraceInfo::new(f()));
+        self.add_error_span(SpanInfo::new(f()));
         self
     }
 
@@ -63,13 +63,13 @@ pub trait ErrorSpanExt: ErrorSpan {
         R: Into<Cow<'static, str>>,
         Self: Sized,
     {
-        self.add_error_span(TraceInfo::detailed(f(), file, line));
+        self.add_error_span(SpanInfo::detailed(f(), file, line));
         self
     }
 }
 
 impl ErrorSpan for OhnoCore {
-    fn add_error_span(&mut self, trace: TraceInfo) {
+    fn add_error_span(&mut self, trace: SpanInfo) {
         self.data.context.push(trace);
     }
 }
@@ -78,7 +78,7 @@ impl<T, E> ErrorSpan for Result<T, E>
 where
     E: StdError + ErrorSpan,
 {
-    fn add_error_span(&mut self, trace: TraceInfo) {
+    fn add_error_span(&mut self, trace: SpanInfo) {
         if let Err(e) = self {
             e.add_error_span(trace);
         }
@@ -100,12 +100,12 @@ mod tests {
     #[test]
     fn test_error_span() {
         let mut error = TestError::default();
-        error.add_error_span(TraceInfo::new("Test trace"));
+        error.add_error_span(SpanInfo::new("Test trace"));
         assert_eq!(error.data.data.context.len(), 1);
         assert_eq!(error.data.data.context[0].message, "Test trace");
         assert!(error.data.data.context[0].location.is_none());
 
-        error.add_error_span(TraceInfo::detailed("Test trace", "test.rs", 10));
+        error.add_error_span(SpanInfo::detailed("Test trace", "test.rs", 10));
         assert_eq!(error.data.data.context.len(), 2);
         assert_eq!(error.data.data.context[1].message, "Test trace");
         let location = error.data.data.context[1].location.as_ref().unwrap();
@@ -118,7 +118,7 @@ mod tests {
         let error = TestError::default();
         let mut result: Result<(), _> = Err(error);
 
-        result.add_error_span(TraceInfo::new("Immediate trace"));
+        result.add_error_span(SpanInfo::new("Immediate trace"));
 
         let err = result.unwrap_err();
         assert_eq!(err.data.data.context.len(), 1);

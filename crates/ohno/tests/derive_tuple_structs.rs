@@ -77,7 +77,7 @@ fn test_tuple_error_span() {
     use ohno::ErrorSpan;
 
     let mut error = SimpleTupleError(OhnoCore::from("test"));
-    error.add_error_span(ohno::TraceInfo::new("trace message"));
+    error.add_error_span(ohno::SpanInfo::new("trace message"));
 
     // The error should still be valid after adding trace
     assert!(error.to_string().contains("test"));

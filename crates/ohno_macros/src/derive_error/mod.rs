@@ -165,7 +165,7 @@ fn generate_error_span_impl(
     let error_field_access = error_field.to_field_access();
     quote! {
         impl #impl_generics ohno::ErrorSpan for #name #ty_generics #where_clause {
-            fn add_error_span(&mut self, trace: ohno::TraceInfo) {
+            fn add_error_span(&mut self, trace: ohno::SpanInfo) {
                 self.#error_field_access.add_error_span(trace);
             }
         }

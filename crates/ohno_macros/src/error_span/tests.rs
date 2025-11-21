@@ -29,7 +29,7 @@ fn empty_error_span() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -62,7 +62,7 @@ fn empty_error_span_async() {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -95,7 +95,7 @@ fn function_with_regular_string() {
                 let trace_msg = "custom error message";
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -122,7 +122,7 @@ fn function_with_regular_string_async() {
                 let trace_msg = "custom error message";
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -159,7 +159,7 @@ fn function_with_inline_format() {
                 let trace_msg = format!("error code: {code}");
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -186,7 +186,7 @@ fn function_with_inline_format_async() {
                 let trace_msg = format!("error code: {code}");
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -213,7 +213,7 @@ fn function_with_complex_format_expression() {
                 let trace_msg = format!("failed to read a file {}", path.as_ref().display());
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -240,7 +240,7 @@ fn function_with_complex_format_expression_async() {
                 let trace_msg = format!("failed to read a file {}", path.as_ref().display());
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -273,7 +273,7 @@ fn method_with_self_ref() {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -300,7 +300,7 @@ fn method_with_self_ref_async() {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -327,7 +327,7 @@ fn method_with_mut_self_ref() {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -354,7 +354,7 @@ fn method_with_mut_self_ref_async() {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -381,7 +381,7 @@ fn method_with_self_ref_formatting_self() {
                 let trace_msg = format!("operation failed, id: {}", self.id);
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -408,7 +408,7 @@ fn method_with_self_ref_formatting_self_async() {
                 let trace_msg = format!("operation failed, id: {}", self.id);
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -435,7 +435,7 @@ fn method_with_mut_self_ref_formatting_self() {
                 let trace_msg = format!("operation failed, id: {}", self.id);
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })
@@ -462,7 +462,7 @@ fn method_with_mut_self_ref_formatting_self_async() {
                 let trace_msg = format!("operation failed, id: {}", self.id);
                 ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(trace_msg, file!(), line!())
                 );
                 e
             })

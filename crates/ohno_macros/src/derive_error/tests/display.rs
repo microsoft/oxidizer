@@ -55,7 +55,7 @@ fn test_display_attribute_expansion() {
             }
         }
         impl ohno::ErrorSpan for FileError {
-            fn add_error_span(&mut self, trace: ohno::TraceInfo) {
+            fn add_error_span(&mut self, trace: ohno::SpanInfo) {
                 self.inner.add_error_span(trace);
             }
         }
@@ -132,7 +132,7 @@ fn test_display_with_format_specifiers_and_lifetime() {
             }
         }
         impl<'a> ohno::ErrorSpan for FilesError<'a> {
-            fn add_error_span(&mut self, trace: ohno::TraceInfo) {
+            fn add_error_span(&mut self, trace: ohno::SpanInfo) {
                 self.inner.add_error_span(trace);
             }
         }

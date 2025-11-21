@@ -7,14 +7,14 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use super::source::Source;
-use super::trace_info::TraceInfo;
+use super::span_info::SpanInfo;
 
 /// Internal error data that is boxed to keep `OhnoCore` lightweight.
 #[derive(Debug)]
 pub struct Inner {
     pub(super) source: Source,
     pub(super) backtrace: Backtrace,
-    pub(super) context: Vec<TraceInfo>,
+    pub(super) context: Vec<SpanInfo>,
 }
 
 /// Core error type that wraps source errors, captures backtraces, and holds context messages.
@@ -144,7 +144,7 @@ impl OhnoCore {
     }
 
     /// Returns an iterator over the context information in reverse order (most recent first).
-    pub fn context_iter(&self) -> impl Iterator<Item = &TraceInfo> {
+    pub fn context_iter(&self) -> impl Iterator<Item = &SpanInfo> {
         self.data.context.iter().rev()
     }
 
@@ -342,8 +342,8 @@ mod tests {
     #[test]
     fn test_context_iter_and_messages() {
         let mut error = OhnoCore::from("msg");
-        error.add_error_span(TraceInfo::new("ctx1"));
-        error.add_error_span(TraceInfo::new("ctx2"));
+        error.add_error_span(SpanInfo::new("ctx1"));
+        error.add_error_span(SpanInfo::new("ctx2"));
         let messages: Vec<_> = error.context_messages().collect();
         assert_eq!(messages, vec!["ctx2", "ctx1"]);
     }

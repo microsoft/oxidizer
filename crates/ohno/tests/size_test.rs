@@ -13,7 +13,7 @@ fn test_inner_error_size() {
     println!("OhnoCore size: {size} bytes");
 
     // It should be much smaller than before (which would have included
-    // the full Backtrace, Vec<TraceInfo>, and Source inline)
+    // the full Backtrace, Vec<SpanInfo>, and Source inline)
     // On 64-bit systems, expect 8 bytes for the Box pointer
     assert_eq!(size, mem::size_of::<usize>());
 }

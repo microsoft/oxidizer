@@ -233,7 +233,7 @@ mod core;
 mod error_ext;
 mod error_span;
 mod source;
-mod trace_info;
+mod span_info;
 
 #[cfg(feature = "test-util")]
 pub mod test_util;
@@ -243,4 +243,4 @@ pub use core::OhnoCore;
 pub use error_ext::ErrorExt;
 pub use error_span::{ErrorSpan, ErrorSpanExt};
 pub use ohno_macros::{Error, error, error_span};
-pub use trace_info::{Location, TraceInfo};
+pub use span_info::{Location, SpanInfo};
