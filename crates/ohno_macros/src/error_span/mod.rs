@@ -13,9 +13,9 @@ use syn::{ItemFn, Result, parse_macro_input};
 
 use crate::utils::bail;
 
-/// Attribute macro for adding detailed error trace (with file and line info) to function errors.
+/// Attribute macro for adding detailed error span (with file and line info) to function errors.
 ///
-/// Now supports complex format expressions like:
+/// Supported formats:
 /// - `#[error_span("failed to read file: {}", path.display())]`
 /// - `#[error_span("error in {}: {}", name, value.len())]`
 /// - `#[error_span("simple message")]`
@@ -64,7 +64,7 @@ fn impl_error_span_attribute(trace_args: proc_macro2::TokenStream, mut fn_defini
     Ok(quote! { #fn_definition })
 }
 
-/// Generate error trace expression for complex format expressions.
+/// Generate error span expression for complex format expressions.
 /// Supports both simple string literals and format strings with complex expressions.
 /// Also supports legacy-style parameter interpolation like "{param}".
 pub fn generate_complex_context_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {

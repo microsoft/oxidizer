@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates error trace extension methods for adding traces to Results.
+//! Demonstrates error span extension methods for adding traces to Results.
 
 use ohno::ErrorSpanExt;
 

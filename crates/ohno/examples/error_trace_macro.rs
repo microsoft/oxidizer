@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating the `#[error_span]` macro for automatic error trace injection.
+//! Example demonstrating the `#[error_span]` macro for automatic error span injection.
 //!
-//! Shows how the `error_span` macro adds traces to any errors returned from functions.
+//! Shows how the `error_span` macro adds spans to ohno-bases errors returned from functions.
 
 use ohno::{Error, OhnoCore, error_span};
 

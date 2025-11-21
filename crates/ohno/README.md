@@ -18,7 +18,7 @@
 * [Display Error Override](#display-error-override)
 * [Automatic Constructors](#automatic-constructors)
 * [Automatic From Implementations](#automatic-from-implementations)
-* [Error Trace](#error-trace)
+* [Error Trace](#error-span)
 
 ## Summary
 
@@ -33,7 +33,7 @@ into one ergonomic crate for comprehensive error handling.
 
 - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
 - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-- [**`#[error_span("...")]`**](#error-span: Attribute macro for automatic error trace injection with file and line information.
+- [**`#[error_span("...")]`**](#error-span: Attribute macro for automatic error span injection with file and line information.
 
 Supports complex expressions like `#[error_span("failed to read {}", path.display())]`
 

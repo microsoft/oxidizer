@@ -6,24 +6,24 @@ use std::error::Error as StdError;
 
 use crate::{OhnoCore, TraceInfo};
 
-/// Base trait for adding error trace to error types.
+/// Base trait for adding error span to error types.
 ///
-/// This trait provides the fundamental error trace addition method and is dyn-compatible.
+/// This trait provides the fundamental error span addition method and is dyn-compatible.
 /// It serves as the base for the more ergonomic `ErrorSpanExt` trait.
 pub trait ErrorSpan {
-    /// Adds error trace information to the error.
+    /// Adds error span information to the error.
     ///
-    /// This is the core method that other error trace methods build upon.
+    /// This is the core method that other error span methods build upon.
     fn add_error_span(&mut self, trace: TraceInfo);
 }
 
-/// Extension trait providing ergonomic error trace addition methods.
+/// Extension trait providing ergonomic error span addition methods.
 ///
 /// This trait extends `ErrorSpan` with convenient methods for adding error traces
 /// when converting or working with errors. It provides both immediate and
 /// lazy evaluation options.
 pub trait ErrorSpanExt: ErrorSpan {
-    /// Wraps the error with error trace.
+    /// Wraps the error with error span.
     #[must_use]
     fn error_span(mut self, trace: impl Into<Cow<'static, str>>) -> Self
     where
@@ -33,7 +33,7 @@ pub trait ErrorSpanExt: ErrorSpan {
         self
     }
 
-    /// Wraps the error with detailed error trace including file and line information.
+    /// Wraps the error with detailed error span including file and line information.
     #[must_use]
     fn detailed_error_span(mut self, trace: impl Into<Cow<'static, str>>, file: &'static str, line: u32) -> Self
     where
@@ -43,7 +43,7 @@ pub trait ErrorSpanExt: ErrorSpan {
         self
     }
 
-    /// Wraps the error with lazily evaluated error trace.
+    /// Wraps the error with lazily evaluated error span.
     #[must_use]
     fn with_error_span<F, R>(mut self, f: F) -> Self
     where
@@ -55,7 +55,7 @@ pub trait ErrorSpanExt: ErrorSpan {
         self
     }
 
-    /// Wraps the error with lazily evaluated detailed error trace including file and line information.
+    /// Wraps the error with lazily evaluated detailed error span including file and line information.
     #[must_use]
     fn with_detailed_error_span<F, R>(mut self, f: F, file: &'static str, line: u32) -> Self
     where

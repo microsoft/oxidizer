@@ -8,7 +8,7 @@
 //! # Macros
 //!
 //! - `#[derive(Error)]` - Automatically implement error traits
-//! - `#[error_span("message")]` - Add error trace with file/line information to function errors
+//! - `#[error_span("message")]` - Add error span with file/line information to function errors
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/favicon.ico")]
@@ -40,7 +40,7 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
     derive_error::derive_error(input)
 }
 
-/// Attribute macro for adding error trace with file and line info to function errors.
+/// Attribute macro for adding error span with file and line info to function errors.
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[proc_macro_attribute]

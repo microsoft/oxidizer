@@ -12,7 +12,7 @@
 //!
 //! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
 //! - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-//! - [**`#[error_span("...")]`**](#error-trace): Attribute macro for automatic error trace injection with file and line information.
+//! - [**`#[error_span("...")]`**](#error-span): Attribute macro for automatic error span injection with file and line information.
 //!
 //! Supports complex expressions like `#[error_span("failed to read {}", path.display())]`
 //!
