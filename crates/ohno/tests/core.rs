@@ -54,26 +54,26 @@ impl std::error::Error for TestError {
 #[test]
 fn test_detailed_error_span() {
     let error = OhnoCore::from("base error")
-        .detailed_error_span("first trace", "file1.rs", 10)
-        .error_span("second trace")
-        .detailed_error_span("third trace", "file2.rs", 20);
+        .detailed_error_span("first span", "file1.rs", 10)
+        .error_span("second span")
+        .detailed_error_span("third span", "file2.rs", 20);
 
     let display = error.to_string();
     assert!(display.contains("base error"));
-    assert!(display.contains("first trace (at file1.rs:10)"));
-    assert!(display.contains("second trace"));
-    assert!(display.contains("third trace (at file2.rs:20)"));
+    assert!(display.contains("first span (at file1.rs:10)"));
+    assert!(display.contains("second span"));
+    assert!(display.contains("third span (at file2.rs:20)"));
 
     // Test context iteration
     let contexts: Vec<_> = error.context_iter().collect();
     assert_eq!(contexts.len(), 3);
 
     // Most recent first
-    assert_eq!(contexts[0].message, "third trace");
+    assert_eq!(contexts[0].message, "third span");
     assert!(contexts[0].has_location());
-    assert_eq!(contexts[1].message, "second trace");
+    assert_eq!(contexts[1].message, "second span");
     assert!(!contexts[1].has_location());
-    assert_eq!(contexts[2].message, "first trace");
+    assert_eq!(contexts[2].message, "first span");
     assert!(contexts[2].has_location());
 }
 

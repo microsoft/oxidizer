@@ -32,16 +32,16 @@ pub fn error_span(args: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
-fn impl_error_span_attribute(trace_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
+fn impl_error_span_attribute(span_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
     // Parse the arguments as either:
     // 1. A simple string literal: "message"
     // 2. A format string with args: "format {}", expr
-    let trace_expr = if trace_args.is_empty() {
+    let span_expr = if span_args.is_empty() {
         // No arguments provided, use function name as default message
         let fn_name = &fn_definition.sig.ident;
         quote! { format!("error in function {}", stringify!(#fn_name)) }
     } else {
-        generate_complex_context_expr(trace_args)?
+        generate_complex_context_expr(span_args)?
     };
 
     check_return_type(&fn_definition.sig.output)?;
@@ -52,8 +52,8 @@ fn impl_error_span_attribute(trace_args: proc_macro2::TokenStream, mut fn_defini
     let block = quote! {
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
-                let trace_msg = #trace_expr;
-                ohno::ErrorSpan::add_error_span(&mut e, ohno::SpanInfo::detailed(trace_msg, file!(), line!()));
+                let span_msg = #span_expr;
+                ohno::ErrorSpan::add_error_span(&mut e, ohno::SpanInfo::detailed(span_msg, file!(), line!()));
                 e
             })
         }

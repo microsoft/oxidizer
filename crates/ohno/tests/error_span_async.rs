@@ -30,7 +30,7 @@ async fn simple_async_error_span() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"async error"));
-    assert_trace!(error, "async operation failed");
+    assert_span!(error, "async operation failed");
 }
 
 #[tokio::test]
@@ -46,7 +46,7 @@ async fn async_error_span_with_params() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"value: 42"));
-    assert_trace!(error, "async operation failed with 42");
+    assert_span!(error, "async operation failed with 42");
 }
 
 // Test that the async function actually returns a Future
@@ -66,7 +66,7 @@ async fn async_plus_impl_as_ref() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"async error"));
-    assert_trace!(error, "async operation failed. Path: test/path/1.txt");
+    assert_span!(error, "async operation failed. Path: test/path/1.txt");
 }
 
 struct AsyncService {
@@ -158,7 +158,7 @@ async fn async_method_with_mut_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"negative value"));
-    assert_trace!(error, "service method failed with value -5");
+    assert_span!(error, "service method failed with value -5");
 }
 
 #[tokio::test]
@@ -169,7 +169,7 @@ async fn async_method_with_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"counter is zero"));
-    assert_trace!(error, "read-only method failed");
+    assert_span!(error, "read-only method failed");
 }
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn async_method_with_self_field_access() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"failed with field"));
-    assert_trace!(error, "method with self field access, counter: 0");
+    assert_span!(error, "method with self field access, counter: 0");
 }
 
 #[tokio::test]
@@ -192,7 +192,7 @@ async fn async_method_with_mut_self_no_args() {
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"mutation failed"));
     // The atomic counter is 1 after fetch_add, not 0
-    assert_trace!(error, "mutable method failed, atomic: 1");
+    assert_span!(error, "mutable method failed, atomic: 1");
 }
 
 #[tokio::test]
@@ -204,7 +204,7 @@ async fn async_method_with_self_and_string() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"message was: test message"));
-    assert_trace!(error, "method failed");
+    assert_span!(error, "method failed");
 }
 
 #[tokio::test]
@@ -216,7 +216,7 @@ async fn async_method_with_self_and_string_ref() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"message was: ref message"));
-    assert_trace!(error, "method failed with string ref: ref message");
+    assert_span!(error, "method failed with string ref: ref message");
 }
 
 #[tokio::test]
@@ -227,7 +227,7 @@ async fn async_method_consume_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed with counter: 0"));
-    assert_trace!(error, "consuming method failed");
+    assert_span!(error, "consuming method failed");
 }
 
 #[tokio::test]
@@ -238,7 +238,7 @@ async fn async_method_consume_self_with_arg() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed with value: 42"));
-    assert_trace!(error, "consuming method with arg failed, value: 42");
+    assert_span!(error, "consuming method with arg failed, value: 42");
 }
 
 #[tokio::test]
@@ -249,7 +249,7 @@ async fn async_method_consume_self_mut() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed mut with counter: 1"));
-    assert_trace!(error, "consuming mutable method failed");
+    assert_span!(error, "consuming mutable method failed");
 }
 
 struct CustomFuture;
@@ -271,5 +271,5 @@ async fn error_span_on_future_poll() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"poll error"));
-    assert_trace!(error, "custom future poll failed");
+    assert_span!(error, "custom future poll failed");
 }

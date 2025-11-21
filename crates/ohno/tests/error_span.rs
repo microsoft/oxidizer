@@ -28,7 +28,7 @@ fn case_1_regular_string() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"base error"));
-    assert_trace!(error, "operation failed");
+    assert_span!(error, "operation failed");
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn case_2_inline_argument() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"file error"));
-    assert_trace!(error, "failed to process file test.txt");
+    assert_span!(error, "failed to process file test.txt");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn case_3_positional_argument() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"processing error"));
-    assert_trace!(error, "processed 5 bytes");
+    assert_span!(error, "processed 5 bytes");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn multiple_inline_arguments() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"multiple param error"));
-    assert_trace!(error, "multiple value1 inline 42 arguments");
+    assert_span!(error, "multiple value1 inline 42 arguments");
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn multiple_positional_arguments() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"multiple pos error"));
-    assert_trace!(error, "multiple first positional 100 arguments");
+    assert_span!(error, "multiple first positional 100 arguments");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn mixed_inline_and_positional_arguments() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"mixed error"));
-    assert_trace!(error, "mixed inline_val and 200 positional");
+    assert_span!(error, "mixed inline_val and 200 positional");
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn generic_function_with_where() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"where error"));
-    assert_trace!(error, "where t: Hi");
+    assert_span!(error, "where t: Hi");
 }
 
 struct SyncService {
@@ -214,7 +214,7 @@ fn sync_method_with_mut_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"negative value"));
-    assert_trace!(error, "sync service method failed with value -5");
+    assert_span!(error, "sync service method failed with value -5");
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn sync_method_with_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"counter is zero"));
-    assert_trace!(error, "sync read-only method failed");
+    assert_span!(error, "sync read-only method failed");
 }
 
 #[test]
@@ -236,7 +236,7 @@ fn sync_method_with_self_field_access() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"failed with field"));
-    assert_trace!(error, "sync method with self field access failed, counter: 0");
+    assert_span!(error, "sync method with self field access failed, counter: 0");
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn sync_method_with_mut_self_no_args() {
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"mutation failed"));
     // The atomic counter is 1 after fetch_add, not 0
-    assert_trace!(error, "mutable method failed, atomic: 1");
+    assert_span!(error, "mutable method failed, atomic: 1");
 }
 
 #[test]
@@ -260,7 +260,7 @@ fn sync_method_with_self_and_string() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"message was: test message"));
-    assert_trace!(error, "method failed");
+    assert_span!(error, "method failed");
 }
 
 #[test]
@@ -272,7 +272,7 @@ fn sync_method_with_self_and_string_ref() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"message was: ref message"));
-    assert_trace!(error, "method failed with string ref: ref message");
+    assert_span!(error, "method failed with string ref: ref message");
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn sync_method_consume_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed with counter: 0"));
-    assert_trace!(error, "consuming method failed");
+    assert_span!(error, "consuming method failed");
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn sync_method_consume_self_with_arg() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed with value: 42"));
-    assert_trace!(error, "consuming method with arg failed, value: 42");
+    assert_span!(error, "consuming method with arg failed, value: 42");
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn sync_method_consume_self_mut() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed mut with counter: 1"));
-    assert_trace!(error, "consuming mutable method failed");
+    assert_span!(error, "consuming mutable method failed");
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn impl_as_ref() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"path error"));
-    assert_trace!(error, "operation failed. Path: test/path/1.txt");
+    assert_span!(error, "operation failed. Path: test/path/1.txt");
 }
 
 #[test]
@@ -332,29 +332,29 @@ fn empty_context_iter() {
 fn context_iter_reverse_order() {
     let mut core = OhnoCore::default();
 
-    let traces = ["trace 1", "trace 2", "trace 3", "trace 4", "trace 5"];
-    for (i, &msg) in traces.iter().enumerate() {
+    let spans = ["span 1", "span 2", "span 3", "span 4", "span 5"];
+    for (i, &msg) in spans.iter().enumerate() {
         #[expect(clippy::cast_possible_truncation, reason = "Test")]
-        let trace = SpanInfo::detailed(msg, "test.rs", (i + 1) as u32 * 10);
-        core.add_error_span(trace);
+        let span = SpanInfo::detailed(msg, "test.rs", (i + 1) as u32 * 10);
+        core.add_error_span(span);
     }
 
     let messages: Vec<(&str, &str, u32)> = core
         .context_iter()
-        .map(|trace| {
-            let location = trace.location.as_ref().unwrap();
-            (trace.message.as_ref(), location.file, location.line)
+        .map(|span| {
+            let location = span.location.as_ref().unwrap();
+            (span.message.as_ref(), location.file, location.line)
         })
         .collect();
 
     assert_eq!(
         messages,
         vec![
-            ("trace 5", "test.rs", 50),
-            ("trace 4", "test.rs", 40),
-            ("trace 3", "test.rs", 30),
-            ("trace 2", "test.rs", 20),
-            ("trace 1", "test.rs", 10),
+            ("span 5", "test.rs", 50),
+            ("span 4", "test.rs", 40),
+            ("span 3", "test.rs", 30),
+            ("span 2", "test.rs", 20),
+            ("span 1", "test.rs", 10),
         ]
     );
 }

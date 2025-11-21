@@ -75,7 +75,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trace_info() {
+    fn test_span_info() {
         let ctx1 = SpanInfo::new("simple span");
         assert!(!ctx1.has_location());
         assert_eq!(ctx1.to_string(), "simple span");

@@ -18,7 +18,7 @@
 * [Display Error Override](#display-error-override)
 * [Automatic Constructors](#automatic-constructors)
 * [Automatic From Implementations](#automatic-from-implementations)
-* [Error Trace](#error-span)
+* [Error Span](#error-span)
 
 ## Summary
 
