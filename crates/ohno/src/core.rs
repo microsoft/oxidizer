@@ -281,23 +281,19 @@ mod tests {
     }
 
     #[test]
-    fn test_format_error() {
-        let error = OhnoCore::from("test error");
-        let result = error.to_string();
-        assert!(result.contains("test error"));
-    }
-
-    #[test]
     fn test_new() {
         let error = OhnoCore::new();
-        assert!(matches!(error.data.source, Source::None));
-        assert!(error.data.context.is_empty());
+        assert!(matches!(error.data.source, Source::None), "{error:?}");
+        assert!(error.data.context.is_empty(), "{error:?}");
+        assert!(error.source().is_none(), "{error:?}");
     }
 
     #[test]
     fn test_from_string() {
         let error = OhnoCore::from("msg");
-        assert!(error.source().is_none());
+        assert!(error.source().is_none(), "{error:?}");
+        assert!(error.to_string().starts_with("msg"), "{error:?}");
+        
         if let Source::Transparent(source) = &error.data.source {
             assert_eq!(source.to_string(), "msg");
         }
