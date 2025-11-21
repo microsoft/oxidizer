@@ -3,6 +3,8 @@
 
 //! Test to demonstrate the correct source behavior for display override
 
+#![cfg(feature = "test-util")]
+
 use std::error::Error;
 
 use ohno::{Error, OhnoCore, assert_error_message};

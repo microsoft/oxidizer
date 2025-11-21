@@ -3,6 +3,8 @@
 
 //! Test for derive Error support on tuple structs
 
+#![cfg(feature = "test-util")]
+
 use std::error::Error as StdError;
 
 use ohno::{Error, OhnoCore, assert_error_message};
