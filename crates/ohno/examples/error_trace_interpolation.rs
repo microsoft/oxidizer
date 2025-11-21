@@ -2,8 +2,6 @@
 // Licensed under the MIT License.
 
 //! Example demonstrating `error_span` macro with argument interpolation.
-//!
-//! Shows how the `error_span` macro can interpolate function arguments into the trace message.
 
 use ohno::error_span;
 

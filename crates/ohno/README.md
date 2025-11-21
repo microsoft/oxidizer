@@ -185,7 +185,7 @@ let my_err: MyError = io_err.into(); // Works automatically
 The `#[error_span("message")]` attribute macro adds error traces with file and line info to function errors.
 
 Functions annotated with `#[error_span("message")]` automatically wrap any returned `Result`. If
-the function returns an error, the macro injects a trace with the provided message, including file and line information, into the error chain.
+the function returns an error, the macro injects a span with the provided message, including file and line information, into the error chain.
 
 **Requirements:**
 - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)

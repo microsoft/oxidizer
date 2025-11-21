@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates chaining errors through multiple layers with trace messages.
+//! Demonstrates chaining errors through multiple layers with span messages.
 
 use ohno::error_span;
 
