@@ -1,4 +1,5 @@
 name: main
+
 permissions:
   contents: read
   pull-requests: read
@@ -44,7 +45,7 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Start sscache
+      - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
@@ -87,7 +88,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sscache
+      - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
@@ -161,7 +162,9 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Start sscache
+        with:
+          fetch-depth: 0
+      - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
@@ -176,11 +179,13 @@ jobs:
           tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
 
       # execute
-      - name: Mutate
+      - name: Generate PR diff
+        run: git diff origin/main...HEAD >diff.txt
+      - name: Mutate Diff
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
-        run: cargo mutants --test-workspace=true --colors=never --jobs=1 --build-timeout=120
+        run: cargo mutants --test-workspace=true --colors=never --jobs=1 --build-timeout=120 --in-diff diff.txt
 
   coverage:
     if: github.event_name == 'pull_request'
@@ -196,7 +201,7 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Start sscache
+      - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
