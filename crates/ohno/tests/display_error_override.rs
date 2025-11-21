@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use ohno::{Error, ErrorExt, ErrorTraceExt, OhnoCore, assert_error_message};
+#![cfg(feature = "test-util")]
+
+use ohno::{Error, ErrorExt, ErrorSpanExt, OhnoCore, assert_error_message};
 
 #[derive(Error)]
 #[display("Failed to read config with path: {path}")]
@@ -43,8 +45,8 @@ fn test_display_error_override_with_context() {
     let error = ConfigError {
         path: "/tmp/test.conf".to_string(),
         inner_error: OhnoCore::from("permission denied")
-            .error_trace("filesystem access failed")
-            .error_trace("security check failed"),
+            .error_span("filesystem access failed")
+            .error_span("security check failed"),
     };
 
     let display = format!("{error}");

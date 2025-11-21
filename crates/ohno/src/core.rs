@@ -7,14 +7,14 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use super::source::Source;
-use super::trace_info::TraceInfo;
+use super::span_info::SpanInfo;
 
 /// Internal error data that is boxed to keep `OhnoCore` lightweight.
 #[derive(Debug)]
 pub struct Inner {
     pub(super) source: Source,
     pub(super) backtrace: Backtrace,
-    pub(super) context: Vec<TraceInfo>,
+    pub(super) context: Vec<SpanInfo>,
 }
 
 /// Core error type that wraps source errors, captures backtraces, and holds context messages.
@@ -31,16 +31,16 @@ pub struct Inner {
 /// ```rust
 /// use std::io;
 ///
-/// use ohno::{ErrorTraceExt, OhnoCore};
+/// use ohno::{ErrorSpanExt, OhnoCore};
 ///
 /// // Create from a string message
 /// let error = OhnoCore::from("something went wrong")
-///     .error_trace("while processing request")
-///     .error_trace("in user handler");
+///     .error_span("while processing request")
+///     .error_span("in user handler");
 ///
 /// // Wrap an existing error
 /// let io_error = io::Error::new(io::ErrorKind::NotFound, "file.txt");
-/// let wrapped = OhnoCore::from(io_error).error_trace("failed to load config");
+/// let wrapped = OhnoCore::from(io_error).error_span("failed to load config");
 /// ```
 pub struct OhnoCore {
     pub(super) data: Box<Inner>,
@@ -144,7 +144,7 @@ impl OhnoCore {
     }
 
     /// Returns an iterator over the context information in reverse order (most recent first).
-    pub fn context_iter(&self) -> impl Iterator<Item = &TraceInfo> {
+    pub fn context_iter(&self) -> impl Iterator<Item = &SpanInfo> {
         self.data.context.iter().rev()
     }
 
@@ -272,7 +272,28 @@ impl fmt::Display for MessageFormatter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error_trace::ErrorTrace;
+    use crate::{assert_error_message, error_span::ErrorSpan};
+
+    #[test]
+    fn default_error_message() {
+        #[ohno::error]
+        struct TestError;
+
+        let error = TestError::new();
+        assert_error_message!(error, "TestError");
+        assert!(error.source().is_none(), "{error:?}");
+    }
+
+    #[test]
+    fn test_override_message() {
+        #[ohno::error]
+        #[display("Overridden message")]
+        struct TestError;
+
+        let error = TestError::new();
+        assert_error_message!(error, "Overridden message");
+        assert!(error.source().is_none(), "{error:?}");
+    }
 
     #[test]
     fn test_default() {
@@ -281,23 +302,24 @@ mod tests {
     }
 
     #[test]
-    fn test_format_error() {
-        let error = OhnoCore::from("test error");
-        let result = error.to_string();
-        assert!(result.contains("test error"));
-    }
-
-    #[test]
     fn test_new() {
+        use crate::assert_error_message;
+
         let error = OhnoCore::new();
-        assert!(matches!(error.data.source, Source::None));
-        assert!(error.data.context.is_empty());
+        assert_error_message!(error, "");
+        assert!(error.source().is_none(), "{error:?}");
+        assert!(matches!(error.data.source, Source::None), "{error:?}");
+        assert!(error.data.context.is_empty(), "{error:?}");
     }
 
     #[test]
     fn test_from_string() {
+        use crate::assert_error_message;
+
         let error = OhnoCore::from("msg");
-        assert!(error.source().is_none());
+        assert_error_message!(error, "msg");
+        assert!(error.source().is_none(), "{error:?}");
+
         if let Source::Transparent(source) = &error.data.source {
             assert_eq!(source.to_string(), "msg");
         }
@@ -342,8 +364,8 @@ mod tests {
     #[test]
     fn test_context_iter_and_messages() {
         let mut error = OhnoCore::from("msg");
-        error.add_error_trace(TraceInfo::new("ctx1"));
-        error.add_error_trace(TraceInfo::new("ctx2"));
+        error.add_error_span(SpanInfo::new("ctx1"));
+        error.add_error_span(SpanInfo::new("ctx2"));
         let messages: Vec<_> = error.context_messages().collect();
         assert_eq!(messages, vec!["ctx2", "ctx1"]);
     }

@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "test-util")]
+
 use std::io;
 
-use ohno::{ErrorTraceExt, OhnoCore, assert_error_message};
+use ohno::{ErrorSpanExt, OhnoCore, assert_error_message};
 
 // Test helper error type for various tests
 #[derive(Debug)]
@@ -52,34 +54,34 @@ impl std::error::Error for TestError {
 }
 
 #[test]
-fn test_detailed_error_trace() {
+fn test_detailed_error_span() {
     let error = OhnoCore::from("base error")
-        .detailed_error_trace("first trace", "file1.rs", 10)
-        .error_trace("second trace")
-        .detailed_error_trace("third trace", "file2.rs", 20);
+        .detailed_error_span("first span", "file1.rs", 10)
+        .error_span("second span")
+        .detailed_error_span("third span", "file2.rs", 20);
 
     let display = error.to_string();
     assert!(display.contains("base error"));
-    assert!(display.contains("first trace (at file1.rs:10)"));
-    assert!(display.contains("second trace"));
-    assert!(display.contains("third trace (at file2.rs:20)"));
+    assert!(display.contains("first span (at file1.rs:10)"));
+    assert!(display.contains("second span"));
+    assert!(display.contains("third span (at file2.rs:20)"));
 
     // Test context iteration
     let contexts: Vec<_> = error.context_iter().collect();
     assert_eq!(contexts.len(), 3);
 
     // Most recent first
-    assert_eq!(contexts[0].message, "third trace");
+    assert_eq!(contexts[0].message, "third span");
     assert!(contexts[0].has_location());
-    assert_eq!(contexts[1].message, "second trace");
+    assert_eq!(contexts[1].message, "second span");
     assert!(!contexts[1].has_location());
-    assert_eq!(contexts[2].message, "first trace");
+    assert_eq!(contexts[2].message, "first span");
     assert!(contexts[2].has_location());
 }
 
 #[test]
-fn test_with_error_trace() {
-    let error = OhnoCore::from("base").with_error_trace(|| format!("computed: {}", 42));
+fn test_with_error_span() {
+    let error = OhnoCore::from("base").with_error_span(|| format!("computed: {}", 42));
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
@@ -90,8 +92,8 @@ fn test_with_error_trace() {
 }
 
 #[test]
-fn test_with_detailed_error_trace() {
-    let error = OhnoCore::from("base").with_detailed_error_trace(|| format!("computed: {}", 42), "test.rs", 50);
+fn test_with_detailed_error_span() {
+    let error = OhnoCore::from("base").with_detailed_error_span(|| format!("computed: {}", 42), "test.rs", 50);
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42 (at test.rs:50)"));
@@ -130,7 +132,7 @@ fn test_backtrace_capture() {
 
 #[test]
 fn test_context_messages_iterator() {
-    let error = OhnoCore::from("base").error_trace("first").error_trace("second");
+    let error = OhnoCore::from("base").error_span("first").error_span("second");
 
     let messages: Vec<_> = error.context_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);

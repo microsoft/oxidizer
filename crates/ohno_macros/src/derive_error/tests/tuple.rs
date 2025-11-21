@@ -52,9 +52,9 @@ fn test_tuple_only_ohno_core() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for OnlyCoreError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.0.add_error_trace(trace);
+            impl ohno::ErrorSpan for OnlyCoreError {
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.0.add_error_span(span);
                 }
             }
         },
@@ -136,9 +136,9 @@ fn test_tuple_struct_expansion() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for TupleError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.1.add_error_trace(trace);
+            impl ohno::ErrorSpan for TupleError {
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.1.add_error_span(span);
                 }
             }
         },
@@ -221,9 +221,9 @@ fn test_ohno_core_first_position_tuple() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for FirstPositionTupleError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.0.add_error_trace(trace);
+            impl ohno::ErrorSpan for FirstPositionTupleError {
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.0.add_error_span(span);
                 }
             }
         },
@@ -307,9 +307,9 @@ fn test_ohno_core_middle_position_tuple() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for MiddlePositionTupleError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.1.add_error_trace(trace);
+            impl ohno::ErrorSpan for MiddlePositionTupleError {
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.1.add_error_span(span);
                 }
             }
         },

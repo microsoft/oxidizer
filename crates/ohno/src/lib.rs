@@ -12,9 +12,9 @@
 //!
 //! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
 //! - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-//! - [**`#[error_trace("...")]`**](#error-trace): Attribute macro for automatic error trace injection with file and line information.
+//! - [**`#[error_span("...")]`**](#error-span): Attribute macro for automatic error span injection with file and line information.
 //!
-//! Supports complex expressions like `#[error_trace("failed to read {}", path.display())]`
+//! Supports complex expressions like `#[error_span("failed to read {}", path.display())]`
 //!
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
 //! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds multiple context messages
@@ -27,7 +27,7 @@
 //! #[ohno::error]
 //! pub struct ConfigError(PathBuf);
 //!
-//! #[ohno::error_trace("failed to open file {}", path.as_ref().display())]
+//! #[ohno::error_span("failed to open file {}", path.as_ref().display())]
 //! fn open_file(path: impl AsRef<Path>) -> Result<String, ConfigError> {
 //!     std::fs::read_to_string(path.as_ref())
 //!         .map_err(|e| ConfigError::caused_by(path.as_ref().to_path_buf(), e))
@@ -159,30 +159,30 @@
 //!
 //! **Note:** Error's fields must implement `Default` when using `#[from]` to ensure they can be properly initialized.
 //!
-//! # Error Trace
+//! # Error Span
 //!
-//! The `#[error_trace("message")]` attribute macro adds error traces with file and line info to function errors.
+//! The `#[error_span("message")]` attribute macro adds error spans with file and line info to function errors.
 //!
-//! Functions annotated with `#[error_trace("message")]` automatically wrap any returned `Result`. If
-//! the function returns an error, the macro injects a trace with the provided message, including file and line information, into the error chain.
+//! Functions annotated with `#[error_span("message")]` automatically wrap any returned `Result`. If
+//! the function returns an error, the macro injects a span with the provided message, including file and line information, into the error chain.
 //!
 //! **Requirements:**
 //! - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-//! - The error type must implement the [`ohno::ErrorTrace`] trait (automatically implemented for all ohno error types)
+//! - The error type must implement the [`ohno::ErrorSpan`] trait (automatically implemented for all ohno error types)
 //!
 //! **Supported syntax patterns:**
 //!
 //! 1. **Simple string literals:**
 //!
 //! ```ignore
-//! #[error_trace("failed to process request")]
+//! #[error_span("failed to process request")]
 //! fn process() -> Result<(), MyError> { /* ... */ }
 //! ```
 //!
 //! 2. **Parameter interpolation:**
 //!
 //! ```ignore
-//! #[error_trace("failed to read file: {path}")]
+//! #[error_span("failed to read file: {path}")]
 //! fn read_file(path: &str) -> Result<String, MyError> { /* ... */ }
 //! ```
 //!
@@ -191,21 +191,21 @@
 //! ```ignore
 //! use std::path::Path;
 //!
-//! #[error_trace("failed to read file: {}", path.display())]
+//! #[error_span("failed to read file: {}", path.display())]
 //! fn read_file(path: &Path) -> Result<String, MyError> { /* ... */ }
 //! ```
 //!
 //! 4. **Multiple expressions and calculations:**
 //!
 //! ```ignore
-//! #[error_trace("processed {} items with total size {} bytes", items.len(), total_size)]
+//! #[error_span("processed {} items with total size {} bytes", items.len(), total_size)]
 //! fn process_items(items: &[String], total_size: usize) -> Result<(), MyError> { /* ... */ }
 //! ```
 //!
 //! 5. **Mixed parameter interpolation and format expressions:**
 //!
 //! ```ignore
-//! #[error_trace("user {user} failed operation with {} items", items.len())]
+//! #[error_span("user {user} failed operation with {} items", items.len())]
 //! fn user_operation(user: &str, items: &[String]) -> Result<(), MyError> { /* ... */ }
 //! ```
 //!
@@ -215,7 +215,7 @@
 //! #[ohno::error]
 //! struct MyError;
 //!
-//! #[ohno::error_trace("failed to open file")]
+//! #[ohno::error_span("failed to open file")]
 //! fn open_file(path: &str) -> Result<String, MyError> {
 //!     std::fs::read_to_string(path)
 //!         .map_err(MyError::caused_by)
@@ -231,16 +231,16 @@ extern crate self as ohno;
 
 mod core;
 mod error_ext;
-mod error_trace;
+mod error_span;
 mod source;
-mod trace_info;
+mod span_info;
 
-#[cfg(feature = "test-util")]
+#[cfg(any(feature = "test-util", test))]
 pub mod test_util;
 
 pub use core::OhnoCore;
 
 pub use error_ext::ErrorExt;
-pub use error_trace::{ErrorTrace, ErrorTraceExt};
-pub use ohno_macros::{Error, error, error_trace};
-pub use trace_info::{Location, TraceInfo};
+pub use error_span::{ErrorSpan, ErrorSpanExt};
+pub use ohno_macros::{Error, error, error_span};
+pub use span_info::{Location, SpanInfo};

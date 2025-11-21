@@ -13,15 +13,15 @@ fn preserves_pub_visibility() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         pub fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -40,15 +40,15 @@ fn preserves_pub_crate_visibility() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         pub(crate) fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -67,15 +67,15 @@ fn preserves_pub_super_visibility() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         pub(super) fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -94,15 +94,15 @@ fn preserves_const_modifier() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         const fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -121,15 +121,15 @@ fn preserves_unsafe_modifier() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         unsafe fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -148,15 +148,15 @@ fn preserves_generic_type_parameter() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T>(value: T) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -175,15 +175,15 @@ fn preserves_generic_with_trait_bound() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T: Display>(value: T) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -202,15 +202,15 @@ fn preserves_multiple_generics_with_bounds() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T: Display, U: Clone>(value: T, other: U) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -232,7 +232,7 @@ fn preserves_where_clause() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T>(value: T) -> Result<(), OhnoErrorType>
@@ -240,10 +240,10 @@ fn preserves_where_clause() {
             T: Display + Clone,
         {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -266,7 +266,7 @@ fn preserves_complex_where_clause() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T, U>(value: T, other: U) -> Result<(), OhnoErrorType>
@@ -275,10 +275,10 @@ fn preserves_complex_where_clause() {
             U: Into<String> + 'static,
         {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -297,15 +297,15 @@ fn preserves_lifetime_parameters() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<'a>(value: &'a str) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -324,15 +324,15 @@ fn preserves_multiple_lifetime_parameters() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<'a, 'b>(first: &'a str, second: &'b str) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -351,15 +351,15 @@ fn preserves_lifetimes_and_generics_combined() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<'a, T: Display>(value: &'a T) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -378,15 +378,15 @@ fn preserves_extern_abi() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         extern "C" fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -407,17 +407,17 @@ fn preserves_attributes() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         #[inline]
         #[allow(clippy::unused)]
         fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -438,17 +438,17 @@ fn preserves_doc_comments() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         /// This is a test function.
         /// It does some work.
         fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -467,15 +467,15 @@ fn preserves_impl_trait_params() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function(value: impl Display) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -494,15 +494,15 @@ fn preserves_impl_trait_with_bounds() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function(value: impl Display + Clone + Send) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -521,15 +521,15 @@ fn preserves_dyn_trait_params() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function(value: &dyn Display) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("error in function {}", stringify!(test_function));
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })
@@ -567,7 +567,7 @@ fn preserves_all_features_combined() {
         }
     };
 
-    let result = impl_error_trace_attribute(args, input).unwrap();
+    let result = impl_error_span_attribute(args, input).unwrap();
 
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         /// Performs a complex operation.
@@ -593,10 +593,10 @@ fn preserves_all_features_combined() {
                 callback();
                 Ok(())
             })().await.map_err(|mut e| {
-                let trace_msg = format!("operation failed: {}", operation_name);
-                ohno::ErrorTrace::add_error_trace(
+                let span_msg = format!("operation failed: {}", operation_name);
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
-                    ohno::TraceInfo::detailed(trace_msg, file!(), line!())
+                    ohno::SpanInfo::detailed(span_msg, file!(), line!())
                 );
                 e
             })

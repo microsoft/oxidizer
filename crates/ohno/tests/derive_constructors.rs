@@ -3,6 +3,8 @@
 
 //! Test for the constructor methods in derive(Error) macro
 
+#![cfg(feature = "test-util")]
+
 use std::io;
 
 use ohno::{Error, OhnoCore, assert_error_message};

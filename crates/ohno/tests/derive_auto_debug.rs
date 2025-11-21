@@ -124,12 +124,12 @@ fn test_no_debug_with_complex_attributes() {
 
 #[test]
 fn test_debug_with_context() {
-    use ohno::ErrorTraceExt;
+    use ohno::ErrorSpanExt;
 
     let error = SimpleError {
         inner_error: OhnoCore::from("base error")
-            .error_trace("first context")
-            .error_trace("second context"),
+            .error_span("first context")
+            .error_span("second context"),
     };
 
     let debug_str = format!("{error:?}");

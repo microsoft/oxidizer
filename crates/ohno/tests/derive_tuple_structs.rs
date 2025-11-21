@@ -3,6 +3,8 @@
 
 //! Test for derive Error support on tuple structs
 
+#![cfg(feature = "test-util")]
+
 use std::error::Error as StdError;
 
 use ohno::{Error, OhnoCore, assert_error_message};
@@ -73,13 +75,13 @@ fn test_tuple_error_with_fields_constructors() {
 }
 
 #[test]
-fn test_tuple_error_trace() {
-    use ohno::ErrorTrace;
+fn test_tuple_error_span() {
+    use ohno::ErrorSpan;
 
     let mut error = SimpleTupleError(OhnoCore::from("test"));
-    error.add_error_trace(ohno::TraceInfo::new("trace message"));
+    error.add_error_span(ohno::SpanInfo::new("span message"));
 
-    // The error should still be valid after adding trace
+    // The error should still be valid after adding span
     assert!(error.to_string().contains("test"));
 }
 

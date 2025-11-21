@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for the `error_trace` macro with async functions.
+//! Tests for the `error_span` macro with async functions.
 #![cfg(not(miri))] // unsupported operation: can't call foreign function `CreateIoCompletionPort` on OS `windows`
 #![expect(clippy::drop_non_drop, reason = "this is test code")]
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ohno::{Error, OhnoCore, error_trace};
+use ohno::{Error, OhnoCore, error_span};
 
 #[macro_use]
 mod util;
@@ -18,8 +18,8 @@ struct AsyncTestError {
 }
 
 #[tokio::test]
-async fn simple_async_error_trace() {
-    #[error_trace("async operation failed")]
+async fn simple_async_error_span() {
+    #[error_span("async operation failed")]
     async fn simple_async_failure() -> Result<String, AsyncTestError> {
         // Simulate async work
         std::future::ready(()).await;
@@ -30,12 +30,12 @@ async fn simple_async_error_trace() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"async error"));
-    assert_trace!(error, "async operation failed");
+    assert_span!(error, "async operation failed");
 }
 
 #[tokio::test]
-async fn async_error_trace_with_params() {
-    #[error_trace("async operation failed with {value}")]
+async fn async_error_span_with_params() {
+    #[error_span("async operation failed with {value}")]
     async fn async_with_param(value: i32) -> Result<String, AsyncTestError> {
         // Simulate async work
         std::future::ready(()).await;
@@ -46,13 +46,13 @@ async fn async_error_trace_with_params() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"value: 42"));
-    assert_trace!(error, "async operation failed with 42");
+    assert_span!(error, "async operation failed with 42");
 }
 
 // Test that the async function actually returns a Future
 #[tokio::test]
 async fn async_plus_impl_as_ref() {
-    #[error_trace("async operation failed. Path: {}", path.as_ref().display())]
+    #[error_span("async operation failed. Path: {}", path.as_ref().display())]
     async fn simple_async_failure(path: impl AsRef<std::path::Path>) -> Result<String, AsyncTestError> {
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by("async error"))
@@ -66,7 +66,7 @@ async fn async_plus_impl_as_ref() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"async error"));
-    assert_trace!(error, "async operation failed. Path: test/path/1.txt");
+    assert_span!(error, "async operation failed. Path: test/path/1.txt");
 }
 
 struct AsyncService {
@@ -81,21 +81,21 @@ impl AsyncService {
             atomic_counter: AtomicI32::new(0),
         }
     }
-    #[error_trace("read-only method failed")]
+    #[error_span("read-only method failed")]
     async fn read_only(&self) -> Result<i32, AsyncTestError> {
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by("counter is zero"))
     }
 
-    #[error_trace("method with self field access, counter: {}", self.counter)]
+    #[error_span("method with self field access, counter: {}", self.counter)]
     async fn with_self_field(&self) -> Result<i32, AsyncTestError> {
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by("failed with field"))
     }
 
-    #[error_trace("service method failed with value {value}")]
+    #[error_span("service method failed with value {value}")]
     async fn with_mut_self_and_copiable_value(&mut self, value: i32) -> Result<i32, AsyncTestError> {
         self.counter += value;
         self.atomic_counter.fetch_add(value, Ordering::SeqCst);
@@ -103,7 +103,7 @@ impl AsyncService {
         Err(AsyncTestError::caused_by("negative value"))
     }
 
-    #[error_trace("mutable method failed, atomic: {}", self.atomic_counter.load(Ordering::SeqCst))]
+    #[error_span("mutable method failed, atomic: {}", self.atomic_counter.load(Ordering::SeqCst))]
     async fn with_mut_self_no_args(&mut self) -> Result<i32, AsyncTestError> {
         self.counter += 1;
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
@@ -111,7 +111,7 @@ impl AsyncService {
         Err(AsyncTestError::caused_by("mutation failed"))
     }
 
-    #[error_trace("method failed")] // you can't use message as it consumed in the function
+    #[error_span("method failed")] // you can't use message as it consumed in the function
     async fn with_self_and_string(&self, message: String) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         let e = AsyncTestError::caused_by(format!("message was: {message}"));
@@ -119,13 +119,13 @@ impl AsyncService {
         Err(e)
     }
 
-    #[error_trace("method failed with string ref: {message}")]
+    #[error_span("method failed with string ref: {message}")]
     async fn with_self_and_string_ref(&self, message: &String) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by(format!("message was: {message}")))
     }
 
-    #[error_trace("consuming method failed")]
+    #[error_span("consuming method failed")]
     async fn consume_self(self) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         let counter = self.counter;
@@ -133,14 +133,14 @@ impl AsyncService {
         Err(AsyncTestError::caused_by(format!("consumed with counter: {counter}")))
     }
 
-    #[error_trace("consuming method with arg failed, value: {value}")]
+    #[error_span("consuming method with arg failed, value: {value}")]
     async fn consume_self_with_arg(self, value: i32) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         drop(self); // ensure self is consumed
         Err(AsyncTestError::caused_by(format!("consumed with value: {value}")))
     }
 
-    #[error_trace("consuming mutable method failed")]
+    #[error_span("consuming mutable method failed")]
     async fn consume_self_mut(mut self) -> Result<i32, AsyncTestError> {
         self.counter += 1;
         std::future::ready(()).await;
@@ -158,7 +158,7 @@ async fn async_method_with_mut_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"negative value"));
-    assert_trace!(error, "service method failed with value -5");
+    assert_span!(error, "service method failed with value -5");
 }
 
 #[tokio::test]
@@ -169,7 +169,7 @@ async fn async_method_with_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"counter is zero"));
-    assert_trace!(error, "read-only method failed");
+    assert_span!(error, "read-only method failed");
 }
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn async_method_with_self_field_access() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"failed with field"));
-    assert_trace!(error, "method with self field access, counter: 0");
+    assert_span!(error, "method with self field access, counter: 0");
 }
 
 #[tokio::test]
@@ -192,7 +192,7 @@ async fn async_method_with_mut_self_no_args() {
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"mutation failed"));
     // The atomic counter is 1 after fetch_add, not 0
-    assert_trace!(error, "mutable method failed, atomic: 1");
+    assert_span!(error, "mutable method failed, atomic: 1");
 }
 
 #[tokio::test]
@@ -204,7 +204,7 @@ async fn async_method_with_self_and_string() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"message was: test message"));
-    assert_trace!(error, "method failed");
+    assert_span!(error, "method failed");
 }
 
 #[tokio::test]
@@ -216,7 +216,7 @@ async fn async_method_with_self_and_string_ref() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"message was: ref message"));
-    assert_trace!(error, "method failed with string ref: ref message");
+    assert_span!(error, "method failed with string ref: ref message");
 }
 
 #[tokio::test]
@@ -227,7 +227,7 @@ async fn async_method_consume_self() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed with counter: 0"));
-    assert_trace!(error, "consuming method failed");
+    assert_span!(error, "consuming method failed");
 }
 
 #[tokio::test]
@@ -238,7 +238,7 @@ async fn async_method_consume_self_with_arg() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed with value: 42"));
-    assert_trace!(error, "consuming method with arg failed, value: 42");
+    assert_span!(error, "consuming method with arg failed, value: 42");
 }
 
 #[tokio::test]
@@ -249,7 +249,7 @@ async fn async_method_consume_self_mut() {
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"consumed mut with counter: 1"));
-    assert_trace!(error, "consuming mutable method failed");
+    assert_span!(error, "consuming mutable method failed");
 }
 
 struct CustomFuture;
@@ -257,19 +257,19 @@ struct CustomFuture;
 impl std::future::Future for CustomFuture {
     type Output = Result<i32, AsyncTestError>;
 
-    #[error_trace("custom future poll failed")]
+    #[error_span("custom future poll failed")]
     fn poll(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         std::task::Poll::Ready(Err(AsyncTestError::caused_by("poll error")))
     }
 }
 
 #[tokio::test]
-async fn error_trace_on_future_poll() {
+async fn error_span_on_future_poll() {
     let future = CustomFuture;
     let error = future.await.unwrap_err();
 
     let error_display = format!("{error}");
     let lines = error_display.lines().collect::<Vec<_>>();
     assert_eq!(lines.first(), Some(&"poll error"));
-    assert_trace!(error, "custom future poll failed");
+    assert_span!(error, "custom future poll failed");
 }

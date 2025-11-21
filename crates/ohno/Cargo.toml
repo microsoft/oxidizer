@@ -24,8 +24,6 @@ ohno_macros.workspace = true
 typeid.workspace = true
 
 [dev-dependencies]
-ohno = { path = ".", features = ["test-util"] }
-
 anyhow.workspace = true
 futures.workspace = true
 regex = { workspace = true, features = [ "unicode-perl"] }
