@@ -274,13 +274,24 @@ mod tests {
     use super::*;
     use crate::{assert_error_message, error_span::ErrorSpan};
 
-    #[ohno::error]
-    struct TestError;
-
     #[test]
     fn default_error_message() {
+        #[ohno::error]
+        struct TestError;
+
         let error = TestError::new();
         assert_error_message!(error, "TestError");
+        assert!(error.source().is_none(), "{error:?}");
+    }
+
+    #[test]
+    fn test_override_message() {
+        #[ohno::error]
+        #[display("Overridden message")]
+        struct TestError;
+
+        let error = TestError::new();
+        assert_error_message!(error, "Overridden message");
         assert!(error.source().is_none(), "{error:?}");
     }
 
