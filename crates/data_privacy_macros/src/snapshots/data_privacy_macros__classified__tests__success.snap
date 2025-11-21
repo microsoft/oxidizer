@@ -2,6 +2,12 @@
 source: crates/data_privacy_macros/src/classified.rs
 expression: pretty
 ---
+#[derive(
+    data_privacy_macros::ClassifiedDebug,
+    data_privacy_macros::RedactedDebug,
+    data_privacy_macros::RedactedDisplay,
+    data_privacy_macros::RedactedToString
+)]
 struct EmailAddress(String);
 impl EmailAddress {
     /// Exfiltrates the payload, allowing it to be used outside the classified context.
@@ -53,16 +59,6 @@ impl data_privacy::Classified for EmailAddress {
     }
     fn data_class(&self) -> data_privacy::DataClass {
         Self::data_class(self)
-    }
-}
-impl core::fmt::Debug for EmailAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(::core::format_args!("<CLASSIFIED:{}>", self.data_class()))
-    }
-}
-impl core::fmt::Display for EmailAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(::core::format_args!("<CLASSIFIED:{}>", self.data_class()))
     }
 }
 impl core::ops::Deref for EmailAddress {

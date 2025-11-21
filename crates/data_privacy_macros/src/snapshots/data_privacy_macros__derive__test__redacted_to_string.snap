@@ -1,0 +1,12 @@
+---
+source: crates/data_privacy_macros/src/derive.rs
+expression: pretty
+---
+impl data_privacy::RedactedToString for EmailAddress {
+    fn to_string(&self, engine: &data_privacy::RedactionEngine) -> String {
+        let v = self.as_declassified();
+        let mut output = String::new();
+        _ = engine.redact(&self.data_class(), v.to_string(), &mut output);
+        output
+    }
+}

@@ -7,7 +7,7 @@ use derive_more::{Constructor, From};
 use serde::{Deserialize, Serialize};
 
 #[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]
-#[derive(Clone, Serialize, Deserialize, Constructor, From)]
+#[derive(Clone, Hash, Serialize, Deserialize, Constructor, From)]
 pub struct UserName(String);
 
 #[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]

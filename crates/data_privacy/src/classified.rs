@@ -10,13 +10,26 @@ use crate::DataClass;
 /// Although instances are encapsulated, it's possible to extract the instances when
 /// classification is no longer needed.
 ///
-/// You rarely implement this trait by hand, instead use the [`classified`](data_privacy_macros::classified) macro.
+/// You rarely implement this trait by hand, instead use the [`classified`](data_privacy_macros::classified) macro to generate
+/// classified types automatically.
+///
+/// # Ancillary Traits
+///
+/// Types that implement the [`Classified`] trait should generally also implement the [`RedactedDebug`](crate::RedactedDebug),
+/// [`RedactedDisplay`](crate::RedactedDisplay), and [`RedactedToString`](crate::RedactedToString) traits. These traits ensure
+/// that when classified data is logged or printed, the sensitive information is redacted according to the configured
+/// redaction policies.
+///
+/// Types that implement the [`Classified`] trait should generally not implement the [`Display`] trait, and if they implement
+/// the [`Debug`] trait, the implementation should avoid exposing the classified payload. Most types should derive the [`ClassifiedDebug`](data_privacy_macros::ClassifiedDebug) macro
+/// to get an appropriate implementation of the [`Debug`] trait.
 ///
 /// # Example
 ///
 /// ```rust
-/// use data_privacy::{Classified, DataClass};
+/// use data_privacy::{Classified, ClassifiedDebug, DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
 ///
+/// #[derive(Debug)]
 /// struct Person {
 ///    name: String,
 ///    address: String,
@@ -28,10 +41,12 @@ use crate::DataClass;
 ///     }
 /// }
 ///
+/// // A classified wrapper is usually a newtype around the payload.
+/// #[derive(ClassifiedDebug, RedactedDebug)]
 /// struct ClassifiedPerson(Person);
 ///
 /// impl ClassifiedPerson {
-///    fn new(person: Person) -> Self {
+///    pub fn new(person: Person) -> Self {
 ///        Self(person)
 ///    }
 /// }
@@ -133,7 +148,14 @@ mod tests {
     #[test]
     fn test_default_trait_methods() {
         let mut classified = ClassifiedExample { data: 42 };
-        classified.visit(|value| assert_eq!(*value, 42, "Initial value should be 42"));
+
+        let mut call_count = 0;
+        classified.visit(|value| {
+            assert_eq!(*value, 42, "Initial value should be 42");
+            call_count += 1;
+        });
+
+        assert_eq!(call_count, 1);
 
         classified.visit_mut(|value| {
             *value = 20;

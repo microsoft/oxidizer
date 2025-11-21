@@ -19,13 +19,14 @@
 //!
 //! Before continuing, it's important to understand a few concepts:
 //!
-//! * **Data Classification**: The process of tagging sensitive data with individual data classes.
+//! * **Data Classification**: The process of assigning sensitive data individual data classes.
 //!   Different data classes may have different rules for handling them. For example, some sensitive
 //!   data can be put into logs, but only for a limited time, while other data can never be logged.
 //!
 //! * **Data Taxonomy**: A group of related data classes that together represent a consistent set
 //!   of rules for handling sensitive data. Different companies or governments usually have their
-//!   own taxonomies.
+//!   own taxonomies representing the different types of data they manipulate, each with specific
+//!   policies.
 //!
 //! * **Redaction**: The process of removing or obscuring sensitive information from data.
 //!   Redaction is often done by using consistent hashing, replacing the sensitive data with a hash
@@ -36,11 +37,11 @@
 //! with something else, while deletion removes the data entirely. Redaction allows for correlation since a given piece
 //! of sensitive data will always produce the same redacted value. This makes it possible to look at many different
 //! log records and correlate them to a specific user or entity without exposing the sensitive data itself. It's possible
-//! to tell over time that an operation is attributed to a the same piece of state without knowing what the state is.
+//! to tell over time that an operation is attributed to the same piece of state without knowing what the state is.
 //!
 //! # Traits
 //!
-//! This crate is built around two traits:
+//! This crate is built around two primary traits:
 //!
 //! * The [`Classified`](crate::classified::Classified) trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
@@ -49,115 +50,134 @@
 //!   few implementations of this trait, such as [`SimpleRedactor`](crate::simple_redactor::SimpleRedactor), but others can
 //!   be implemented and used by applications as well.
 //!
-//! # Data Classes
+//! This crate also exposes additional traits which are usually, but not necessarily, implemented by types that implement the
+//! [`Classified`] trait:
 //!
-//! A [`DataClass`](crate::data_class::DataClass) is a struct that represents a single data class within a taxonomy. The struct
-//! contains the name of the taxonomy and the name of the data class.
+//! - The [`RedactedDebug`] trait defines how to produce redacted debug output for classified data.
+//!
+//! - The [`RedactedDisplay`] trait defines how to produce redacted display output for classified data.
+//!
+//! - The [`RedactedToString`] trait defines how to produce a redacted string representation of classified data.
+//!
+//! # Taxonomies and Data Classes
+//!
+//! A taxonomy is defined using the [`taxonomy`] attribute macro. The macro is applied to an enum
+//! declaration. Each variant of the enum represents a data class within the taxonomy.
+//!
+//! [`DataClass`](crate::data_class::DataClass) is a struct that represents a single data class within a taxonomy. The struct
+//! contains the name of the taxonomy and the name of the data class. You can get a `DataClass` instance for a given data class
+//! by calling the associated `data_class` method on the taxonomy enum.
+//!
+//! ```rust
+//! use data_privacy::taxonomy;
+//!
+//! // A simple taxonomy definition for the Contoso organization.
+//! #[taxonomy(contoso)]
+//! enum ContosoTaxonomy {
+//!     CustomerContent,
+//!     CustomerIdentifier,
+//!     OrganizationIdentifier,
+//! }
+//!
+//! let dc = ContosoTaxonomy::CustomerIdentifier.data_class();
+//! assert_eq!(dc.taxonomy(), "contoso");
+//! assert_eq!(dc.name(), "customer_identifier");
+//! ```
 //!
 //! # Classified Containers
 //!
 //! Types that implement the [`Classified`] trait are said to be classified containers. They encapsulate
 //! an instance of another type. Although containers can be created by hand, they are most commonly created
-//! using the [`taxonomy`](crate::taxonomy) attribute. See the documentation for the attribute to learn how you define your own
-//! taxonomy and all its data classes.
-//!
-//! Classified containers implement the `Debug` trait if the data they hold implements the trait. However,
-//! the data produced by the `Debug` trait is redacted, so it does not accidentally expose the sensitive data.
+//! using the [`classified`](crate::classified) attribute. See the documentation for the attribute to learn how you define your own
+//! classified type.
 //!
 //! Applications use the classified container types around application
-//! data types to indicate instances of those types hold sensitive data. Although applications typically
-//! define their own taxonomies of data classes, this crate defines three well-known data classes:
-//!
-//! * [`Sensitive<T>`](crate::common_taxonomy::Sensitive) which can be used for taxonomy-agnostic classification in libraries.
-//! * [`UnknownSensitivity<T>`](crate::common_taxonomy::UnknownSensitivity) which holds data without a known classification.
-//! * [`Insensitive<T>`](crate::common_taxonomy::Insensitive) which holds data that explicitly has no classification.
+//! data types to indicate instances of those types hold sensitive data.
 //!
 //! # Theory of Operation
 //!
 //! How this all works:
 //!
-//! * An application defines its own taxonomy using the [`taxonomy`](crate::taxonomy) macro, which generates classified container types.
+//! * An application defines its own taxonomy using the [`taxonomy`] macro.
+//!
+//! * An application defines classified container types using the [`classified`] attribute for each piece of sensitive data it needs to manipulate.
 //!
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
 //! * On startup, the application initializes a [`RedactionEngine`](crate::redaction_engine::RedactionEngine) using the [`RedactionEngineBuilder`](crate::redaction_engine_builder::RedactionEngineBuilder)
-//!   type. The engine is configured with
-//!   redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class. For example, for
-//!   a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
+//!   type. The engine is configured with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
+//!   For example, for a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
 //! * When it's time to log or otherwise process the sensitive data, the application uses the redaction engine to redact the data.
 //!
 //! # Examples
 //!
-//! This example shows how to use the `Sensitive` type to classify sensitive data.
+//! This example shows how to define a simple taxonomy and a few classified container types, and how to manipulate these
+//! container types.
 //!
 //! ```rust
-//! use data_privacy::common_taxonomy::Sensitive;
+//! use data_privacy::{classified, RedactionEngine, RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode, taxonomy};
 //!
-//! struct Person {
-//!     name: Sensitive<String>, // a bit of sensitive data we should not leak in logs
-//!     age: u32,
+//! // A simple taxonomy definition for the Contoso organization.
+//! #[taxonomy(contoso)]
+//! enum ContosoTaxonomy {
+//!     CustomerContent,
+//!     CustomerIdentifier,
+//!     OrganizationIdentifier,
 //! }
 //!
-//! fn try_out() {
-//!     let person = Person {
-//!         name: "John Doe".to_string().into(),
-//!         age: 30,
-//!     };
+//! // A classified container for customer names.
+//! #[classified(ContosoTaxonomy::CustomerIdentifier)]
+//! struct Name(String);
 //!
-//!     // doesn't compile since `Sensitive` doesn't implement `Display`
-//!     // println!("Name: {}", person.name);
+//! // A classified container for customer addresses.
+//! #[classified(ContosoTaxonomy::CustomerIdentifier)]
+//! struct Address(String);
 //!
-//!     // outputs: Name: <CLASSIFIED:common/sensitive>"
-//!     println!("Name: {:?}", person.name);
+//! // A classified container for customer content.
+//! #[classified(ContosoTaxonomy::CustomerContent)]
+//! struct Memo(String);
 //!
-//!     // extract the data from the `Sensitive` type and outputs: Name: John Doe
-//!     let name = person.name.declassify();
-//!     println!("Name: {name}");
-//! }
-//! #
-//! # fn main() {
-//! #     try_out();
-//! # }
-//! ```
-//!
-//! This example shows how to initialize and use a redaction engine.
-//!
-//! ```rust
-//! use std::fmt::Write;
-//!
-//! use data_privacy::common_taxonomy::{CommonTaxonomy, Sensitive};
-//! use data_privacy::{RedactionEngineBuilder, Redactor, SimpleRedactor, SimpleRedactorMode};
-//!
-//! struct Person {
-//!     name: Sensitive<String>, // a bit of sensitive data we should not leak in logs
-//!     age: u32,
+//! // A customer record which contains a bunch of classified data.
+//! #[derive(Debug)]
+//! struct Customer {
+//!    name: Name,
+//!    address: Address,
+//!    memo : Memo,
 //! }
 //!
-//! fn try_out() {
-//!     let person = Person {
-//!         name: "John Doe".to_string().into(),
-//!         age: 30,
-//!     };
+//! let c = Customer {
+//!     name: Name("John Doe".to_string()),
+//!     address: Address("123 Main St, Anytown, USA".to_string()),
+//!     memo: Memo("Leave packages on the front porch.".to_string()),
+//! };
 //!
-//!     let asterisk_redactor = SimpleRedactor::new();
-//!     let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
+//! // Displaying the customer record will not leak sensitive data because the classified containers protect the data
+//! println!("Customer record: {:?}", c);
 //!
-//!     // Create the redaction engine. This is typically done once when the application starts.
-//!     let engine = RedactionEngineBuilder::new()
-//!         .add_class_redactor(&CommonTaxonomy::Sensitive.data_class(), asterisk_redactor)
-//!         .set_fallback_redactor(erasing_redactor)
-//!         .build();
+//! // To access the sensitive data, it must be declassified explicitly, which is easily audited in your source code.
+//! let name: &String = c.name.as_declassified();
+//! let address: &String = c.address.as_declassified();
+//! let memo: &String = c.memo.as_declassified();
 //!
-//!     let mut output_buffer = String::new();
+//! // You can get redacted representations of classified data using a [`RedactionEngine`](crate::redaction_engine::RedactionEngine).
 //!
-//!     // Redact the sensitive data in the person's name using the redaction engine.
-//!     engine.redacted_display(&person.name, |s| output_buffer.write_str(s).unwrap());
+//! // Initialize some redactors
+//! let asterisk_redactor = SimpleRedactor::new();
+//! let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 //!
-//!     // check that the data in the output buffer has indeed been redacted as expected.
-//!     assert_eq!(output_buffer, "********");
-//! }
+//! // Create the redaction engine. This is typically done once when the application starts.
+//! let engine = RedactionEngineBuilder::new()
+//!     .add_class_redactor(&ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
+//!     .set_fallback_redactor(erasing_redactor)
+//!     .build();
+//!
+//! let mut output_buffer = String::new();
+//! _ = engine.redacted_display(&c.name, &mut output_buffer);
+//!
+//! // check that the data in the output buffer has indeed been redacted as expected.
+//! assert_eq!(output_buffer, "********");
 //! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
@@ -165,8 +185,10 @@
 
 mod classified;
 mod classified_wrapper;
-pub mod common_taxonomy;
 mod data_class;
+mod redacted_debug;
+mod redacted_display;
+mod redacted_to_string;
 mod redaction_engine;
 mod redaction_engine_builder;
 mod redactor;
@@ -235,6 +257,14 @@ pub use data_privacy_macros::classified;
 /// ```
 pub use data_privacy_macros::taxonomy;
 
+pub use data_privacy_macros::ClassifiedDebug;
+pub use data_privacy_macros::RedactedDebug;
+pub use data_privacy_macros::RedactedDisplay;
+pub use data_privacy_macros::RedactedToString;
+
+pub use redacted_debug::RedactedDebug;
+pub use redacted_display::RedactedDisplay;
+pub use redacted_to_string::RedactedToString;
 pub use redaction_engine::RedactionEngine;
 pub use redaction_engine_builder::RedactionEngineBuilder;
 pub use redactor::Redactor;
