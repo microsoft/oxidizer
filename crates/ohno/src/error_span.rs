@@ -98,7 +98,25 @@ mod tests {
     }
 
     #[test]
-    fn test_error_span() {
+    fn with_error_span() {
+        let error = TestError::default().with_error_span(|| "Lazy span");
+        assert_eq!(error.data.data.context.len(), 1);
+        assert_eq!(error.data.data.context[0].message, "Lazy span");
+        assert!(error.data.data.context[0].location.is_none());
+    }
+
+    #[test]
+    fn with_detailed_error_span() {
+        let error = TestError::default().with_detailed_error_span(|| "Lazy detailed span", "lazy.rs", 42);
+        assert_eq!(error.data.data.context.len(), 1);
+        assert_eq!(error.data.data.context[0].message, "Lazy detailed span");
+        let location = error.data.data.context[0].location.as_ref().unwrap();
+        assert_eq!(location.file, "lazy.rs");
+        assert_eq!(location.line, 42);
+    }
+
+    #[test]
+    fn add_error_span() {
         let mut error = TestError::default();
         error.add_error_span(SpanInfo::new("Test span"));
         assert_eq!(error.data.data.context.len(), 1);
@@ -114,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn test_error_span_ext() {
+    fn add_error_span_ext() {
         let error = TestError::default();
         let mut result: Result<(), _> = Err(error);
 
