@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Implementation details for the [`fundle`](https://docs.rs/fundle) crate.
-//! See `fundle` for more information.
+//! Macros for the [`fundle`](https://docs.rs/fundle) crate.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fundle_macros_impl/logo.png")]
 #![doc(
