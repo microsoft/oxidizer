@@ -35,12 +35,12 @@ pub struct Inner {
 ///
 /// // Create from a string message
 /// let error = OhnoCore::from("something went wrong")
-///     .error_trace("while processing request")
-///     .error_trace("in user handler");
+///     .error_span("while processing request")
+///     .error_span("in user handler");
 ///
 /// // Wrap an existing error
 /// let io_error = io::Error::new(io::ErrorKind::NotFound, "file.txt");
-/// let wrapped = OhnoCore::from(io_error).error_trace("failed to load config");
+/// let wrapped = OhnoCore::from(io_error).error_span("failed to load config");
 /// ```
 pub struct OhnoCore {
     pub(super) data: Box<Inner>,
@@ -272,7 +272,7 @@ impl fmt::Display for MessageFormatter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error_trace::ErrorTrace;
+    use crate::error_span::ErrorTrace;
 
     #[test]
     fn test_default() {
@@ -342,8 +342,8 @@ mod tests {
     #[test]
     fn test_context_iter_and_messages() {
         let mut error = OhnoCore::from("msg");
-        error.add_error_trace(TraceInfo::new("ctx1"));
-        error.add_error_trace(TraceInfo::new("ctx2"));
+        error.add_error_span(TraceInfo::new("ctx1"));
+        error.add_error_span(TraceInfo::new("ctx2"));
         let messages: Vec<_> = error.context_messages().collect();
         assert_eq!(messages, vec!["ctx2", "ctx1"]);
     }

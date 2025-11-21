@@ -16,23 +16,23 @@ use crate::utils::bail;
 /// Attribute macro for adding detailed error trace (with file and line info) to function errors.
 ///
 /// Now supports complex format expressions like:
-/// - `#[error_trace("failed to read file: {}", path.display())]`
-/// - `#[error_trace("error in {}: {}", name, value.len())]`
-/// - `#[error_trace("simple message")]`
-/// - `#[error_trace("param interpolation: {param}")]`
+/// - `#[error_span("failed to read file: {}", path.display())]`
+/// - `#[error_span("error in {}: {}", name, value.len())]`
+/// - `#[error_span("simple message")]`
+/// - `#[error_span("param interpolation: {param}")]`
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
-pub fn error_trace(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn error_span(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = proc_macro2::TokenStream::from(args);
     let input = parse_macro_input!(input as ItemFn);
 
-    impl_error_trace_attribute(args, input)
+    impl_error_span_attribute(args, input)
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
 }
 
-fn impl_error_trace_attribute(trace_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
+fn impl_error_span_attribute(trace_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
     // Parse the arguments as either:
     // 1. A simple string literal: "message"
     // 2. A format string with args: "format {}", expr
@@ -53,7 +53,7 @@ fn impl_error_trace_attribute(trace_args: proc_macro2::TokenStream, mut fn_defin
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
                 let trace_msg = #trace_expr;
-                ohno::ErrorTrace::add_error_trace(&mut e, ohno::TraceInfo::detailed(trace_msg, file!(), line!()));
+                ohno::ErrorTrace::add_error_span(&mut e, ohno::TraceInfo::detailed(trace_msg, file!(), line!()));
                 e
             })
         }
@@ -75,16 +75,16 @@ pub fn generate_complex_context_expr(args_stream: proc_macro2::TokenStream) -> R
 
     let tokens: Vec<_> = args_stream.into_iter().collect();
     if tokens.is_empty() {
-        bail!("error_trace requires a message or format string");
+        bail!("error_span requires a message or format string");
     }
 
     // Check if it starts with a string literal
     let Some(proc_macro2::TokenTree::Literal(lit)) = tokens.first() else {
-        bail!("cannot parse error_trace arguments as a string literal or format expression");
+        bail!("cannot parse error_span arguments as a string literal or format expression");
     };
     let lit_str = lit.to_string();
     if !is_quoted_string(&lit_str) {
-        bail!("error_trace requires a string literal or format expression");
+        bail!("error_span requires a string literal or format expression");
     }
 
     // Check if we have multiple tokens (format string with arguments) or interpolation
@@ -128,7 +128,7 @@ mod inline_tests {
     #[test]
     fn generate_complex_context_expr_empty_args_stream() {
         let err = generate_complex_context_expr(proc_macro2::TokenStream::new()).unwrap_err();
-        assert_eq!(err.to_string(), "error_trace requires a message or format string");
+        assert_eq!(err.to_string(), "error_span requires a message or format string");
     }
 
     #[test]
@@ -153,7 +153,7 @@ mod inline_tests {
     #[test]
     fn generate_complex_context_expr_format() {
         let err = generate_complex_context_expr(quote! { format!("error in {}", name) }).unwrap_err();
-        let expected_err = "cannot parse error_trace arguments as a string literal or format expression";
+        let expected_err = "cannot parse error_span arguments as a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
@@ -186,7 +186,7 @@ mod inline_tests {
     fn generate_complex_context_expr_invalid_literal() {
         // Test with a number literal instead of string literal
         let err = generate_complex_context_expr(quote! { 42 }).unwrap_err();
-        let expected_err = "error_trace requires a string literal or format expression";
+        let expected_err = "error_span requires a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
@@ -195,7 +195,7 @@ mod inline_tests {
         // Test with a boolean literal instead of string literal
         // Boolean literals are parsed as identifiers, not literals, so they trigger the earlier error
         let err = generate_complex_context_expr(quote! { true }).unwrap_err();
-        let expected_err = "cannot parse error_trace arguments as a string literal or format expression";
+        let expected_err = "cannot parse error_span arguments as a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
@@ -203,7 +203,7 @@ mod inline_tests {
     fn generate_complex_context_expr_char_literal() {
         // Test with a char literal instead of string literal
         let err = generate_complex_context_expr(quote! { 'c' }).unwrap_err();
-        let expected_err = "error_trace requires a string literal or format expression";
+        let expected_err = "error_span requires a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 

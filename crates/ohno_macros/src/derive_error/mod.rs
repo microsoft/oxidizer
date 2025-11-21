@@ -63,7 +63,7 @@ fn impl_error_derive(input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
         where_clause,
     );
     let error_impl = generate_error_impl(name, &impl_generics, &ty_generics, where_clause, &error_field);
-    let error_trace_impl = generate_error_trace_impl(name, &impl_generics, &ty_generics, where_clause, &error_field);
+    let error_span_impl = generate_error_span_impl(name, &impl_generics, &ty_generics, where_clause, &error_field);
     let error_ext_impl = generate_error_ext_impl(name, &impl_generics, &ty_generics, where_clause, &error_field, display_expr);
     let debug_impl = if should_impl_debug {
         generate_debug_impl(input, name, &impl_generics, &ty_generics, where_clause)
@@ -77,7 +77,7 @@ fn impl_error_derive(input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
         #from_infallible_impl
         #display_impl
         #error_impl
-        #error_trace_impl
+        #error_span_impl
         #debug_impl
         #error_ext_impl
     })
@@ -155,7 +155,7 @@ fn generate_error_impl(
     }
 }
 
-fn generate_error_trace_impl(
+fn generate_error_span_impl(
     name: &syn::Ident,
     impl_generics: &syn::ImplGenerics,
     ty_generics: &syn::TypeGenerics,
@@ -165,8 +165,8 @@ fn generate_error_trace_impl(
     let error_field_access = error_field.to_field_access();
     quote! {
         impl #impl_generics ohno::ErrorTrace for #name #ty_generics #where_clause {
-            fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                self.#error_field_access.add_error_trace(trace);
+            fn add_error_span(&mut self, trace: ohno::TraceInfo) {
+                self.#error_field_access.add_error_span(trace);
             }
         }
     }

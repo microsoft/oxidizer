@@ -10,7 +10,7 @@
 /// # Example
 ///
 /// ```ignore
-/// #[error_trace("operation failed with value {value}")]
+/// #[error_span("operation failed with value {value}")]
 /// fn failing_function(value: i32) -> Result<(), MyError> {
 ///     Err(MyError::caused_by("base error"))
 /// }

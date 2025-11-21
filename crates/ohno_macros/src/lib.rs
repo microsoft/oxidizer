@@ -8,7 +8,7 @@
 //! # Macros
 //!
 //! - `#[derive(Error)]` - Automatically implement error traits
-//! - `#[error_trace("message")]` - Add error trace with file/line information to function errors
+//! - `#[error_span("message")]` - Add error trace with file/line information to function errors
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/favicon.ico")]
@@ -16,7 +16,7 @@
 use proc_macro::TokenStream;
 
 mod derive_error;
-mod error_trace;
+mod error_span;
 mod error_type_attr;
 mod utils;
 
@@ -45,8 +45,8 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
-pub fn error_trace(args: TokenStream, input: TokenStream) -> TokenStream {
-    error_trace::error_trace(args, input)
+pub fn error_span(args: TokenStream, input: TokenStream) -> TokenStream {
+    error_span::error_span(args, input)
 }
 
 /// Attribute macro version of `error_type` that preserves documentation comments.

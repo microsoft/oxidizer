@@ -14,7 +14,7 @@ pub trait ErrorTrace {
     /// Adds error trace information to the error.
     ///
     /// This is the core method that other error trace methods build upon.
-    fn add_error_trace(&mut self, trace: TraceInfo);
+    fn add_error_span(&mut self, trace: TraceInfo);
 }
 
 /// Extension trait providing ergonomic error trace addition methods.
@@ -25,51 +25,51 @@ pub trait ErrorTrace {
 pub trait ErrorTraceExt: ErrorTrace {
     /// Wraps the error with error trace.
     #[must_use]
-    fn error_trace(mut self, trace: impl Into<Cow<'static, str>>) -> Self
+    fn error_span(mut self, trace: impl Into<Cow<'static, str>>) -> Self
     where
         Self: Sized,
     {
-        self.add_error_trace(TraceInfo::new(trace));
+        self.add_error_span(TraceInfo::new(trace));
         self
     }
 
     /// Wraps the error with detailed error trace including file and line information.
     #[must_use]
-    fn detailed_error_trace(mut self, trace: impl Into<Cow<'static, str>>, file: &'static str, line: u32) -> Self
+    fn detailed_error_span(mut self, trace: impl Into<Cow<'static, str>>, file: &'static str, line: u32) -> Self
     where
         Self: Sized,
     {
-        self.add_error_trace(TraceInfo::detailed(trace, file, line));
+        self.add_error_span(TraceInfo::detailed(trace, file, line));
         self
     }
 
     /// Wraps the error with lazily evaluated error trace.
     #[must_use]
-    fn with_error_trace<F, R>(mut self, f: F) -> Self
+    fn with_error_span<F, R>(mut self, f: F) -> Self
     where
         F: FnOnce() -> R,
         R: Into<Cow<'static, str>>,
         Self: Sized,
     {
-        self.add_error_trace(TraceInfo::new(f()));
+        self.add_error_span(TraceInfo::new(f()));
         self
     }
 
     /// Wraps the error with lazily evaluated detailed error trace including file and line information.
     #[must_use]
-    fn with_detailed_error_trace<F, R>(mut self, f: F, file: &'static str, line: u32) -> Self
+    fn with_detailed_error_span<F, R>(mut self, f: F, file: &'static str, line: u32) -> Self
     where
         F: FnOnce() -> R,
         R: Into<Cow<'static, str>>,
         Self: Sized,
     {
-        self.add_error_trace(TraceInfo::detailed(f(), file, line));
+        self.add_error_span(TraceInfo::detailed(f(), file, line));
         self
     }
 }
 
 impl ErrorTrace for OhnoCore {
-    fn add_error_trace(&mut self, trace: TraceInfo) {
+    fn add_error_span(&mut self, trace: TraceInfo) {
         self.data.context.push(trace);
     }
 }
@@ -78,9 +78,9 @@ impl<T, E> ErrorTrace for Result<T, E>
 where
     E: StdError + ErrorTrace,
 {
-    fn add_error_trace(&mut self, trace: TraceInfo) {
+    fn add_error_span(&mut self, trace: TraceInfo) {
         if let Err(e) = self {
-            e.add_error_trace(trace);
+            e.add_error_span(trace);
         }
     }
 }
@@ -98,14 +98,14 @@ mod tests {
     }
 
     #[test]
-    fn test_error_trace() {
+    fn test_error_span() {
         let mut error = TestError::default();
-        error.add_error_trace(TraceInfo::new("Test trace"));
+        error.add_error_span(TraceInfo::new("Test trace"));
         assert_eq!(error.data.data.context.len(), 1);
         assert_eq!(error.data.data.context[0].message, "Test trace");
         assert!(error.data.data.context[0].location.is_none());
 
-        error.add_error_trace(TraceInfo::detailed("Test trace", "test.rs", 10));
+        error.add_error_span(TraceInfo::detailed("Test trace", "test.rs", 10));
         assert_eq!(error.data.data.context.len(), 2);
         assert_eq!(error.data.data.context[1].message, "Test trace");
         let location = error.data.data.context[1].location.as_ref().unwrap();
@@ -114,18 +114,18 @@ mod tests {
     }
 
     #[test]
-    fn test_error_trace_ext() {
+    fn test_error_span_ext() {
         let error = TestError::default();
         let mut result: Result<(), _> = Err(error);
 
-        result.add_error_trace(TraceInfo::new("Immediate trace"));
+        result.add_error_span(TraceInfo::new("Immediate trace"));
 
         let err = result.unwrap_err();
         assert_eq!(err.data.data.context.len(), 1);
         assert_eq!(err.data.data.context[0].message, "Immediate trace");
         assert!(err.data.data.context[0].location.is_none());
 
-        result = Err(err).detailed_error_trace("Detailed trace", "test.rs", 20);
+        result = Err(err).detailed_error_span("Detailed trace", "test.rs", 20);
         let err = result.unwrap_err();
 
         assert_eq!(err.data.data.context.len(), 2);

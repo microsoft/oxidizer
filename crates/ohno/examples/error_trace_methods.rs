@@ -9,7 +9,7 @@ use ohno::ErrorTraceExt;
 struct MyError;
 
 fn failing_function() -> Result<String, MyError> {
-    Err(MyError::caused_by("connection timeout")).error_trace("failed to query database")
+    Err(MyError::caused_by("connection timeout")).error_span("failed to query database")
 }
 
 fn main() {

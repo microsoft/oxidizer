@@ -128,8 +128,8 @@ fn test_debug_with_context() {
 
     let error = SimpleError {
         inner_error: OhnoCore::from("base error")
-            .error_trace("first context")
-            .error_trace("second context"),
+            .error_span("first context")
+            .error_span("second context"),
     };
 
     let debug_str = format!("{error:?}");

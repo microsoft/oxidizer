@@ -43,8 +43,8 @@ fn test_display_error_override_with_context() {
     let error = ConfigError {
         path: "/tmp/test.conf".to_string(),
         inner_error: OhnoCore::from("permission denied")
-            .error_trace("filesystem access failed")
-            .error_trace("security check failed"),
+            .error_span("filesystem access failed")
+            .error_span("security check failed"),
     };
 
     let display = format!("{error}");

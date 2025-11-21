@@ -1,18 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating the `#[error_trace]` macro for automatic error trace injection.
+//! Example demonstrating the `#[error_span]` macro for automatic error trace injection.
 //!
-//! Shows how the `error_trace` macro adds traces to any errors returned from functions.
+//! Shows how the `error_span` macro adds traces to any errors returned from functions.
 
-use ohno::{Error, OhnoCore, error_trace};
+use ohno::{Error, OhnoCore, error_span};
 
 #[derive(Error)]
 struct MyError {
     inner: OhnoCore,
 }
 
-#[error_trace("failed to load configuration")]
+#[error_span("failed to load configuration")]
 fn failing_function() -> Result<String, MyError> {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "config.toml not found");
     Err(MyError::caused_by(io_err))

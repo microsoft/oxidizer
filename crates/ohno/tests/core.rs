@@ -52,11 +52,11 @@ impl std::error::Error for TestError {
 }
 
 #[test]
-fn test_detailed_error_trace() {
+fn test_detailed_error_span() {
     let error = OhnoCore::from("base error")
-        .detailed_error_trace("first trace", "file1.rs", 10)
-        .error_trace("second trace")
-        .detailed_error_trace("third trace", "file2.rs", 20);
+        .detailed_error_span("first trace", "file1.rs", 10)
+        .error_span("second trace")
+        .detailed_error_span("third trace", "file2.rs", 20);
 
     let display = error.to_string();
     assert!(display.contains("base error"));
@@ -78,8 +78,8 @@ fn test_detailed_error_trace() {
 }
 
 #[test]
-fn test_with_error_trace() {
-    let error = OhnoCore::from("base").with_error_trace(|| format!("computed: {}", 42));
+fn test_with_error_span() {
+    let error = OhnoCore::from("base").with_error_span(|| format!("computed: {}", 42));
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
@@ -90,8 +90,8 @@ fn test_with_error_trace() {
 }
 
 #[test]
-fn test_with_detailed_error_trace() {
-    let error = OhnoCore::from("base").with_detailed_error_trace(|| format!("computed: {}", 42), "test.rs", 50);
+fn test_with_detailed_error_span() {
+    let error = OhnoCore::from("base").with_detailed_error_span(|| format!("computed: {}", 42), "test.rs", 50);
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42 (at test.rs:50)"));
@@ -130,7 +130,7 @@ fn test_backtrace_capture() {
 
 #[test]
 fn test_context_messages_iterator() {
-    let error = OhnoCore::from("base").error_trace("first").error_trace("second");
+    let error = OhnoCore::from("base").error_span("first").error_span("second");
 
     let messages: Vec<_> = error.context_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);

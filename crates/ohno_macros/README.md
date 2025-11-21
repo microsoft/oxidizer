@@ -23,7 +23,7 @@ Procedural macros to support the [`ohno`](https://docs.rs/ohno) crate. See `ohno
 ## Macros
 
 - `#[derive(Error)]` - Automatically implement error traits
-- `#[error_trace("message")]` - Add error trace with file/line information to function errors
+- `#[error_span("message")]` - Add error trace with file/line information to function errors
 
 <!-- cargo-rdme end -->
 

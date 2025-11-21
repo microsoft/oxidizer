@@ -3,7 +3,7 @@
 
 //! Demonstrates chaining errors through multiple layers with trace messages.
 
-use ohno::error_trace;
+use ohno::error_span;
 
 #[ohno::error]
 #[from(std::io::Error)]
@@ -20,23 +20,23 @@ struct ServiceError;
 #[display("API error (3)")]
 struct ApiError;
 
-#[error_trace("connecting to database (1.1)")]
-#[error_trace("validating credentials (1.2)")]
-#[error_trace("establishing connection pool (1.3)")]
+#[error_span("connecting to database (1.1)")]
+#[error_span("validating credentials (1.2)")]
+#[error_span("establishing connection pool (1.3)")]
 fn database_operation() -> Result<String, DatabaseError> {
     Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied (0)").into())
 }
 
-#[error_trace("fetching user data (2.1)")]
-#[error_trace("parsing user profile (2.2)")]
-#[error_trace("validating user permissions (2.3)")]
+#[error_span("fetching user data (2.1)")]
+#[error_span("parsing user profile (2.2)")]
+#[error_span("validating user permissions (2.3)")]
 fn service_operation() -> Result<String, ServiceError> {
     Ok(database_operation()?)
 }
 
-#[error_trace("handling API request (3.1)")]
-#[error_trace("processing request payload (3.2)")]
-#[error_trace("preparing response (3.3)")]
+#[error_span("handling API request (3.1)")]
+#[error_span("processing request payload (3.2)")]
+#[error_span("preparing response (3.3)")]
 fn api_operation() -> Result<String, ApiError> {
     Ok(service_operation()?)
 }
