@@ -14,7 +14,7 @@
 
 <!-- cargo-rdme start -->
 
-Procedural macros to support the [`data_privacy`](https://docs.rs/data_privacy) crate. See `data_privacy` for more information.
+Macros for the [`data_privacy`](https://docs.rs/data_privacy) crate.
 
 <!-- cargo-rdme end -->
 

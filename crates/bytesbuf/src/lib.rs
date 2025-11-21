@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Types for producing or consuming byte sequences.
+//! Manipulate sequences of bytes for efficient I/O.
 //!
 //! A [`BytesView`] is a view over a logical sequence of zero or more bytes
 //! stored in memory, similar to a slice `&[u8]` but with some key differences:

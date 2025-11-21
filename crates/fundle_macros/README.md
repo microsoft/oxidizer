@@ -22,7 +22,7 @@
 
 <!-- cargo-rdme start -->
 
-Procedural macros to support the [`fundle`](https://docs.rs/fundle) crate. See `fundle` for more information.
+Macros to support the [`fundle`](https://docs.rs/fundle) crate.
 
 ## Macros
 

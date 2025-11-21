@@ -3,7 +3,7 @@
 
 [package]
 name = "fundle_macros_impl"
-description = "Procedural macros for the fundle crate."
+description = "Macros for the fundle crate."
 version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "di", "proc-macro"]

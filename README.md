@@ -21,14 +21,14 @@ This repository contains a set of crates that help you build robust highly scala
 
 These are the crates built out of this repo:
 
-- [`bytesbuf`](./crates/bytesbuf/README.md) - Manipulate sequences of bytes for efficient I/O
+- [`bytesbuf`](./crates/bytesbuf/README.md) - Manipulate sequences of bytes for efficient I/O.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
-- [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros to generate data taxonomies.
-- [`fundle`](./crates/fundle/README.md) - Effective dependency management for Rust.
-- [`fundle_macros`](crates/fundle_macros/README.md) - Procedural macros for the `fundle` crate.
-- [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Procedural macros implementation for the `fundle` crate.
-- [`ohno`](./crates/ohno/README.md) - High quality Rust error handling
-- [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the ohno crate.
+- [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros for the `data_privacy` crate.
+- [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
+- [`fundle_macros`](crates/fundle_macros/README.md) - Macros for the `fundle` crate.
+- [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Macros for the `fundle` crate.
+- [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling
+- [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
 
 ## Repo Guidelines
 
@@ -73,13 +73,31 @@ Releasing new versions of crates to [crates.io](https://crates.io) is handled by
 an internal Microsoft automation process. To release a new version of any crate, use
 the `scripts\release-crate.ps1` script. For example:
 
-```bash
-scripts\release-crate.ps1 data_privacy
-```
+1. Make the changes you'd like to release and commit them to the repo. Don't push them
+to GitHub, just commit them:
 
-Once you run this script, the version of the crate is updated and the crate's
-`CHANGELOG.md` file is updated. You can then check in those changes to the repo
-and push to GitHub. Once these changes are committed, automation will kick in
+    ```bash
+    git add .
+    git commit -m "feat: Add the GoFast feature"
+    ```
+
+1. Run the release script, supplying the name of the crate you want to release. The script will
+update the version number in a few places and update the appropriate `CHANGELOG` file:
+
+    ```bash
+    .\scripts\release-crate.ps1 <crate_name>
+    ```
+
+1. Amend the newly edited files back into your commit
+
+    ```bash
+    git add .
+    git commit --amend --no-edit
+    ```
+
+1. Create a PR like normal.
+
+Once your PR is merged, automation will kick in
 to tag the commit and push the crate to crates.io.
 
 ## Trademarks

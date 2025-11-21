@@ -3,7 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! Procedural macros to support the [`ohno`](https://docs.rs/ohno) crate. See `ohno` for more information.
+//! Macros for the [`ohno`](https://docs.rs/ohno) crate.
 //!
 //! # Macros
 //!
