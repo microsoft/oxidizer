@@ -12,8 +12,23 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  MSRV: "1.88"        # used for testing, ensures the MSRV promise is kept
-  RUST_LATEST: "1.90" # used for static analysis, mutation testing, and coverage
+
+  # Rust toolchain versions
+  RUST_MSRV: "1.88"                                  # used for testing (ensures the MSRV promise is kept)
+  RUST_LATEST: "1.91"                                # used for static analysis & mutation testing
+  RUST_NIGHTLY: "nightly-2025-11-20"                 # used for coverage and extended analysis
+  RUST_NIGHTLY_EXTERNAL_TYPES: "nightly-2025-08-06"  # used for external type exposure checks
+
+  # Tool versions
+  CARGO_AUDIT_VERSION: "0.22.0"
+  CARGO_CHECK_EXTERNAL_TYPES_VERSION: "0.3.0"
+  CARGO_HACK_VERSION: "0.6.39"
+  CARGO_LLVM_COV_VERSION: "0.6.21"
+  CARGO_MUTANTS_VERSION: "25.3.1"
+  CARGO_RDME_VERSION: "1.5.0"
+  CARGO_UDEPS_VERSION: "0.1.60"
+  CARGO_WORKSPACES_VERSION: "0.4.1"
+  SCCACHE_VERSION: "v0.12.0"
 
 jobs:
   testing:
@@ -28,19 +43,19 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Start sscache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
-          version: "v0.10.0"
+          version: ${{ env.SCCACHE_VERSION }}
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
-          toolchain: ${{ env.MSRV }}
+          toolchain: ${{ env.RUST_MSRV }}
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-hack@0.4.7
+          tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
 
       # execute
       - name: Build
@@ -62,9 +77,9 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: |
             ~/.cargo/bin/
@@ -75,16 +90,16 @@ jobs:
       - name: Start sscache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
-          version: "v0.10.0"
+          version: ${{ env.SCCACHE_VERSION }}
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
           toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-audit@0.21.2, cargo-rdme@1.4.8, cargo-workspaces@0.4.0
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}
 
       # execute
       - name: Clippy
@@ -109,9 +124,9 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: |
             ~/.cargo/bin/
@@ -120,20 +135,20 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
       - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
-          toolchain: nightly
+          toolchain: ${{ env.RUST_NIGHTLY }}
           components: miri
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-udeps@0.1.57
+          tool: cargo-udeps@${{ env.CARGO_UDEPS_VERSION }}
 
       # execute
       - name: Udeps
-        run: cargo +nightly udeps --all-features --workspace
+        run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace
       - name: Miri
-        run: cargo +nightly miri test --all-features --workspace
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
 
   mutation-testing:
     if: github.event_name == 'pull_request'
@@ -145,26 +160,26 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Start sscache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
-          version: "v0.10.0"
+          version: ${{ env.SCCACHE_VERSION }}
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
           toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-mutants@25.3.1
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
 
       # execute
       - name: Mutate
         env:
           DISABLE_T_REX: 1
-        timeout-minutes: 20
+        timeout-minutes: 45
         run: cargo mutants --test-workspace=true --colors=never --jobs=1 --build-timeout=120
 
   coverage:
@@ -180,28 +195,28 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Start sscache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
-          version: "v0.10.0"
+          version: ${{ env.SCCACHE_VERSION }}
       - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
-          toolchain: nightly
+          toolchain: ${{ env.RUST_NIGHTLY }}
           components: llvm-tools-preview
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-llvm-cov@0.6.21
+          tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
 
       # execute
       - name: Generate Coverage (all-features)
-        run: cargo +nightly llvm-cov --all-features --workspace --lcov --output-path lcov.info
+        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --all-features --workspace --lcov --output-path lcov.info
       - name: Generate Coverage (no-default-features)
-        run: cargo +nightly llvm-cov --no-default-features --workspace --lcov --output-path lcov.info
+        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov.info
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v5.5.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
@@ -212,7 +227,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Check PR Title
-        uses: amannn/action-semantic-pull-request@v6
+        uses: amannn/action-semantic-pull-request@v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -236,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Check License Headers
         uses: viperproject/check-license-header@v2
         with:
@@ -249,15 +264,15 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6.0.0
       - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
-          toolchain: nightly-2025-08-06-x86_64-unknown-linux-gnu
+          toolchain: ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-check-external-types@0.3.0
+          tool: cargo-check-external-types@${{ env.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
 
       # execute
       - name: Check External Type Exposure
@@ -266,7 +281,7 @@ jobs:
             if [ -f "$crate/Cargo.toml" ]; then
               if ! grep -q "^\\[lib\\]" "$crate/Cargo.toml"; then
                 echo "Checking external types in $crate"
-                cargo +nightly-2025-08-06-x86_64-unknown-linux-gnu check-external-types --manifest-path "$crate/Cargo.toml" --no-default-features
+                cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} check-external-types --manifest-path "$crate/Cargo.toml" --all-features
               else
                 echo "Skipping $crate (contains [lib] section)"
               fi
