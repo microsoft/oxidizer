@@ -53,8 +53,8 @@ fn test_tuple_only_ohno_core() {
         },
         parse_quote! {
             impl ohno::ErrorSpan for OnlyCoreError {
-                fn add_error_span(&mut self, trace: ohno::SpanInfo) {
-                    self.0.add_error_span(trace);
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.0.add_error_span(span);
                 }
             }
         },
@@ -137,8 +137,8 @@ fn test_tuple_struct_expansion() {
         },
         parse_quote! {
             impl ohno::ErrorSpan for TupleError {
-                fn add_error_span(&mut self, trace: ohno::SpanInfo) {
-                    self.1.add_error_span(trace);
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.1.add_error_span(span);
                 }
             }
         },
@@ -222,8 +222,8 @@ fn test_ohno_core_first_position_tuple() {
         },
         parse_quote! {
             impl ohno::ErrorSpan for FirstPositionTupleError {
-                fn add_error_span(&mut self, trace: ohno::SpanInfo) {
-                    self.0.add_error_span(trace);
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.0.add_error_span(span);
                 }
             }
         },
@@ -308,8 +308,8 @@ fn test_ohno_core_middle_position_tuple() {
         },
         parse_quote! {
             impl ohno::ErrorSpan for MiddlePositionTupleError {
-                fn add_error_span(&mut self, trace: ohno::SpanInfo) {
-                    self.1.add_error_span(trace);
+                fn add_error_span(&mut self, span: ohno::SpanInfo) {
+                    self.1.add_error_span(span);
                 }
             }
         },
