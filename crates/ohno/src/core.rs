@@ -293,7 +293,7 @@ mod tests {
         let error = OhnoCore::from("msg");
         assert!(error.source().is_none(), "{error:?}");
         assert!(error.to_string().starts_with("msg"), "{error:?}");
-        
+
         if let Source::Transparent(source) = &error.data.source {
             assert_eq!(source.to_string(), "msg");
         }
