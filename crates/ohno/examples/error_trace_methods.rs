@@ -3,7 +3,7 @@
 
 //! Demonstrates error trace extension methods for adding traces to Results.
 
-use ohno::ErrorTraceExt;
+use ohno::ErrorSpanExt;
 
 #[ohno::error]
 struct MyError;

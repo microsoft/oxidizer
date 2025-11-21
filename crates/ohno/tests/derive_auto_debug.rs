@@ -124,7 +124,7 @@ fn test_no_debug_with_complex_attributes() {
 
 #[test]
 fn test_debug_with_context() {
-    use ohno::ErrorTraceExt;
+    use ohno::ErrorSpanExt;
 
     let error = SimpleError {
         inner_error: OhnoCore::from("base error")

@@ -168,7 +168,7 @@
 //!
 //! **Requirements:**
 //! - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-//! - The error type must implement the [`ohno::ErrorTrace`] trait (automatically implemented for all ohno error types)
+//! - The error type must implement the [`ohno::ErrorSpan`] trait (automatically implemented for all ohno error types)
 //!
 //! **Supported syntax patterns:**
 //!
@@ -241,6 +241,6 @@ pub mod test_util;
 pub use core::OhnoCore;
 
 pub use error_ext::ErrorExt;
-pub use error_span::{ErrorTrace, ErrorTraceExt};
+pub use error_span::{ErrorSpan, ErrorSpanExt};
 pub use ohno_macros::{Error, error, error_span};
 pub use trace_info::{Location, TraceInfo};

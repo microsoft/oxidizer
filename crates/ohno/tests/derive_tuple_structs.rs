@@ -74,7 +74,7 @@ fn test_tuple_error_with_fields_constructors() {
 
 #[test]
 fn test_tuple_error_span() {
-    use ohno::ErrorTrace;
+    use ohno::ErrorSpan;
 
     let mut error = SimpleTupleError(OhnoCore::from("test"));
     error.add_error_span(ohno::TraceInfo::new("trace message"));

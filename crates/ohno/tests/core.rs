@@ -3,7 +3,7 @@
 
 use std::io;
 
-use ohno::{ErrorTraceExt, OhnoCore, assert_error_message};
+use ohno::{ErrorSpanExt, OhnoCore, assert_error_message};
 
 // Test helper error type for various tests
 #[derive(Debug)]

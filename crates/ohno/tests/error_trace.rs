@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ohno::{Error, ErrorExt, ErrorTrace, OhnoCore, TraceInfo, error_span};
+use ohno::{Error, ErrorExt, ErrorSpan, OhnoCore, TraceInfo, error_span};
 
 #[macro_use]
 mod util;

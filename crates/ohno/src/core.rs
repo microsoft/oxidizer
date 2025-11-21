@@ -31,7 +31,7 @@ pub struct Inner {
 /// ```rust
 /// use std::io;
 ///
-/// use ohno::{ErrorTraceExt, OhnoCore};
+/// use ohno::{ErrorSpanExt, OhnoCore};
 ///
 /// // Create from a string message
 /// let error = OhnoCore::from("something went wrong")
@@ -272,7 +272,7 @@ impl fmt::Display for MessageFormatter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error_span::ErrorTrace;
+    use crate::error_span::ErrorSpan;
 
     #[test]
     fn test_default() {

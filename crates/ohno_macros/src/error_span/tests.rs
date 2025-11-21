@@ -27,7 +27,7 @@ fn empty_error_span() {
                 Ok(())
             })().map_err(|mut e| {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -60,7 +60,7 @@ fn empty_error_span_async() {
                 Ok(())
             })().await.map_err(|mut e| {
                 let trace_msg = format!("error in function {}", stringify!(test_function));
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -93,7 +93,7 @@ fn function_with_regular_string() {
                 Ok(())
             })().map_err(|mut e| {
                 let trace_msg = "custom error message";
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -120,7 +120,7 @@ fn function_with_regular_string_async() {
         async fn test_function() -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = "custom error message";
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -157,7 +157,7 @@ fn function_with_inline_format() {
                 Ok(())
             })().map_err(|mut e| {
                 let trace_msg = format!("error code: {code}");
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -184,7 +184,7 @@ fn function_with_inline_format_async() {
         async fn test_function(code: i32) -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = format!("error code: {code}");
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -211,7 +211,7 @@ fn function_with_complex_format_expression() {
         fn test_function(path: &std::path::Path) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
                 let trace_msg = format!("failed to read a file {}", path.as_ref().display());
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -238,7 +238,7 @@ fn function_with_complex_format_expression_async() {
         async fn test_function(path: &std::path::Path) -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = format!("failed to read a file {}", path.as_ref().display());
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -271,7 +271,7 @@ fn method_with_self_ref() {
                 Ok(())
             })().map_err(|mut e| {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -298,7 +298,7 @@ fn method_with_self_ref_async() {
         async fn test_method(&self) -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -325,7 +325,7 @@ fn method_with_mut_self_ref() {
         fn test_method(&mut self) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -352,7 +352,7 @@ fn method_with_mut_self_ref_async() {
         async fn test_method(&mut self) -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = format!("error in function {}", stringify!(test_method));
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -379,7 +379,7 @@ fn method_with_self_ref_formatting_self() {
         fn test_method(&self) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
                 let trace_msg = format!("operation failed, id: {}", self.id);
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -406,7 +406,7 @@ fn method_with_self_ref_formatting_self_async() {
         async fn test_method(&self) -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = format!("operation failed, id: {}", self.id);
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -433,7 +433,7 @@ fn method_with_mut_self_ref_formatting_self() {
         fn test_method(&mut self) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
                 let trace_msg = format!("operation failed, id: {}", self.id);
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );
@@ -460,7 +460,7 @@ fn method_with_mut_self_ref_formatting_self_async() {
         async fn test_method(&mut self) -> Result<(), OhnoErrorType> {
             (async || { Ok(()) })().await.map_err(|mut e| {
                 let trace_msg = format!("operation failed, id: {}", self.id);
-                ohno::ErrorTrace::add_error_span(
+                ohno::ErrorSpan::add_error_span(
                     &mut e,
                     ohno::TraceInfo::detailed(trace_msg, file!(), line!())
                 );

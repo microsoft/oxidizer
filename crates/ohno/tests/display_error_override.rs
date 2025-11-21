@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use ohno::{Error, ErrorExt, ErrorTraceExt, OhnoCore, assert_error_message};
+use ohno::{Error, ErrorExt, ErrorSpanExt, OhnoCore, assert_error_message};
 
 #[derive(Error)]
 #[display("Failed to read config with path: {path}")]

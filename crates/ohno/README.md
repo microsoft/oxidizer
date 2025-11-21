@@ -189,7 +189,7 @@ the function returns an error, the macro injects a trace with the provided messa
 
 **Requirements:**
 - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-- The error type must implement the [`ohno::ErrorTrace`] trait (automatically implemented for all ohno error types)
+- The error type must implement the [`ohno::ErrorSpan`] trait (automatically implemented for all ohno error types)
 
 **Supported syntax patterns:**
 

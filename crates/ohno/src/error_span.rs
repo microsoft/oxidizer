@@ -9,8 +9,8 @@ use crate::{OhnoCore, TraceInfo};
 /// Base trait for adding error trace to error types.
 ///
 /// This trait provides the fundamental error trace addition method and is dyn-compatible.
-/// It serves as the base for the more ergonomic `ErrorTraceExt` trait.
-pub trait ErrorTrace {
+/// It serves as the base for the more ergonomic `ErrorSpanExt` trait.
+pub trait ErrorSpan {
     /// Adds error trace information to the error.
     ///
     /// This is the core method that other error trace methods build upon.
@@ -19,10 +19,10 @@ pub trait ErrorTrace {
 
 /// Extension trait providing ergonomic error trace addition methods.
 ///
-/// This trait extends `ErrorTrace` with convenient methods for adding error traces
+/// This trait extends `ErrorSpan` with convenient methods for adding error traces
 /// when converting or working with errors. It provides both immediate and
 /// lazy evaluation options.
-pub trait ErrorTraceExt: ErrorTrace {
+pub trait ErrorSpanExt: ErrorSpan {
     /// Wraps the error with error trace.
     #[must_use]
     fn error_span(mut self, trace: impl Into<Cow<'static, str>>) -> Self
@@ -68,15 +68,15 @@ pub trait ErrorTraceExt: ErrorTrace {
     }
 }
 
-impl ErrorTrace for OhnoCore {
+impl ErrorSpan for OhnoCore {
     fn add_error_span(&mut self, trace: TraceInfo) {
         self.data.context.push(trace);
     }
 }
 
-impl<T, E> ErrorTrace for Result<T, E>
+impl<T, E> ErrorSpan for Result<T, E>
 where
-    E: StdError + ErrorTrace,
+    E: StdError + ErrorSpan,
 {
     fn add_error_span(&mut self, trace: TraceInfo) {
         if let Err(e) = self {
@@ -85,8 +85,8 @@ where
     }
 }
 
-// Blanket implementation: all types that implement ErrorTrace automatically get ErrorTraceExt
-impl<T: ErrorTrace> ErrorTraceExt for T {}
+// Blanket implementation: all types that implement ErrorSpan automatically get ErrorSpanExt
+impl<T: ErrorSpan> ErrorSpanExt for T {}
 
 #[cfg(test)]
 mod tests {
