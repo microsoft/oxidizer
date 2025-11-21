@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [package]
-name = "byte_sequences"
+name = "bytesbuf"
 description = "Manipulate sequences of bytes for efficient I/O"
 version = "0.1.0"
 readme = "README.md"

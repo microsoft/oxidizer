@@ -21,7 +21,7 @@ This repository contains a set of crates that help you build robust highly scala
 
 These are the crates built out of this repo:
 
-- [`byte_sequences`](./crates/byte_sequences/README.md) - Manipulate sequences of bytes for efficient I/O
+- [`bytesbuf`](./crates/bytesbuf/README.md) - Manipulate sequences of bytes for efficient I/O
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros to generate data taxonomies.
 - [`fundle`](./crates/fundle/README.md) - Effective dependency management for Rust.

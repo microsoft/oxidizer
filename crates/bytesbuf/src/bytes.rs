@@ -8,7 +8,7 @@
 //! `Bytes` to `BytesView` is always zero-copy. `BytesView` to `Bytes` is opportunistically zero-copy,
 //! depending on the memory layout of the `BytesView` instance.
 //!
-//! Besides this module, some functionality is also present directly in the `byte_sequences` types
+//! Besides this module, some functionality is also present directly in the `bytesbuf` types
 //! where the logic requires access to private fields of our types for efficiency.
 
 use std::mem::MaybeUninit;

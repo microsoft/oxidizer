@@ -6,8 +6,8 @@ use std::io::Write;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use byte_sequences::{BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::{Buf, BufMut};
+use bytesbuf::{BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 
 // We often want to write this static data to network connections.
 const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";

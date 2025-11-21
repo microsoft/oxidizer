@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 //! Showcases how you can easily and cheaply reuse byte sequences and parts of byte sequences.
-use byte_sequences::{BytesView, GlobalPool};
 use bytes::{Buf, BufMut};
+use bytesbuf::{BytesView, GlobalPool};
 
 fn main() {
     // The global memory pool in a real application would be provided by the framework.

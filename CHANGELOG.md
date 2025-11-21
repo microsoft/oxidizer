@@ -2,7 +2,7 @@
 
 Please see each crate's change log below:
 
-- [`byte_sequences`](./crates/byte_sequences/CHANGELOG.md)
+- [`bytesbuf`](./crates/bytesbuf/CHANGELOG.md)
 - [`data_privacy`](./crates/data_privacy/CHANGELOG.md)
 - [`data_privacy_macros`](./crates/data_privacy_macros/CHANGELOG.md)
 - [`fundle`](./crates/fundle/CHANGELOG.md)
