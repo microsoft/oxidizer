@@ -280,7 +280,6 @@ mod tests {
         assert!(matches!(error.data.source, Source::None));
     }
 
-    #[cfg(feature = "test-util")]
     #[test]
     fn test_new() {
         use crate::assert_error_message;
@@ -292,7 +291,6 @@ mod tests {
         assert!(error.data.context.is_empty(), "{error:?}");
     }
 
-    #[cfg(feature = "test-util")]
     #[test]
     fn test_from_string() {
         use crate::assert_error_message;
