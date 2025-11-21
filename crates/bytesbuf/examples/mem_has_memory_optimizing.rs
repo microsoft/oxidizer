@@ -5,8 +5,8 @@
 //! strategy that obtains memory from a memory provider specific to a particular purpose, with
 //! a configuration optimal for that purpose.
 
-use byte_sequences::{BytesBuf, BytesView, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 use bytes::BufMut;
+use bytesbuf::{BytesBuf, BytesView, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 
 fn main() {
     // In a real application, the I/O context would be provided by the framework.

@@ -7,8 +7,8 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use byte_sequences::{BlockSize, BytesView, FixedBlockTestMemory};
 use bytes::Buf;
+use bytesbuf::{BlockSize, BytesView, FixedBlockTestMemory};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
@@ -23,7 +23,7 @@ static ALLOCATOR: Allocator<System> = Allocator::system();
 const TEST_SPAN_SIZE: NonZero<BlockSize> = nz!(12345);
 const TEST_DATA: &[u8] = &[88_u8; TEST_SPAN_SIZE.get() as usize];
 
-const MAX_INLINE_SPANS: usize = byte_sequences::MAX_INLINE_SPANS;
+const MAX_INLINE_SPANS: usize = bytesbuf::MAX_INLINE_SPANS;
 // This should be more than MAX_INLINE_SPANS.
 const MANY_SPANS: usize = 32;
 

@@ -3,9 +3,9 @@
 
 # Byte BytesView
 
-[![crate.io](https://img.shields.io/crates/v/byte_sequences.svg)](https://crates.io/crates/byte_sequences)
-[![docs.rs](https://docs.rs/byte_sequences/badge.svg)](https://docs.rs/byte_sequences)
-[![MSRV](https://img.shields.io/crates/msrv/byte_sequences)](https://crates.io/crates/byte_sequences)
+[![crate.io](https://img.shields.io/crates/v/bytesbuf.svg)](https://crates.io/crates/bytesbuf)
+[![docs.rs](https://docs.rs/bytesbuf/badge.svg)](https://docs.rs/bytesbuf)
+[![MSRV](https://img.shields.io/crates/msrv/bytesbuf)](https://crates.io/crates/bytesbuf)
 [![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
@@ -48,8 +48,8 @@ sequence and simultaneously remove the read bytes from the sequence, shrinking i
 the remaining bytes.
 
 ```rust
-use byte_sequences::BytesView;
 use bytes::Buf;
+use bytesbuf::BytesView;
 
 fn consume_message(mut message: BytesView) {
     // We read the message and calculate the sum of all the words in it.
@@ -78,8 +78,8 @@ more fundamental methods of the [`bytes::buf::Buf`][17] trait such as:
   chunks of data at the same time.
 
 ```rust
-use byte_sequences::BytesView;
 use bytes::Buf;
+use bytesbuf::BytesView;
 
 let len = sequence.len();
 let mut chunk_lengths = Vec::new();
@@ -99,8 +99,8 @@ To reuse a byte sequence, clone it before consuming the contents. This is a chea
 zero-copy operation.
 
 ```rust
-use byte_sequences::BytesView;
 use bytes::Buf;
+use bytesbuf::BytesView;
 
 assert_eq!(sequence.len(), 16);
 
@@ -138,7 +138,7 @@ Once you have a memory provider, you can reserve memory from it by calling
 memory capacity.
 
 ```rust
-use byte_sequences::Memory;
+use bytesbuf::Memory;
 
 let memory = connection.memory();
 
@@ -154,7 +154,7 @@ extent of the reserved memory capacity.
 
 ```rust
 use bytes::buf::BufMut;
-use byte_sequences::Memory;
+use bytesbuf::Memory;
 
 let memory = connection.memory();
 
@@ -186,7 +186,7 @@ on the sequence builder to identify how much unused memory capacity is available
 
 ```rust
 use bytes::buf::BufMut;
-use byte_sequences::Memory;
+use bytesbuf::Memory;
 
 let memory = connection.memory();
 
@@ -207,7 +207,7 @@ the data in the sequence builder, turning it into a [`BytesView`] of immutable b
 
 ```rust
 use bytes::buf::BufMut;
-use byte_sequences::Memory;
+use bytesbuf::Memory;
 
 let memory = connection.memory();
 
@@ -225,7 +225,7 @@ after consuming some already written bytes.
 
 ```rust
 use bytes::buf::BufMut;
-use byte_sequences::Memory;
+use bytesbuf::Memory;
 
 let memory = connection.memory();
 
@@ -248,7 +248,7 @@ that reuses the memory capacity of the sequence you are appending.
 
 ```rust
 use bytes::buf::BufMut;
-use byte_sequences::Memory;
+use bytesbuf::Memory;
 
 let memory = connection.memory();
 
@@ -293,7 +293,7 @@ Example of forwarding the memory provider (see `examples/mem_has_provider_forwar
 for full code):
 
 ```rust
-use byte_sequences::{HasMemory, MemoryShared, BytesView};
+use bytesbuf::{HasMemory, MemoryShared, BytesView};
 
 /// Counts the number of 0x00 bytes in a sequence before
 /// writing that sequence to a network connection.
@@ -338,7 +338,7 @@ Example of returning a memory provider that performs configuration for optimal m
 `examples/mem_has_provider_optimizing.rs` for full code):
 
 ```rust
-use byte_sequences::{CallbackMemory, HasMemory, MemoryShared, BytesView};
+use bytesbuf::{CallbackMemory, HasMemory, MemoryShared, BytesView};
 
 /// # Implementation strategy for `HasMemory`
 ///
@@ -384,7 +384,7 @@ Example of returning a usage-neutral memory provider (see `examples/mem_has_prov
 full code):
 
 ```rust
-use byte_sequences::{GlobalPool, HasMemory, MemoryShared};
+use bytesbuf::{GlobalPool, HasMemory, MemoryShared};
 
 /// Calculates a checksum for a given byte sequence.
 ///
@@ -431,7 +431,7 @@ Example of identifying whether a byte sequence uses the optimal memory configura
 `examples/mem_optimal_path.rs` for full code):
 
 ```rust
-use byte_sequences::BytesView;
+use bytesbuf::BytesView;
 
 pub fn write(&mut self, message: BytesView) {
     // We now need to identify whether the message actually uses memory that allows us to
@@ -500,7 +500,8 @@ intended usage.
 
 ```rust
 use std::sync::OnceLock;
-use byte_sequences::BytesView;
+
+use bytesbuf::BytesView;
 
 const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";
 

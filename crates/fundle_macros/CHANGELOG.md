@@ -4,7 +4,7 @@
 
 - ✨ Features
 
-  - Migrate byte_sequences to GitHub ([#56](https://github.com//pull/56))
+  - Migrate bytesbuf to GitHub ([#56](https://github.com//pull/56))
 
 ## [0.2.1] - 2025-11-14
 

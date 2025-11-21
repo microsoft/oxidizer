@@ -24,10 +24,10 @@
 //! the remaining bytes.
 //!
 //! ```
-//! # let memory = byte_sequences::GlobalPool::new();
+//! # let memory = bytesbuf::GlobalPool::new();
 //! # let message = BytesView::copied_from_slice(b"1234123412341234", &memory);
-//! use byte_sequences::BytesView;
 //! use bytes::Buf;
+//! use bytesbuf::BytesView;
 //!
 //! fn consume_message(mut message: BytesView) {
 //!     // We read the message and calculate the sum of all the words in it.
@@ -57,10 +57,10 @@
 //!   chunks of data at the same time.
 //!
 //! ```
-//! # let memory = byte_sequences::GlobalPool::new();
+//! # let memory = bytesbuf::GlobalPool::new();
 //! # let mut sequence = BytesView::copied_from_slice(b"1234123412341234", &memory);
-//! use byte_sequences::BytesView;
 //! use bytes::Buf;
+//! use bytesbuf::BytesView;
 //!
 //! let len = sequence.len();
 //! let mut chunk_lengths = Vec::new();
@@ -80,10 +80,10 @@
 //! zero-copy operation.
 //!
 //! ```
-//! # let memory = byte_sequences::GlobalPool::new();
+//! # let memory = bytesbuf::GlobalPool::new();
 //! # let mut sequence = BytesView::copied_from_slice(b"1234123412341234", &memory);
-//! use byte_sequences::BytesView;
 //! use bytes::Buf;
+//! use bytesbuf::BytesView;
 //!
 //! assert_eq!(sequence.len(), 16);
 //!
@@ -122,9 +122,9 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use byte_sequences::Memory;
+//! use bytesbuf::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -140,10 +140,10 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
-//! use byte_sequences::Memory;
+//! use bytesbuf::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -175,10 +175,10 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
-//! use byte_sequences::Memory;
+//! use bytesbuf::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -199,10 +199,10 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
-//! use byte_sequences::Memory;
+//! use bytesbuf::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -220,10 +220,10 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
-//! use byte_sequences::Memory;
+//! use bytesbuf::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -246,10 +246,10 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { byte_sequences::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
 //! # let connection = Connection {};
 //! use bytes::buf::BufMut;
-//! use byte_sequences::Memory;
+//! use bytesbuf::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -294,7 +294,7 @@
 //! for full code):
 //!
 //! ```
-//! use byte_sequences::{HasMemory, MemoryShared, BytesView};
+//! use bytesbuf::{HasMemory, MemoryShared, BytesView};
 //!
 //! /// Counts the number of 0x00 bytes in a sequence before
 //! /// writing that sequence to a network connection.
@@ -335,14 +335,14 @@
 //! }
 //! # #[derive(Debug)] struct Connection;
 //! # impl Connection { fn write(&mut self, mut _message: BytesView) {} }
-//! # impl HasMemory for Connection { fn memory(&self) -> impl MemoryShared { byte_sequences::TransparentTestMemory::new() } }
+//! # impl HasMemory for Connection { fn memory(&self) -> impl MemoryShared { bytesbuf::TransparentTestMemory::new() } }
 //! ```
 //!
 //! Example of returning a memory provider that performs configuration for optimal memory (see
 //! `examples/mem_has_provider_optimizing.rs` for full code):
 //!
 //! ```
-//! use byte_sequences::{CallbackMemory, HasMemory, MemoryShared, BytesView};
+//! use bytesbuf::{CallbackMemory, HasMemory, MemoryShared, BytesView};
 //!
 //! /// # Implementation strategy for `HasMemory`
 //! ///
@@ -382,7 +382,7 @@
 //!     }
 //! }
 //!
-//! # use byte_sequences::BytesBuf;
+//! # use bytesbuf::BytesBuf;
 //! # #[derive(Clone, Debug)]
 //! # struct IoContext;
 //! # impl IoContext {
@@ -401,7 +401,7 @@
 //! full code):
 //!
 //! ```
-//! use byte_sequences::{GlobalPool, HasMemory, MemoryShared};
+//! use bytesbuf::{GlobalPool, HasMemory, MemoryShared};
 //!
 //! /// Calculates a checksum for a given byte sequence.
 //! ///
@@ -449,7 +449,7 @@
 //!
 //! ```
 //! # struct Foo;
-//! use byte_sequences::BytesView;
+//! use bytesbuf::BytesView;
 //!
 //! # impl Foo {
 //! pub fn write(&mut self, message: BytesView) {
@@ -523,7 +523,8 @@
 //!
 //! ```
 //! use std::sync::OnceLock;
-//! use byte_sequences::BytesView;
+//!
+//! use bytesbuf::BytesView;
 //!
 //! const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";
 //!
@@ -552,7 +553,7 @@
 //! # struct Connection;
 //! # impl Connection {
 //! #     fn accept() -> Self { Connection }
-//! #     fn memory(&self) -> impl byte_sequences::Memory { byte_sequences::GlobalPool::new() }
+//! #     fn memory(&self) -> impl bytesbuf::Memory { bytesbuf::GlobalPool::new() }
 //! #     fn write(&self, _sequence: BytesView) {}
 //! # }
 //! ```
@@ -588,8 +589,8 @@
 //! [26]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html#method.remaining_mut
 //! [27]: std::sync::OnceLock
 
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/byte_sequences/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/byte_sequences/favicon.ico")]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/favicon.ico")]
 
 mod block;
 mod block_ref;
