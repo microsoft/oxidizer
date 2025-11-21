@@ -272,7 +272,17 @@ impl fmt::Display for MessageFormatter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error_span::ErrorSpan;
+    use crate::{assert_error_message, error_span::ErrorSpan};
+
+    #[ohno::error]
+    struct TestError;
+
+    #[test]
+    fn default_error_message() {
+        let error = TestError::new();
+        assert_error_message!(error, "TestError");
+        assert!(error.source().is_none(), "{error:?}");
+    }
 
     #[test]
     fn test_default() {
