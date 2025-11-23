@@ -26,6 +26,9 @@ fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = fa
 ohno = { path = "crates/ohno", default-features = false, version = "0.1.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false, version = "0.0.0" }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.1.0" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.1.0" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.1.0" }
 
 # external dependencies
 alloc_tracker = { version = "0.5.9", default-features = false }
@@ -36,6 +39,7 @@ derive_more = { version = "2.0.1", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.43.2", default-features = false }
+many_cpus = { version = "1.1.0", default-features = false }
 mockall = { version = "0.13.1", default-features = false }
 mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }

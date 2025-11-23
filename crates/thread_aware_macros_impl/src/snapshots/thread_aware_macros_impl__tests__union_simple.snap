@@ -1,0 +1,7 @@
+---
+source: crates/thread_aware_macros_impl/src/lib.rs
+expression: derive(input)
+---
+::core::compile_error! {
+    "#[derive(ThreadAware)] does not support unions"
+}

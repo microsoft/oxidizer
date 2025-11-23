@@ -1,0 +1,21 @@
+---
+source: crates/thread_aware_macros_impl/src/lib.rs
+expression: derive(input)
+---
+impl ::thread_aware::ThreadAware for Color {
+    #[allow(
+        clippy::redundant_clone,
+        reason = "macro generated pattern moves each field once"
+    )]
+    fn relocated(
+        self,
+        source: ::thread_aware::MemoryAffinity,
+        destination: ::thread_aware::MemoryAffinity,
+    ) -> Self {
+        match self {
+            Self::Red => Self::Red,
+            Self::Green => Self::Green,
+            Self::Blue => Self::Blue,
+        }
+    }
+}

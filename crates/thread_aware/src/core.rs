@@ -1,0 +1,198 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! This module contains all the core primitives the thread aware system is built upon.
+
+/// Create affinities for testing purposes or when not using the `ThreadRegistry`.
+///
+/// # Parameters
+///
+/// * `counts`: A slice of usize representing the number of processors in each memory region.
+///
+/// # Panics
+///
+/// If there are more than `u16::MAX` processors or memory regions.
+#[must_use]
+#[expect(clippy::needless_range_loop, reason = "clearer in this case")]
+pub fn create_manual_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
+    let numa_count = counts.len();
+    let core_count = counts.iter().sum();
+    let mut affinities = Vec::with_capacity(core_count);
+    let mut processor_index = 0;
+
+    for numa_index in 0..numa_count {
+        for _ in 0..counts[numa_index] {
+            affinities.push(MemoryAffinity::new(
+                processor_index.try_into().expect("Too many processors"),
+                numa_index.try_into().expect("Too many memory regions"),
+                core_count.try_into().expect("Too many processors"),
+                numa_count.try_into().expect("Too many memory regions"),
+            ));
+            processor_index += 1;
+        }
+    }
+
+    affinities
+}
+
+/// An `MemoryAffinity` can be thought of as a placement in a system.
+///
+/// It is used to represent a specific context or environment where data can be processed.
+/// For example a NUMA node, a thread, a specific CPU core, or a specific memory region.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MemoryAffinity {
+    processor_index: u16,
+    memory_region_index: u16,
+
+    processor_count: u16,
+    memory_region_count: u16,
+}
+
+impl MemoryAffinity {
+    pub(crate) fn new(processor_index: u16, memory_region_index: u16, processor_count: u16, memory_region_count: u16) -> Self {
+        Self {
+            processor_index,
+            memory_region_index,
+
+            processor_count,
+            memory_region_count,
+        }
+    }
+
+    /// Returns the processor index of this affinity.
+    #[must_use]
+    pub const fn processor_index(self) -> usize {
+        self.processor_index as _
+    }
+
+    /// Returns the memory region index of this affinity.
+    #[must_use]
+    pub const fn memory_region_index(self) -> usize {
+        self.memory_region_index as _
+    }
+
+    /// Returns the processor count of this affinity.
+    #[must_use]
+    pub const fn processor_count(self) -> usize {
+        self.processor_count as _
+    }
+
+    /// Returns the number of memory regions of this affinity.
+    #[must_use]
+    pub const fn memory_region_count(self) -> usize {
+        self.memory_region_count as _
+    }
+}
+
+/// Marks types that correctly handle isolation when transferred between affinities (threads).
+///
+/// The basic invariant of the `ThreadAware` trait is that the value returned by
+/// [`ThreadAware::relocated`] must be as independent as possible from any state on the source
+/// (or any other) affinity in the sense that interacting with the object should not result
+/// in contention over synchronization primitives when this interaction happens in parallel
+/// with interactions with related values (e.g. clones) on other affinities.
+///
+/// What this means depends on the type, but there are a couple of common implementation
+/// strategies:
+///
+/// * Return self - this implies that the value doesn't have any dependency on other values
+///   that may result in synchronization primitive contention, so it can be transferred as is. This
+///   approach can be also be achieved by wrapping a value in the
+///   [`Unaware`](`crate::Unaware`) type.
+/// * Construct a per-affinity value - with this approach, each affinity gets its own
+///   independently-initialized value. The [`PerCore::new_with`](`crate::PerCore::new_with`)
+///   function facilitates this approach.
+/// * Utilize true sharing in a controlled manner - have some data that is actually shared
+///   between the values on different affinities, but in a controlled manner that minimizes
+///   the contention for the synchronization primitives necessary. This is a more advanced
+///   technique allowing for designs that minimize contention while avoiding wasting resources
+///   by duplicating them for each affinity.
+///
+/// As an example, let's implement a counter that counts per-affinity. This counter will use
+/// interior mutability to to allow increments with just a shared reference, but we want to
+/// avoid contention on the internal state, so each affinity will get an independent counter.
+///
+/// ```rust
+/// # use std::sync::atomic::{AtomicI32, Ordering};
+/// # use std::sync::Arc;
+/// # use thread_aware::{ThreadAware, MemoryAffinity};
+///
+/// #[derive(Clone)]
+/// struct Counter {
+///     value: Arc<AtomicI32>,
+/// }
+///
+/// impl Counter {
+///     fn new() -> Self {
+///         Self {
+///             value: Arc::new(AtomicI32::new(0)),
+///         }
+///     }
+///
+///     fn increment_by(&self, value: i32) {
+///         self.value.fetch_add(value, Ordering::AcqRel);
+///     }
+///
+///     fn value(&self) -> i32 {
+///         self.value.load(Ordering::Acquire)
+///     }
+/// }
+///
+/// impl ThreadAware for Counter {
+///     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+///         Self {
+///             // Initialize a new value in the destination affinity independent
+///             // of the source affinity.
+///             value: Arc::new(AtomicI32::new(0)),
+///         }
+///     }
+/// }
+/// ```
+///
+/// Note that this trait is independent of the `Send` trait as there can be usages of isolated
+/// affinities with multiple affinities on a single thread. However, that
+/// is a fairly specific use case, so types that implement `ThreadAware` should generally also implement
+/// Send.
+pub trait ThreadAware {
+    /// Consume a value and return a value in the destination affinity.
+    ///
+    /// When implementing this function, you can assume self belongs to the source affinity, but it's
+    /// not guaranteed that source and destination will be different. Note that "belonging to an affinity"
+    /// is a logical concept that may not have a direct representation in the code. In particular,
+    /// when a value is first constructed, the source affinity may not be known to that value until it's
+    /// transferred for the first time, at which point it can utilize the source parameter to determine
+    /// the original affinity.
+    ///
+    /// When calling this function, you must ensure that self belongs to the source affinity, and try
+    /// to avoid calling transfer when source and destination match as that's a useless operation
+    /// and transfer implementations may be non-trivial.
+    #[must_use]
+    fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MemoryAffinity, create_manual_affinities};
+
+    #[test]
+    fn test_crate_fake_affinities() {
+        let affinities = create_manual_affinities(&[2, 3]);
+        assert_eq!(affinities.len(), 5);
+        for (i, affinity) in affinities.iter().enumerate() {
+            assert_eq!(affinity.processor_index(), i);
+            assert_eq!(affinity.processor_count(), 5);
+            assert_eq!(affinity.memory_region_index(), usize::from(i >= 2));
+            assert_eq!(affinity.memory_region_count(), 2);
+        }
+    }
+
+    #[test]
+    fn test_affinity() {
+        let affinity = MemoryAffinity::new(2, 1, 4, 2);
+        assert_eq!(affinity.processor_index(), 2);
+        assert_eq!(affinity.processor_count(), 4);
+
+        assert_eq!(affinity.memory_region_index(), 1);
+        assert_eq!(affinity.memory_region_count(), 2);
+    }
+}

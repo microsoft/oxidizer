@@ -1,0 +1,38 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "thread_aware_macros_impl"
+description = "Macros for the thread_aware crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "thread", "aware", "macro", "derive"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
+
+[dev-dependencies]
+insta.workspace = true
+prettyplease.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "proc_macro2::*",
+    "syn::attr::*",
+    "syn::error::*",
+    "syn::path::*",
+    "syn::ty::*",
+]
