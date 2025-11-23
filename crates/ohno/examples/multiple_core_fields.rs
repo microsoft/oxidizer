@@ -19,6 +19,7 @@ fn failing_function() -> Result<(), MyError> {
     })
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = failing_function().unwrap_err();
     println!("Error: {e}");

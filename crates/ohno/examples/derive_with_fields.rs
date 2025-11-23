@@ -16,6 +16,7 @@ fn failing_query() -> Result<String, InvalidQuery> {
     Err(InvalidQuery::new("SELECT", "users"))
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = failing_query().unwrap_err();
     println!("{e}");

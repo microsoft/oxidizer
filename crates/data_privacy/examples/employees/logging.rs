@@ -6,10 +6,12 @@ use once_cell::sync::OnceCell;
 
 static REDACTION_ENGINE: OnceCell<RedactionEngine> = OnceCell::new();
 
+#[expect(clippy::unwrap_used, reason = "Infallible after initialization")]
 pub fn set_redaction_engine_for_logging(engine: RedactionEngine) {
     REDACTION_ENGINE.set(engine).unwrap();
 }
 
+#[expect(clippy::unwrap_used, reason = "Infallible after initialization")]
 pub fn redacted_display(value: &impl RedactedDisplay) -> String {
     let mut output = String::new();
     _ = REDACTION_ENGINE.get().unwrap().redacted_display(value, &mut output);

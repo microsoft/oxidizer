@@ -27,6 +27,7 @@ fn app_err() -> Result<(), AppError> {
     Ok(())
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = app_err().unwrap_err();
     println!("{e}");

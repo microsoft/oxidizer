@@ -20,6 +20,7 @@ async fn async_with_lifetime<'a>(data: &'a str) -> Result<String, AsyncTestError
     Err(AsyncTestError::caused_by(format!("lifetime error: {data}")))
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 #[tokio::main]
 async fn main() {
     let result = generic_async_function(&42).await.unwrap_err();

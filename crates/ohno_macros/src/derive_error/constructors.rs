@@ -151,6 +151,7 @@ fn generate_simple_named_constructors(
 }
 
 #[expect(clippy::too_many_arguments, reason = "C'est la vie")]
+#[expect(clippy::unwrap_used, reason = "Field names are guaranteed to be present here")]
 fn generate_complex_named_constructors(
     name: &syn::Ident,
     impl_generics: &syn::ImplGenerics,

@@ -15,6 +15,7 @@ fn failing_function(path: &str) -> Result<String, MyError> {
     Err(MyError::caused_by("file not found"))
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = failing_function("config.toml").unwrap_err();
     println!("Error: {e}");

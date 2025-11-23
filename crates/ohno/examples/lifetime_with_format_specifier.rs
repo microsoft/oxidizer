@@ -14,6 +14,7 @@ fn validate_input<'a>(input: &'a str, rules: &'a [&'a str]) -> Result<(), Valida
     Err(ValidationError::new(input, rules))
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let rules = ["no_spaces", "min_length_5", "alphanumeric_only"];
     let e = validate_input("bad!", &rules).unwrap_err();

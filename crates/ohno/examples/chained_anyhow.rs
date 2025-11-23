@@ -40,6 +40,7 @@ fn api_operation() -> Result<String, ApiError> {
     Ok(service_operation()?)
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let result: Result<String> = api_operation()
         .context("handling API request (3.1)")

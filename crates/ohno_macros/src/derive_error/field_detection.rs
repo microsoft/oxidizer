@@ -22,6 +22,7 @@ pub fn find_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
     }
 }
 
+#[expect(clippy::unwrap_used, reason = "Field names are guaranteed to be present here")]
 fn find_error_field_named(fields: &syn::FieldsNamed) -> Result<ErrorFieldRef> {
     // First, look for fields explicitly marked with #[error]
     if let Some(field) = find_explicit_error_field_named(fields) {
