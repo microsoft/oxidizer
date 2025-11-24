@@ -1,0 +1,38 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "thread_aware"
+description = "Facilities to support thread-isolated state."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["oxidizer", "thread", "aware"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = ["derive"]
+derive = ["dep:thread_aware_macros"]
+threads = ["dep:many_cpus"]
+
+[dependencies]
+mutants.workspace = true
+many_cpus = { workspace = true, optional = true }
+thread_aware_macros = { workspace = true, optional = true }
+
+[dev-dependencies]
+thread_aware_macros = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "thread_aware_macros::ThreadAware"
+]

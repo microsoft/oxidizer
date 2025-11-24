@@ -101,7 +101,7 @@
 #[doc(hidden)]
 pub mod exports;
 
-// Re-export proc macros from fundle_proc
+// Re-export proc macros from fundle_macros
 pub use fundle_macros::{bundle, deps, newtype};
 
 // Internal helpers. These are used for type state pattern used by the `bundle` macro.
