@@ -60,7 +60,7 @@ jobs:
 
       # execute
       - name: Build
-        run: cargo hack build --each-feature --workspace --verbose
+        run: cargo hack build --each-feature --workspace --verbose --locked
       - name: Tests
         run: cargo test --verbose --workspace --all-features
       - name: Doc Tests
