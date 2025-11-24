@@ -1,0 +1,99 @@
+name: nightly
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+  # Rust toolchain versions
+  RUST_LATEST: "1.91"                                # used for mutation testing
+
+  # Tool versions
+  CARGO_MUTANTS_VERSION: "25.3.1"
+  SCCACHE_VERSION: "v0.12.0"
+
+jobs:
+  nightly-gatekeeper:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.check.outputs.should_skip }}
+    steps:
+      - uses: actions/checkout@v6.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes in last 24 hours
+        id: check
+        run: |
+          # Check logs for commits in the last 24 hours on the current branch
+          if [[ -z $(git log --since="24 hours ago" --pretty=format:"%H") ]]; then
+            echo "No commits in the last 24 hours. Skipping..."
+            echo "should_skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "New commits found. Proceeding..."
+            echo "should_skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  mutation-testing:
+    needs: nightly-gatekeeper
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.0
+        with:
+          fetch-depth: 0
+      - name: Start sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: ${{ env.SCCACHE_VERSION }}
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        with:
+          toolchain: ${{ env.RUST_LATEST }}
+          components: clippy, rustfmt
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2.62.53
+        with:
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+
+      # execute
+      - name: Mutate All
+        env:
+          DISABLE_T_REX: 1
+        timeout-minutes: 90
+        run: cargo mutants --test-workspace=true --colors=never --jobs=4 --build-timeout=120
+
+      - name: Create or Update Issue on Failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE_TITLE="🚨 Nightly Build Failed"
+          ISSUE_DATE="$(date +'%Y-%m-%d')"
+          ISSUE_FULL_TITLE="$ISSUE_TITLE: $ISSUE_DATE"
+          ISSUE_BODY="The nightly scheduled build failed. Please check the logs here: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Search for open issues with the same base title and label
+          EXISTING_ISSUE=$(gh issue list --label "bug" --state open --search "$ISSUE_TITLE" --json number,title | jq -r '.[] | select(.title | startswith("'"$ISSUE_TITLE"'")) | .number' | head -n 1)
+          if [[ -n "$EXISTING_ISSUE" ]]; then
+            # Add a comment to the existing issue
+            gh issue comment "$EXISTING_ISSUE" --body "$ISSUE_BODY"
+          else
+            # Create a new issue
+            gh issue create \
+              --title "$ISSUE_FULL_TITLE" \
+              --body "$ISSUE_BODY" \
+              --label "bug"
+          fi
