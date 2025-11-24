@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "test-util")]
+
 use std::error::Error;
 
 use ohno::{ErrorExt, assert_error_message};
