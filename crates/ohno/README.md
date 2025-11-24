@@ -24,7 +24,7 @@
 
 <!-- cargo-rdme start -->
 
-Ergonomic Error Handling for Rust
+High-quality error handling for Rust.
 
 Ohno combines error wrapping, context stacking, backtrace capture, and procedural macros
 into one ergonomic crate for comprehensive error handling.

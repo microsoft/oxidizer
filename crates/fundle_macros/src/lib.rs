@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Procedural macros to support the [`fundle`](https://docs.rs/fundle) crate. See `fundle` for more information.
+//! Macros to support the [`fundle`](https://docs.rs/fundle) crate.
 //!
 //! # Macros
 //!

@@ -4,6 +4,8 @@
 //! Comprehensive test that verifies the new default constructor behavior
 //! and the `no_constructors` opt-out functionality
 
+#![cfg(feature = "test-util")]
+
 use ohno::{Error, OhnoCore, assert_error_message};
 
 // These error types should have constructors by default (no attributes needed)

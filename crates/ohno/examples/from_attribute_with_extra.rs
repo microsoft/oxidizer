@@ -22,6 +22,7 @@ fn failing_function() -> Result<(), MyError> {
     Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found").into())
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = failing_function().unwrap_err();
     println!("Error kind: {:?}", e.kind);

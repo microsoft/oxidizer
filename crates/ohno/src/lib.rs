@@ -3,7 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-//! Ergonomic Error Handling for Rust
+//! High-quality error handling for Rust.
 //!
 //! Ohno combines error wrapping, context stacking, backtrace capture, and procedural macros
 //! into one ergonomic crate for comprehensive error handling.
@@ -235,7 +235,7 @@ mod error_trace;
 mod source;
 mod trace_info;
 
-#[cfg(feature = "test-util")]
+#[cfg(any(feature = "test-util", test))]
 pub mod test_util;
 
 pub use core::OhnoCore;

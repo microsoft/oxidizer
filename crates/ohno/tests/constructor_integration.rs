@@ -3,6 +3,8 @@
 
 //! Integration tests demonstrating #[derive(Error)] functionality
 
+#![cfg(feature = "test-util")]
+
 use ohno::{Error, OhnoCore, assert_error_message};
 
 #[test]

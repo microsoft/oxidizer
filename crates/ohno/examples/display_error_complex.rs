@@ -20,6 +20,7 @@ fn failing_function() -> Result<(), MyError> {
     Err(MyError::caused_by("update", ErrorCode(404), "Not found"))
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = failing_function().unwrap_err();
     println!("{e}");

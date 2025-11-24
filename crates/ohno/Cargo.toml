@@ -3,7 +3,7 @@
 
 [package]
 name = "ohno"
-description = "High quality Rust error handling"
+description = "High-quality Rust error handling."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
@@ -24,8 +24,6 @@ ohno_macros.workspace = true
 typeid.workspace = true
 
 [dev-dependencies]
-ohno = { path = ".", features = ["test-util"] }
-
 anyhow.workspace = true
 futures.workspace = true
 regex = { workspace = true, features = [ "unicode-perl"] }
