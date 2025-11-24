@@ -27,7 +27,7 @@ These are the crates built out of this repo:
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`fundle_macros`](crates/fundle_macros/README.md) - Macros for the `fundle` crate.
 - [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Macros for the `fundle` crate.
-- [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling
+- [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.

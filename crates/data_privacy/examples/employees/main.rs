@@ -45,6 +45,7 @@ use example_taxonomy::ExampleTaxonomy;
 use logging::{log, set_redaction_engine_for_logging};
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
+use std::io::{Write, stdin, stdout};
 
 fn main() {
     // First step, we create a redaction engine that prescribes how to redact individual data classes.
@@ -71,7 +72,6 @@ fn main() {
     app_loop();
 }
 
-#[expect(clippy::print_stdout, reason = "this is a demo app, so we print to stdout")]
 fn app_loop() {
     let json_path = "employees.json";
     let mut employees: Vec<Employee> = File::open(json_path).map_or_else(
@@ -82,30 +82,80 @@ fn app_loop() {
         },
     );
 
-    // pretend some UI collected some data, and we then create an Employee struct to hold this data
-    let employee = Employee {
-        name: UserName::new("John Doe".to_string()),
-        address: UserAddress::new("123 Elm Street".to_string()),
-        id: EmployeeID::new("12345-52".to_string()),
-        age: 33,
-    };
+    loop {
+        println!("Enter employee details (type 'quit' to exit):");
 
-    employees.push(employee.clone());
+        let name = prompt("Name: ");
+        if name.eq_ignore_ascii_case("quit") {
+            break;
+        }
 
-    let file = OpenOptions::new().write(true).create(true).truncate(true).open(json_path).unwrap();
-    serde_json::to_writer_pretty(file, &employees).unwrap();
-    println!("Employee added.\n");
+        let address = prompt("Address: ");
+        if address.eq_ignore_ascii_case("quit") {
+            break;
+        }
 
-    // Here we log the employee creation event. Our little logging framework takes as input a set of name/value pairs that provide
-    // a structured log record.
-    //
-    // For each value, you can control which trait is used to format the value into a string:
-    //   `name` - formats the value with the `Display` trait.
-    //   `name:?` - formats the value with the `Debug` trait.
-    //   `mame:@` - formats the value with the `Display` trait and redacts it.
-    log!(event:? = "Employee created",
-         name:@ = employee.name,
-         address:@ = employee.address,
-         employee_id:@ = employee.id,
-         age = employee.age);
+        let id = prompt("Employee ID: ");
+        if id.eq_ignore_ascii_case("quit") {
+            break;
+        }
+
+        let age_str = prompt("Age: ");
+        if age_str.eq_ignore_ascii_case("quit") {
+            break;
+        }
+
+        let age: u32 = if let Ok(a) = age_str.trim().parse() {
+            a
+        } else {
+            println!("Invalid age, please enter a number.");
+            continue;
+        };
+
+        let employee = Employee {
+            name: UserName::new(name),
+            address: UserAddress::new(address),
+            id: EmployeeID::new(id),
+            age,
+        };
+
+        employees.push(employee.clone());
+
+        match OpenOptions::new().write(true).create(true).truncate(true).open(json_path) {
+            Ok(file) => {
+                match serde_json::to_writer_pretty(file, &employees) {
+                    Ok(()) => {
+                        // Here we log the employee creation event. Our little logging framework takes as input a set of name/value pairs that provide
+                        // a structured log record.
+                        //
+                        // For each value, you can control which trait is used to format the value into a string:
+                        //   `name` - formats the value with the `Display` trait.
+                        //   `name:?` - formats the value with the `Debug` trait.
+                        //   `name:@` - formats the value with the `Display` trait and redacts it.
+                        log!(event = "Employee created",
+                             name:@ = employee.name,
+                             address:@ = employee.address,
+                             employee_id:@ = employee.id,
+                             age = employee.age);
+                    }
+
+                    Err(error) => {
+                        log!(event = "Employee database write error", error = error);
+                    }
+                }
+            }
+
+            Err(error) => {
+                log!(event = "Employee database read error", error = error);
+            }
+        }
+    }
+}
+
+fn prompt(msg: &str) -> String {
+    print!("{msg}");
+    let _ = stdout().flush();
+    let mut input = String::new();
+    stdin().read_line(&mut input).expect("Failed to read input");
+    input.trim().to_string()
 }

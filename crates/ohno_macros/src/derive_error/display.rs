@@ -86,11 +86,13 @@ fn parse_field_reference(chars: &mut std::iter::Peekable<std::str::Chars>) -> (S
             break;
         } else if ch == ':' && !in_format {
             in_format = true;
-            chars.next(); // consume the ':'
+            chars.next();
         } else if in_format {
-            format_spec.push(chars.next().unwrap());
+            format_spec.push(ch);
+            chars.next();
         } else {
-            field_name.push(chars.next().unwrap());
+            field_name.push(ch);
+            chars.next();
         }
     }
 

@@ -17,6 +17,7 @@ fn process(item_id: u32) -> Result<(), ProcessingError> {
     Err(ProcessingError::new(item_id, -456))
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let processing_err = process(123).unwrap_err();
     println!("Short message:\n{}", processing_err.message());

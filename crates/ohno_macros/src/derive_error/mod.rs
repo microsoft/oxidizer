@@ -172,6 +172,7 @@ fn generate_error_trace_impl(
     }
 }
 
+#[expect(clippy::unwrap_used, reason = "Field names are guaranteed to be present here")]
 fn generate_debug_impl(
     input: &DeriveInput,
     name: &syn::Ident,
