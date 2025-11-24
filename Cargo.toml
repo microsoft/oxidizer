@@ -26,9 +26,9 @@ fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = fa
 ohno = { path = "crates/ohno", default-features = false, version = "0.1.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false, version = "0.0.0" }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.1.0" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.1.0" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.1.0" }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.2.0" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.2.0" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.2.0" }
 
 # external dependencies
 alloc_tracker = { version = "0.5.9", default-features = false }
