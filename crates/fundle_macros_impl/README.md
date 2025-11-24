@@ -14,8 +14,7 @@
 
 <!-- cargo-rdme start -->
 
-Implementation details for the [`fundle`](https://docs.rs/fundle) crate.
-See `fundle` for more information.
+Macros for the [`fundle`](https://docs.rs/fundle) crate.
 
 <!-- cargo-rdme end -->
 
