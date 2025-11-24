@@ -171,6 +171,18 @@ mod tests {
     #[cfg(not(miri))]
     use crate::{ProcessorCount, ThreadRegistry};
 
+    #[cfg(not(miri))]
+    #[test]
+    pub fn test_default() {
+        let registry = ThreadRegistry::default();
+
+        assert!(registry.num_affinities() > 0);
+        for affinity in registry.affinities() {
+            assert!(affinity.memory_region_count() > 0);
+            assert!(affinity.processor_count() > 0);
+        }
+    }
+
     #[test]
     fn test_numa_node() {
         let invalid = NumaNode::invalid();
