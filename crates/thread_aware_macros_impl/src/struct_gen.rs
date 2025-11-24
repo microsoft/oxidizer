@@ -13,7 +13,7 @@ pub fn build_struct_body(name: &syn::Ident, fields: &Fields, root_path: &syn::Pa
             let mut bindings = Vec::new();
             let mut inits = Vec::new();
             for f in &named.named {
-                let ident = f.ident.as_ref().unwrap();
+                let ident = f.ident.as_ref().expect("Field identifier is missing");
                 let attr_cfg: FieldAttrCfg = parse_field_attrs(&f.attrs)?;
                 bindings.push(quote! { #ident });
                 let init_expr = if is_phantom_data(&f.ty) {

@@ -35,7 +35,7 @@ pub fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Pat
                 let mut bindings = Vec::new();
                 let mut inits = Vec::new();
                 for f in &named.named {
-                    let ident = f.ident.as_ref().unwrap();
+                    let ident = f.ident.as_ref().expect("Field identifier is missing");
                     let cfg: FieldAttrCfg = parse_field_attrs(&f.attrs)?;
                     bindings.push(quote! { #ident });
                     let expr = if is_phantom_data(&f.ty) {
