@@ -218,8 +218,10 @@ jobs:
       # execute
       - name: Generate Coverage (all-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --all-features --workspace --lcov --output-path lcov-all.info
+      # Note: test-util feature enables additional testing functionality.
+      # Without this feature, coverage would be lower.
       - name: Generate Coverage (no-default-features)
-        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
+        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --features="test-util" --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v5.5.1
         with:
