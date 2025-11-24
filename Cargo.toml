@@ -97,6 +97,7 @@ fn_to_numeric_cast_any = "warn"
 if_then_some_else_none = "warn"
 map_err_ignore = "warn"
 multiple_unsafe_ops_per_block = "warn"
+panic = "warn"
 redundant_type_annotations = "warn"
 renamed_function_params = "warn"
 semicolon_outside_block = "warn"
@@ -106,10 +107,11 @@ unnecessary_safety_comment = "warn"
 unnecessary_safety_doc = "warn"
 unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
+unwrap_used = "warn"
 
 # Below are undesirable lint rules that are enabled by the categories above but are not useful.
 
-# This lint in many cases produces a less readable code and is not worth the trouble.
+# This lint in many cases produces less readable code and is not worth the trouble.
 option_if_let_else = "allow"
 # Just because a fn can be const does not mean it should be const. Const is a promise, part of the
 # API contract, and removing it is a breaking change so we need to be careful where we commit to const.

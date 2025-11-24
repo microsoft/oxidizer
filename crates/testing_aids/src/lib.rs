@@ -3,6 +3,9 @@
 
 //! An unpublished crate containing testing utilities for use within this repo.
 
+#![allow(clippy::panic, reason = "Test code")]
+#![allow(clippy::unwrap_used, reason = "Test code")]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
 use std::time::Duration;

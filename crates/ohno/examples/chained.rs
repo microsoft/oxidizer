@@ -41,6 +41,7 @@ fn api_operation() -> Result<String, ApiError> {
     Ok(service_operation()?)
 }
 
+#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let error = api_operation().unwrap_err();
     println!("{error}");

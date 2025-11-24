@@ -688,6 +688,7 @@ impl Buf for BytesBufInspector<'_, '_> {
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
+    #[expect(clippy::panic, reason = "Constrained by trait API contract")]
     fn advance(&mut self, mut cnt: usize) {
         while cnt > 0 {
             //            assert!(cnt <= self.remaining);
