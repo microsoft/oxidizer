@@ -3,6 +3,8 @@
 
 //! Tests for `ErrorExt::find_source` method
 
+#![cfg(feature = "test-util")]
+
 use ohno::{ErrorExt, assert_error_message};
 
 #[ohno::error]

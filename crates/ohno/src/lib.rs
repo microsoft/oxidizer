@@ -235,7 +235,7 @@ mod error_trace;
 mod source;
 mod trace_info;
 
-#[cfg(feature = "test-util")]
+#[cfg(any(feature = "test-util", test))]
 pub mod test_util;
 
 pub use core::OhnoCore;
