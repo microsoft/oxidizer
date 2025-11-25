@@ -71,13 +71,15 @@ jobs:
 
       # execute
       - name: Mutate All
+        id: mutate
+        continue-on-error: true
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 90
         run: cargo mutants --test-workspace=true --colors=never --jobs=4 --build-timeout=120
 
       - name: Create or Update Issue on Failure
-        if: failure()
+        if: always() && steps.mutate.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -97,3 +99,7 @@ jobs:
               --body "$ISSUE_BODY" \
               --label "bug"
           fi
+
+      - name: Check for Step Failure
+        if: steps.mutate.outcome == 'failure'
+        run: exit 1
