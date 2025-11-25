@@ -3,7 +3,6 @@ name: main
 permissions:
   contents: read
   pull-requests: read
-  security-events: write
 
 on:
   pull_request:
@@ -45,6 +44,15 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
       - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
@@ -164,6 +172,15 @@ jobs:
         uses: actions/checkout@v6.0.0
         with:
           fetch-depth: 0
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
       - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
@@ -173,6 +190,8 @@ jobs:
         with:
           toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
+      - name: Installing Wild Linker
+        uses: davidlattimore/wild-action@0.7.0
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.53
         with:
@@ -185,7 +204,7 @@ jobs:
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
-        run: cargo mutants --test-workspace=true --colors=never --jobs=1 --build-timeout=120 --in-diff diff.txt
+        run: cargo mutants --in-place --no-shuffle --baseline=skip --test-workspace=true --colors=never --build-timeout=120 --in-diff diff.txt --timeout=300
 
   coverage:
     if: github.event_name == 'pull_request'
@@ -201,6 +220,15 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
       - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
