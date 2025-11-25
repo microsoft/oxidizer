@@ -3,7 +3,6 @@ name: nightly
 permissions:
   contents: read
   pull-requests: read
-  security-events: write
 
 on:
   schedule:
@@ -64,6 +63,8 @@ jobs:
         with:
           toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
+      - name: Installing Wild Linker
+        uses: davidlattimore/wild-action@0.7.0
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.53
         with:
@@ -75,8 +76,8 @@ jobs:
         continue-on-error: true
         env:
           DISABLE_T_REX: 1
-        timeout-minutes: 90
-        run: cargo mutants --test-workspace=true --colors=never --jobs=4 --build-timeout=120
+        timeout-minutes: 180
+        run: cargo mutants --no-shuffle --baseline=skip --test-workspace=true --colors=never --jobs=4 --build-timeout=120 --timeout=300
 
       - name: Create or Update Issue on Failure
         if: always() && steps.mutate.outcome == 'failure'

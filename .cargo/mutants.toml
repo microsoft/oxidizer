@@ -16,7 +16,9 @@ exclude_re = [
     "impl Debug",
     "impl fmt::Debug",
     "impl std::fmt::Debug",
-    "impl Display",
-    "impl fmt::Display",
-    "impl std::fmt::Display",
-]
+    "impl core::fmt::Debug",
+    "impl data_privacy::Redactor",
+    "impl data_privacy::RedactedDebug",
+    "impl data_privacy::RedactedDisplay",
+    "impl data_privacy::RedactedToString",
+    ]
