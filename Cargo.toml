@@ -13,7 +13,18 @@ license-file = "LICENSE"
 homepage = "https://github.com/microsoft/oxidizer"
 repository = "https://github.com/microsoft/oxidizer"
 
-# all dependencies are listed with default-features = false, individual crates add the features they need
+# Adhere to the following rules when adding dependencies:
+# * All dependencies specified here need to have default-features turned off - individual crates can enable the
+#   features they need
+# * Avoid cyclic dependencies caused by dev-dependencies. If a dev-dependency causes a cyclic dependency, the
+#   cycle needs to be broken by utilizing a path-based dependency specification. For example, `thread_aware`
+#   has a dependency on `thread_aware_macros`, but `thread_aware_macros` has a dev-dependency on `thread_aware`
+#   (for tests and examples). In this case `thread_aware_macros` needs to use a path spec instead of utilizing
+#   a workspace dependency:
+#   ```
+#   [dev-dependencies]
+#   thread_aware = { path = "../thread_aware" }
+#   ```
 [workspace.dependencies]
 
 # local dependencies
