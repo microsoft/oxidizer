@@ -204,7 +204,7 @@ jobs:
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
-        run: cargo mutants --in-place --no-shuffle --baseline=skip --test-workspace=true --colors=never --build-timeout=120 --in-diff diff.txt --timeout=300
+        run: cargo mutants --in-place --no-shuffle --baseline=skip --test-workspace=true --colors=never --build-timeout=600 --in-diff diff.txt --timeout=300
 
   coverage:
     if: github.event_name == 'pull_request'
