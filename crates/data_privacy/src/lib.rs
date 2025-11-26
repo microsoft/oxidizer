@@ -199,6 +199,7 @@ mod simple_redactor;
 #[cfg(feature = "xxh3")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 mod xxh3_redactor;
+mod std;
 
 // Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
 // Workaround for https://github.com/bkchr/proc-macro-crate/issues/14

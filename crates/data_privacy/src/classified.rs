@@ -72,10 +72,6 @@ use crate::DataClass;
 /// }
 ///  ```
 pub trait Classified {
-    /// The type of the payload being classified.
-    type Payload;
-
-
     // /// Visits the payload with the provided operation.
     // fn visit(&self, operation: impl FnOnce(&Self::Payload)) {
     //     operation(self.as_declassified());
@@ -101,8 +97,6 @@ mod tests {
     }
 
     impl Classified for ClassifiedExample {
-        type Payload = u32;
-
         fn data_class(&self) -> DataClass {
             DataClass::new("example", "classified_example")
         }

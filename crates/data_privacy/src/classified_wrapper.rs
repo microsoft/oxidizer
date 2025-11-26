@@ -24,8 +24,6 @@ impl<T> ClassifiedWrapper<T> {
 }
 
 impl<T> Classified for ClassifiedWrapper<T> {
-    type Payload = T;
-
     fn data_class(&self) -> DataClass {
         self.data_class.clone()
     }
