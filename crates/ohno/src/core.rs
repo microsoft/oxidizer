@@ -30,19 +30,16 @@ pub struct Inner {
 /// # Examples
 ///
 /// ```rust
-/// use std::io;
-///
-/// use ohno::{ErrorTraceExt, OhnoCore};
+/// use ohno::OhnoCore;
 ///
 /// // Create from a string message
-/// let error = OhnoCore::from("something went wrong")
-///     .error_trace("while processing request")
-///     .error_trace("in user handler");
+/// let core = OhnoCore::from("something went wrong");
 ///
 /// // Wrap an existing error
-/// let io_error = io::Error::new(io::ErrorKind::NotFound, "file.txt");
-/// let wrapped = OhnoCore::from(io_error).error_trace("failed to load config");
+/// let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file.txt");
+/// let wrapped = OhnoCore::from(io_error);
 /// ```
+#[derive(Clone)]
 pub struct OhnoCore {
     pub(super) data: Box<Inner>,
 }

@@ -153,3 +153,15 @@ fn error_source_is_accessible() {
     let source = source.source().unwrap();
     assert_error_message!(source, "inner");
 }
+
+#[test]
+fn clone_ohno_core() {
+    let original = OhnoCore::from("original error")
+        .error_trace("first trace")
+        .detailed_error_trace("second trace", "file.rs", 42);
+    let mut cloned = original.clone();
+    assert_eq!(original.to_string(), cloned.to_string());
+
+    cloned = cloned.error_trace("additional trace");
+    assert_ne!(original.to_string(), cloned.to_string());
+}
