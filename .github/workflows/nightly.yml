@@ -52,8 +52,6 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-        with:
-          fetch-depth: 0
       - name: Start sccache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
@@ -77,10 +75,10 @@ jobs:
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 180
-        run: cargo mutants --no-shuffle --baseline=skip --test-workspace=true --colors=never --jobs=4 --build-timeout=120 --timeout=300
+        run: cargo mutants --no-shuffle --baseline=skip --test-workspace=true --colors=never --jobs=4 --build-timeout=600 --timeout=300 -vV
 
       - name: Create or Update Issue on Failure
-        if: always() && steps.mutate.outcome == 'failure'
+        if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -102,5 +100,5 @@ jobs:
           fi
 
       - name: Check for Step Failure
-        if: steps.mutate.outcome == 'failure'
+        if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
         run: exit 1
