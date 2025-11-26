@@ -165,3 +165,14 @@ fn clone_ohno_core() {
     cloned = cloned.error_trace("additional trace");
     assert_ne!(original.to_string(), cloned.to_string());
 }
+
+#[test]
+fn clone_with_inner_error() {
+    let inner = TestError::new("inner error");
+    let original = OhnoCore::from(inner)
+        .error_trace("trace message");
+    let cloned = original.clone();
+
+    let _ = original.source().unwrap().downcast_ref::<TestError>().unwrap();
+    let _ = cloned.source().unwrap().downcast_ref::<TestError>().unwrap();
+}
