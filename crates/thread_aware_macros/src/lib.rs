@@ -37,7 +37,6 @@ use syn::{Path, parse_quote};
 ///
 /// # Example
 /// ```rust
-/// # use thread_aware_macros::ThreadAware as ThreadAware;
 /// use thread_aware::{MemoryAffinity, ThreadAware};
 ///
 /// #[derive(ThreadAware)]

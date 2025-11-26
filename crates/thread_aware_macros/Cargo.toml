@@ -24,7 +24,7 @@ syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "
 thread_aware_macros_impl.workspace = true
 
 [dev-dependencies]
-thread_aware.workspace = true
+thread_aware = { path = "../thread_aware" }
 mutants.workspace = true
 
 [lints]
