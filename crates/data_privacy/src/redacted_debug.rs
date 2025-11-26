@@ -20,4 +20,5 @@ pub trait RedactedDebug  {
     /// this function only returns a [`Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
     /// has occurred back up the stack.
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> Result;
+    
 }
