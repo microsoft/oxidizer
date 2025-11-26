@@ -26,6 +26,16 @@
 
     {
         "include": [
+            "**/*.sh"
+        ],
+        "exclude": [
+            "target"
+        ],
+        "license": "./.github/license-check/bash.txt"
+    },
+
+    {
+        "include": [
             "**/*.svg",
             "**/*.png",
             "**/*.ico",

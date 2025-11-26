@@ -324,3 +324,14 @@ jobs:
               fi
             fi
           done
+
+  default-features-are-off:
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.0
+
+      # execute
+      - name: Check No Default Features
+        run: bash scripts/ensure-no-default-features.sh
