@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A lightweight, clonable wrapper around [`std::backtrace::Backtrace`].
+
 use std::backtrace::{Backtrace as StdBacktrace, BacktraceStatus};
 use std::sync::Arc;
 
@@ -74,7 +76,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clonning() {
+    fn cloning() {
         let bt1 = Backtrace::capture();
         let bt2 = bt1.clone();
         assert_eq!(bt1.status(), bt2.status());
