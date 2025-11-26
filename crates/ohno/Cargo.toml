@@ -26,6 +26,7 @@ typeid.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 futures.workspace = true
+mutants.workspace = true
 regex = { workspace = true, features = [ "unicode-perl"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time", "rt-multi-thread"] }

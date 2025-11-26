@@ -629,6 +629,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
+ "mutants",
  "ohno_macros",
  "regex",
  "thiserror",
