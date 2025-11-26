@@ -1,16 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::backtrace::{Backtrace, BacktraceStatus};
+use std::backtrace::BacktraceStatus;
 use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt;
 
+use super::backtrace::Backtrace;
 use super::source::Source;
 use super::trace_info::TraceInfo;
 
 /// Internal error data that is boxed to keep `OhnoCore` lightweight.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Inner {
     pub(super) source: Source,
     pub(super) backtrace: Backtrace,
@@ -79,7 +80,7 @@ impl OhnoCore {
     pub fn without_backtrace(error: impl Into<Box<dyn StdError + Send + Sync + 'static>>) -> Self {
         Self {
             data: Box::new(Inner {
-                source: Source::Error(error.into()),
+                source: Source::Error(error.into().into()),
                 backtrace: Backtrace::disabled(),
                 context: Vec::new(),
             }),
@@ -139,8 +140,8 @@ impl OhnoCore {
     ///
     /// This method always returns a reference to the internal backtrace,
     /// even if it wasn't captured (in which case it will be empty/disabled).
-    pub fn backtrace(&self) -> &Backtrace {
-        &self.data.backtrace
+    pub fn backtrace(&self) -> &std::backtrace::Backtrace {
+        self.data.backtrace.as_backtrace()
     }
 
     /// Returns an iterator over the context information in reverse order (most recent first).
@@ -186,7 +187,7 @@ impl OhnoCore {
         }
 
         if matches!(self.data.backtrace.status(), BacktraceStatus::Captured) {
-            write!(f, "\n\nBacktrace:\n{}", self.data.backtrace)?;
+            write!(f, "\n\nBacktrace:\n{}", self.data.backtrace.as_backtrace())?;
         }
 
         Ok(())
@@ -222,9 +223,9 @@ where
     fn from(value: T) -> Self {
         // StringError is a private error type and cannot be referenced directly
         if is_string_error(&value) {
-            Self::from_source(Source::Transparent(value.into()))
+            Self::from_source(Source::Transparent(value.into().into()))
         } else {
-            Self::from_source(Source::Error(value.into()))
+            Self::from_source(Source::Error(value.into().into()))
         }
     }
 }

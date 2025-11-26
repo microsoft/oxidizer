@@ -229,6 +229,7 @@
 #[doc(hidden)]
 extern crate self as ohno;
 
+mod backtrace;
 mod core;
 mod error_ext;
 mod error_trace;
