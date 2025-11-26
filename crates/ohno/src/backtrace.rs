@@ -47,9 +47,9 @@ impl Backtrace {
     /// Get the status of the backtrace.
     pub(crate) fn status(&self) -> BacktraceStatus {
         match self {
-            Backtrace::Captured(bt) => bt.status(),
-            Backtrace::Disabled => BacktraceStatus::Disabled,
-            Backtrace::Unsupported => BacktraceStatus::Unsupported,
+            Self::Captured(bt) => bt.status(),
+            Self::Disabled => BacktraceStatus::Disabled,
+            Self::Unsupported => BacktraceStatus::Unsupported,
         }
     }
 
@@ -57,7 +57,7 @@ impl Backtrace {
     pub(crate) fn as_backtrace(&self) -> &StdBacktrace {
         static DISABLED_BACKTRACE: StdBacktrace = StdBacktrace::disabled();
         match self {
-            Backtrace::Captured(bt) => bt.as_ref(),
+            Self::Captured(bt) => bt.as_ref(),
             _ => &DISABLED_BACKTRACE,
         }
     }

@@ -169,8 +169,7 @@ fn clone_ohno_core() {
 #[test]
 fn clone_with_inner_error() {
     let inner = TestError::new("inner error");
-    let original = OhnoCore::from(inner)
-        .error_trace("trace message");
+    let original = OhnoCore::from(inner).error_trace("trace message");
     let cloned = original.clone();
 
     let _ = original.source().unwrap().downcast_ref::<TestError>().unwrap();
