@@ -78,7 +78,7 @@ $script:SemanticVersionRegex = [regex]'^\d+\.\d+\.\d+$'
 $script:CargoVersionRegex = [regex]'(?<=version\s*=\s*")[^"]+'
 
 # Pattern for GitHub repository URL matching
-$script:GitHubRepoRegex = [regex]'github\.com[/:][\w.-]+/[\w.-]+'
+$script:GitHubRepoRegex = [regex]'github\.com[/:]([\w.-]+/[\w.-]+)'
 
 # Pattern for regex metacharacters that need escaping
 $script:RegexEscapeRegex = [regex]'([\\\.$\^\{\[\(\|\)\*\+\?\/])'
@@ -136,15 +136,13 @@ function Get-CurrentVersion {
     param([string]$cargoTomlPath)
 
     if (-not (Test-Path $cargoTomlPath)) {
-        Write-Error "Could not find Cargo.toml file at '$cargoTomlPath'."
-        return $null
+        Write-Error "Could not find Cargo.toml file at '$cargoTomlPath'." -ErrorAction Stop
     }
 
     $cargoContent = Get-Content $cargoTomlPath -Raw
     $currentVersionMatch = $script:CargoVersionRegex.Match($cargoContent)
     if (-not $currentVersionMatch.Success) {
-        Write-Error "Could not determine current version from '$cargoTomlPath'."
-        return $null
+        Write-Error "Could not determine current version from '$cargoTomlPath'." -ErrorAction Stop
     }
 
     return $currentVersionMatch.Value
@@ -158,8 +156,12 @@ function Invoke-GitCommand {
 
     $result = Invoke-Expression "git $command" 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "$errorMessage. Git command: git $command. Error: $result"
-        return $null
+        Write-Error "$errorMessage. Git command: git $command. Error: $result" -ErrorAction Stop
+    }
+
+    # Return empty array instead of null for commands with no output
+    if ($null -eq $result -or $result.Count -eq 0) {
+        return @()
     }
 
     return $result
@@ -310,12 +312,17 @@ function Write-Changelog {
     )
 
     $tags = Invoke-GitCommand -Command "tag --list `"$crateName-v*`"" -ErrorMessage "Failed to retrieve git tags"
-    if ($null -eq $tags) {
-        Write-Warning "Could not retrieve git tags. Changelog generation may be incomplete."
+    if ($null -eq $tags -or $tags.Count -eq 0) {
+        Write-Warning "No tags found for crate '$crateName'. Generating changelog from all history."
         $tags = @()
     } else {
-        $tags = $tags | Where-Object { $_ -match "^${crateName}-v\d+\.\d+\.\d+$" } |
-            Sort-Object { [version]($_ -replace "${crateName}-v", '') }
+        $filteredTags = @($tags | Where-Object { $_ -match "^${crateName}-v\d+\.\d+\.\d+$" })
+        if ($filteredTags.Count -gt 0) {
+            $tags = @($filteredTags | Sort-Object { [version]($_ -replace "${crateName}-v", '') })
+        } else {
+            Write-Warning "No valid semantic version tags found for crate '$crateName'. Generating changelog from all history."
+            $tags = @()
+        }
     }
 
     $changelogContent = @("# Changelog", "")
@@ -326,8 +333,10 @@ function Write-Changelog {
     $latestTag = if ($tags.Count -gt 0) { $tags[-1] } else { $null }
     $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
     $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for unreleased commits"
-    if ($null -eq $rawCommits) {
+    if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
         $rawCommits = @()
+    } else {
+        $rawCommits = @($rawCommits)
     }
 
     if ($rawCommits) {
@@ -346,7 +355,12 @@ function Write-Changelog {
         $previousTag = if ($i -gt 0) { $tags[$i-1] } else { $null }
         $range = if ($previousTag) { "$previousTag..$currentTag" } else { $currentTag }
         $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for tag $currentTag"
-        if ($null -eq $rawCommits) {
+        if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
+            $rawCommits = @()
+        } else {
+            $rawCommits = @($rawCommits)
+        }
+        if ($rawCommits.Count -eq 0) {
             continue
         }
 
@@ -395,30 +409,30 @@ function Show-FinalMessage {
 # 1. INPUT VALIDATION
 if (-not (Test-ValidCrateName -crateName $CrateName)) {
     Write-Error "Invalid crate name '$CrateName'. Crate names must contain only letters, numbers, hyphens, and underscores, cannot start or end with hyphen, and must be 64 characters or less."
-    return
+    Exit 1
 }
 
 if (-not (Test-ValidVersion -version $Version)) {
     Write-Error "Invalid version format '$Version'. Version must follow semantic versioning format (e.g., '1.2.3')."
-    return
+    Exit 1
 }
 
 # 2. PRE-FLIGHT CHECKS
 if (-not (Test-CommandExists -command "git")) {
     Write-Error "Git is not installed or not found in your PATH."
-    return
+    Exit 1
 }
 
 $repoRoot = Get-Location
 if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
     Write-Error "This script must be run from the root of a Git repository."
-    return
+    Exit 1
 }
 
 $crateFolder = Join-Path $repoRoot "crates/$CrateName"
 if (-not (Test-Path $crateFolder)) {
     Write-Error "Crate folder not found at '$crateFolder'. Please check the CrateName."
-    return
+    Exit 1
 }
 
 # 3. DETERMINE GITHUB REPO URL
@@ -438,7 +452,7 @@ $changelogFile = Join-Path $crateFolder "CHANGELOG.md"
 
 if ((-not (Test-Path $crateCargoToml)) -or (-not (Test-Path $rootCargoToml))) {
     Write-Error "Could not find Cargo.toml file in the crate folder or repository root."
-    return
+    Exit 1
 }
 
 # 5. VERSION COMPARISON VALIDATION
@@ -446,22 +460,28 @@ if (-not [string]::IsNullOrEmpty($Version)) {
     $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
     if ($null -eq $currentVersion) {
         Write-Error "Failed to get current version for comparison. Aborting."
-        return
+        Exit 1
     }
 
     $versionComparison = Compare-SemanticVersions -version1 $Version -version2 $currentVersion
     if ($versionComparison -le 0) {
         Write-Error "Specified version '$Version' must be greater than current version '$currentVersion'. Please specify a higher version number."
-        return
+        Exit 1
     }
 }
 
 # 6. EXECUTE WORKFLOW
-$newVersion = Update-CrateVersion -crateName $CrateName -version $Version -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
-if ($null -eq $newVersion) {
-    Write-Error "Failed to update crate version. Aborting."
-    return
-}
+try {
+    $newVersion = Update-CrateVersion -crateName $CrateName -version $Version -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
+    if ($null -eq $newVersion) {
+        Write-Error "Failed to update crate version. Aborting."
+        Exit 1
+    }
 
-Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
-Show-FinalMessage -crateName $CrateName -newVersion $newVersion
+    Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
+    Show-FinalMessage -crateName $CrateName -newVersion $newVersion
+}
+catch {
+    Write-Error "Script failed: $_"
+    Exit 1
+}

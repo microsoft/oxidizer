@@ -189,7 +189,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "data_privacy"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "data_privacy_macros",
  "derive_more",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "insta",
  "mutants",
@@ -458,9 +458,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.43.2"
+version = "1.44.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46fdb647ebde000f43b5b53f773c30cf9b0cb4300453208713fa38b2c70935a0"
+checksum = "e8732d3774162a0851e3f2b150eb98f31a9885dd75985099421d393385a01dfd"
 dependencies = [
  "once_cell",
  "serde",
@@ -541,9 +541,9 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
 name = "mockall"
-version = "0.13.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39a6bfcc6c8c7eed5ee98b9c3e33adc726054389233e201c95dab2d41a3839d2"
+checksum = "f58d964098a5f9c6b63d0798e5372fd04708193510a7af313c22e9f29b7b620b"
 dependencies = [
  "cfg-if",
  "downcast",
@@ -555,9 +555,9 @@ dependencies = [
 
 [[package]]
 name = "mockall_derive"
-version = "0.13.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25ca3004c2efe9011bd4e461bd8256445052b9615405b4f7ea43fc8ca5c20898"
+checksum = "ca41ce716dda6a9be188b385aa78ee5260fc25cd3802cb2a8afdc6afbe6b6dbf"
 dependencies = [
  "cfg-if",
  "proc-macro2",
@@ -962,9 +962,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "syn"
-version = "2.0.110"
+version = "2.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a99801b5bd34ede4cf3fc688c5919368fea4e4814a4664359503e6015b280aea"
+checksum = "390cc9a294ab71bdb1aa2e99d13be9c753cd2d7bd6560c77118597410c4d2e87"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "many_cpus",
  "mutants",
@@ -1034,17 +1034,16 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "mutants",
  "syn",
- "thread_aware",
  "thread_aware_macros_impl",
 ]
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "insta",
  "prettyplease",

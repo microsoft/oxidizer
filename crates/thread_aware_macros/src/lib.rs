@@ -16,50 +16,7 @@
 use proc_macro::TokenStream;
 use syn::{Path, parse_quote};
 
-/// Derive macro implementing `ThreadAware` for structs and enums.
-///
-/// The generated implementation transfers each field by calling its own
-/// `ThreadAware::relocated` method. Fields annotated with `#[transfer(skip)]` are
-/// left as-is (moved without invoking `transfer`).
-///
-/// # Supported Items
-/// * Structs (named, tuple, or unit)
-/// * Enums (all variant field styles)
-///
-/// Unions are not supported and will produce a compile error.
-///
-/// # Attributes
-/// * `#[thread_aware(skip)]` – Prevents a field from being recursively transferred.
-///
-/// # Generic Bounds
-/// Generic type parameters appearing in non-skipped fields automatically receive a
-/// `::thread_aware::ThreadAware` bound (occurrences only inside `PhantomData<..>` are ignored).
-///
-/// # Example
-/// ```rust
-/// use thread_aware::{MemoryAffinity, ThreadAware};
-///
-/// #[derive(ThreadAware)]
-/// struct Payload {
-///     id: u64,
-///     data: Vec<u8>,
-/// }
-///
-/// #[derive(ThreadAware)]
-/// struct Wrapper {
-///     // This field will be recursively transferred.
-///     inner: Payload,
-///     // This field will be moved without calling `transfer`.
-///     #[thread_aware(skip)]
-///     raw_len: usize,
-/// }
-///
-/// fn demo(mut a1: MemoryAffinity, mut a2: MemoryAffinity, w: Wrapper) -> Wrapper {
-///     // Move the wrapper from a1 to a2.
-///     let moved = w.relocated(a1.clone(), a2.clone());
-///     moved
-/// }
-/// ```
+// Documented in the thread_aware crate's reexport
 #[proc_macro_derive(ThreadAware, attributes(thread_aware))]
 #[cfg_attr(test, mutants::skip)]
 pub fn derive_transfer(input: TokenStream) -> TokenStream {

@@ -210,8 +210,8 @@ pub use data_class::DataClass;
 ///
 /// This macro is applied to a newtype struct declaration. The newtype
 /// wraps an inner type that holds sensitive data. The macro generates
-/// an implementation of the [`Classified`], [`Debug`], [`Deref`],
-/// and [`DerefMut`] traits.
+/// an implementation of the [`Classified`], [`Debug`], [`Deref`](core::ops::Deref),
+/// and [`DerefMut`](core::ops::DerefMut) traits.
 ///
 /// # Example
 ///

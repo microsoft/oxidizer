@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware"
 description = "Facilities to support thread-isolated state."
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware"]
 categories = ["data-structures"]
