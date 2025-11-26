@@ -38,7 +38,6 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
     let input: ItemStruct = parse2(item)?;
 
     let struct_name = &input.ident;
-    let data_privacy_path = quote!(data_privacy);
     let data_class = macro_args.data_class;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -62,81 +61,87 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
     let field_type = &unnamed_fields.unnamed[0].ty;
 
     Ok(quote! {
-        #[derive(data_privacy_macros::ClassifiedDebug, data_privacy_macros::RedactedDebug, data_privacy_macros::RedactedDisplay, data_privacy_macros::RedactedToString)]
         #input
 
-        impl #impl_generics #struct_name #ty_generics #where_clause {
-            /// Exfiltrates the payload, allowing it to be used outside the classified context.
-            ///
-            /// Exfiltration should be done with caution, as it may expose sensitive information.
-            ///
-            /// # Returns
-            /// The original payload.
-            #[must_use]
-            fn declassify(self) -> #field_type {
-                self.0
-            }
-
-            /// Provides a reference to the declassified payload, allowing read access without ownership transfer.
-            ///
-            /// Exfiltration should be done with caution, as it may expose sensitive information.
-            ///
-            /// # Returns
-            /// A reference to the original payload.
-            #[must_use]
-            fn as_declassified(&self) -> &#field_type {
-                &self.0
-            }
-
-            /// Provides a mutable reference to the declassified payload, allowing write access without ownership transfer.
-            ///
-            /// Exfiltration should be done with caution, as it may expose sensitive information.
-            ///
-            /// # Returns
-            /// A mutable reference to the original payload.
-            #[must_use]
-            fn as_declassified_mut(&mut self) -> &mut #field_type {
-                &mut self.0
-            }
-
-            /// Returns the data class of the payload.
-            #[must_use]
-            fn data_class(&self) -> #data_privacy_path::DataClass {
+        impl #impl_generics ::data_privacy::Classified for #struct_name #ty_generics #where_clause {
+            fn data_class(&self) -> ::data_privacy::DataClass {
                 #data_class.data_class()
             }
         }
 
-        impl #impl_generics #data_privacy_path::Classified for #struct_name #ty_generics #where_clause {
-            type Payload = #field_type;
-
-            fn declassify(self) -> Self::Payload {
-                Self::declassify(self)
+        impl #impl_generics ::core::fmt::Debug for #struct_name #ty_generics #where_clause {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_fmt(format_args!("<CLASSIFIED:{}/{}>", data_privacy::Classified::data_class(self).taxonomy(), data_privacy::Classified::data_class(self).name()))
             }
+        }
 
-            fn as_declassified(&self) -> &Self::Payload {
-                Self::as_declassified(self)
+        impl #impl_generics ::core::fmt::Display for #struct_name #ty_generics #where_clause {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_fmt(format_args!("<CLASSIFIED:{}/{}>", data_privacy::Classified::data_class(self).taxonomy(), data_privacy::Classified::data_class(self).name()))
             }
+        }
 
-            fn as_declassified_mut(&mut self) -> &mut Self::Payload {
-                Self::as_declassified_mut(self)
+        impl #impl_generics ::data_privacy::RedactedDebug for #struct_name #ty_generics #where_clause {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "Converting from u64 to usize, value is known to be <= 128"
+            )]
+            fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let v = &self.0;
+                let mut local_buf = [0u8; 128];
+                let amount = {
+                    let mut cursor = ::std::io::Cursor::new(&mut local_buf[..]);
+                    if ::std::io::Write::write_fmt(&mut cursor, format_args!("{v:?}")).is_ok() {
+                        cursor.position() as usize
+                    } else {
+                        local_buf.len() + 1 // force fallback case on write errors
+                    }
+                };
+                if amount <= local_buf.len() {
+                    let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
+                    engine.redact(&self.data_class(), s, output)
+                } else {
+                    engine.redact(&self.data_class(), format!("{v:?}"), output)
+                }
             }
+        }
 
-            fn data_class(&self) -> #data_privacy_path::DataClass {
-                Self::data_class(self)
+        impl #impl_generics ::data_privacy::RedactedDisplay for #struct_name #ty_generics #where_clause {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "Converting from u64 to usize, value is known to be <= 128"
+            )]
+            fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
+                let v = &self.0;
+                let mut local_buf = [0u8; 128];
+                let amount = {
+                    let mut cursor = ::std::io::Cursor::new(&mut local_buf[..]);
+                    if ::std::io::Write::write_fmt(&mut cursor, format_args!("{v}")).is_ok() {
+                        cursor.position() as usize
+                    } else {
+                        local_buf.len() + 1 // force fallback case on write errors
+                    }
+                };
+                if amount <= local_buf.len() {
+                    let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
+                    engine.redact(&self.data_class(), s, output)
+                } else {
+                    engine.redact(&self.data_class(), format!("{v}"), output)
+                }
             }
         }
 
         impl #impl_generics core::ops::Deref for #struct_name #ty_generics #where_clause {
-            type Target = core::convert::Infallible;
+            type Target = ::core::convert::Infallible;
 
             fn deref(&self) -> &Self::Target {
-                todo!()
+                panic!("Deref to Infallible should never happen")
             }
         }
 
-        impl #impl_generics core::ops::DerefMut for #struct_name #ty_generics #where_clause {
+        impl #impl_generics ::core::ops::DerefMut for #struct_name #ty_generics #where_clause {
             fn deref_mut(&mut self) -> &mut Self::Target {
-                todo!()
+                panic!("Deref to Infallible should never happen")
             }
         }
     })
