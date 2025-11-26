@@ -57,7 +57,7 @@ impl<T> Unaware<T> {
 
     /// Converts an `Arc<Unaware<T>>` into an `Arc<T>`.
     pub fn into_arc(self: Arc<Self>) -> Arc<T> {
-        // SAFETY: `Inert` is a transparent wrapper around `T`,
+        // SAFETY: `Unaware` is a transparent wrapper around `T`,
         unsafe { std::mem::transmute(self) }
     }
 }
@@ -287,5 +287,14 @@ mod tests {
         let value = unaware(55);
         let inner = value.into_inner();
         assert_eq!(inner, 55);
+    }
+
+    #[test]
+    fn test_from_impl() {
+        let value: Unaware<i32> = 99.into();
+        assert_eq!(value.0, 99);
+
+        let string_value: Unaware<String> = "from impl".to_string().into();
+        assert_eq!(string_value.0, "from impl");
     }
 }
