@@ -571,7 +571,7 @@ mod tests {
         let _arc = trc.into_arc();
 
         let trc = Trc::new(Unaware(42));
-        let _arc = trc.into_arc().into_inner();
+        let _arc = trc.into_arc().into_arc();
     }
 
     #[test]
