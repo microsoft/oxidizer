@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::backtrace::{Backtrace as StdBacktrace, BacktraceStatus};
 use std::sync::Arc;
 

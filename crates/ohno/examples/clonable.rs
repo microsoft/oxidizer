@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! An example demonstrating a clonable error using the `ohno` crate.
 
 #[ohno::error]
