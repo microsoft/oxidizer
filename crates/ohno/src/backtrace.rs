@@ -21,6 +21,7 @@ pub(crate) enum Backtrace {
 
 impl Backtrace {
     /// Create a `Backtrace` from a standard backtrace.
+    #[cfg_attr(coverage_nightly, coverage(off))] // we can't create Unsupported backtraces in tests
     pub(crate) fn from_backtrace(bt: StdBacktrace) -> Self {
         match bt.status() {
             BacktraceStatus::Disabled => Self::Disabled,
@@ -63,5 +64,45 @@ impl Backtrace {
             Self::Captured(bt) => bt.as_ref(),
             _ => &DISABLED_BACKTRACE,
         }
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clonning() {
+        let bt1 = Backtrace::capture();
+        let bt2 = bt1.clone();
+        assert_eq!(bt1.status(), bt2.status());
+    }
+
+    #[test]
+    fn from_std_backtrace() {
+        let std_bt = StdBacktrace::capture();
+        let status = std_bt.status();
+        let bt = Backtrace::from_backtrace(std_bt);
+        assert_eq!(bt.status(), status);
+
+        let disabled_bt = StdBacktrace::disabled();
+        let bt_disabled = Backtrace::from_backtrace(disabled_bt);
+        assert_eq!(bt_disabled.status(), BacktraceStatus::Disabled);
+        assert!(matches!(bt_disabled, Backtrace::Disabled));
+    }
+
+    #[test]
+    fn status_conversion() {
+        let bt = Backtrace::Captured(Arc::new(StdBacktrace::disabled()));
+        assert_eq!(bt.status(), BacktraceStatus::Disabled);
+        let bt = Backtrace::Captured(Arc::new(StdBacktrace::force_capture()));
+        assert_eq!(bt.status(), BacktraceStatus::Captured);
+
+        let bt = Backtrace::Disabled;
+        assert_eq!(bt.status(), BacktraceStatus::Disabled);
+
+        let bt = Backtrace::Unsupported;
+        assert_eq!(bt.status(), BacktraceStatus::Unsupported);
     }
 }
