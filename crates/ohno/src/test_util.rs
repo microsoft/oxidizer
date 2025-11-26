@@ -52,7 +52,7 @@ macro_rules! assert_error_message {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use crate::OhnoCore;
+    use crate::{OhnoCore, backtrace::Backtrace};
 
     #[derive(crate::Error)]
     struct MyTestError {
@@ -69,7 +69,7 @@ mod tests {
     fn test_assert_error_message_with_backtrace() {
         let mut error = MyTestError::caused_by("test message");
         // Force a backtrace (this will be empty in test mode without RUST_BACKTRACE)
-        error.inner.data.backtrace = std::backtrace::Backtrace::disabled();
+        error.inner.data.backtrace = Backtrace::disabled();
         assert_error_message!(error, "test message");
     }
 

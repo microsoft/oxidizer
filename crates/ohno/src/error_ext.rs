@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::backtrace::Backtrace;
+use std::backtrace::Backtrace as StdBacktrace;
 use std::error::Error as StdError;
 
 /// Extension trait providing additional functionality for ohno error types.
@@ -44,7 +44,7 @@ pub trait ErrorExt: StdError {
     /// Controlled by environment variables:
     /// - `RUST_BACKTRACE=1` enables basic backtrace
     /// - `RUST_BACKTRACE=full` enables full backtrace with all frames
-    fn backtrace(&self) -> &Backtrace;
+    fn backtrace(&self) -> &StdBacktrace;
 
     /// Returns `true` if the error has a captured backtrace.
     ///
@@ -83,6 +83,8 @@ pub trait ErrorExt: StdError {
 #[cfg(test)]
 mod tests {
     use std::backtrace::BacktraceStatus;
+
+    use crate::backtrace::Backtrace;
 
     use super::*;
 
