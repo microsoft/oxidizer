@@ -21,6 +21,14 @@ use crate::{MemoryAffinity, ThreadAware};
 #[repr(transparent)]
 pub struct Unaware<T>(pub T);
 
+// The only way this could cause issues is if you had a `fn generic<T>(x: impl From<Unaware<T>>)` or similar,
+// which in practice is extremely unlikely to occur, especially since `Unaware` is not a common type.
+impl<T> From<T> for Unaware<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
 impl<T> Deref for Unaware<T> {
     type Target = T;
 
@@ -42,7 +50,13 @@ impl<T> ThreadAware for Unaware<T> {
 }
 
 impl<T> Unaware<T> {
-    pub fn into_inner(self: Arc<Self>) -> Arc<T> {
+    /// Consumes the wrapper and returns the inner value.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+
+    /// Converts an `Arc<Unaware<T>>` into an `Arc<T>`.
+    pub fn into_arc(self: Arc<Self>) -> Arc<T> {
         // SAFETY: `Inert` is a transparent wrapper around `T`,
         unsafe { std::mem::transmute(self) }
     }
@@ -169,23 +183,23 @@ mod tests {
     }
 
     #[test]
-    fn test_unaware_into_inner() {
+    fn test_unaware_into_arc() {
         // Test with i32
         let value = Unaware(42);
         let arc_unaware = Arc::new(value);
-        let arc_inner: Arc<i32> = arc_unaware.into_inner();
+        let arc_inner: Arc<i32> = arc_unaware.into_arc();
         assert_eq!(*arc_inner, 42);
 
         // Test with String
         let value = Unaware("hello".to_string());
         let arc_unaware = Arc::new(value);
-        let arc_inner: Arc<String> = arc_unaware.into_inner();
+        let arc_inner: Arc<String> = arc_unaware.into_arc();
         assert_eq!(*arc_inner, "hello");
 
         // Test with Vec
         let value = Unaware(vec![1, 2, 3, 4, 5]);
         let arc_unaware = Arc::new(value);
-        let arc_inner: Arc<Vec<i32>> = arc_unaware.into_inner();
+        let arc_inner: Arc<Vec<i32>> = arc_unaware.into_arc();
 
         assert_eq!(*arc_inner, vec![1, 2, 3, 4, 5]);
     }
@@ -198,7 +212,7 @@ mod tests {
 
         assert_eq!(Arc::strong_count(&arc_unaware), 2);
 
-        let arc_inner: Arc<i32> = arc_unaware.into_inner();
+        let arc_inner: Arc<i32> = arc_unaware.into_arc();
 
         // Arc count should be preserved (though one handle is now the inner type)
         assert_eq!(Arc::strong_count(&arc_inner), 2);
@@ -266,5 +280,12 @@ mod tests {
         // Test that unaware is a const function
         const VALUE: Unaware<i32> = unaware(42);
         assert_eq!(VALUE.0, 42);
+    }
+
+    #[test]
+    fn test_unaware_into_inner() {
+        let value = unaware(55);
+        let inner = value.into_inner();
+        assert_eq!(inner, 55);
     }
 }
