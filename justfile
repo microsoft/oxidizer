@@ -8,7 +8,7 @@ set shell := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
 #set script-interpreter := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive"]
 
 
-mutants: 
+mutants:
     scripts/mutants.ps1
 
 test:
