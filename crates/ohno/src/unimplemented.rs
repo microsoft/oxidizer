@@ -9,14 +9,16 @@ use crate::OhnoCore;
 
 /// Error type for unimplemented functionality.
 ///
-/// This error type is used to signal that a particular code path or feature
-/// has not yet been implemented. It captures the file location and line number
-/// where the error was created, along with an optional custom message.
+/// This type is designed to replace panicking macros like [`todo!`] and
+/// [`unimplemented!`] with a proper error that can be handled gracefully.
+///
+/// See the documentation for the [`unimplemented_error!`](crate::unimplemented_error!) macro for 
+/// more details.
 ///
 /// # Examples
 ///
 /// ```
-/// use ohno::Unimplemented;
+/// use ohno::{Unimplemented, unimplemented_error};
 ///
 /// fn not_ready_yet() -> Result<(), Unimplemented> {
 ///     unimplemented_error!("this feature is coming soon")
@@ -72,11 +74,27 @@ impl Unimplemented {
     }
 }
 
-/// Returns an `Unimplemented` error from the current function.
+/// Returns an [`Unimplemented`] error from the current function.
 ///
-/// This macro is a convenient way to signal that a code path has not been
-/// implemented yet. It automatically captures the file and line information
-/// and returns early with an `Unimplemented` error.
+/// This macro is designed to replace panicking macros like [`todo!`] and
+/// [`unimplemented!`] with a proper error that can be handled gracefully.
+/// It automatically captures the file and line information and returns early
+/// with an `Unimplemented` error.
+///
+/// Unlike the standard panicking macros, this allows your application to:
+///
+/// - Continue running and handle the error appropriately
+/// - Log the error with full context (file, line, message)
+/// - Return meaningful error responses to users instead of crashing
+/// - Test error paths without triggering panics
+///
+/// To prevent accidental use of panicking macros, enable these clippy lints:
+///
+/// ```toml
+/// [workspace.lints.clippy]
+/// todo = "deny"
+/// unimplemented = "deny"
+/// ```
 ///
 /// The error can be automatically converted into any error type that implements
 /// `From<Unimplemented>`, making it easy to use in functions with different
