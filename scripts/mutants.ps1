@@ -42,10 +42,11 @@ function mutate_group($group) {
     $crates = $group -join ","
     Write-Host "Mutating group: $crates"
 
+    $packages_arg = $group | ForEach-Object { "--package=$_"}
+
     $args = @(
         "--no-shuffle",
-        "--baseline=skip",
-        "--package=$crates",
+        # "--baseline=skip",
         "--colors=never",
         "--jobs=$jobs",
         "--build-timeout=$build_timeout",
@@ -53,7 +54,7 @@ function mutate_group($group) {
         "-vV"
     )
 
-    $mutate_command = "cargo mutants " + ($args -join " ")
+    $mutate_command = "cargo mutants " + ($args -join " ") + " " + ($packages_arg -join " ")
     Write-Host "Running command: $mutate_command"
 
     Invoke-Expression $mutate_command
