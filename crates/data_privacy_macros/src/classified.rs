@@ -87,6 +87,8 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
                 reason = "Converting from u64 to usize, value is known to be <= 128"
             )]
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                use data_privacy::Classified;
+
                 let v = &self.0;
                 let mut local_buf = [0u8; 128];
                 let amount = {
@@ -112,6 +114,8 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
                 reason = "Converting from u64 to usize, value is known to be <= 128"
             )]
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
+                use data_privacy::Classified;
+
                 let v = &self.0;
                 let mut local_buf = [0u8; 128];
                 let amount = {

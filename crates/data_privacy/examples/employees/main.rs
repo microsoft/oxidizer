@@ -46,6 +46,7 @@ use logging::{log, set_redaction_engine_for_logging};
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
 use std::io::{Write, stdin, stdout};
+use crate::employee::{Employee, EmployeeID, UserAddress, UserName};
 
 fn main() {
     // First step, we create a redaction engine that prescribes how to redact individual data classes.
@@ -74,13 +75,13 @@ fn main() {
 
 fn app_loop() {
     let json_path = "employees.json";
-    // let mut employees: Vec<Employee> = File::open(json_path).map_or_else(
-    //     |_| Vec::new(),
-    //     |file| {
-    //         let reader = BufReader::new(file);
-    //         serde_json::from_reader(reader).unwrap_or_default()
-    //     },
-    // );
+    let mut employees: Vec<Employee> = File::open(json_path).map_or_else(
+        |_| Vec::new(),
+        |file| {
+            let reader = BufReader::new(file);
+            serde_json::from_reader(reader).unwrap_or_default()
+        },
+    );
 
     loop {
         println!("Enter employee details (type 'quit' to exit):");
@@ -112,43 +113,48 @@ fn app_loop() {
             continue;
         };
 
-        // let employee = Employee {
-        //     name: UserName::new(name),
-        //     address: UserAddress::new(address),
-        //     id: EmployeeID::new(id),
-        //     age,
-        // };
+        let employee = Employee {
+            name: UserName::new(name),
+            address: UserAddress::new(address),
+            id: EmployeeID::new(id),
+            age,
+        };
 
-        // employees.push(employee.clone());
+        employees.push(employee.clone());
 
-        // match OpenOptions::new().write(true).create(true).truncate(true).open(json_path) {
-        //     Ok(file) => {
-        //         match serde_json::to_writer_pretty(file, &employees) {
-        //             Ok(()) => {
-        //                 // Here we log the employee creation event. Our little logging framework takes as input a set of name/value pairs that provide
-        //                 // a structured log record.
-        //                 //
-        //                 // For each value, you can control which trait is used to format the value into a string:
-        //                 //   `name` - formats the value with the `Display` trait.
-        //                 //   `name:?` - formats the value with the `Debug` trait.
-        //                 //   `name:@` - formats the value with the `Display` trait and redacts it.
-        //                 // log!(event = "Employee created",
-        //                 //      name:@ = employee.name,
-        //                 //      address:@ = employee.address,
-        //                 //      employee_id:@ = employee.id,
-        //                 //      age = employee.age);
-        //             }
-        //
-        //             Err(error) => {
-        //                 log!(event = "Employee database write error", error = error);
-        //             }
-        //         }
-        //     }
-        //
-        //     Err(error) => {
-        //         log!(event = "Employee database read error", error = error);
-        //     }
-        // }
+        match OpenOptions::new().write(true).create(true).truncate(true).open(json_path) {
+            Ok(file) => {
+                match serde_json::to_writer_pretty(file, &employees) {
+                    Ok(()) => {
+                        // Here we log the employee creation event. Our little logging framework takes as input a set of name/value pairs that provide
+                        // a structured log record.
+                        //
+                        // For each value, you can control which trait is used to format the value into a string:
+                        //   `name` - formats the value with the `Display` trait.
+                        //   `name:?` - formats the value with the `Debug` trait.
+                        //   `name:@` - formats the value with the `Display` trait and redacts it.
+
+                        // We can log the entire type as-is, and it will properly perform redaction on all fields.
+                        log!(event = "Employee created", employee:@ = employee);
+
+                        // Or we logs the fields individually
+                        log!(event = "Employee fields",
+                             name:@ = employee.name,
+                             address:@ = employee.address,
+                             employee_id:@ = employee.id,
+                             age = employee.age);
+                    }
+
+                    Err(error) => {
+                        log!(event = "Employee database write error", error = error);
+                    }
+                }
+            }
+
+            Err(error) => {
+                log!(event = "Employee database read error", error = error);
+            }
+        }
     }
 }
 
