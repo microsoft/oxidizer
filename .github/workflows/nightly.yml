@@ -66,7 +66,7 @@ jobs:
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          tool: just cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
 
       # execute
       - name: Mutate All
@@ -75,7 +75,7 @@ jobs:
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 180
-        run: cargo mutants --no-shuffle --baseline=skip --test-workspace=true --colors=never --jobs=4 --build-timeout=600 --timeout=300 -vV
+        run: just mutants
 
       - name: Create or Update Issue on Failure
         if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
