@@ -9,4 +9,4 @@ mutants:
     scripts/mutants.ps1
 
 test:
-    cargo test --all --all-features --locked
+    cargo test --all --all-features --locked 
