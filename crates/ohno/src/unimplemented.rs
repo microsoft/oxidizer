@@ -39,10 +39,12 @@ impl Unimplemented {
         }
     }
 
+    #[must_use]
     pub fn file(&self) -> &str {
         &self.file
     }
 
+    #[must_use]
     pub fn line(&self) -> usize {
         self.line
     }
