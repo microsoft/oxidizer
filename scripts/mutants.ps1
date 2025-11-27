@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $True
 
 $jobs = 1
 $build_timeout_sec = 600
