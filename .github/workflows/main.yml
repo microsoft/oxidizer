@@ -22,6 +22,7 @@ env:
   # Tool versions
   CARGO_AUDIT_VERSION: "0.22.0"
   CARGO_CHECK_EXTERNAL_TYPES_VERSION: "0.3.0"
+  CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: "0.2.0"
   CARGO_HACK_VERSION: "0.6.39"
   CARGO_LLVM_COV_VERSION: "0.6.21"
   CARGO_MUTANTS_VERSION: "25.3.1"
@@ -112,7 +113,7 @@ jobs:
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
 
       # execute
       - name: Clippy
@@ -125,6 +126,8 @@ jobs:
         run: cargo doc --no-deps --workspace --all-features
       - name: Rdme
         run: cargo workspaces exec cargo rdme --check --no-fail-on-warnings
+      - name: Default Features
+        run: cargo ensure-no-default-features
 
   extended-analysis:
     if: github.event_name == 'pull_request'
@@ -323,18 +326,3 @@ jobs:
               fi
             fi
           done
-
-  ensure-no-default-features:
-    runs-on: ubuntu-latest
-    steps:
-      # prep
-      - name: Checkout
-        uses: actions/checkout@v6.0.0
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY }}
-
-      # execute
-      - name: Ensure No Default Features
-        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/ensure-no-default-features.rs
