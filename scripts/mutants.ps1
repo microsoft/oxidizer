@@ -8,7 +8,7 @@ $timeout = 300
 
 # Define test groups for mutants testing
 $test_groups = @(
-    @("butesbuf"),
+    @("bytesbuf"),
     @("data_privacy", "data_privacy_macros"),
     @("fundle", "fundle_macros", "fundle_macros_impl"),
     @("ohno", "ohno_macros"),
