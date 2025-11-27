@@ -63,10 +63,10 @@ jobs:
           components: clippy, rustfmt
       - name: Installing Wild Linker
         uses: davidlattimore/wild-action@0.7.0
-      - name: Install Tools  
-        uses: taiki-e/install-action@v2.62.53  
-        with:  
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }},just 
+      - name: Install Tools
+        uses: taiki-e/install-action@v2.62.53
+        with:
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }},just
 
       # execute
       - name: Mutate All
