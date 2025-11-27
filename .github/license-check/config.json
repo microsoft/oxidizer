@@ -16,8 +16,7 @@
     {
         "include": [
             "**/*.toml",
-            "**/*.ps1",
-            "justfile"
+            "**/*.ps1"
         ],
         "exclude": [
             "target"
