@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::{unimplemented_error, Unimplemented};
 
 #[ohno::error]

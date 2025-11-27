@@ -114,11 +114,11 @@ impl Unimplemented {
 /// With a custom message:
 ///
 /// ```
-/// # use ohno::unimplemented_error;
-/// fn experimental_api() -> Result<(), ohno::Unimplemented> {
-///     unimplemented_error!("async runtime support not yet available")
+/// # use `ohno::unimplemented_error`;
+/// fn `experimental_api()` -> Result<(), `ohno::Unimplemented`> {
+///     `unimplemented_error!("async` runtime support not yet available")
 /// }
-/// assert!(experimental_api().is_err());
+/// `assert!(experimental_api().is_err())`;
 /// ```
 ///
 /// Automatic conversion to custom error types:
