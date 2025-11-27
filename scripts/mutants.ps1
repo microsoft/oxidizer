@@ -39,7 +39,8 @@ if ($not_included.Count -gt 0) {
 }
 
 
-function mutate_group($group) {
+function mutate_group {
+    param([array]$group)
     $crates = $group -join ","
     Write-Host "Mutating group: $crates"
 
