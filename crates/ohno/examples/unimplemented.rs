@@ -3,7 +3,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::{unimplemented_error, Unimplemented};
+use ohno::{Unimplemented, unimplemented_error};
 
 #[ohno::error]
 #[from(Unimplemented)]

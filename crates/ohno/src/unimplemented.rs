@@ -12,7 +12,7 @@ use crate::OhnoCore;
 /// This type is designed to replace panicking macros like [`todo!`] and
 /// [`unimplemented!`] with a proper error that can be handled gracefully.
 ///
-/// See the documentation for the [`unimplemented_error!`](crate::unimplemented_error!) macro for 
+/// See the documentation for the [`unimplemented_error!`](crate::unimplemented_error!) macro for
 /// more details.
 ///
 /// # Examples
@@ -49,11 +49,7 @@ impl Unimplemented {
     /// The message provides additional context about why the functionality
     /// is not yet implemented or what needs to be done.
     #[must_use]
-    pub fn with_message(
-        message: impl Into<Cow<'static, str>>,
-        file: Cow<'static, str>,
-        line: usize,
-    ) -> Self {
+    pub fn with_message(message: impl Into<Cow<'static, str>>, file: Cow<'static, str>, line: usize) -> Self {
         Self {
             file,
             line,
@@ -136,19 +132,10 @@ impl Unimplemented {
 #[macro_export]
 macro_rules! unimplemented_error {
     () => {
-        return Err($crate::Unimplemented::new(
-            std::borrow::Cow::Borrowed(file!()),
-            line!() as usize,
-        )
-        .into())
+        return Err($crate::Unimplemented::new(std::borrow::Cow::Borrowed(file!()), line!() as usize).into())
     };
     ($ex:expr) => {
-        return Err($crate::Unimplemented::with_message(
-            $ex,
-            std::borrow::Cow::Borrowed(file!()),
-            line!() as usize,
-        )
-        .into())
+        return Err($crate::Unimplemented::with_message($ex, std::borrow::Cow::Borrowed(file!()), line!() as usize).into())
     };
 }
 
