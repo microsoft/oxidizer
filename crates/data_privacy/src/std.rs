@@ -10,15 +10,15 @@ pub const PUBLIC: DataClass = DataClass::new("public", "data");
 /// Implements Classified and RedactedDebug for non-generic std types.
 macro_rules! impl_std_traits_debug_only {
     ($ty:ty, $data_class:expr) => {
-        impl Classified for $ty {
-            fn data_class(&self) -> DataClass {
+        impl $crate::Classified for $ty {
+            fn data_class(&self) -> $crate::DataClass {
                 $data_class
             }
         }
 
-        impl RedactedDebug for $ty {
-            fn fmt(&self, _: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-                <Self as Debug>::fmt(self, f)
+        impl $crate::RedactedDebug for $ty {
+            fn fmt(&self, _: &$crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                <Self as ::std::fmt::Debug>::fmt(self, f)
             }
         }
     };
@@ -29,9 +29,9 @@ macro_rules! impl_std_traits {
     ($ty:ty, $data_class:expr) => {
         impl_std_traits_debug_only!($ty, $data_class);
 
-        impl RedactedDisplay for $ty {
-            fn fmt(&self, _: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-                <Self as Display>::fmt(self, f)
+        impl $crate::RedactedDisplay for $ty {
+            fn fmt(&self, _: &$crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                <Self as ::std::fmt::Display>::fmt(self, f)
             }
         }
     };
@@ -40,18 +40,18 @@ macro_rules! impl_std_traits {
 /// Implements Classified and RedactedDebug for generic std types (no Display).
 macro_rules! impl_std_traits_generic_debug_only {
     ($ty:ty, $data_class:expr, $($bounds:tt)*) => {
-        impl<$($bounds)*> Classified for $ty {
-            fn data_class(&self) -> DataClass {
+        impl<$($bounds)*> $crate::Classified for $ty {
+            fn data_class(&self) -> $crate::DataClass {
                 $data_class
             }
         }
 
-        impl<$($bounds)*> RedactedDebug for $ty
+        impl<$($bounds)*> $crate::RedactedDebug for $ty
         where
             $($bounds)*
         {
-            fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-                <Self as Debug>::fmt(self, f)
+            fn fmt(&self, _engine: &$crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                <Self as ::std::fmt::Debug>::fmt(self, f)
             }
         }
     };
@@ -62,12 +62,12 @@ macro_rules! impl_std_traits_generic {
     ($ty:ty, $data_class:expr, $($bounds:tt)*) => {
         impl_std_traits_generic_debug_only!($ty, $data_class, $($bounds)*);
 
-        impl<$($bounds)*> RedactedDisplay for $ty
+        impl<$($bounds)*> $crate::RedactedDisplay for $ty
         where
             $($bounds)*
         {
-            fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-                <Self as Display>::fmt(self, f)
+            fn fmt(&self, _engine: &$crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                <Self as ::std::fmt::Display>::fmt(self, f)
             }
         }
     };
@@ -108,127 +108,127 @@ impl_std_traits_generic_debug_only!(&[T], PUBLIC, T: RedactedDebug + Classified 
 impl_std_traits_generic_debug_only!(&mut [T], PUBLIC, T: RedactedDebug + Classified + Debug);
 
 // Box can display if T can display (manual impl for ?Sized)
-impl<T: ?Sized> Classified for Box<T>
+impl<T: ?Sized> crate::Classified for ::std::boxed::Box<T>
 where
-    T: Classified,
+    T: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T: ?Sized> RedactedDebug for Box<T>
+impl<T: ?Sized> crate::RedactedDebug for ::std::boxed::Box<T>
 where
-    T: RedactedDebug + Debug,
+    T: crate::RedactedDebug + ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> RedactedDisplay for Box<T>
+impl<T: ?Sized> crate::RedactedDisplay for ::std::boxed::Box<T>
 where
-    T: RedactedDisplay + Display,
+    T: crate::RedactedDisplay + ::std::fmt::Display,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Display>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Display>::fmt(self, f)
     }
 }
 
 // Result with two type parameters (no Display)
-impl<T, E> Classified for Result<T, E>
+impl<T, E> crate::Classified for ::std::result::Result<T, E>
 where
-    T: Classified,
-    E: Classified,
+    T: crate::Classified,
+    E: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T, E> RedactedDebug for Result<T, E>
+impl<T, E> crate::RedactedDebug for ::std::result::Result<T, E>
 where
-    T: RedactedDebug + Debug,
-    E: RedactedDebug + Debug,
+    T: crate::RedactedDebug + ::std::fmt::Debug,
+    E: crate::RedactedDebug + ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
 // Smart pointers (can display if T can display, manual impl for ?Sized)
-impl<T: ?Sized> Classified for std::rc::Rc<T>
+impl<T: ?Sized> crate::Classified for ::std::rc::Rc<T>
 where
-    T: Classified,
+    T: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T: ?Sized> RedactedDebug for std::rc::Rc<T>
+impl<T: ?Sized> crate::RedactedDebug for ::std::rc::Rc<T>
 where
-    T: RedactedDebug + Debug,
+    T: crate::RedactedDebug + ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> RedactedDisplay for std::rc::Rc<T>
+impl<T: ?Sized> crate::RedactedDisplay for ::std::rc::Rc<T>
 where
-    T: RedactedDisplay + Display,
+    T: crate::RedactedDisplay + ::std::fmt::Display,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Display>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Display>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> Classified for std::sync::Arc<T>
+impl<T: ?Sized> crate::Classified for ::std::sync::Arc<T>
 where
-    T: Classified,
+    T: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T: ?Sized> RedactedDebug for std::sync::Arc<T>
+impl<T: ?Sized> crate::RedactedDebug for ::std::sync::Arc<T>
 where
-    T: RedactedDebug + Debug,
+    T: crate::RedactedDebug + ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> RedactedDisplay for std::sync::Arc<T>
+impl<T: ?Sized> crate::RedactedDisplay for ::std::sync::Arc<T>
 where
-    T: RedactedDisplay + Display,
+    T: crate::RedactedDisplay + ::std::fmt::Display,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Display>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Display>::fmt(self, f)
     }
 }
 
 // Cow with lifetime (no Display in general)
-impl<'a, T> Classified for std::borrow::Cow<'a, T>
+impl<'a, T> crate::Classified for ::std::borrow::Cow<'a, T>
 where
-    T: ToOwned + ?Sized,
-    T::Owned: Classified,
+    T: ::std::borrow::ToOwned + ?Sized,
+    T::Owned: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<'a, T> RedactedDebug for std::borrow::Cow<'a, T>
+impl<'a, T> crate::RedactedDebug for ::std::borrow::Cow<'a, T>
 where
-    T: ToOwned + ?Sized,
-    std::borrow::Cow<'a, T>: Debug,
+    T: ::std::borrow::ToOwned + ?Sized,
+    ::std::borrow::Cow<'a, T>: ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
@@ -239,43 +239,43 @@ impl_std_traits_generic_debug_only!(std::collections::HashSet<T>, PUBLIC, T: Red
 impl_std_traits_generic_debug_only!(std::collections::BTreeSet<T>, PUBLIC, T: RedactedDebug + Classified + Debug + Ord);
 
 // Maps with two type parameters (no Display)
-impl<K, V> Classified for std::collections::HashMap<K, V>
+impl<K, V> crate::Classified for ::std::collections::HashMap<K, V>
 where
-    K: Classified,
-    V: Classified,
+    K: crate::Classified,
+    V: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<K, V> RedactedDebug for std::collections::HashMap<K, V>
+impl<K, V> crate::RedactedDebug for ::std::collections::HashMap<K, V>
 where
-    K: RedactedDebug + Debug,
-    V: RedactedDebug + Debug,
+    K: crate::RedactedDebug + ::std::fmt::Debug,
+    V: crate::RedactedDebug + ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<K, V> Classified for std::collections::BTreeMap<K, V>
+impl<K, V> crate::Classified for ::std::collections::BTreeMap<K, V>
 where
-    K: Classified,
-    V: Classified,
+    K: crate::Classified,
+    V: crate::Classified,
 {
-    fn data_class(&self) -> DataClass {
+    fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<K, V> RedactedDebug for std::collections::BTreeMap<K, V>
+impl<K, V> crate::RedactedDebug for ::std::collections::BTreeMap<K, V>
 where
-    K: RedactedDebug + Debug,
-    V: RedactedDebug + Debug,
+    K: crate::RedactedDebug + ::std::fmt::Debug,
+    V: crate::RedactedDebug + ::std::fmt::Debug,
 {
-    fn fmt(&self, _engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        <Self as Debug>::fmt(self, f)
+    fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 

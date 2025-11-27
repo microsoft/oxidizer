@@ -29,13 +29,13 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
                 let field_type = &field.ty;
                 if i == 0 {
                     quote! {
-                        write!(f, " {}: ", #field_name_str)?;
-                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                        ::std::write!(f, " {}: ", #field_name_str)?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
                     }
                 } else {
                     quote! {
-                        write!(f, ", {}: ", #field_name_str)?;
-                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                        ::std::write!(f, ", {}: ", #field_name_str)?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
                     }
                 }
             });
@@ -47,12 +47,12 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
                 let index = syn::Index::from(i);
                 if i == 0 {
                     quote! {
-                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
                     }
                 } else {
                     quote! {
-                        write!(f, ", ")?;
-                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                        ::std::write!(f, ", ")?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
                     }
                 }
             });
@@ -71,16 +71,16 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
     };
 
     Ok(quote! {
-        impl #impl_generics data_privacy::RedactedDebug for #name #ty_generics #where_clause {
+        impl #impl_generics ::data_privacy::RedactedDebug for #name #ty_generics #where_clause {
             fn fmt(
                 &self,
-                engine: &data_privacy::RedactionEngine,
-                f: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
-                write!(f, #opening)?;
+                engine: &::data_privacy::RedactionEngine,
+                f: &mut ::std::fmt::Formatter,
+            ) -> ::std::fmt::Result {
+                ::std::write!(f, #opening)?;
                 #field_fmt_calls
-                write!(f, #closing)?;
-                Ok(())
+                ::std::write!(f, #closing)?;
+                ::std::result::Result::Ok(())
             }
         }
     })
@@ -110,13 +110,13 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
                 let field_type = &field.ty;
                 if i == 0 {
                     quote! {
-                        write!(f, " {}: ", #field_name_str)?;
-                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                        ::std::write!(f, " {}: ", #field_name_str)?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
                     }
                 } else {
                     quote! {
-                        write!(f, ", {}: ", #field_name_str)?;
-                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                        ::std::write!(f, ", {}: ", #field_name_str)?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
                     }
                 }
             });
@@ -128,12 +128,12 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
                 let index = syn::Index::from(i);
                 if i == 0 {
                     quote! {
-                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
                     }
                 } else {
                     quote! {
-                        write!(f, ", ")?;
-                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                        ::std::write!(f, ", ")?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
                     }
                 }
             });
@@ -152,16 +152,16 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
     };
 
     Ok(quote! {
-        impl #impl_generics data_privacy::RedactedDisplay for #name #ty_generics #where_clause {
+        impl #impl_generics ::data_privacy::RedactedDisplay for #name #ty_generics #where_clause {
             fn fmt(
                 &self,
-                engine: &data_privacy::RedactionEngine,
-                f: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
-                write!(f, #opening)?;
+                engine: &::data_privacy::RedactionEngine,
+                f: &mut ::std::fmt::Formatter,
+            ) -> ::std::fmt::Result {
+                ::std::write!(f, #opening)?;
                 #field_fmt_calls
-                write!(f, #closing)?;
-                Ok(())
+                ::std::write!(f, #closing)?;
+                ::std::result::Result::Ok(())
             }
         }
     })
@@ -191,13 +191,13 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
                 let field_type = &field.ty;
                 if i == 0 {
                     quote! {
-                        result.push_str(&format!(" {}: ", #field_name_str));
-                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
+                        result.push_str(&::std::format!(" {}: ", #field_name_str));
+                        result.push_str(&<#field_type as ::data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
                     }
                 } else {
                     quote! {
-                        result.push_str(&format!(", {}: ", #field_name_str));
-                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
+                        result.push_str(&::std::format!(", {}: ", #field_name_str));
+                        result.push_str(&<#field_type as ::data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
                     }
                 }
             });
@@ -209,12 +209,12 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
                 let index = syn::Index::from(i);
                 if i == 0 {
                     quote! {
-                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#index, engine));
+                        result.push_str(&<#field_type as ::data_privacy::RedactedToString>::to_string(&self.#index, engine));
                     }
                 } else {
                     quote! {
                         result.push_str(", ");
-                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#index, engine));
+                        result.push_str(&<#field_type as ::data_privacy::RedactedToString>::to_string(&self.#index, engine));
                     }
                 }
             });
@@ -233,9 +233,9 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
     };
 
     Ok(quote! {
-        impl #impl_generics data_privacy::RedactedToString for #name #ty_generics #where_clause {
-            fn to_string(&self, engine: &data_privacy::RedactionEngine) -> String {
-                let mut result = String::from(#opening);
+        impl #impl_generics ::data_privacy::RedactedToString for #name #ty_generics #where_clause {
+            fn to_string(&self, engine: &::data_privacy::RedactionEngine) -> ::std::string::String {
+                let mut result = ::std::string::String::from(#opening);
                 #field_to_string_calls
                 result.push_str(#closing);
                 result
