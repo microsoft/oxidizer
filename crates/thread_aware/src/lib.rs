@@ -103,6 +103,51 @@ pub use core::{MemoryAffinity, ThreadAware, create_manual_affinities};
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
+
+/// Derive macro implementing `ThreadAware` for structs and enums.
+///
+/// The generated implementation transfers each field by calling its own
+/// `ThreadAware::relocated` method. Fields annotated with `#[thread_aware(skip)]` are
+/// left as-is (moved without invoking `transfer`).
+///
+/// # Supported Items
+/// * Structs (named, tuple, or unit)
+/// * Enums (all variant field styles)
+///
+/// Unions are not supported and will produce a compile error.
+///
+/// # Attributes
+/// * `#[thread_aware(skip)]` – Prevents a field from being recursively transferred.
+///
+/// # Generic Bounds
+/// Generic type parameters appearing in non-skipped fields automatically receive a
+/// `::thread_aware::ThreadAware` bound (occurrences only inside `PhantomData<..>` are ignored).
+///
+/// # Example
+/// ```rust
+/// use thread_aware::{MemoryAffinity, ThreadAware};
+///
+/// #[derive(ThreadAware)]
+/// struct Payload {
+///     id: u64,
+///     data: Vec<u8>,
+/// }
+///
+/// #[derive(ThreadAware)]
+/// struct Wrapper {
+///     // This field will be recursively transferred.
+///     inner: Payload,
+///     // This field will be moved without calling `transfer`.
+///     #[thread_aware(skip)]
+///     raw_len: usize,
+/// }
+///
+/// fn demo(mut a1: MemoryAffinity, mut a2: MemoryAffinity, w: Wrapper) -> Wrapper {
+///     // Move the wrapper from a1 to a2.
+///     let moved = w.relocated(a1.clone(), a2.clone());
+///     moved
+/// }
+/// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
 pub use cell::{

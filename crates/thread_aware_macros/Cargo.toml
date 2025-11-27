@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware_macros"
 description = "Macros for the thread_aware crate."
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware", "macro", "derive"]
 categories = ["data-structures"]
@@ -24,7 +24,6 @@ syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "
 thread_aware_macros_impl.workspace = true
 
 [dev-dependencies]
-thread_aware = { path = "../thread_aware" }
 mutants.workspace = true
 
 [lints]

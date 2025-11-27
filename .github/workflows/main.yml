@@ -71,6 +71,10 @@ jobs:
         run: cargo hack build --each-feature --workspace --verbose --locked
       - name: Tests
         run: cargo test --verbose --workspace --all-features
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --verbose --workspace --all-features
       - name: Doc Tests
         run: cargo test --doc --verbose --workspace --all-features
 
