@@ -58,8 +58,6 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
         return Err(syn::Error::new_spanned(unnamed_fields, "Tuple struct must have exactly one field"));
     }
 
-    let field_type = &unnamed_fields.unnamed[0].ty;
-
     Ok(quote! {
         #input
 
