@@ -7,6 +7,21 @@ use std::borrow::Cow;
 
 use crate::OhnoCore;
 
+/// Error type for unimplemented functionality.
+///
+/// This error type is used to signal that a particular code path or feature
+/// has not yet been implemented. It captures the file location and line number
+/// where the error was created, along with an optional custom message.
+///
+/// # Examples
+///
+/// ```
+/// use ohno::Unimplemented;
+///
+/// fn not_ready_yet() -> Result<(), Unimplemented> {
+///     unimplemented_error!("this feature is coming soon")
+/// }
+/// ```
 #[derive(crate::Error, Clone)]
 #[no_constructors]
 #[display("not implemented at {file}:{line}")]
@@ -17,6 +32,7 @@ pub struct Unimplemented {
 }
 
 impl Unimplemented {
+    /// Creates a new `Unimplemented` error.
     #[must_use]
     pub fn new(file: Cow<'static, str>, line: usize) -> Self {
         Self {
@@ -26,6 +42,10 @@ impl Unimplemented {
         }
     }
 
+    /// Creates a new `Unimplemented` error with a custom message.
+    ///
+    /// The message provides additional context about why the functionality
+    /// is not yet implemented or what needs to be done.
     #[must_use]
     pub fn with_message(
         message: impl Into<Cow<'static, str>>,
@@ -39,17 +59,61 @@ impl Unimplemented {
         }
     }
 
+    /// Returns the file path where this error was created.
     #[must_use]
     pub fn file(&self) -> &str {
         &self.file
     }
 
+    /// Returns the line number where this error was created.
     #[must_use]
     pub fn line(&self) -> usize {
         self.line
     }
 }
 
+/// Returns an `Unimplemented` error from the current function.
+///
+/// This macro is a convenient way to signal that a code path has not been
+/// implemented yet. It automatically captures the file and line information
+/// and returns early with an `Unimplemented` error.
+///
+/// The error can be automatically converted into any error type that implements
+/// `From<Unimplemented>`, making it easy to use in functions with different
+/// error types.
+///
+/// # Examples
+///
+/// Basic usage without a message:
+///
+/// ```should_panic
+/// # use ohno::unimplemented_error;
+/// fn future_feature() -> Result<String, ohno::Unimplemented> {
+///     unimplemented_error!()
+/// }
+/// ```
+///
+/// With a custom message:
+///
+/// ```should_panic
+/// # use ohno::unimplemented_error;
+/// fn experimental_api() -> Result<(), ohno::Unimplemented> {
+///     unimplemented_error!("async runtime support not yet available")
+/// }
+/// ```
+///
+/// Automatic conversion to custom error types:
+///
+/// ```should_panic
+/// # use ohno::{unimplemented_error, Unimplemented};
+/// #[ohno::error]
+/// #[from(Unimplemented)]
+/// struct AppError;
+///
+/// fn app_function() -> Result<(), AppError> {
+///     unimplemented_error!("feature coming in v2.0")
+/// }
+/// ```
 #[macro_export]
 macro_rules! unimplemented_error {
     () => {

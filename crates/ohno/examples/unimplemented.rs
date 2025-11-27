@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use ohno::{unimplemented_error, Unimplemented};
 
 #[ohno::error]
@@ -17,6 +20,6 @@ fn main() {
     println!("Error: {err}");
 }
 
-/// Output:
-/// Error: not implemented at crates\ohno\examples\unimplemented.rs:11
-/// caused by: this feature is not yet implemented
+// Output:
+// Error: not implemented at crates\ohno\examples\unimplemented.rs:11
+// caused by: this feature is not yet implemented
