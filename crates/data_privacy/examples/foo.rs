@@ -9,7 +9,7 @@
 // - create our own formatter for struct pretty printing.
 
 use std::fmt::{Debug, Formatter};
-use data_privacy::{Classified, RedactionEngine};
+use data_privacy::{Classified, RedactedToString, RedactionEngine, RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode};
 use data_privacy_macros::{classified, taxonomy};
 use data_privacy::RedactedDebug;
 
@@ -21,43 +21,35 @@ pub enum Tax {
 }
 
 #[classified(Tax::PII)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 struct Personal(String);
 
+#[derive(Debug, RedactedDebug, RedactedToString)]
 struct Foo {
     x: String,
     b: Personal,
 }
 
-impl std::fmt::Debug for Foo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Foo")
-            .field("x", &self.x)
-            .field("b", &self.b)
-            .finish()
-    }
-}
-
-impl RedactedDebug for Foo {
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "Foo {{")?;
-        <String as RedactedDebug>::fmt(&self.x, engine, f)?;
-        <Personal as RedactedDebug>::fmt(&self.b, engine, f)?;
-        write!(f, "}}")?;
-        Ok(())
-    }
-}
-
-
-impl std::fmt::Display for Foo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Foo {{ x: {}, b: {} }}", self.x, self.b)
-    }
-}
 
 
 fn main() {
-    let x = Personal("foo".to_string());
+    let engine = RedactionEngineBuilder::new()
+        .add_class_redactor(
+            &Tax::PII.data_class(),
+            SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
+        )
+        .add_class_redactor(
+            &Tax::OII.data_class(),
+            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
+        )
+        .build();
 
+    let x = Personal("foo".to_string());
+    let f = Foo {
+        x: "x".to_string(),
+        b: x.clone(),
+    };
     println!("{}", x);
     println!("{:?}", x);
+    println!("{}", <Foo as RedactedToString>::to_string(&f, &engine));
 }

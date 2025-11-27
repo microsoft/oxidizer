@@ -57,11 +57,3 @@ pub fn redacted_to_string(input: proc_macro::TokenStream) -> proc_macro::TokenSt
         .into()
 }
 
-#[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
-#[proc_macro_derive(ClassifiedDebug)]
-#[cfg_attr(test, mutants::skip)]
-pub fn classified_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    derive::classified_debug_impl(input.into())
-        .unwrap_or_else(|err| err.to_compile_error())
-        .into()
-}

@@ -23,11 +23,20 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
 
     let field_fmt_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
-            let calls = fields.named.iter().map(|field| {
+            let calls = fields.named.iter().enumerate().map(|(i, field)| {
                 let field_name = &field.ident;
+                let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                quote! {
-                    <#field_type as data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                if i == 0 {
+                    quote! {
+                        write!(f, " {}: ", #field_name_str)?;
+                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                    }
+                } else {
+                    quote! {
+                        write!(f, ", {}: ", #field_name_str)?;
+                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                    }
                 }
             });
             quote! { #(#calls)* }
@@ -36,8 +45,15 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                quote! {
-                    <#field_type as data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                if i == 0 {
+                    quote! {
+                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                    }
+                } else {
+                    quote! {
+                        write!(f, ", ")?;
+                        <#field_type as data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                    }
                 }
             });
             quote! { #(#calls)* }
@@ -48,7 +64,11 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
     };
 
     let name_str = name.to_string();
-    let opening = format!("{} {{{{", name_str);
+    let (opening, closing) = match &data_struct.fields {
+        syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
+        syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
+        syn::Fields::Unit => (name_str.clone(), ""),
+    };
 
     Ok(quote! {
         impl #impl_generics data_privacy::RedactedDebug for #name #ty_generics #where_clause {
@@ -59,7 +79,7 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
             ) -> std::fmt::Result {
                 write!(f, #opening)?;
                 #field_fmt_calls
-                write!(f, "}}")?;
+                write!(f, #closing)?;
                 Ok(())
             }
         }
@@ -84,11 +104,20 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
 
     let field_fmt_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
-            let calls = fields.named.iter().map(|field| {
+            let calls = fields.named.iter().enumerate().map(|(i, field)| {
                 let field_name = &field.ident;
+                let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                quote! {
-                    <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                if i == 0 {
+                    quote! {
+                        write!(f, " {}: ", #field_name_str)?;
+                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                    }
+                } else {
+                    quote! {
+                        write!(f, ", {}: ", #field_name_str)?;
+                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                    }
                 }
             });
             quote! { #(#calls)* }
@@ -97,8 +126,15 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                quote! {
-                    <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                if i == 0 {
+                    quote! {
+                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                    }
+                } else {
+                    quote! {
+                        write!(f, ", ")?;
+                        <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                    }
                 }
             });
             quote! { #(#calls)* }
@@ -109,7 +145,11 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
     };
 
     let name_str = name.to_string();
-    let opening = format!("{} {{{{", name_str);
+    let (opening, closing) = match &data_struct.fields {
+        syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
+        syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
+        syn::Fields::Unit => (name_str.clone(), ""),
+    };
 
     Ok(quote! {
         impl #impl_generics data_privacy::RedactedDisplay for #name #ty_generics #where_clause {
@@ -120,7 +160,7 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
             ) -> std::fmt::Result {
                 write!(f, #opening)?;
                 #field_fmt_calls
-                write!(f, "}}")?;
+                write!(f, #closing)?;
                 Ok(())
             }
         }
@@ -145,11 +185,20 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
 
     let field_to_string_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
-            let calls = fields.named.iter().map(|field| {
+            let calls = fields.named.iter().enumerate().map(|(i, field)| {
                 let field_name = &field.ident;
+                let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                quote! {
-                    result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
+                if i == 0 {
+                    quote! {
+                        result.push_str(&format!(" {}: ", #field_name_str));
+                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
+                    }
+                } else {
+                    quote! {
+                        result.push_str(&format!(", {}: ", #field_name_str));
+                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
+                    }
                 }
             });
             quote! { #(#calls)* }
@@ -158,8 +207,15 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                quote! {
-                    result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#index, engine));
+                if i == 0 {
+                    quote! {
+                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#index, engine));
+                    }
+                } else {
+                    quote! {
+                        result.push_str(", ");
+                        result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#index, engine));
+                    }
                 }
             });
             quote! { #(#calls)* }
@@ -170,14 +226,18 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
     };
 
     let name_str = name.to_string();
-    let opening = format!("{} {{{{", name_str);
+    let (opening, closing) = match &data_struct.fields {
+        syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
+        syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
+        syn::Fields::Unit => (name_str.clone(), ""),
+    };
 
     Ok(quote! {
         impl #impl_generics data_privacy::RedactedToString for #name #ty_generics #where_clause {
             fn to_string(&self, engine: &data_privacy::RedactionEngine) -> String {
                 let mut result = String::from(#opening);
                 #field_to_string_calls
-                result.push_str("}}");
+                result.push_str(#closing);
                 result
             }
         }
