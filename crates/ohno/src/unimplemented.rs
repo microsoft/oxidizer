@@ -65,7 +65,7 @@ impl Unimplemented {
 
     /// Returns the line number where this error was created.
     #[must_use]
-    pub fn line(&self) -> usize {
+    pub fn line(&self) -> u32 {
         self.line
     }
 }
