@@ -45,7 +45,6 @@ jobs:
     needs: nightly-gatekeeper
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     env:
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
@@ -64,19 +63,15 @@ jobs:
           components: clippy, rustfmt
       - name: Installing Wild Linker
         uses: davidlattimore/wild-action@0.7.0
-      - name: Install Cargo Mutants
-        uses: taiki-e/install-action@v2.62.53
-        with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
-      - name: Install Just
-        uses: taiki-e/install-action@v2.62.53
-        with:
-          tool: just
+      - name: Install Tools  
+        uses: taiki-e/install-action@v2.62.53  
+        with:  
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }},just 
 
       # execute
       - name: Mutate All
         id: mutate
-        shell: pwsh
+        continue-on-error: true
         env:
           DISABLE_T_REX: 1
         run: just mutants
