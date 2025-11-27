@@ -29,14 +29,14 @@ use crate::OhnoCore;
 #[display("not implemented at {file}:{line}")]
 pub struct Unimplemented {
     file: Cow<'static, str>,
-    line: usize,
+    line: u32,
     core: OhnoCore,
 }
 
 impl Unimplemented {
     /// Creates a new `Unimplemented` error.
     #[must_use]
-    pub fn new(file: Cow<'static, str>, line: usize) -> Self {
+    pub fn new(file: Cow<'static, str>, line: u32) -> Self {
         Self {
             file,
             line,
@@ -49,7 +49,7 @@ impl Unimplemented {
     /// The message provides additional context about why the functionality
     /// is not yet implemented or what needs to be done.
     #[must_use]
-    pub fn with_message(message: impl Into<Cow<'static, str>>, file: Cow<'static, str>, line: usize) -> Self {
+    pub fn with_message(message: impl Into<Cow<'static, str>>, file: Cow<'static, str>, line: u32) -> Self {
         Self {
             file,
             line,
@@ -131,10 +131,10 @@ impl Unimplemented {
 #[macro_export]
 macro_rules! unimplemented_error {
     () => {
-        return Err($crate::Unimplemented::new(std::borrow::Cow::Borrowed(file!()), line!() as usize).into())
+        return Err($crate::Unimplemented::new(::std::borrow::Cow::Borrowed(file!()), line!()).into())
     };
     ($ex:expr) => {
-        return Err($crate::Unimplemented::with_message($ex, std::borrow::Cow::Borrowed(file!()), line!() as usize).into())
+        return Err($crate::Unimplemented::with_message($ex, ::std::borrow::Cow::Borrowed(file!()), line!()).into())
     };
 }
 
