@@ -166,6 +166,13 @@ mod test {
     }
 
     #[test]
+    fn file_and_line() {
+        let err = Unimplemented::new("file.rs".into(), 111);
+        assert_eq!(err.file(), "file.rs");
+        assert_eq!(err.line(), 111);
+    }
+
+    #[test]
     fn automatic_conversion() {
         #[derive(Debug)]
         struct CustomError(Unimplemented);
