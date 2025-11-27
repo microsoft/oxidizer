@@ -8,22 +8,180 @@ use syn::{DeriveInput, Result, parse2};
 pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
+    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    todo!()
+    let data_struct = match &input.data {
+        syn::Data::Struct(data) => data,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                input,
+                "RedactedDebug can only be derived for structs",
+            ))
+        }
+    };
+
+    let field_fmt_calls = match &data_struct.fields {
+        syn::Fields::Named(fields) => {
+            let calls = fields.named.iter().map(|field| {
+                let field_name = &field.ident;
+                let field_type = &field.ty;
+                quote! {
+                    <#field_type as data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                }
+            });
+            quote! { #(#calls)* }
+        }
+        syn::Fields::Unnamed(fields) => {
+            let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
+                let field_type = &field.ty;
+                let index = syn::Index::from(i);
+                quote! {
+                    <#field_type as data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                }
+            });
+            quote! { #(#calls)* }
+        }
+        syn::Fields::Unit => {
+            quote! {}
+        }
+    };
+
+    let name_str = name.to_string();
+    let opening = format!("{} {{{{", name_str);
+
+    Ok(quote! {
+        impl #impl_generics data_privacy::RedactedDebug for #name #ty_generics #where_clause {
+            fn fmt(
+                &self,
+                engine: &data_privacy::RedactionEngine,
+                f: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                write!(f, #opening)?;
+                #field_fmt_calls
+                write!(f, "}}")?;
+                Ok(())
+            }
+        }
+    })
 }
 
 pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
+    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    todo!()
+    let data_struct = match &input.data {
+        syn::Data::Struct(data) => data,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                input,
+                "RedactedDisplay can only be derived for structs",
+            ))
+        }
+    };
+
+    let field_fmt_calls = match &data_struct.fields {
+        syn::Fields::Named(fields) => {
+            let calls = fields.named.iter().map(|field| {
+                let field_name = &field.ident;
+                let field_type = &field.ty;
+                quote! {
+                    <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                }
+            });
+            quote! { #(#calls)* }
+        }
+        syn::Fields::Unnamed(fields) => {
+            let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
+                let field_type = &field.ty;
+                let index = syn::Index::from(i);
+                quote! {
+                    <#field_type as data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                }
+            });
+            quote! { #(#calls)* }
+        }
+        syn::Fields::Unit => {
+            quote! {}
+        }
+    };
+
+    let name_str = name.to_string();
+    let opening = format!("{} {{{{", name_str);
+
+    Ok(quote! {
+        impl #impl_generics data_privacy::RedactedDisplay for #name #ty_generics #where_clause {
+            fn fmt(
+                &self,
+                engine: &data_privacy::RedactionEngine,
+                f: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                write!(f, #opening)?;
+                #field_fmt_calls
+                write!(f, "}}")?;
+                Ok(())
+            }
+        }
+    })
 }
 
 pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
+    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    todo!()
+    let data_struct = match &input.data {
+        syn::Data::Struct(data) => data,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                input,
+                "RedactedToString can only be derived for structs",
+            ))
+        }
+    };
+
+    let field_to_string_calls = match &data_struct.fields {
+        syn::Fields::Named(fields) => {
+            let calls = fields.named.iter().map(|field| {
+                let field_name = &field.ident;
+                let field_type = &field.ty;
+                quote! {
+                    result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#field_name, engine));
+                }
+            });
+            quote! { #(#calls)* }
+        }
+        syn::Fields::Unnamed(fields) => {
+            let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
+                let field_type = &field.ty;
+                let index = syn::Index::from(i);
+                quote! {
+                    result.push_str(&<#field_type as data_privacy::RedactedToString>::to_string(&self.#index, engine));
+                }
+            });
+            quote! { #(#calls)* }
+        }
+        syn::Fields::Unit => {
+            quote! {}
+        }
+    };
+
+    let name_str = name.to_string();
+    let opening = format!("{} {{{{", name_str);
+
+    Ok(quote! {
+        impl #impl_generics data_privacy::RedactedToString for #name #ty_generics #where_clause {
+            fn to_string(&self, engine: &data_privacy::RedactionEngine) -> String {
+                let mut result = String::from(#opening);
+                #field_to_string_calls
+                result.push_str("}}");
+                result
+            }
+        }
+    })
 }
 
 
