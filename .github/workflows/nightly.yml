@@ -60,7 +60,6 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
           toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
       - name: Installing Wild Linker
         uses: davidlattimore/wild-action@0.7.0
       - name: Install Cargo Tools

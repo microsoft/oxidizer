@@ -58,7 +58,7 @@ nm = { version = "0.1.21", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false  }
-proc-macro2 = { version = "1.0.103", default-features = true }
+proc-macro2 = { version = "1.0.103", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rand = { version = "0.9.2", default-features = false }
 regex = { version = "1.12.2", default-features = false  }

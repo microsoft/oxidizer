@@ -193,7 +193,6 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
           toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
       - name: Installing Wild Linker
         uses: davidlattimore/wild-action@0.7.0
       - name: Install Cargo Tools
@@ -325,13 +324,17 @@ jobs:
             fi
           done
 
-  default-features-are-off:
+  ensure-no-default-features:
     runs-on: ubuntu-latest
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
+      - name: Install Rust Nightly
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        with:
+          toolchain: ${{ env.RUST_NIGHTLY }}
 
       # execute
-      - name: Check No Default Features
-        run: bash scripts/ensure-no-default-features.sh
+      - name: Ensure No Default Features
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/ensure-no-default-features.rs
