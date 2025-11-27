@@ -260,7 +260,6 @@ pub use data_privacy_macros::classified;
 /// ```
 pub use data_privacy_macros::taxonomy;
 
-pub use data_privacy_macros::ClassifiedDebug;
 pub use data_privacy_macros::RedactedDebug;
 pub use data_privacy_macros::RedactedDisplay;
 pub use data_privacy_macros::RedactedToString;
