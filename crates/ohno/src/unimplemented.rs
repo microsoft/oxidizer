@@ -104,20 +104,21 @@ impl Unimplemented {
 ///
 /// Basic usage without a message:
 ///
-/// ```should_panic
+/// ```
 /// # use ohno::unimplemented_error;
 /// fn future_feature() -> Result<String, ohno::Unimplemented> {
 ///     unimplemented_error!()
 /// }
-/// ```
+/// assert!(future_feature().is_err());
 ///
 /// With a custom message:
 ///
-/// ```should_panic
+/// ```
 /// # use ohno::unimplemented_error;
 /// fn experimental_api() -> Result<(), ohno::Unimplemented> {
 ///     unimplemented_error!("async runtime support not yet available")
 /// }
+/// assert!(experimental_api().is_err());
 /// ```
 ///
 /// Automatic conversion to custom error types:
