@@ -1,7 +1,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$jobs = 4
+$jobs = 2
 $build_timeout_sec = 600
 $timeout_sec = 300
 $minimum_test_timeout_sec = 60
