@@ -66,15 +66,16 @@ jobs:
       - name: Install Tools
         uses: taiki-e/install-action@v2.62.53
         with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }},just
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
 
       # execute
       - name: Mutate All
         id: mutate
         continue-on-error: true
+        shell: pwsh
         env:
           DISABLE_T_REX: 1
-        run: just mutants
+        run: ./scripts/mutants.ps1
 
       - name: Create or Update Issue on Failure
         if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
