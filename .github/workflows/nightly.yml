@@ -75,10 +75,9 @@ jobs:
       # execute
       - name: Mutate All
         id: mutate
-        continue-on-error: true
+        shell: pwsh
         env:
           DISABLE_T_REX: 1
-        timeout-minutes: 180
         run: just mutants
 
       - name: Create or Update Issue on Failure

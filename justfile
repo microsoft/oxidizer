@@ -7,3 +7,6 @@ set shell := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
 
 mutants: 
     scripts/mutants.ps1
+
+test:
+    cargo test --all --all-features --locked
