@@ -2,8 +2,9 @@
 $ErrorActionPreference = "Stop"
 
 $jobs = 4
-$build_timeout = 600
-$timeout = 300
+$build_timeout_sec = 600
+$timeout_sec = 300
+$minimum_test_timeout_sec = 60
 
 
 # Define test groups for mutants testing
@@ -49,8 +50,9 @@ function mutate_group($group) {
         # "--baseline=skip",
         "--colors=never",
         "--jobs=$jobs",
-        "--build-timeout=$build_timeout",
-        "--timeout=$timeout",
+        "--build-timeout=$build_timeout_sec",
+        "--timeout=$timeout_sec",
+        "--minimum-test-timeout=$minimum_test_timeout_sec",
         "-vV"
     )
 
