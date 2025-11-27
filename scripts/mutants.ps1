@@ -48,7 +48,7 @@ function mutate_group {
 
     $args = @(
         "--no-shuffle",
-        # "--baseline=skip",
+        "--baseline=skip",
         "--colors=never",
         "--jobs=$jobs",
         "--build-timeout=$build_timeout_sec",
