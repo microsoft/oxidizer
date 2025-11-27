@@ -72,16 +72,6 @@ use crate::DataClass;
 /// }
 ///  ```
 pub trait Classified {
-    // /// Visits the payload with the provided operation.
-    // fn visit(&self, operation: impl FnOnce(&Self::Payload)) {
-    //     operation(self.as_declassified());
-    // }
-    //
-    // /// Visits the payload with the provided operation.
-    // fn visit_mut(&mut self, operation: impl FnOnce(&mut Self::Payload)) {
-    //     operation(self.as_declassified_mut());
-    // }
-
     /// Returns the data class of the classified data.
     #[must_use]
     fn data_class(&self) -> DataClass;
@@ -104,22 +94,7 @@ mod tests {
 
     #[test]
     fn test_default_trait_methods() {
-        let mut classified = ClassifiedExample { data: 42 };
-
-        // let mut call_count = 0;
-        // classified.visit(|value| {
-        //     assert_eq!(*value, 42, "Initial value should be 42");
-        //     call_count += 1;
-        // });
-        //
-        // assert_eq!(call_count, 1);
-        //
-        // classified.visit_mut(|value| {
-        //     *value = 20;
-        // });
-        // classified.visit(|value| assert_eq!(*value, 20, "Value should be updated to 20"));
-
+        let classified = ClassifiedExample { data: 42 };
         assert_eq!(classified.data_class().name(), "classified_example");
-
     }
 }

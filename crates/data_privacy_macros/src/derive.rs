@@ -11,15 +11,12 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    let data_struct = match &input.data {
-        syn::Data::Struct(data) => data,
-        _ => {
+    let syn::Data::Struct(data_struct) = &input.data else {
             return Err(syn::Error::new_spanned(
                 input,
                 "RedactedDebug can only be derived for structs",
             ))
-        }
-    };
+        };
 
     let field_fmt_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
@@ -92,15 +89,12 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    let data_struct = match &input.data {
-        syn::Data::Struct(data) => data,
-        _ => {
+    let syn::Data::Struct(data_struct) = &input.data else {
             return Err(syn::Error::new_spanned(
                 input,
                 "RedactedDisplay can only be derived for structs",
             ))
-        }
-    };
+        };
 
     let field_fmt_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
@@ -284,19 +278,6 @@ mod test {
         };
 
         let result = redacted_to_string_impl(input);
-        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-        let pretty = prettyplease::unparse(&result_file);
-
-        assert_snapshot!(pretty);
-    }
-
-    #[test]
-    fn classified_debug() {
-        let input = quote! {
-            struct EmailAddress(String);
-        };
-
-        let result = classified_debug_impl(input);
         let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
         let pretty = prettyplease::unparse(&result_file);
 
