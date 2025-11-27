@@ -119,7 +119,7 @@ impl Unimplemented {
 ///
 /// Automatic conversion to custom error types:
 ///
-/// ```should_panic
+/// ```
 /// # use ohno::{unimplemented_error, Unimplemented};
 /// #[ohno::error]
 /// #[from(Unimplemented)]
