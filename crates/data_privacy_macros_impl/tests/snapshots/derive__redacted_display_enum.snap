@@ -1,0 +1,8 @@
+---
+source: crates/data_privacy_macros_impl/tests/derive.rs
+assertion_line: 115
+expression: pretty
+---
+::core::compile_error! {
+    "RedactedDisplay can only be derived for structs"
+}
