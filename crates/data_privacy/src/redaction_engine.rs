@@ -4,6 +4,7 @@
 use crate::redactors::Redactors;
 use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor};
 use core::fmt::Debug;
+use data_privacy::IntoDataClass;
 use std::fmt::{Display, Formatter, Write};
 use std::sync::Arc;
 
@@ -177,8 +178,8 @@ impl RedactionEngineBuilder {
     ///
     /// Whenever the redaction engine encounters data of this class, it will use the provided redactor.
     #[must_use]
-    pub fn add_class_redactor(mut self, data_class: &DataClass, redactor: impl Redactor + Send + Sync + 'static) -> Self {
-        self.redactors.insert(data_class.clone(), redactor);
+    pub fn add_class_redactor(mut self, data_class: impl IntoDataClass, redactor: impl Redactor + Send + Sync + 'static) -> Self {
+        self.redactors.insert(data_class.into_data_class(), redactor);
         self
     }
 

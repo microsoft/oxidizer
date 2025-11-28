@@ -17,7 +17,10 @@ pub struct Sensitive<T> {
 
 impl<T> Debug for Sensitive<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Protected").finish()
+        f.debug_struct("Sensitive")
+            .field("value", &"***")
+            .field("data_class", &self.data_class)
+            .finish()
     }
 }
 
@@ -77,7 +80,7 @@ where
         reason = "Converting from u64 to usize, value is known to be <= 128"
     )]
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        let v = &self.data_class;
+        let v = &self.value;
 
         let mut local_buf = [0u8; 128];
         let amount = {
@@ -178,26 +181,18 @@ mod tests {
     }
 
     use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-    // New tests exercising RedactedDebug, RedactedDisplay, and RedactedToString implementations.
-    use crate::RedactionEngineBuilder;
 
     #[test]
     fn test_redacted_debug_and_display_replace_mode_string() {
-        let engine = RedactionEngineBuilder::new()
-            .add_class_redactor(
-                &TestTaxonomy::PII.data_class(),
-                SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
-            )
+        let engine = RedactionEngine::builder()
+            .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
             .build();
         let wrapper = Sensitive::new("secret".to_string(), TestTaxonomy::PII);
 
         // Debug redaction operates on the Debug representation (includes quotes for String)
         let mut debug_out = String::new();
         engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
-        assert_eq!(
-            debug_out, "********",
-            "Debug redaction should produce 8 asterisks (including quotes)"
-        );
+        assert_eq!(debug_out, "********", "Debug redaction should produce 8 asterisks (including quotes)");
 
         // Display redaction operates on the Display representation (no quotes)
         let mut display_out = String::new();
@@ -211,11 +206,8 @@ mod tests {
 
     #[test]
     fn test_redacted_debug_and_display_replace_mode_numeric() {
-        let engine = RedactionEngineBuilder::new()
-            .add_class_redactor(
-                &TestTaxonomy::PII.data_class(),
-                SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
-            )
+        let engine = RedactionEngine::builder()
+            .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
             .build();
         let wrapper = Sensitive::new(42u32, TestTaxonomy::PII);
 
@@ -232,41 +224,29 @@ mod tests {
 
     #[test]
     fn test_redacted_passthrough_and_tag_mode() {
-        let engine = RedactionEngineBuilder::new()
-            .add_class_redactor(
-                &TestTaxonomy::PII.data_class(),
-                SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
-            )
+        let engine = RedactionEngine::builder()
+            .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
             .build();
         let wrapper = Sensitive::new("secret".to_string(), TestTaxonomy::PII);
 
         let mut debug_out = String::new();
         engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
         // Debug includes quotes in inner representation
-        assert_eq!(
-            debug_out, "<test/sensitive:\"secret\">",
-            "PassthroughAndTag debug should include quotes inside tag"
-        );
+        assert_eq!(debug_out, "<test/p_i_i:\"secret\">", "PassthroughAndTag debug should include quotes inside tag");
 
         let mut display_out = String::new();
         engine.redacted_display(&wrapper, &mut display_out).unwrap();
-        assert_eq!(
-            display_out, "<test/sensitive:secret>",
-            "PassthroughAndTag display should not include quotes"
-        );
+        assert_eq!(display_out, "<test/p_i_i:secret>", "PassthroughAndTag display should not include quotes");
 
         let to_string_out = engine.redacted_to_string(&wrapper);
-        assert_eq!(to_string_out, "<test/sensitive:secret>");
+        assert_eq!(to_string_out, "<test/p_i_i:secret>");
     }
 
     #[test]
     fn test_redacted_long_value_fallback_path() {
         // Value length > 128 triggers fallback branch in ClassifiedWrapper's redacted debug/display implementations.
-        let engine = RedactionEngineBuilder::new()
-            .add_class_redactor(
-                &TestTaxonomy::PII.data_class(),
-                SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
-            )
+        let engine = RedactionEngine::builder()
+            .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
             .build();
         let long_plain = "a".repeat(140);
         let wrapper = Sensitive::new(long_plain.clone(), TestTaxonomy::PII);
