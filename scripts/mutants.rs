@@ -20,22 +20,27 @@ const BUILD_TIMEOUT_SEC: u32 = 600;
 const TIMEOUT_SEC: u32 = 300;
 const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 
+// Test groups define related packages that should be tested together during mutation testing.
+// Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
+// validated by all relevant tests. Ungrouped packages are tested individually, which may miss
+// mutations if their tests reside in dependent packages.
+const TEST_GROUPS: &[&[&str]] = &[
+    &["bytesbuf"],
+    &["data_privacy", "data_privacy_macros"],
+    &["fundle", "fundle_macros", "fundle_macros_impl"],
+    &["ohno", "ohno_macros"],
+    &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
+];
+
 fn main() -> Result<()> {
     println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let all_packages = ci_aids::list_packages(workspace_root)?;
 
-    // Test groups define related packages that should be tested together during mutation testing.
-    // Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
-    // validated by all relevant tests. Ungrouped packages are tested individually, which may miss
-    // mutations if their tests reside in dependent packages.
-    let mut test_groups: Vec<Vec<String>> = vec![
-        vec!["bytesbuf".to_string()],
-        vec!["data_privacy".to_string(), "data_privacy_macros".to_string()],
-        vec!["fundle".to_string(), "fundle_macros".to_string(), "fundle_macros_impl".to_string()],
-        vec!["ohno".to_string(), "ohno_macros".to_string()],
-        vec!["thread_aware".to_string(), "thread_aware_macros".to_string(), "thread_aware_macros_impl".to_string()],
-    ];
+    let mut test_groups: Vec<Vec<String>> = TEST_GROUPS
+        .iter()
+        .map(|group| group.iter().map(|s| s.to_string()).collect())
+        .collect();
 
     let (publishable, skipped): (Vec<_>, Vec<_>) = all_packages
         .into_iter()
