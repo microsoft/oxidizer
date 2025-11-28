@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::Parse;
 use syn::spanned::Spanned;
-use syn::{Fields, ItemStruct, Path, parse2};
+use syn::{parse2, Fields, ItemStruct, Path};
 
 type SynResult<T> = Result<T, syn::Error>;
 
@@ -33,7 +33,12 @@ impl Parse for MacroArgs {
     }
 }
 
-pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStream> {
+#[expect(
+    missing_docs,
+    clippy::missing_errors_doc,
+    reason = "this is documented in the data_privacy reexport"
+)]
+pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStream> {
     let macro_args = MacroArgs::parse(attr_args)?;
     let input: ItemStruct = parse2(item)?;
 
@@ -147,97 +152,4 @@ pub fn classified_impl(attr_args: TokenStream, item: TokenStream) -> SynResult<T
             }
         }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use insta::assert_snapshot;
-
-    #[test]
-    fn test_classified_impl_empty_args() {
-        let attr_args = quote! {};
-        let input = quote! {
-            pub struct EmailAddress(String);
-        };
-
-        let result = classified_impl(attr_args, input);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("classified attribute requires a taxonomy and data class name")
-        );
-    }
-
-    #[test]
-    fn test_classified_impl_random_args() {
-        let attr_args = quote! {Foo::Bar Baz};
-        let input = quote! {
-            struct EmailAddress(String);
-        };
-
-        let result = classified_impl(attr_args, input);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("unexpected token"));
-    }
-
-    #[test]
-    fn test_classified_impl_named_fields() {
-        let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
-        let input = quote! {
-            struct EmailAddress { x : String }
-        };
-
-        let result = classified_impl(attr_args, input);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("Named fields aren't supported"));
-    }
-
-    #[test]
-    fn test_classified_impl_no_fields() {
-        let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
-        let input = quote! {
-            struct EmailAddress;
-        };
-
-        let result = classified_impl(attr_args, input);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("Unit structs aren't supported"));
-    }
-
-    #[test]
-    fn test_classified_impl_too_many_fields() {
-        let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
-        let input = quote! {
-            struct EmailAddress(String, i32);
-        };
-
-        let result = classified_impl(attr_args, input);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("Tuple struct must have exactly one field"));
-    }
-
-    #[test]
-    fn test_success() {
-        let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
-        let input = quote! {
-            struct EmailAddress(String);
-        };
-
-        let result = classified_impl(attr_args, input);
-        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-        let pretty = prettyplease::unparse(&result_file);
-
-        assert_snapshot!(pretty);
-    }
 }

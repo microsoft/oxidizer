@@ -1,0 +1,100 @@
+---
+source: crates/data_privacy_macros_impl/tests/classified.rs
+assertion_line: 92
+expression: pretty
+---
+struct EmailAddress(String);
+impl ::data_privacy::Classified for EmailAddress {
+    fn data_class(&self) -> ::data_privacy::DataClass {
+        ExampleTaxonomy::PersonallyIdentifiableInformation.data_class()
+    }
+}
+impl ::core::fmt::Debug for EmailAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(
+            format_args!(
+                "<CLASSIFIED:{}/{}>", data_privacy::Classified::data_class(self)
+                .taxonomy(), data_privacy::Classified::data_class(self).name()
+            ),
+        )
+    }
+}
+impl ::core::fmt::Display for EmailAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(
+            format_args!(
+                "<CLASSIFIED:{}/{}>", data_privacy::Classified::data_class(self)
+                .taxonomy(), data_privacy::Classified::data_class(self).name()
+            ),
+        )
+    }
+}
+impl ::data_privacy::RedactedDebug for EmailAddress {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "Converting from u64 to usize, value is known to be <= 128"
+    )]
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        output: &mut ::std::fmt::Formatter<'_>,
+    ) -> ::core::fmt::Result {
+        use data_privacy::Classified;
+        let v = &self.0;
+        let mut local_buf = [0u8; 128];
+        let amount = {
+            let mut cursor = ::std::io::Cursor::new(&mut local_buf[..]);
+            if ::std::io::Write::write_fmt(&mut cursor, format_args!("{v:?}")).is_ok() {
+                cursor.position() as usize
+            } else {
+                local_buf.len() + 1
+            }
+        };
+        if amount <= local_buf.len() {
+            let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
+            engine.redact(&self.data_class(), s, output)
+        } else {
+            engine.redact(&self.data_class(), format!("{v:?}"), output)
+        }
+    }
+}
+impl ::data_privacy::RedactedDisplay for EmailAddress {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "Converting from u64 to usize, value is known to be <= 128"
+    )]
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        output: &mut ::std::fmt::Formatter,
+    ) -> ::core::fmt::Result {
+        use data_privacy::Classified;
+        let v = &self.0;
+        let mut local_buf = [0u8; 128];
+        let amount = {
+            let mut cursor = ::std::io::Cursor::new(&mut local_buf[..]);
+            if ::std::io::Write::write_fmt(&mut cursor, format_args!("{v}")).is_ok() {
+                cursor.position() as usize
+            } else {
+                local_buf.len() + 1
+            }
+        };
+        if amount <= local_buf.len() {
+            let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
+            engine.redact(&self.data_class(), s, output)
+        } else {
+            engine.redact(&self.data_class(), format!("{v}"), output)
+        }
+    }
+}
+impl core::ops::Deref for EmailAddress {
+    type Target = ::core::convert::Infallible;
+    fn deref(&self) -> &Self::Target {
+        panic!("Deref to Infallible should never happen")
+    }
+}
+impl ::core::ops::DerefMut for EmailAddress {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        panic!("Deref to Infallible should never happen")
+    }
+}

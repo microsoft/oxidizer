@@ -3,20 +3,20 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Result, parse2};
+use syn::{parse2, DeriveInput, Result};
 
-pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
+pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let syn::Data::Struct(data_struct) = &input.data else {
-            return Err(syn::Error::new_spanned(
-                input,
-                "RedactedDebug can only be derived for structs",
-            ))
-        };
+        return Err(syn::Error::new_spanned(
+            input,
+            "RedactedDebug can only be derived for structs",
+        ))
+    };
 
     let field_fmt_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
@@ -83,18 +83,18 @@ pub fn redacted_debug_impl(input: TokenStream) -> Result<TokenStream> {
     })
 }
 
-pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
+pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let syn::Data::Struct(data_struct) = &input.data else {
-            return Err(syn::Error::new_spanned(
-                input,
-                "RedactedDisplay can only be derived for structs",
-            ))
-        };
+        return Err(syn::Error::new_spanned(
+            input,
+            "RedactedDisplay can only be derived for structs",
+        ))
+    };
 
     let field_fmt_calls = match &data_struct.fields {
         syn::Fields::Named(fields) => {
@@ -161,20 +161,22 @@ pub fn redacted_display_impl(input: TokenStream) -> Result<TokenStream> {
     })
 }
 
-pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
+#[expect(
+    missing_docs,
+    clippy::missing_errors_doc,
+    reason = "this is documented in the data_privacy reexport"
+)]
+pub fn redacted_to_string(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    let data_struct = match &input.data {
-        syn::Data::Struct(data) => data,
-        _ => {
-            return Err(syn::Error::new_spanned(
-                input,
-                "RedactedToString can only be derived for structs",
-            ))
-        }
+    let syn::Data::Struct(data_struct) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            input,
+            "RedactedToString can only be derived for structs",
+        ))
     };
 
     let field_to_string_calls = match &data_struct.fields {
@@ -223,7 +225,7 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
     let (opening, closing) = match &data_struct.fields {
         syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
         syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
-        syn::Fields::Unit => (name_str.clone(), ""),
+        syn::Fields::Unit => (name_str, ""),
     };
 
     Ok(quote! {
@@ -238,49 +240,3 @@ pub fn redacted_to_string_impl(input: TokenStream) -> Result<TokenStream> {
     })
 }
 
-
-#[cfg(test)]
-mod test {
-    use crate::derive::*;
-    use insta::assert_snapshot;
-    use quote::quote;
-
-    #[test]
-    fn redacted_debug() {
-        let input = quote! {
-            struct EmailAddress(String);
-        };
-
-        let result = redacted_debug_impl(input);
-        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-        let pretty = prettyplease::unparse(&result_file);
-
-        assert_snapshot!(pretty);
-    }
-
-    #[test]
-    fn redacted_display() {
-        let input = quote! {
-            struct EmailAddress(String);
-        };
-
-        let result = redacted_display_impl(input);
-        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-        let pretty = prettyplease::unparse(&result_file);
-
-        assert_snapshot!(pretty);
-    }
-
-    #[test]
-    fn redacted_to_string() {
-        let input = quote! {
-            struct EmailAddress(String);
-        };
-
-        let result = redacted_to_string_impl(input);
-        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-        let pretty = prettyplease::unparse(&result_file);
-
-        assert_snapshot!(pretty);
-    }
-}
