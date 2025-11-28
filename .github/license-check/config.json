@@ -8,9 +8,17 @@
             "**/*.h"
         ],
         "exclude": [
-            "target"
+            "target",
+            "scripts/**/*.rs"
         ],
         "license": "./.github/license-check/slash-slash.txt"
+    },
+
+    {
+        "include": [
+            "scripts/**/*.rs"
+        ],
+        "license": "./.github/license-check/hash.txt"
     },
 
     {
