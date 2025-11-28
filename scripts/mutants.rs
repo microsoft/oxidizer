@@ -32,6 +32,8 @@ const TEST_GROUPS: &[&[&str]] = &[
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
 ];
 
+const PACKAGES_TO_SKIP: &[&str] = &["ci_aids", "testing_aids"];
+
 fn main() -> Result<()> {
     println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -42,14 +44,16 @@ fn main() -> Result<()> {
         .map(|group| group.iter().map(|s| s.to_string()).collect())
         .collect();
 
-    let (publishable, skipped): (Vec<_>, Vec<_>) = all_packages
+    let filtered_packages: Vec<_> = all_packages
         .into_iter()
-        .partition(|pkg| pkg.is_publishable);
+        .filter(|pkg| !PACKAGES_TO_SKIP.contains(&pkg.name.as_str()))
+        .collect();
 
     // Add ungrouped packages
     let initial_count = test_groups.len();
-    for pkg in &publishable {
+    for pkg in &filtered_packages {
         if !test_groups.iter().any(|g| g.contains(&pkg.name)) {
+            println!("this package is not listed in any test group: {}", pkg.name);
             test_groups.push(vec![pkg.name.clone()]);
         }
     }
@@ -65,10 +69,8 @@ fn main() -> Result<()> {
     for (i, group) in test_groups.iter().enumerate() {
         println!("  {}: [{}]", i + 1, group.join(", "));
     }
+    println!("\nSkipped: {}", PACKAGES_TO_SKIP.join(", "));
 
-    if !skipped.is_empty() {
-        println!("\nSkipped (not publishable): {}", skipped.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
-    }
     if test_groups.len() > initial_count {
         println!("\nAdded {} ungrouped package(s) as individual groups", test_groups.len() - initial_count);
     }
@@ -101,8 +103,5 @@ fn mutate_group(group: &[String]) -> Result<()> {
     let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
     args.extend(package_args);
 
-    let output = ci_aids::run_cargo(args.into_iter())?;
-    println!("{}", String::from_utf8_lossy(&output.stdout));
-    println!("{}", String::from_utf8_lossy(&output.stderr));
-    Ok(())
+    ci_aids::run_cargo(args.into_iter())
 }
