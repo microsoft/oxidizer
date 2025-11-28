@@ -25,11 +25,10 @@ fn main() -> Result<()> {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let all_packages = ci_aids::list_packages(workspace_root)?;
 
-    // Test groups define groups of packages to test together for each code mutation
-    // This helps reduce overall test time by sharing build/test overhead
-    // 
-    // If packages are not listed here, they will be tested individually which reduces the number of running tests
-    // and may cause some mutations to fail if test located in another package.
+    // Test groups define related packages that should be tested together during mutation testing.
+    // Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
+    // validated by all relevant tests. Ungrouped packages are tested individually, which may miss
+    // mutations if their tests reside in dependent packages.
     let mut test_groups: Vec<Vec<String>> = vec![
         vec!["bytesbuf".to_string()],
         vec!["data_privacy".to_string(), "data_privacy_macros".to_string()],
