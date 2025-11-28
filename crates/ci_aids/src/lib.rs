@@ -88,7 +88,7 @@ mod tests {
         assert!(!packages.is_empty());
 
         let ci_aids = packages.iter().find(|p| p.name == "ci_aids");
-        assert!(ci_aids.is_some(), "{packages:?}");        
+        assert!(ci_aids.is_some(), "{packages:?}");
         assert!(!ci_aids.unwrap().manifest_path.is_empty());
         assert!(!ci_aids.unwrap().targets.is_empty());
     }
