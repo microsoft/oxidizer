@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock};
 use super::Trc;
 use crate::cell::storage;
 use crate::closure::RelocateFnOnce;
-use crate::{MemoryAffinity, Storage, ThreadAware, relocate_once};
+use crate::{MemoryAffinity, PinnedAffinity, Storage, ThreadAware, relocate_once};
 
 /// Per-Processor Transferable reference counted type.
 ///
@@ -300,7 +300,7 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: Arc<RwLock<Storage<Arc<T>, storage::PerCoreStrategy>>>, current_affinity: MemoryAffinity) -> Self {
+    pub fn from_storage(storage: Arc<RwLock<Storage<Arc<T>, storage::PerCoreStrategy>>>, current_affinity: PinnedAffinity) -> Self {
         Self(Trc::from_storage(storage, current_affinity))
     }
 
@@ -330,7 +330,7 @@ mod tests {
     use std::sync::atomic::{AtomicI32, Ordering};
 
     use super::*;
-    use crate::create_manual_affinities;
+    use crate::{create_manual_memory_affinities, create_manual_pinned_affinities};
 
     #[derive(Clone, Debug)]
     struct Counter {
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn transfer_creates_new_value() {
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_memory_affinities(&[2]);
         let pmr = PerCore::new(Counter::new);
         pmr.increment_by(10);
         let pmr2 = pmr.clone().relocated(affinities[0], affinities[1]);
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(*per_core, 42);
 
         // Verify it can be relocated
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_memory_affinities(&[2]);
         let relocated = per_core.relocated(affinities[0], affinities[1]);
         assert_eq!(*relocated, 42);
     }
@@ -400,7 +400,7 @@ mod tests {
     fn test_from_storage() {
         // Create a storage and populate it with a value for a specific affinity
         // This covers line 303 (from_storage method)
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let affinity1 = affinities[0];
 
         // Create a storage and populate it
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn test_counter_relocated() {
         // This test explicitly covers line 355 (Counter's ThreadAware::relocated implementation)
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_memory_affinities(&[2]);
         let affinity1 = affinities[0];
         let affinity2 = affinities[1];
 

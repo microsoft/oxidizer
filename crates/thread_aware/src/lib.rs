@@ -86,6 +86,7 @@
 //! If you disable default features (or the `derive` feature explicitly) you
 //! can still implement [`ThreadAware`] manually as shown in the earlier example.
 
+mod affinity;
 mod cell;
 mod closure;
 pub mod core;
@@ -98,7 +99,9 @@ mod validator;
 #[cfg(feature = "threads")]
 mod registry;
 
-pub use core::{MemoryAffinity, ThreadAware, create_manual_affinities};
+pub use core::{ThreadAware, create_manual_pinned_affinities, create_manual_memory_affinities};
+
+pub use affinity::{MemoryAffinity, PinnedAffinity};
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the

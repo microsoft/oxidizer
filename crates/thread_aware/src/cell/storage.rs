@@ -3,45 +3,45 @@
 
 use std::marker::PhantomData;
 
-use crate::MemoryAffinity;
+use crate::PinnedAffinity;
 
 /// A strategy for storing data in a affinity-aware manner.
 pub trait Strategy {
     /// Returns the slot index for the given affinity.
-    fn index(affinity: MemoryAffinity) -> usize;
+    fn index(affinity: PinnedAffinity) -> usize;
 
     /// Returns the total number of slots for the given affinity.
-    fn count(affinity: MemoryAffinity) -> usize;
+    fn count(affinity: PinnedAffinity) -> usize;
 }
 
 /// A strategy that stores data per processor.
 ///
-/// This strategy uses the processor index and count from the `MemoryAffinity` to determine
+/// This strategy uses the processor index and count from the `PinnedAffinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerCoreStrategy;
 impl Strategy for PerCoreStrategy {
-    fn index(affinity: MemoryAffinity) -> usize {
+    fn index(affinity: PinnedAffinity) -> usize {
         affinity.processor_index()
     }
 
-    fn count(affinity: MemoryAffinity) -> usize {
+    fn count(affinity: PinnedAffinity) -> usize {
         affinity.processor_count()
     }
 }
 
 /// A strategy that stores data per memory region.
 ///
-/// This strategy uses the memory region index and count from the `MemoryAffinity` to determine
+/// This strategy uses the memory region index and count from the `PinnedAffinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerNumaStrategy;
 impl Strategy for PerNumaStrategy {
-    fn index(affinity: MemoryAffinity) -> usize {
+    fn index(affinity: PinnedAffinity) -> usize {
         affinity.memory_region_index()
     }
 
-    fn count(affinity: MemoryAffinity) -> usize {
+    fn count(affinity: PinnedAffinity) -> usize {
         affinity.memory_region_count()
     }
 }
@@ -52,11 +52,11 @@ impl Strategy for PerNumaStrategy {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerProcessStrategy;
 impl Strategy for PerProcessStrategy {
-    fn index(_affinity: MemoryAffinity) -> usize {
+    fn index(_affinity: PinnedAffinity) -> usize {
         0
     }
 
-    fn count(_affinity: MemoryAffinity) -> usize {
+    fn count(_affinity: PinnedAffinity) -> usize {
         1
     }
 }
@@ -83,7 +83,7 @@ impl<T, S: Strategy> Storage<T, S> {
     /// Replaces the data for the given affinity with the provided value.
     ///
     /// Returns the previous value if it existed, otherwise returns `None`.
-    pub fn replace(&mut self, affinity: MemoryAffinity, value: T) -> Option<T> {
+    pub fn replace(&mut self, affinity: PinnedAffinity, value: T) -> Option<T> {
         self.resize(S::count(affinity));
 
         self.data[S::index(affinity)].replace(value)
@@ -110,7 +110,7 @@ where
     /// Clone and gets the data for the given affinity if it exists.
     /// Returns `None` if the data does not exist for that affinity.
     #[must_use]
-    pub fn get_clone(&self, affinity: MemoryAffinity) -> Option<T> {
+    pub fn get_clone(&self, affinity: PinnedAffinity) -> Option<T> {
         self.data.get(S::index(affinity)).and_then(std::clone::Clone::clone)
     }
 }
@@ -126,13 +126,13 @@ pub type PerAppStorage<T> = Storage<T, PerProcessStrategy>;
 
 #[cfg(test)]
 mod tests {
-    use crate::{Storage, Strategy, create_manual_affinities};
+    use crate::{Storage, Strategy, create_manual_pinned_affinities};
 
     #[test]
     fn replace_returns_previous_value() {
         use super::PerCoreStorage;
 
-        let affinities = create_manual_affinities(&[1]);
+        let affinities = create_manual_pinned_affinities(&[1]);
         let mut storage = PerCoreStorage::new();
         let affinity = affinities[0];
 
@@ -153,7 +153,7 @@ mod tests {
     fn get_clone() {
         use super::PerCoreStorage;
 
-        let affinities = create_manual_affinities(&[1]);
+        let affinities = create_manual_pinned_affinities(&[1]);
 
         let mut storage = PerCoreStorage::new();
         let affinity = affinities[0];
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn per_app() {
-        let affinities = create_manual_affinities(&[1, 1]);
+        let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         let index = super::PerProcessStrategy::index(affinities[0]);
         let count = super::PerProcessStrategy::count(affinities[0]);
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn per_memory_region() {
-        let affinities = create_manual_affinities(&[1, 1]);
+        let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
             let index = super::PerNumaStrategy::index(affinity);
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn per_processor() {
-        let affinities = create_manual_affinities(&[1, 1]);
+        let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
             let index = super::PerCoreStrategy::index(affinity);
@@ -203,7 +203,7 @@ mod tests {
         // This test covers line 101: Self::new() in the Default trait implementation
         use super::PerCoreStorage;
 
-        let affinities = create_manual_affinities(&[1]);
+        let affinities = create_manual_pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
         let mut storage: PerCoreStorage<String> = Storage::default();

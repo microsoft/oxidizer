@@ -3,7 +3,9 @@
 
 //! This module contains all the core primitives the thread aware system is built upon.
 
-/// Create affinities for testing purposes or when not using the `ThreadRegistry`.
+use crate::{MemoryAffinity, PinnedAffinity};
+
+/// Create pinned affinities for testing purposes or when not using the `ThreadRegistry`.
 ///
 /// # Parameters
 ///
@@ -14,7 +16,7 @@
 /// If there are more than `u16::MAX` processors or memory regions.
 #[must_use]
 #[expect(clippy::needless_range_loop, reason = "clearer in this case")]
-pub fn create_manual_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
+pub fn create_manual_pinned_affinities(counts: &[usize]) -> Vec<PinnedAffinity> {
     let numa_count = counts.len();
     let core_count = counts.iter().sum();
     let mut affinities = Vec::with_capacity(core_count);
@@ -22,7 +24,7 @@ pub fn create_manual_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
 
     for numa_index in 0..numa_count {
         for _ in 0..counts[numa_index] {
-            affinities.push(MemoryAffinity::new(
+            affinities.push(PinnedAffinity::new(
                 processor_index.try_into().expect("Too many processors"),
                 numa_index.try_into().expect("Too many memory regions"),
                 core_count.try_into().expect("Too many processors"),
@@ -35,53 +37,21 @@ pub fn create_manual_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
     affinities
 }
 
-/// An `MemoryAffinity` can be thought of as a placement in a system.
+/// Create pinned affinities for testing purposes or when not using the `ThreadRegistry`.
 ///
-/// It is used to represent a specific context or environment where data can be processed.
-/// For example a NUMA node, a thread, a specific CPU core, or a specific memory region.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct MemoryAffinity {
-    processor_index: u16,
-    memory_region_index: u16,
-
-    processor_count: u16,
-    memory_region_count: u16,
-}
-
-impl MemoryAffinity {
-    pub(crate) fn new(processor_index: u16, memory_region_index: u16, processor_count: u16, memory_region_count: u16) -> Self {
-        Self {
-            processor_index,
-            memory_region_index,
-
-            processor_count,
-            memory_region_count,
-        }
-    }
-
-    /// Returns the processor index of this affinity.
-    #[must_use]
-    pub const fn processor_index(self) -> usize {
-        self.processor_index as _
-    }
-
-    /// Returns the memory region index of this affinity.
-    #[must_use]
-    pub const fn memory_region_index(self) -> usize {
-        self.memory_region_index as _
-    }
-
-    /// Returns the processor count of this affinity.
-    #[must_use]
-    pub const fn processor_count(self) -> usize {
-        self.processor_count as _
-    }
-
-    /// Returns the number of memory regions of this affinity.
-    #[must_use]
-    pub const fn memory_region_count(self) -> usize {
-        self.memory_region_count as _
-    }
+/// # Parameters
+///
+/// * `counts`: A slice of usize representing the number of processors in each memory region.
+///
+/// # Panics
+///
+/// If there are more than `u16::MAX` processors or memory regions.
+#[must_use]
+pub fn create_manual_memory_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
+    create_manual_pinned_affinities(counts)
+        .into_iter()
+        .map(MemoryAffinity::Pinned)
+        .collect()
 }
 
 /// Marks types that correctly handle isolation when transferred between affinities (threads).
@@ -172,11 +142,11 @@ pub trait ThreadAware {
 
 #[cfg(test)]
 mod tests {
-    use super::{MemoryAffinity, create_manual_affinities};
+    use super::{create_manual_pinned_affinities};
 
     #[test]
     fn test_crate_fake_affinities() {
-        let affinities = create_manual_affinities(&[2, 3]);
+        let affinities = create_manual_pinned_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
         for (i, affinity) in affinities.iter().enumerate() {
             assert_eq!(affinity.processor_index(), i);
@@ -184,15 +154,5 @@ mod tests {
             assert_eq!(affinity.memory_region_index(), usize::from(i >= 2));
             assert_eq!(affinity.memory_region_count(), 2);
         }
-    }
-
-    #[test]
-    fn test_affinity() {
-        let affinity = MemoryAffinity::new(2, 1, 4, 2);
-        assert_eq!(affinity.processor_index(), 2);
-        assert_eq!(affinity.processor_count(), 4);
-
-        assert_eq!(affinity.memory_region_index(), 1);
-        assert_eq!(affinity.memory_region_count(), 2);
     }
 }

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::core::MemoryAffinity;
+use crate::MemoryAffinity;
 use crate::{RelocateFnOnce, ThreadAware};
 
 pub struct ErasedClosureOnce<T> {

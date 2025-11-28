@@ -222,7 +222,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::create_manual_affinities;
+    use crate::{create_manual_memory_affinities};
 
     #[test]
     fn boxed_once() {
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_closure_thread_aware() {
-        let affinities = create_manual_affinities(&[2, 2]);
+        let affinities = create_manual_memory_affinities(&[2, 2]);
 
         // Test with i32
         let closure = relocate(42_i32, |x| x + 1);
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_closure_once_thread_aware() {
-        let affinities = create_manual_affinities(&[2, 3]);
+        let affinities = create_manual_memory_affinities(&[2, 3]);
 
         // Test with String
         let closure = relocate_once(String::from("world"), |s| format!("Hello, {s}!"));
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_closure_mut_thread_aware() {
-        let affinities = create_manual_affinities(&[2, 3]);
+        let affinities = create_manual_memory_affinities(&[2, 3]);
 
         // Test with i32 - mutating state across relocations
         let closure = relocate_mut(0_i32, |x| {
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_closure_all_traits_together() {
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_memory_affinities(&[2]);
         let closure = relocate(vec![1, 2, 3], std::vec::Vec::len);
 
         // Test Clone
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn test_closure_mut_all_traits_together() {
-        let affinities = create_manual_affinities(&[2, 2]);
+        let affinities = create_manual_memory_affinities(&[2, 2]);
         let closure = relocate_mut(100_i32, |x| {
             *x += 1;
             *x
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_closure_once_with_thread_aware_and_clone() {
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_memory_affinities(&[2]);
         let closure = relocate_once((1, 2, 3), |(a, b, c)| a + b + c);
 
         // Test Clone

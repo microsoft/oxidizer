@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::core::{MemoryAffinity, ThreadAware};
+use crate::core::{ThreadAware};
+use crate::MemoryAffinity;
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -166,7 +167,7 @@ mod tests {
     fn test_hashmap() {
         use std::collections::HashMap;
 
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
 
         let mut value: HashMap<i32, String> = HashMap::new();
         value.insert(1, "one".to_string());
@@ -184,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_tuples() {
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
 
         // Test empty tuple
         let empty_tuple = ();
@@ -258,7 +259,7 @@ mod tests {
             x > 0
         }
 
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
 
         // Test fn() -> R (line 90)
         let fn_ptr_no_args: fn() -> i32 = no_args;
@@ -303,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_result() {
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
 
         // Test Ok variant
         let ok_value: Result<String, i32> = Ok("success".to_string());
@@ -329,7 +330,7 @@ mod tests {
     fn test_arc() {
         use std::sync::Arc;
 
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
 
         // Test Arc with simple type
         let arc_value = Arc::new(42);
