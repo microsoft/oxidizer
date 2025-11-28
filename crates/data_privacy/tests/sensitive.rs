@@ -61,17 +61,11 @@ fn test_ordering() {
     assert_eq!(classified1.partial_cmp(&classified1).unwrap(), Ordering::Equal);
 }
 
-#[test]
-fn test_declassify_returns_inner_value() {
-    // Consuming declassification returns the inner value
-    let classified = Sensitive::new(String::from("secret"), TestTaxonomy::PII);
-    // assert_eq!(value, "secret");
-}
 
 #[test]
 fn test_as_declassified_mut_allows_mutation() {
     // Mutable access allows in-place mutation of the wrapped value
-    let mut classified = Sensitive::new(vec![1, 2, 3], TestTaxonomy::PII);
+    let classified = Sensitive::new(vec![1, 2, 3], TestTaxonomy::PII);
     // Ensure the data class remains unchanged after mutation
     assert_eq!(classified.data_class(), TestTaxonomy::PII);
 }

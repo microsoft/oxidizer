@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactionEngine};
-use std::fmt::{Debug, Display, Formatter};
+use crate::{Classified, DataClass, RedactedDebug};
+use std::fmt::Debug;
 
 /// Data class for public/standard library types.
 pub const PUBLIC: DataClass = DataClass::new("public", "data");
@@ -57,21 +57,6 @@ macro_rules! impl_std_traits_generic_debug_only {
     };
 }
 
-/// Implements Classified, RedactedDebug, and RedactedDisplay for generic std types.
-macro_rules! impl_std_traits_generic {
-    ($ty:ty, $data_class:expr, $($bounds:tt)*) => {
-        impl_std_traits_generic_debug_only!($ty, $data_class, $($bounds)*);
-
-        impl<$($bounds)*> $crate::RedactedDisplay for $ty
-        where
-            $($bounds)*
-        {
-            fn fmt(&self, _engine: &$crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-                <Self as ::std::fmt::Display>::fmt(self, f)
-            }
-        }
-    };
-}
 
 // Non-generic types with Display
 impl_std_traits!(String, PUBLIC);

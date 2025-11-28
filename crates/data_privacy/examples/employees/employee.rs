@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::example_taxonomy::ExampleTaxonomy;
-use data_privacy_macros::{RedactedDebug, RedactedDisplay, RedactedToString, classified};
+use data_privacy_macros::{classified, RedactedDebug, RedactedDisplay};
 use derive_more::{Constructor, From};
 use serde::{Deserialize, Serialize};
 

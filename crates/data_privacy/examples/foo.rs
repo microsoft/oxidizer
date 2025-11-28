@@ -9,8 +9,8 @@
 // - create our own formatter for struct pretty printing.
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-use data_privacy::{Classified, RedactedToString};
 use data_privacy::{RedactedDebug, RedactionEngine};
+use data_privacy::RedactedToString;
 use data_privacy_macros::{classified, taxonomy};
 use std::fmt::Debug;
 
@@ -20,6 +20,7 @@ pub enum Tax {
     PII,
     OII,
 }
+
 
 #[classified(Tax::PII)]
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -33,10 +34,8 @@ struct Foo {
 
 fn main() {
     let engine = RedactionEngine::builder()
-        .add_class_redactor(&Tax::PII.data_class(), SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
-        .add_class_redactor(
-            &Tax::OII.data_class(),
-            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
+        .add_class_redactor(Tax::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .add_class_redactor(Tax::OII, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
         )
         .build();
 

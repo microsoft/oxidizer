@@ -14,6 +14,12 @@ pub struct DataClass {
     name: Cow<'static, str>,
 }
 
+impl AsRef<Self> for DataClass {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 impl DataClass {
     /// Creates a new data class instance.
     #[must_use]

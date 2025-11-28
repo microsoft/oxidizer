@@ -55,14 +55,8 @@ fn main() {
     // If at runtime, an unconfigured data class is encountered, then the data just
     // gets erased, so it is not logged at all, avoiding a potential privacy leak.
     let engine = RedactionEngine::builder()
-        .add_class_redactor(
-            &ExampleTaxonomy::PersonallyIdentifiableInformation.data_class(),
-            SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
-        )
-        .add_class_redactor(
-            &ExampleTaxonomy::OrganizationallyIdentifiableInformation.data_class(),
-            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
-        )
+        .add_class_redactor(ExampleTaxonomy::PersonallyIdentifiableInformation, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .add_class_redactor(ExampleTaxonomy::OrganizationallyIdentifiableInformation, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
         .build();
 
     // now configure the logging system to use the redaction engine
