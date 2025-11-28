@@ -32,8 +32,6 @@ const TEST_GROUPS: &[&[&str]] = &[
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
 ];
 
-const PACKAGES_TO_SKIP: &[&str] = &["ci_aids", "testing_aids"];
-
 fn main() -> Result<()> {
     println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -46,7 +44,7 @@ fn main() -> Result<()> {
 
     let filtered_packages: Vec<_> = all_packages
         .into_iter()
-        .filter(|pkg| !PACKAGES_TO_SKIP.contains(&pkg.name.as_str()))
+        .filter(|pkg| !ci_aids::INTERNAL_CRATES.contains(&pkg.name.as_str()))
         .collect();
 
     // Add ungrouped packages
@@ -69,7 +67,7 @@ fn main() -> Result<()> {
     for (i, group) in test_groups.iter().enumerate() {
         println!("  {}: [{}]", i + 1, group.join(", "));
     }
-    println!("\nSkipped: {}", PACKAGES_TO_SKIP.join(", "));
+    println!("\nSkipped: {}", ci_aids::INTERNAL_CRATES.join(", "));
 
     if test_groups.len() > initial_count {
         println!("\nAdded {} ungrouped package(s) as individual groups", test_groups.len() - initial_count);

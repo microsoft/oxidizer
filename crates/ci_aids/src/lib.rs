@@ -20,6 +20,14 @@ struct CargoMetadata {
 pub struct PackageMetadata {
     pub name: String,
     pub id: String,
+    pub manifest_path: String,
+    pub targets: Vec<Target>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Target {
+    pub kind: Vec<String>,
+    pub name: String,
 }
 
 /// List all workspace packages using `cargo metadata`
@@ -41,6 +49,9 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
 
     Ok(metadata.packages)
 }
+
+/// Internal crates that should be skipped in CI checks
+pub const INTERNAL_CRATES: &[&str] = &["ci_aids", "testing_aids"];
 
 /// Run a cargo command and pipe the output to stdout/stderr
 pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
@@ -77,6 +88,8 @@ mod tests {
         assert!(!packages.is_empty());
 
         let ci_aids = packages.iter().find(|p| p.name == "ci_aids");
-        assert!(ci_aids.is_some(), "{packages:?}");
+        assert!(ci_aids.is_some(), "{packages:?}");        
+        assert!(!ci_aids.unwrap().manifest_path.is_empty());
+        assert!(!ci_aids.unwrap().targets.is_empty());
     }
 }
