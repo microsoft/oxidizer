@@ -3,7 +3,7 @@
 
 #![cfg(feature = "test-util")]
 
-use ohno::{Error, ErrorExt, ErrorTraceExt, OhnoCore, assert_error_message};
+use ohno::{EnrichableExt, Error, ErrorExt, OhnoCore, assert_error_message};
 
 #[derive(Error)]
 #[display("Failed to read config with path: {path}")]
@@ -41,12 +41,12 @@ fn test_display_error_override_with_field() {
 }
 
 #[test]
-fn test_display_error_override_with_context() {
+fn test_display_error_override_with_enrichment() {
     let error = ConfigError {
         path: "/tmp/test.conf".to_string(),
         inner_error: OhnoCore::from("permission denied")
-            .error_trace("filesystem access failed")
-            .error_trace("security check failed"),
+            .enrich("filesystem access failed")
+            .enrich("security check failed"),
     };
 
     let display = format!("{error}");

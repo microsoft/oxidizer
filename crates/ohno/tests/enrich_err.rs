@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ohno::{Error, ErrorExt, ErrorTrace, OhnoCore, TraceInfo, error_trace};
+use ohno::{Enrichable, Error, ErrorExt, OhnoCore, TraceInfo, enrich_err};
 
 #[macro_use]
 mod util;
@@ -17,7 +17,7 @@ struct BasicTestError {
 
 #[test]
 fn case_1_regular_string() {
-    #[error_trace("operation failed")]
+    #[enrich_err("operation failed")]
     fn regular_string_test() -> Result<String, BasicTestError> {
         Err(BasicTestError::caused_by("base error"))
     }
@@ -33,7 +33,7 @@ fn case_1_regular_string() {
 
 #[test]
 fn case_2_inline_argument() {
-    #[error_trace("failed to process file {filename}")]
+    #[enrich_err("failed to process file {filename}")]
     fn inline_argument_test(filename: &str) -> Result<String, BasicTestError> {
         Err(BasicTestError::caused_by("file error"))
     }
@@ -50,7 +50,7 @@ fn case_2_inline_argument() {
 
 #[test]
 fn case_3_positional_argument() {
-    #[error_trace("processed {} bytes", data.len())]
+    #[enrich_err("processed {} bytes", data.len())]
     fn positional_argument_test(data: &[u8]) -> Result<String, BasicTestError> {
         Err(BasicTestError::caused_by("processing error"))
     }
@@ -67,7 +67,7 @@ fn case_3_positional_argument() {
 
 #[test]
 fn multiple_inline_arguments() {
-    #[error_trace("multiple {param1} inline {param2} arguments")]
+    #[enrich_err("multiple {param1} inline {param2} arguments")]
     fn multiple_inline_test(param1: &str, param2: i32) -> Result<(), BasicTestError> {
         Err(BasicTestError::caused_by("multiple param error"))
     }
@@ -83,7 +83,7 @@ fn multiple_inline_arguments() {
 
 #[test]
 fn multiple_positional_arguments() {
-    #[error_trace("multiple {} positional {} arguments", first, second)]
+    #[enrich_err("multiple {} positional {} arguments", first, second)]
     fn multiple_positional_test(first: &str, second: i32) -> Result<(), BasicTestError> {
         Err(BasicTestError::caused_by("multiple pos error"))
     }
@@ -99,7 +99,7 @@ fn multiple_positional_arguments() {
 
 #[test]
 fn mixed_inline_and_positional_arguments() {
-    #[error_trace("mixed {inline} and {} positional", positional)]
+    #[enrich_err("mixed {inline} and {} positional", positional)]
     fn mixed_arguments_test(inline: &str, positional: i32) -> Result<(), BasicTestError> {
         Err(BasicTestError::caused_by("mixed error"))
     }
@@ -115,7 +115,7 @@ fn mixed_inline_and_positional_arguments() {
 
 #[test]
 fn generic_function_with_where() {
-    #[error_trace("where t: {t}")]
+    #[enrich_err("where t: {t}")]
     fn where_test<T>(t: T) -> Result<(), BasicTestError>
     where
         T: std::fmt::Display,
@@ -146,58 +146,58 @@ impl SyncService {
         }
     }
 
-    #[error_trace("sync service method failed with value {value}")]
+    #[enrich_err("sync service method failed with value {value}")]
     fn do_something(&mut self, value: i32) -> Result<i32, BasicTestError> {
         self.counter += value;
         self.atomic_counter.fetch_add(value, Ordering::SeqCst);
         Err(BasicTestError::caused_by("negative value"))
     }
 
-    #[error_trace("sync read-only method failed")]
+    #[enrich_err("sync read-only method failed")]
     fn read_only(&self) -> Result<i32, BasicTestError> {
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         Err(BasicTestError::caused_by("counter is zero"))
     }
 
-    #[error_trace("sync method with self field access failed, counter: {}", self.counter)]
+    #[enrich_err("sync method with self field access failed, counter: {}", self.counter)]
     fn with_self_field(&self) -> Result<i32, BasicTestError> {
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         Err(BasicTestError::caused_by("failed with field"))
     }
 
-    #[error_trace("mutable method failed, atomic: {}", self.atomic_counter.load(Ordering::SeqCst))]
+    #[enrich_err("mutable method failed, atomic: {}", self.atomic_counter.load(Ordering::SeqCst))]
     fn with_mut_self_no_args(&mut self) -> Result<i32, BasicTestError> {
         self.counter += 1;
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         Err(BasicTestError::caused_by("mutation failed"))
     }
 
-    #[error_trace("method failed")] // you can't use message as it's consumed in the function
+    #[enrich_err("method failed")] // you can't use message as it's consumed in the function
     fn with_self_and_string(&self, message: String) -> Result<i32, BasicTestError> {
         let e = BasicTestError::caused_by(format!("message was: {message}"));
         drop(message); // ensure message is consumed
         Err(e)
     }
 
-    #[error_trace("method failed with string ref: {message}")]
+    #[enrich_err("method failed with string ref: {message}")]
     fn with_self_and_string_ref(&self, message: &String) -> Result<i32, BasicTestError> {
         Err(BasicTestError::caused_by(format!("message was: {message}")))
     }
 
-    #[error_trace("consuming method failed")]
+    #[enrich_err("consuming method failed")]
     fn consume_self(self) -> Result<i32, BasicTestError> {
         let counter = self.counter;
         drop(self); // ensure self is consumed
         Err(BasicTestError::caused_by(format!("consumed with counter: {counter}")))
     }
 
-    #[error_trace("consuming method with arg failed, value: {value}")]
+    #[enrich_err("consuming method with arg failed, value: {value}")]
     fn consume_self_with_arg(self, value: i32) -> Result<i32, BasicTestError> {
         drop(self); // ensure self is consumed
         Err(BasicTestError::caused_by(format!("consumed with value: {value}")))
     }
 
-    #[error_trace("consuming mutable method failed")]
+    #[enrich_err("consuming mutable method failed")]
     fn consume_self_mut(mut self) -> Result<i32, BasicTestError> {
         self.counter += 1;
         let counter = self.counter;
@@ -310,7 +310,7 @@ fn sync_method_consume_self_mut() {
 
 #[test]
 fn impl_as_ref() {
-    #[error_trace("operation failed. Path: {}", path.as_ref().display())]
+    #[enrich_err("operation failed. Path: {}", path.as_ref().display())]
     fn impl_as_ref_test(path: impl AsRef<std::path::Path>) -> Result<String, BasicTestError> {
         Err(BasicTestError::caused_by("path error"))
     }
@@ -325,7 +325,7 @@ fn impl_as_ref() {
 #[test]
 fn empty_context_iter() {
     let core = OhnoCore::default();
-    assert!(core.context_iter().next().is_none());
+    assert!(core.traces().next().is_none());
 }
 
 #[test]
@@ -335,14 +335,14 @@ fn context_iter_reverse_order() {
     let traces = ["trace 1", "trace 2", "trace 3", "trace 4", "trace 5"];
     for (i, &msg) in traces.iter().enumerate() {
         #[expect(clippy::cast_possible_truncation, reason = "Test")]
-        let trace = TraceInfo::detailed(msg, "test.rs", (i + 1) as u32 * 10);
-        core.add_error_trace(trace);
+        let trace = TraceInfo::new(msg, "test.rs", (i + 1) as u32 * 10);
+        core.add_enrichment(trace);
     }
 
     let messages: Vec<(&str, &str, u32)> = core
-        .context_iter()
+        .traces()
         .map(|trace| {
-            let location = trace.location.as_ref().unwrap();
+            let location = &trace.location;
             (trace.message.as_ref(), location.file, location.line)
         })
         .collect();

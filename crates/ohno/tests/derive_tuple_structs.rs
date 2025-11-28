@@ -75,11 +75,11 @@ fn test_tuple_error_with_fields_constructors() {
 }
 
 #[test]
-fn test_tuple_error_trace() {
-    use ohno::ErrorTrace;
+fn test_tuple_add_enrichment() {
+    use ohno::Enrichable;
 
     let mut error = SimpleTupleError(OhnoCore::from("test"));
-    error.add_error_trace(ohno::TraceInfo::new("trace message"));
+    error.add_enrichment(ohno::TraceInfo::new("trace message", "test.rs", 80));
 
     // The error should still be valid after adding trace
     assert!(error.to_string().contains("test"));

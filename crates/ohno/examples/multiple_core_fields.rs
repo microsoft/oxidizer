@@ -7,14 +7,14 @@ use ohno::{Error, OhnoCore};
 
 #[derive(Error)]
 struct MyError {
-    context_info: OhnoCore,
+    metadata: OhnoCore,
     #[error] // Mark the primary error field
     main_error: OhnoCore,
 }
 
 fn failing_function() -> Result<(), MyError> {
     Err(MyError {
-        context_info: OhnoCore::from("Additional context"),
+        metadata: OhnoCore::from("Additional metadata"),
         main_error: OhnoCore::from("Main error occurred"),
     })
 }

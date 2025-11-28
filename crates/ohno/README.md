@@ -18,7 +18,7 @@
 * [Display Error Override](#display-error-override)
 * [Automatic Constructors](#automatic-constructors)
 * [Automatic From Implementations](#automatic-from-implementations)
-* [Error Trace](#error-trace)
+* [Error Enrichment](#error-enrichment)
 
 ## Summary
 
@@ -26,19 +26,16 @@
 
 High-quality error handling for Rust.
 
-Ohno combines error wrapping, context stacking, backtrace capture, and procedural macros
+Ohno combines error wrapping, enrichment trace stacking, backtrace capture, and procedural macros
 into one ergonomic crate for comprehensive error handling.
 
 ## Key Features
 
 - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
 - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-- [**`#[error_trace("...")]`**](#error-trace): Attribute macro for automatic error trace injection with file and line information.
-
-Supports complex expressions like `#[error_trace("failed to read {}", path.display())]`
-
+- [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error trace injection with file and line information.
 - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
-- [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds multiple context messages
+- [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment traces
 
 ## Quick Start
 
@@ -48,7 +45,7 @@ use std::path::{Path, PathBuf};
 #[ohno::error]
 pub struct ConfigError(PathBuf);
 
-#[ohno::error_trace("failed to open file {}", path.as_ref().display())]
+#[ohno::enrich_err("failed to open file {}", path.as_ref().display())]
 fn open_file(path: impl AsRef<Path>) -> Result<String, ConfigError> {
     std::fs::read_to_string(path.as_ref())
         .map_err(|e| ConfigError::caused_by(path.as_ref().to_path_buf(), e))
@@ -180,30 +177,30 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 **Note:** Error's fields must implement `Default` when using `#[from]` to ensure they can be properly initialized.
 
-## Error Trace
+## Error Enrichment
 
-The `#[error_trace("message")]` attribute macro adds error traces with file and line info to function errors.
+The `#[enrich_err("message")]` attribute macro adds error traces with file and line info to function errors.
 
-Functions annotated with `#[error_trace("message")]` automatically wrap any returned `Result`. If
+Functions annotated with `#[enrich_err("message")]` automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a trace with the provided message, including file and line information, into the error chain.
 
 **Requirements:**
 - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-- The error type must implement the [`ohno::ErrorTrace`] trait (automatically implemented for all ohno error types)
+- The error type must implement the [`ohno::Enrichable`] trait (automatically implemented for all ohno error types)
 
 **Supported syntax patterns:**
 
 1. **Simple string literals:**
 
 ```rust
-#[error_trace("failed to process request")]
+#[enrich_err("failed to process request")]
 fn process() -> Result<(), MyError> { /* ... */ }
 ```
 
 2. **Parameter interpolation:**
 
 ```rust
-#[error_trace("failed to read file: {path}")]
+#[enrich_err("failed to read file: {path}")]
 fn read_file(path: &str) -> Result<String, MyError> { /* ... */ }
 ```
 
@@ -212,21 +209,21 @@ fn read_file(path: &str) -> Result<String, MyError> { /* ... */ }
 ```rust
 use std::path::Path;
 
-#[error_trace("failed to read file: {}", path.display())]
+#[enrich_err("failed to read file: {}", path.display())]
 fn read_file(path: &Path) -> Result<String, MyError> { /* ... */ }
 ```
 
 4. **Multiple expressions and calculations:**
 
 ```rust
-#[error_trace("processed {} items with total size {} bytes", items.len(), total_size)]
+#[enrich_err("processed {} items with total size {} bytes", items.len(), total_size)]
 fn process_items(items: &[String], total_size: usize) -> Result<(), MyError> { /* ... */ }
 ```
 
 5. **Mixed parameter interpolation and format expressions:**
 
 ```rust
-#[error_trace("user {user} failed operation with {} items", items.len())]
+#[enrich_err("user {user} failed operation with {} items", items.len())]
 fn user_operation(user: &str, items: &[String]) -> Result<(), MyError> { /* ... */ }
 ```
 
@@ -236,7 +233,7 @@ All patterns include file and line information automatically:
 #[ohno::error]
 struct MyError;
 
-#[ohno::error_trace("failed to open file")]
+#[ohno::enrich_err("failed to open file")]
 fn open_file(path: &str) -> Result<String, MyError> {
     std::fs::read_to_string(path)
         .map_err(MyError::caused_by)

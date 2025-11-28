@@ -5,7 +5,7 @@
 
 use std::io;
 
-use ohno::{ErrorTraceExt, OhnoCore, assert_error_message};
+use ohno::{EnrichableExt, OhnoCore, assert_error_message};
 
 // Test helper error type for various tests
 #[derive(Debug)]
@@ -54,53 +54,37 @@ impl std::error::Error for TestError {
 }
 
 #[test]
-fn test_detailed_error_trace() {
+fn test_detailed_enrich() {
     let error = OhnoCore::from("base error")
-        .detailed_error_trace("first trace", "file1.rs", 10)
-        .error_trace("second trace")
-        .detailed_error_trace("third trace", "file2.rs", 20);
+        .enrich("first trace")
+        .enrich("second trace")
+        .enrich("third trace");
 
     let display = error.to_string();
     assert!(display.contains("base error"));
-    assert!(display.contains("first trace (at file1.rs:10)"));
+    assert!(display.contains("first trace"));
     assert!(display.contains("second trace"));
-    assert!(display.contains("third trace (at file2.rs:20)"));
+    assert!(display.contains("third trace"));
 
-    // Test context iteration
-    let contexts: Vec<_> = error.context_iter().collect();
-    assert_eq!(contexts.len(), 3);
+    // Test enrichment iteration
+    let traces: Vec<_> = error.traces().collect();
+    assert_eq!(traces.len(), 3);
 
     // Most recent first
-    assert_eq!(contexts[0].message, "third trace");
-    assert!(contexts[0].has_location());
-    assert_eq!(contexts[1].message, "second trace");
-    assert!(!contexts[1].has_location());
-    assert_eq!(contexts[2].message, "first trace");
-    assert!(contexts[2].has_location());
+    assert_eq!(traces[0].message, "third trace");
+    assert_eq!(traces[1].message, "second trace");
+    assert_eq!(traces[2].message, "first trace");
 }
 
 #[test]
-fn test_with_error_trace() {
-    let error = OhnoCore::from("base").with_error_trace(|| format!("computed: {}", 42));
+fn test_with_enrich() {
+    let error = OhnoCore::from("base").enrich_with(|| format!("computed: {}", 42));
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
 
-    let contexts: Vec<_> = error.context_iter().collect();
-    assert_eq!(contexts.len(), 1);
-    assert!(!contexts[0].has_location());
-}
-
-#[test]
-fn test_with_detailed_error_trace() {
-    let error = OhnoCore::from("base").with_detailed_error_trace(|| format!("computed: {}", 42), "test.rs", 50);
-
-    let error_string = error.to_string();
-    assert!(error_string.contains("computed: 42 (at test.rs:50)"));
-
-    let contexts: Vec<_> = error.context_iter().collect();
-    assert_eq!(contexts.len(), 1);
-    assert!(contexts[0].has_location());
+    let traces: Vec<_> = error.traces().collect();
+    assert_eq!(traces.len(), 1);
 }
 
 #[test]
@@ -131,10 +115,10 @@ fn test_backtrace_capture() {
 }
 
 #[test]
-fn test_context_messages_iterator() {
-    let error = OhnoCore::from("base").error_trace("first").error_trace("second");
+fn test_trace_messages_iterator() {
+    let error = OhnoCore::from("base").enrich("first").enrich("second");
 
-    let messages: Vec<_> = error.context_messages().collect();
+    let messages: Vec<_> = error.trace_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);
 }
 
@@ -156,20 +140,18 @@ fn error_source_is_accessible() {
 
 #[test]
 fn clone_ohno_core() {
-    let original = OhnoCore::from("original error")
-        .error_trace("first trace")
-        .detailed_error_trace("second trace", "file.rs", 42);
+    let original = OhnoCore::from("original error").enrich("first trace").enrich("second trace");
     let mut cloned = original.clone();
     assert_eq!(original.to_string(), cloned.to_string());
 
-    cloned = cloned.error_trace("additional trace");
+    cloned = cloned.enrich("additional trace");
     assert_ne!(original.to_string(), cloned.to_string());
 }
 
 #[test]
 fn clone_with_inner_error() {
     let inner = TestError::new("inner error");
-    let original = OhnoCore::from(inner).error_trace("trace message");
+    let original = OhnoCore::from(inner).enrich("trace message");
     let cloned = original.clone();
 
     let _ = original.source().unwrap().downcast_ref::<TestError>().unwrap();

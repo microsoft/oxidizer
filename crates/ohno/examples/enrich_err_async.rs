@@ -1,26 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use ohno::error_trace;
+#![expect(clippy::unwrap_used, reason = "Example code")]
+
+use ohno::enrich_err;
 
 #[ohno::error]
 struct AsyncTestError;
 
 // async function with generic parameters
-#[error_trace("generic async function failed with {data}")]
+#[enrich_err("generic async function failed with {data}")]
 async fn generic_async_function<T: std::fmt::Display + Sync>(data: &T) -> Result<String, AsyncTestError> {
     std::future::ready(()).await;
     Err(AsyncTestError::caused_by(format!("generic error: {data}")))
 }
 
 // async function with lifetime parameters
-#[error_trace("async function with lifetime failed")]
+#[enrich_err("async function with lifetime failed")]
 async fn async_with_lifetime<'a>(data: &'a str) -> Result<String, AsyncTestError> {
     std::future::ready(()).await;
     Err(AsyncTestError::caused_by(format!("lifetime error: {data}")))
 }
 
-#[expect(clippy::unwrap_used, reason = "Example code")]
 #[tokio::main]
 async fn main() {
     let result = generic_async_function(&42).await.unwrap_err();

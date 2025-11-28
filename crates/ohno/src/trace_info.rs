@@ -7,9 +7,9 @@ use std::fmt;
 /// Source location information (file and line).
 #[derive(Debug, Clone)]
 pub struct Location {
-    /// File where the context was added
+    /// File where the trace was added
     pub file: &'static str,
-    /// Line number where the context was added
+    /// Line number where the trace was added
     pub line: u32,
 }
 
@@ -32,41 +32,23 @@ impl fmt::Display for Location {
 pub struct TraceInfo {
     /// The trace message
     pub message: Cow<'static, str>,
-    /// Optional location where the trace was added
-    pub location: Option<Location>,
+    /// Location where the trace was added
+    pub location: Location,
 }
 
 impl TraceInfo {
-    /// Creates a new context with just a message.
-    pub fn new(message: impl Into<Cow<'static, str>>) -> Self {
+    /// Creates a new trace with message, file, and line information.
+    pub fn new(message: impl Into<Cow<'static, str>>, file: &'static str, line: u32) -> Self {
         Self {
             message: message.into(),
-            location: None,
+            location: Location::new(file, line),
         }
-    }
-
-    /// Creates a new context with message, file, and line information.
-    pub fn detailed(message: impl Into<Cow<'static, str>>, file: &'static str, line: u32) -> Self {
-        Self {
-            message: message.into(),
-            location: Some(Location::new(file, line)),
-        }
-    }
-
-    /// Returns true if this context has location information.
-    #[must_use]
-    pub const fn has_location(&self) -> bool {
-        self.location.is_some()
     }
 }
 
 impl fmt::Display for TraceInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)?;
-        if let Some(location) = &self.location {
-            write!(f, " (at {location})")?;
-        }
-        Ok(())
+        write!(f, "{} (at {})", self.message, self.location)
     }
 }
 
@@ -76,12 +58,9 @@ mod tests {
 
     #[test]
     fn test_trace_info() {
-        let ctx1 = TraceInfo::new("simple trace");
-        assert!(!ctx1.has_location());
-        assert_eq!(ctx1.to_string(), "simple trace");
-
-        let ctx2 = TraceInfo::detailed("detailed trace", "main.rs", 42);
-        assert!(ctx2.has_location());
-        assert_eq!(ctx2.to_string(), "detailed trace (at main.rs:42)");
+        let ctx = TraceInfo::new("trace message", "main.rs", 42);
+        assert_eq!(ctx.to_string(), "trace message (at main.rs:42)");
+        assert_eq!(ctx.location.file, "main.rs");
+        assert_eq!(ctx.location.line, 42);
     }
 }
