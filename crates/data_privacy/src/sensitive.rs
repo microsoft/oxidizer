@@ -8,7 +8,7 @@ use data_privacy::IntoDataClass;
 /// A wrapper that dynamically classifies a value with a specific data class.
 ///
 /// Use this wrapper in places where the data class of a value cannot be determined statically. When the data class is known
-/// at compile time, prefer using specific classification types defined with the [`classified`] attribute macro.
+/// at compile time, prefer using specific classification types defined with the [`classified`](crate::classified) attribute macro.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd)]
 pub struct Sensitive<T> {
     value: T,

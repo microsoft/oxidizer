@@ -20,8 +20,8 @@ use crate::DataClass;
 /// that when classified data is logged or printed, the sensitive information is redacted according to the configured
 /// redaction policies.
 ///
-/// Types that implement the [`Classified`] trait should generally not implement the [`core::fmt::Display`] trait, and if they implement
-/// the [`Debug`] trait, the implementation should avoid exposing the classified payload. Most types should derive the [`ClassifiedDebug`](data_privacy_macros::ClassifiedDebug) macro
+/// Types that implement the [`Classified`] trait should generally not implement the [`Display`] trait, and if they implement
+/// the [`Debug`] trait, the implementation should avoid exposing the classified payload. Most types should derive the [`ClassifiedDebug`](data_privacy::ClassifiedDebug) macro
 /// to get an appropriate implementation of the [`Debug`] trait.
 ///
 /// # Example

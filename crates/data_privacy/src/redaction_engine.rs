@@ -18,7 +18,7 @@ use std::sync::Arc;
 ///
 /// ```rust
 /// use core::fmt::Write;
-/// use data_privacy::{classified, RedactionEngineBuilder, Redactor, SimpleRedactor, SimpleRedactorMode, taxonomy};
+/// use data_privacy::{classified, RedactionEngineBuilder, Redactor, taxonomy};
 ///
 /// // The taxonomy defines the different data classes we will use in our application.
 /// #[taxonomy(simple)]

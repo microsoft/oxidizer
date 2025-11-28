@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Implements the [`Classified`] trait on a newtype.
+/// Implements the [`Classified`](crate::Classified) trait on a newtype.
 ///
 /// This macro is applied to a newtype struct declaration. The newtype
 /// wraps an inner type that holds sensitive data. The macro generates
-/// an implementation of the [`Classified`], [`Debug`], [`Deref`],
-/// and [`DerefMut`] traits.
+/// an implementation of the [`Classified`](crate::Classified), [`Debug`], [`Deref`](core::ops::Deref),
+/// and [`DerefMut`](core::ops::DerefMut) traits.
 ///
 /// # Example
 ///
@@ -36,7 +36,7 @@ pub use data_privacy_macros::classified;
 /// The default value for `serde` is `true`, meaning that serde support is included by default.
 ///
 /// This attribute produces an implementation block for the enum which includes one method for
-/// each variant of the enum. These methods each return a [`DataClass`] instance representing that data class.
+/// each variant of the enum. These methods each return a [`DataClass`](crate::DataClass) instance representing that data class.
 /// In addition, classified data container types are generated for each data class.
 ///
 /// ## Example
@@ -55,4 +55,9 @@ pub use data_privacy_macros::taxonomy;
 pub use data_privacy_macros::RedactedDebug;
 pub use data_privacy_macros::RedactedDisplay;
 pub use data_privacy_macros::RedactedToString;
+
+
+
+
+
 

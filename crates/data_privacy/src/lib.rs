@@ -47,7 +47,7 @@
 //! * The [`Classified`](crate::classified::Classified) trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
 //!
-//! * The [`Redactor`](crate::redactor::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
+//! * The [`Redactor`](crate::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
 //!   few implementations of this trait, such as [`SimpleRedactor`](crate::simple_redactor::SimpleRedactor), but others can
 //!   be implemented and used by applications as well.
 //!
@@ -106,8 +106,8 @@
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
-//! * On startup, the application initializes a [`RedactionEngine`](crate::redaction_engine::RedactionEngine) using the [`RedactionEngineBuilder`](crate::redaction_engine_builder::RedactionEngineBuilder)
-//!   type. The engine is configured with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
+//! * On startup, the application initializes a [`RedactionEngine`](crate::RedactionEngine) via [`RedactionEngine::builder()`]. The engine is configured
+//!   with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
 //!   For example, for a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
 //! * When it's time to log or otherwise process the sensitive data, the application uses the redaction engine to redact the data.
@@ -118,7 +118,7 @@
 //! container types.
 //!
 //! ```rust
-//! use data_privacy::{classified, RedactionEngine, RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode, taxonomy};
+//! use data_privacy::{classified, RedactionEngine, RedactionEngineBuilder, taxonomy};
 //!
 //! // A simple taxonomy definition for the Contoso organization.
 //! #[taxonomy(contoso)]

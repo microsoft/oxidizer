@@ -10,7 +10,7 @@ pub trait RedactedDebug {
     /// This trait behaves similarly to the standard library's [`std::fmt::Debug`] trait, but it produces a redacted
     /// representation of the value based on the provided [`RedactionEngine`].
     ///
-    /// Types implementing [`Classified`] usually implement [`RedactedDebug`] as well.
+    /// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDebug`] as well.
     /// Generally speaking, you should just derive an implementation of this trait.
     ///
     /// # Errors
@@ -27,7 +27,7 @@ pub trait RedactedDisplay {
     /// This trait behaves similarly to the standard library's [`std::fmt::Display`] trait, but it produces a redacted
     /// representation of the value based on the provided [`RedactionEngine`].
     ///
-    /// Types implementing [`Classified`] usually implement [`RedactedDisplay`] as well.
+    /// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDisplay`] as well.
     /// Generally speaking, you should just derive an implementation of this trait.
     ///
     /// # Errors
