@@ -39,7 +39,6 @@ pub fn is_mutation_testing() -> bool {
 /// # Panics
 ///
 /// Panics if the test panics or the test timeout is exceeded.
-#[cfg_attr(test, mutants::skip)] // This is test logic - pointless to mutate.
 #[must_use]
 pub fn execute_or_abandon<F, R>(f: F) -> Option<R>
 where
@@ -79,7 +78,6 @@ where
 /// # Panics
 ///
 /// Panics if the test panics or the test timeout is exceeded.
-#[cfg_attr(test, mutants::skip)] // This is test logic - pointless to mutate.
 pub fn execute_or_terminate_process<F, R>(f: F) -> R
 where
     F: FnOnce() -> R,
@@ -134,7 +132,6 @@ pub fn repeating_reverse_incrementing_bytes() -> impl Iterator<Item = u8> {
 
 /// Executes an async function on the Miri-compatible `futures` async task runtime,
 /// blocking until it completes and enforcing a test timeout.
-#[cfg_attr(test, mutants::skip)] // This is test logic - pointless to mutate.
 pub fn async_test<F, FF>(f: F)
 where
     F: FnOnce() -> FF + 'static,
