@@ -324,4 +324,4 @@ jobs:
 
       # execute
       - name: Check External Type Exposure
-        run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs
+        run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
