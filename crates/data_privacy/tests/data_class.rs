@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use core::hash::{Hash, Hasher};
 use data_privacy::DataClass;

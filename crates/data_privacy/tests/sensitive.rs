@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 
 #[taxonomy(test)]
 #[derive(Debug)]
+#[allow(clippy::upper_case_acronyms, reason = "PII is a well-known acronym")]
 enum TestTaxonomy {
     PII,
 }
