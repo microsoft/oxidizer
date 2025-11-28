@@ -78,6 +78,7 @@ pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(miri, ignore)]
 mod tests {
     use super::*;
 
