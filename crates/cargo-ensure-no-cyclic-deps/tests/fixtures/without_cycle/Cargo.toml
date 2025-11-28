@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [workspace]
 members = ["crate_x", "crate_y", "crate_z"]
 resolver = "2"

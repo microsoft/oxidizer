@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [workspace]
 members = ["lib_main", "lib_test_helpers"]
 resolver = "2"
