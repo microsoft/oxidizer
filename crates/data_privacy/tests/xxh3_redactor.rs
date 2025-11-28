@@ -3,10 +3,10 @@
 
 #![cfg(feature = "xxh3")]
 
-use data_privacy::xxh3_redactor::xxH3Redactor;
-use data_privacy::xxh3_redactor::REDACTED_LEN;
 use data_privacy::DataClass;
 use data_privacy::Redactor;
+use data_privacy::xxh3_redactor::REDACTED_LEN;
+use data_privacy::xxh3_redactor::xxH3Redactor;
 
 fn get_test_redactor() -> xxH3Redactor {
     let mut secret: Vec<u8> = vec![0; 192];
@@ -16,7 +16,6 @@ fn get_test_redactor() -> xxH3Redactor {
 
     xxH3Redactor::with_secret(secret)
 }
-
 
 #[test]
 fn test_redact_produces_consistent_output() {
@@ -124,7 +123,6 @@ fn test_clone_produces_identical_redactor() {
 
     assert_eq!(output1, output2);
 }
-
 
 #[test]
 fn test_data_class_does_not_affect_output() {

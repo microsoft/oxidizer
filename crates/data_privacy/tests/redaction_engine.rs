@@ -327,7 +327,10 @@ fn test_debug_trait_with_default_redactors() {
 #[test]
 fn test_long_strings() {
     let engine = RedactionEngine::builder()
-        .add_class_redactor(TestTaxonomy::Sensitive, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
+        .add_class_redactor(
+            TestTaxonomy::Sensitive,
+            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
+        )
         .build();
 
     let long_string = "a".repeat(148);
@@ -377,7 +380,8 @@ fn add_multiple_class_redactors() {
 
     let engine = RedactionEngine::builder()
         .add_class_redactor(data_class1.clone(), redactor1)
-        .add_class_redactor(data_class2.clone(), redactor2).build();
+        .add_class_redactor(data_class2.clone(), redactor2)
+        .build();
 
     test_redaction(&engine, &data_class1, "sensitive data", "XX");
     test_redaction(&engine, &data_class2, "sensitive data", "YY");
@@ -397,7 +401,8 @@ fn set_fallback_redactor_overwrites_default() {
     let engine = RedactionEngine::builder()
         .add_class_redactor(data_class1.clone(), redactor1)
         .add_class_redactor(data_class2.clone(), redactor2)
-        .set_fallback_redactor(redactor3).build();
+        .set_fallback_redactor(redactor3)
+        .build();
 
     test_redaction(&engine, &data_class1, "sensitive data", "XX");
     test_redaction(&engine, &data_class2, "sensitive data", "YY");
@@ -414,7 +419,8 @@ fn debug_trait_implementation() {
 
     let engine = RedactionEngine::builder()
         .add_class_redactor(data_class1, redactor1)
-        .add_class_redactor(data_class2, redactor2).build();
+        .add_class_redactor(data_class2, redactor2)
+        .build();
 
     let debug_output = format!("{engine:?}");
 
