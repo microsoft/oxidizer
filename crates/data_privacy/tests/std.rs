@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(unused_allocation)] // We're deliberately testing Box allocations
+#![allow(unused_allocation, reason = "We're deliberately testing Box allocations")]
 
 use data_privacy::{Classified, DataClass, RedactionEngine};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, LinkedList, VecDeque};
@@ -61,7 +61,7 @@ macro_rules! test_type_debug_only {
     }};
 }
 
-/// Test helper for unordered collections (HashSet, HashMap) where Debug output order is non-deterministic
+/// Test helper for unordered collections (`HashSet`, `HashMap`) where Debug output order is non-deterministic
 macro_rules! test_unordered_collection {
     ($value:expr) => {{
         let engine = RedactionEngine::default();
@@ -77,6 +77,7 @@ macro_rules! test_unordered_collection {
 }
 
 #[test]
+#[allow(clippy::cognitive_complexity, reason = "Test function intentionally tests many types")]
 fn test_all_std_types() {
     // Non-generic types with Display
     test_type_with_display!(String::from("hello"));
@@ -183,6 +184,7 @@ fn test_nested_generic_types() {
 }
 
 #[test]
+#[allow(clippy::cognitive_complexity, reason = "Test function intentionally tests many edge cases")]
 fn test_edge_cases() {
     // Empty collections
     test_type_debug_only!(Vec::<i32>::new());

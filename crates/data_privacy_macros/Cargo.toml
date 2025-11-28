@@ -27,3 +27,8 @@ mutants.workspace = true
 
 [lints]
 workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "data_privacy_macros::*",
+]

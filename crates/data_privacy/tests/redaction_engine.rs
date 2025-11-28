@@ -54,13 +54,17 @@ where
     C: RedactedDisplay,
 {
     let mut output = String::new();
-    engine.redacted_display(value, &mut output).unwrap();
+    engine
+        .redacted_display(value, &mut output)
+        .expect("redacted_display should succeed in tests");
     output
 }
 
 fn collect_output_as_class(engine: &RedactionEngine, data_class: impl IntoDataClass, value: &str) -> String {
     let mut output = String::new();
-    engine.redact(data_class.into_data_class(), value, &mut output).unwrap();
+    engine
+        .redact(data_class.into_data_class(), value, &mut output)
+        .expect("redact should succeed in tests");
     output
 }
 
@@ -356,7 +360,9 @@ fn test_long_strings() {
 
 fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str, expected: &str) {
     let mut output = String::new();
-    engine.redact(data_class, input, &mut output).unwrap();
+    engine
+        .redact(data_class, input, &mut output)
+        .expect("redact should succeed in tests");
     assert_eq!(output, expected);
 }
 
