@@ -25,7 +25,8 @@
 /// struct CustomerId(String);
 pub use data_privacy_macros::classified;
 
-
+pub use data_privacy_macros::RedactedDebug;
+pub use data_privacy_macros::RedactedDisplay;
 /// Generates implementation logic and types to expose a data taxonomy.
 ///
 /// This macro is applied to an enum declaration. Each variant of the enum
@@ -52,6 +53,3 @@ pub use data_privacy_macros::classified;
 /// }
 /// ```
 pub use data_privacy_macros::taxonomy;
-pub use data_privacy_macros::RedactedDebug;
-pub use data_privacy_macros::RedactedDisplay;
-

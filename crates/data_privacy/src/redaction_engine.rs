@@ -200,4 +200,3 @@ impl RedactionEngineBuilder {
         RedactionEngine::new(self.redactors)
     }
 }
-

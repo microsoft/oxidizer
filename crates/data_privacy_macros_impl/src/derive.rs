@@ -3,7 +3,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, DeriveInput, Result};
+use syn::{DeriveInput, Result, parse2};
 
 pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
@@ -154,4 +154,3 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
         }
     })
 }
-

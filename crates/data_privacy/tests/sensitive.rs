@@ -17,7 +17,10 @@ enum TestTaxonomy {
 fn test_classified_wrapper() {
     let classified = Sensitive::new(42, TestTaxonomy::PII);
     assert_eq!(classified.data_class(), TestTaxonomy::PII);
-    assert_eq!(format!("{classified:?}"), "Sensitive { value: \"***\", data_class: DataClass { taxonomy: \"test\", name: \"p_i_i\" } }");
+    assert_eq!(
+        format!("{classified:?}"),
+        "Sensitive { value: \"***\", data_class: DataClass { taxonomy: \"test\", name: \"p_i_i\" } }"
+    );
 }
 
 #[test]

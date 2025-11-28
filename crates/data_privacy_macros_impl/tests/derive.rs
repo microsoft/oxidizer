@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy_macros_impl::derive::{redacted_debug, redacted_display, redacted_to_string};
+use data_privacy_macros_impl::derive::{redacted_debug, redacted_display};
 use insta::assert_snapshot;
 use quote::quote;
 
@@ -64,7 +64,6 @@ fn redacted_debug_enum() {
     test_derive!(input, redacted_debug);
 }
 
-
 #[test]
 fn redacted_display_single() {
     let input = quote! {
@@ -114,4 +113,3 @@ fn redacted_display_enum() {
 
     test_derive!(input, redacted_display);
 }
-

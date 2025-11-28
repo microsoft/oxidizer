@@ -164,7 +164,7 @@ fn test_nested_generic_types() {
     // Vec of Vec
     let nested_vec = vec![vec![1, 2], vec![3, 4]];
     assert_eq!(nested_vec.data_class(), PUBLIC);
-    let debug_output = format!("{nested_vec:?}", );
+    let debug_output = format!("{nested_vec:?}",);
     let mut redacted_output = String::new();
     engine.redacted_debug(&nested_vec, &mut redacted_output).unwrap();
     assert_eq!(debug_output, redacted_output);
@@ -176,7 +176,7 @@ fn test_nested_generic_types() {
     // Box of Box
     let boxed_box = Box::new(Box::new(42));
     assert_eq!(boxed_box.data_class(), PUBLIC);
-    let debug_output = format!("{boxed_box:?}", );
+    let debug_output = format!("{boxed_box:?}",);
     let mut redacted_output = String::new();
     engine.redacted_debug(&boxed_box, &mut redacted_output).unwrap();
     assert_eq!(debug_output, redacted_output);
