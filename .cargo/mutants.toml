@@ -8,7 +8,7 @@ cap_lints = true
 profile = "mutants"
 
 # Only run unit tests and integration tests, not doctests, benchmarks or examples.
-additional_cargo_test_args = [ "--tests" ]
+additional_cargo_test_args = [ "--locked", "--tests" ]
 
 exclude_re = [
     # There are no API contracts for what these must return because they
@@ -21,4 +21,4 @@ exclude_re = [
     "impl data_privacy::RedactedDebug",
     "impl data_privacy::RedactedDisplay",
     "impl data_privacy::RedactedToString",
-    ]
+]
