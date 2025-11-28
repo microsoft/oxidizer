@@ -324,14 +324,4 @@ jobs:
 
       # execute
       - name: Check External Type Exposure
-        run: |
-          for crate in crates/*; do
-            if [ -f "$crate/Cargo.toml" ]; then
-              if ! grep -q "^\\[lib\\]" "$crate/Cargo.toml"; then
-                echo "Checking external types in $crate"
-                cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} check-external-types --manifest-path "$crate/Cargo.toml" --all-features
-              else
-                echo "Skipping $crate (contains [lib] section)"
-              fi
-            fi
-          done
+        run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs
