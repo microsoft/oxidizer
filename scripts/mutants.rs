@@ -111,20 +111,20 @@ fn mutate_group(group: &[String], args: &Args) -> Result<()> {
         "--no-shuffle".into(),
         "--baseline=skip".into(),
         "--colors=never".into(),
-         format!("--jobs={JOBS}"),
          format!("--build-timeout={BUILD_TIMEOUT_SEC}"),
          format!("--timeout={TIMEOUT_SEC}"),
          format!("--minimum-test-timeout={MINIMUM_TEST_TIMEOUT_SEC}"),
          "-vV".into(),
     ];
 
-    // Add in-place flag if specified
     if args.in_place {
         cargo_args.push("--in-place".into());
+    } else {
+        // argument '--jobs <JOBS>' cannot be used with '--in-place'
+        cargo_args.push(format!("--jobs={JOBS}"));
     }
 
-    // Add diff file if specified
-    if let Some(ref diff) = args.in_diff {
+    if let Some(diff) = &args.in_diff {
         cargo_args.push("--in-diff".into());
         cargo_args.push(diff.display().to_string());
     }
