@@ -176,12 +176,8 @@
 //! assert_eq!(output_buffer, "********");
 //! ```
 
-#![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png"
-)]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico")]
 
 // Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
 // Workaround for https://github.com/bkchr/proc-macro-crate/issues/14
@@ -197,7 +193,7 @@ mod std;
 
 pub use classified::Classified;
 pub use data_class::{DataClass, IntoDataClass};
-pub use macros::{classified, taxonomy, RedactedDebug, RedactedDisplay};
+pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
 pub use redactors::simple_redactor;

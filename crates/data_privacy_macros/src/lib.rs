@@ -3,9 +3,7 @@
 
 //! Macros for the [`data_privacy`](https://docs.rs/data_privacy) crate.
 
-#![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy_macros/logo.png"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy_macros/logo.png")]
 #![doc(
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy_macros/favicon.ico"
 )]
@@ -45,4 +43,3 @@ pub fn redacted_display(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
 }
-

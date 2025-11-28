@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy_macros::{classified, taxonomy, RedactedDebug, RedactedDisplay};
+use data_privacy_macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 
 #[taxonomy(example)]
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -20,11 +20,10 @@ struct Contact {
     email: EMailAddress,
 }
 
-
 #[test]
 fn can_create_instance() {
-    let _ = Contact { name: "Alice".to_string(), email: EMailAddress("a@b.c".to_string()) };
+    let _ = Contact {
+        name: "Alice".to_string(),
+        email: EMailAddress("a@b.c".to_string()),
+    };
 }
-
-
-
