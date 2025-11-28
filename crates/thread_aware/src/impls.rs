@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::core::{ThreadAware};
 use crate::MemoryAffinity;
+use crate::core::ThreadAware;
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {

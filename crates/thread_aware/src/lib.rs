@@ -102,7 +102,7 @@ mod validator;
 #[cfg(feature = "threads")]
 mod registry;
 
-pub use core::{ThreadAware, create_manual_pinned_affinities, create_manual_memory_affinities};
+pub use core::{ThreadAware, create_manual_memory_affinities, create_manual_pinned_affinities};
 
 pub use affinity::{MemoryAffinity, PinnedAffinity};
 

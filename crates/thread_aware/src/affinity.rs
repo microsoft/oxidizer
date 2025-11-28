@@ -1,4 +1,3 @@
-
 /// An `MemoryAffinity` can be thought of as a placement in a system.
 ///
 /// It is used to represent a specific context or environment where data can be processed.
@@ -38,12 +37,7 @@ pub struct PinnedAffinity {
 
 impl PinnedAffinity {
     #[must_use]
-    pub(crate) const fn new(
-        processor_index: u16,
-        memory_region_index: u16,
-        processor_count: u16,
-        memory_region_count: u16,
-    ) -> Self {
+    pub(crate) const fn new(processor_index: u16, memory_region_index: u16, processor_count: u16, memory_region_count: u16) -> Self {
         Self {
             processor_index,
             memory_region_index,
@@ -79,8 +73,8 @@ impl PinnedAffinity {
 
 #[cfg(test)]
 mod tests {
-    use crate::PinnedAffinity;
     use super::MemoryAffinity;
+    use crate::PinnedAffinity;
 
     #[test]
     fn test_pinned_affinity() {

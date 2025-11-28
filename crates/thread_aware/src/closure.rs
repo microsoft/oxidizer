@@ -222,7 +222,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{create_manual_memory_affinities};
+    use crate::create_manual_memory_affinities;
 
     #[test]
     fn boxed_once() {

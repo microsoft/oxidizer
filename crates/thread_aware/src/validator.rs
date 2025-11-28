@@ -18,7 +18,10 @@ pub struct ThreadAwareValidator {
 impl ThreadAwareValidator {
     /// Creates a new validator for the given home memory affinity and thread registry.
     pub fn with_affinity(home: impl Into<MemoryAffinity>, registry: Arc<ThreadRegistry>) -> Self {
-        Self { home: home.into(), registry }
+        Self {
+            home: home.into(),
+            registry,
+        }
     }
 
     /// Checks if the current thread is running on its home memory affinity.

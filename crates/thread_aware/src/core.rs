@@ -142,7 +142,7 @@ pub trait ThreadAware {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_manual_pinned_affinities};
+    use super::create_manual_pinned_affinities;
 
     #[test]
     fn test_crate_fake_affinities() {

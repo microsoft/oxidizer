@@ -469,7 +469,6 @@ impl<T, S: Strategy> ThreadAware for Trc<T, S> {
                 assert!(old_data.is_none(), "Data already exists for the destination affinity");
             }
 
-
             (value, factory)
         };
 
