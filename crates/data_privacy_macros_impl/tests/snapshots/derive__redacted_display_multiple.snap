@@ -1,6 +1,6 @@
 ---
 source: crates/data_privacy_macros_impl/tests/derive.rs
-assertion_line: 73
+assertion_line: 72
 expression: pretty
 ---
 impl ::data_privacy::RedactedDisplay for EmailAddress {

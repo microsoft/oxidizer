@@ -1,20 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use data_privacy_macros_impl::derive::{redacted_debug, redacted_display, redacted_to_string};
 use insta::assert_snapshot;
 use quote::quote;
 
+macro_rules! test_derive {
+    ($input:expr, $derive_fn:path) => {{
+        let result = $derive_fn($input);
+        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
+        let pretty = prettyplease::unparse(&result_file);
+        assert_snapshot!(pretty);
+    }};
+}
+
 #[test]
-fn redacted_debug() {
+fn redacted_debug_single() {
     let input = quote! {
         struct EmailAddress(String);
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_debug(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_debug);
 }
 
 #[test]
@@ -23,11 +29,7 @@ fn redacted_debug_multiple() {
         struct EmailAddress(String, String);
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_debug(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_debug);
 }
 
 #[test]
@@ -39,11 +41,7 @@ fn redacted_debug_multiple_named() {
         }
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_debug(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_debug);
 }
 
 #[test]
@@ -52,25 +50,17 @@ fn redacted_debug_unit() {
         struct EmailAddress;
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_debug(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_debug);
 }
 
 
 #[test]
-fn redacted_display() {
+fn redacted_display_single() {
     let input = quote! {
         struct EmailAddress(String);
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_display(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_display);
 }
 
 #[test]
@@ -79,11 +69,7 @@ fn redacted_display_multiple() {
         struct EmailAddress(String, String);
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_display(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_display);
 }
 
 #[test]
@@ -95,11 +81,7 @@ fn redacted_display_multiple_named() {
         }
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_display(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_display);
 }
 
 #[test]
@@ -108,25 +90,17 @@ fn redacted_display_unit() {
         struct EmailAddress;
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_display(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_display);
 }
 
 
 #[test]
-fn redacted_to_string() {
+fn redacted_to_string_single() {
     let input = quote! {
         struct EmailAddress(String);
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_to_string(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_to_string);
 }
 
 #[test]
@@ -135,11 +109,7 @@ fn redacted_to_string_multiple() {
         struct EmailAddress(String, String);
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_to_string(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_to_string);
 }
 
 #[test]
@@ -151,11 +121,7 @@ fn redacted_to_string_multiple_named() {
         }
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_to_string(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_to_string);
 }
 
 #[test]
@@ -164,9 +130,5 @@ fn redacted_to_string_unit() {
         struct EmailAddress;
     };
 
-    let result = data_privacy_macros_impl::derive::redacted_to_string(input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
-
-    assert_snapshot!(pretty);
+    test_derive!(input, redacted_to_string);
 }
