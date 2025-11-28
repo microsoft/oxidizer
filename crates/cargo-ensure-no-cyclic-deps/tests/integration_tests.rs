@@ -19,9 +19,7 @@ fn test_workspace_with_cycle() {
     let manifest_path = fixture_path.join("Cargo.toml");
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cargo-ensure-no-cyclic-deps"));
-    cmd.arg("ensure-no-cyclic-deps")
-        .arg("--manifest-path")
-        .arg(manifest_path);
+    cmd.arg("ensure-no-cyclic-deps").arg("--manifest-path").arg(manifest_path);
 
     cmd.assert()
         .failure()
@@ -41,9 +39,7 @@ fn test_workspace_without_cycle() {
     let manifest_path = fixture_path.join("Cargo.toml");
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cargo-ensure-no-cyclic-deps"));
-    cmd.arg("ensure-no-cyclic-deps")
-        .arg("--manifest-path")
-        .arg(manifest_path);
+    cmd.arg("ensure-no-cyclic-deps").arg("--manifest-path").arg(manifest_path);
 
     cmd.assert()
         .success()
@@ -56,19 +52,14 @@ fn test_workspace_with_dev_cycle() {
     let manifest_path = fixture_path.join("Cargo.toml");
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cargo-ensure-no-cyclic-deps"));
-    cmd.arg("ensure-no-cyclic-deps")
-        .arg("--manifest-path")
-        .arg(manifest_path);
+    cmd.arg("ensure-no-cyclic-deps").arg("--manifest-path").arg(manifest_path);
 
     cmd.assert()
         .failure()
         .code(1)
         .stderr(predicate::str::contains("Error: Cyclic dependencies detected!"))
         .stderr(predicate::str::contains("Cycle 1:"))
-        .stderr(
-            predicate::str::contains("lib_main")
-                .and(predicate::str::contains("lib_test_helpers")),
-        );
+        .stderr(predicate::str::contains("lib_main").and(predicate::str::contains("lib_test_helpers")));
 }
 
 #[test]
