@@ -782,4 +782,34 @@ mod tests {
         // because Factory::Manual just clones the Arc
         assert!(Arc::ptr_eq(&*trc_relocated, &value));
     }
+
+    #[test]
+    fn test_relocated_unknown_destination() {
+        use crate::{MemoryAffinity, ThreadAware, create_manual_pinned_affinities};
+
+        let affinities = create_manual_pinned_affinities(&[2]);
+
+        let source = affinities[0];
+        let destination = MemoryAffinity::Unknown;
+
+        let trc = Trc::new(42);
+
+        let relocated_trc = trc.relocated(source.into(), destination);
+        assert_eq!(**relocated_trc, 42);
+    }
+
+    #[test]
+    fn test_relocated_unknown_source() {
+        use crate::{MemoryAffinity, ThreadAware, create_manual_pinned_affinities};
+
+        let affinities = create_manual_pinned_affinities(&[2]);
+
+        let source = MemoryAffinity::Unknown;
+        let destination = affinities[1];
+
+        let trc = Trc::new(42);
+
+        let relocated_trc = trc.relocated(source, destination.into());
+        assert_eq!(**relocated_trc, 42);
+    }
 }

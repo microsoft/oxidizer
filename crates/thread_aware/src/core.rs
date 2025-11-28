@@ -37,7 +37,9 @@ pub fn create_manual_pinned_affinities(counts: &[usize]) -> Vec<PinnedAffinity> 
     affinities
 }
 
-/// Create pinned affinities for testing purposes or when not using the `ThreadRegistry`.
+/// Create memory affinities for testing purposes or when not using the `ThreadRegistry`.
+///
+/// This is similar to `create_manual_pinned_affinities` but returns `MemoryAffinity` values.
 ///
 /// # Parameters
 ///
