@@ -318,7 +318,7 @@ jobs:
         run: |
           for crate in crates/*; do
             if [ -f "$crate/Cargo.toml" ]; then
-              if ! grep -q "^\\[lib\\]" "$crate/Cargo.toml"; then
+              if ! grep -q "^\\[lib\\]\|^\\[\\[bin\\]\\]" "$crate/Cargo.toml"; then
                 echo "Checking external types in $crate"
                 cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} check-external-types --manifest-path "$crate/Cargo.toml" --all-features
               else
