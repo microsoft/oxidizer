@@ -120,6 +120,7 @@ mod tests {
 
         // Check initial size
         assert_eq!(redactors.redactors.len(), 2);
+        assert!(!redactors.is_empty());
         assert!(redactors.redactors.capacity() >= 42, "Initial capacity should be at least 42");
 
         // Shrink the redactors

@@ -1,0 +1,24 @@
+---
+source: crates/data_privacy_macros_impl/tests/derive.rs
+assertion_line: 116
+expression: pretty
+---
+impl ::data_privacy::RedactedToString for EmailAddress {
+    fn to_string(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+    ) -> ::std::string::String {
+        let mut result = ::std::string::String::from("EmailAddress(");
+        result
+            .push_str(
+                &<String as ::data_privacy::RedactedToString>::to_string(&self.0, engine),
+            );
+        result.push_str(", ");
+        result
+            .push_str(
+                &<String as ::data_privacy::RedactedToString>::to_string(&self.1, engine),
+            );
+        result.push_str(")");
+        result
+    }
+}

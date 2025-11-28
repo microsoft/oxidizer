@@ -159,6 +159,7 @@ impl Debug for RedactionEngine {
 }
 
 /// A builder for creating a [`RedactionEngine`].
+#[derive(Debug)]
 pub struct RedactionEngineBuilder {
     redactors: Redactors,
 }
@@ -200,14 +201,3 @@ impl RedactionEngineBuilder {
     }
 }
 
-impl Default for RedactionEngineBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Debug for RedactionEngineBuilder {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.redactors.fmt(f)
-    }
-}

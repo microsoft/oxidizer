@@ -1,0 +1,19 @@
+---
+source: crates/data_privacy_macros_impl/tests/derive.rs
+assertion_line: 30
+expression: pretty
+---
+impl ::data_privacy::RedactedDebug for EmailAddress {
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        f: &mut ::std::fmt::Formatter,
+    ) -> ::std::fmt::Result {
+        ::std::write!(f, "EmailAddress(")?;
+        <String as ::data_privacy::RedactedDebug>::fmt(&self.0, engine, f)?;
+        ::std::write!(f, ", ")?;
+        <String as ::data_privacy::RedactedDebug>::fmt(&self.1, engine, f)?;
+        ::std::write!(f, ")")?;
+        ::std::result::Result::Ok(())
+    }
+}
