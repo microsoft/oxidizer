@@ -99,13 +99,13 @@ fn detect_cycles(metadata: &Metadata) -> Vec<Vec<PackageId>> {
     // Add edges for dependencies (only workspace dependencies)
     for package in metadata.workspace_packages() {
         let from_idx = node_map[&package.id];
-        
+
         for dep in &package.dependencies {
             // Only consider workspace dependencies
-            if let Some(dep_pkg) = metadata.packages.iter().find(|p| p.name == dep.name) {
-                if let Some(&to_idx) = node_map.get(&dep_pkg.id) {
-                    graph.add_edge(from_idx, to_idx, ());
-                }
+            if let Some(dep_pkg) = metadata.packages.iter().find(|p| p.name == dep.name)
+                && let Some(&to_idx) = node_map.get(&dep_pkg.id)
+            {
+                graph.add_edge(from_idx, to_idx, ());
             }
         }
     }
@@ -116,11 +116,7 @@ fn detect_cycles(metadata: &Metadata) -> Vec<Vec<PackageId>> {
     // Extract cycles (SCCs with more than one node indicate a cycle)
     sccs.into_iter()
         .filter(|scc| scc.len() > 1)
-        .map(|scc| {
-            scc.iter()
-                .map(|&idx| graph[idx].clone())
-                .collect()
-        })
+        .map(|scc| scc.iter().map(|&idx| graph[idx].clone()).collect())
         .collect()
 }
 
