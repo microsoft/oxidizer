@@ -204,7 +204,7 @@ jobs:
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
-          toolchain: ${{ env.RUST_LATEST }}
+          toolchain: ${{ env.RUST_LATEST }},nightly
       - name: Installing Wild Linker
         uses: davidlattimore/wild-action@0.7.0
       - name: Install Cargo Tools
@@ -219,7 +219,7 @@ jobs:
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
-        run: cargo mutants --in-place --no-shuffle --baseline=skip --test-workspace=true --colors=never --build-timeout=600 --in-diff diff.txt --timeout=300
+        run: cargo +nightly -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
     if: github.event_name == 'pull_request'
