@@ -9,16 +9,30 @@ edition = "2024"
 [dependencies]
 ci_aids = { path = "../crates/ci_aids" }
 anyhow = "1.0"
+argh = "0.1.12"
 ---
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use argh::FromArgs;
 
 const JOBS: u32 = 1;
 const BUILD_TIMEOUT_SEC: u32 = 600;
 const TIMEOUT_SEC: u32 = 300;
 const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
+
+/// Run mutation testing on the workspace
+#[derive(FromArgs)]
+struct Args {
+    /// run mutations in-place instead of in a temporary directory
+    #[argh(switch)]
+    in_place: bool,
+
+    /// path to a diff file to limit mutations to changed code
+    #[argh(option)]
+    in_diff: Option<PathBuf>,
+}
 
 // Test groups define related packages that should be tested together during mutation testing.
 // Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
@@ -33,6 +47,8 @@ const TEST_GROUPS: &[&[&str]] = &[
 ];
 
 fn main() -> Result<()> {
+    let args: Args = argh::from_env();
+
     println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let all_packages = ci_aids::list_packages(workspace_root)?;
@@ -63,6 +79,10 @@ fn main() -> Result<()> {
     println!("  Build timeout: {BUILD_TIMEOUT_SEC}s");
     println!("  Test timeout: {TIMEOUT_SEC}s");
     println!("  Min timeout: {MINIMUM_TEST_TIMEOUT_SEC}s");
+    println!("  In-place: {}", args.in_place);
+    if let Some(ref diff) = args.in_diff {
+        println!("  Diff file: {}", diff.display());
+    }
     println!("Test groups ({} total):", test_groups.len());
     for (i, group) in test_groups.iter().enumerate() {
         println!("  {}: [{}]", i + 1, group.join(", "));
@@ -77,16 +97,16 @@ fn main() -> Result<()> {
     println!("=====================================\n");
 
     for group in &test_groups {
-        mutate_group(&group[..])?;
+        mutate_group(&group[..], &args)?;
     }
 
     Ok(())
 }
 
-fn mutate_group(group: &[String]) -> Result<()> {
+fn mutate_group(group: &[String], args: &Args) -> Result<()> {
     println!("Mutating: {}", group.join(", "));
 
-    let mut args = vec![
+    let mut cargo_args = vec![
         "mutants".to_owned(), 
         "--no-shuffle".into(),
         "--baseline=skip".into(),
@@ -98,8 +118,19 @@ fn mutate_group(group: &[String]) -> Result<()> {
          "-vV".into(),
     ];
 
-    let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
-    args.extend(package_args);
+    // Add in-place flag if specified
+    if args.in_place {
+        cargo_args.push("--in-place".into());
+    }
 
-    ci_aids::run_cargo(args.into_iter())
+    // Add diff file if specified
+    if let Some(ref diff) = args.in_diff {
+        cargo_args.push("--in-diff".into());
+        cargo_args.push(diff.display().to_string());
+    }
+
+    let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
+    cargo_args.extend(package_args);
+
+    ci_aids::run_cargo(cargo_args.into_iter())
 }
