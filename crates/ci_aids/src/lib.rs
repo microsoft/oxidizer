@@ -4,6 +4,7 @@
 //! Shared code for writing Rust scripts
 
 #![allow(clippy::missing_errors_doc, reason = "this is an internal crate for scripts")]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::path::Path;
