@@ -118,7 +118,8 @@
 //! container types.
 //!
 //! ```rust
-//! use data_privacy::{classified, RedactionEngine, RedactionEngineBuilder, taxonomy};
+//! use data_privacy::{classified, RedactionEngine, taxonomy};
+//! use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 //!
 //! // A simple taxonomy definition for the Contoso organization.
 //! #[taxonomy(contoso)]
@@ -157,11 +158,6 @@
 //! // Displaying the customer record will not leak sensitive data because the classified containers protect the data
 //! println!("Customer record: {:?}", c);
 //!
-//! // To access the sensitive data, it must be declassified explicitly, which is easily audited in your source code.
-//! let name: &String = c.name.as_declassified();
-//! let address: &String = c.address.as_declassified();
-//! let memo: &String = c.memo.as_declassified();
-//!
 //! // You can get redacted representations of classified data using a [`RedactionEngine`](crate::redaction_engine::RedactionEngine).
 //!
 //! // Initialize some redactors
@@ -169,8 +165,8 @@
 //! let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 //!
 //! // Create the redaction engine. This is typically done once when the application starts.
-//! let engine = RedactionEngineBuilder::new()
-//!     .add_class_redactor(&ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
+//! let engine = RedactionEngine::builder()
+//!     .add_class_redactor(ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
 //!     .set_fallback_redactor(erasing_redactor)
 //!     .build();
 //!
