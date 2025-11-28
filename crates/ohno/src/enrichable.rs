@@ -47,7 +47,7 @@ impl Enrichable for OhnoCore {
 /// lazy evaluation options.
 pub trait EnrichableExt: Enrichable {
     /// Adds enrichment information to the error.
-    /// 
+    ///
     /// It uses [`std::panic::Location::caller`] to capture the file and line number
     /// where this method is invoked.
     #[must_use]
@@ -61,7 +61,7 @@ pub trait EnrichableExt: Enrichable {
     }
 
     /// Adds lazily evaluated enrichment information to the error.
-    /// 
+    ///
     /// It uses [`std::panic::Location::caller`] to capture the file and line number
     /// where this method is invoked.
     #[must_use]
