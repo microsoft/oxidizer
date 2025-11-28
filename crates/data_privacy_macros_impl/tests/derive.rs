@@ -8,7 +8,7 @@ use quote::quote;
 macro_rules! test_derive {
     ($input:expr, $derive_fn:path) => {{
         let result = $derive_fn($input);
-        let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
+        let result_file = syn::parse_file(&result.unwrap_or_else(|e| e.to_compile_error()).to_string()).unwrap();
         let pretty = prettyplease::unparse(&result_file);
         assert_snapshot!(pretty);
     }};
@@ -53,6 +53,17 @@ fn redacted_debug_unit() {
     test_derive!(input, redacted_debug);
 }
 
+#[test]
+fn redacted_debug_enum() {
+    let input = quote! {
+        enum EmailAddress {
+            A
+        }
+    };
+
+    test_derive!(input, redacted_debug);
+}
+
 
 #[test]
 fn redacted_display_single() {
@@ -88,6 +99,17 @@ fn redacted_display_multiple_named() {
 fn redacted_display_unit() {
     let input = quote! {
         struct EmailAddress;
+    };
+
+    test_derive!(input, redacted_display);
+}
+
+#[test]
+fn redacted_display_enum() {
+    let input = quote! {
+        enum EmailAddress {
+            A
+        }
     };
 
     test_derive!(input, redacted_display);
