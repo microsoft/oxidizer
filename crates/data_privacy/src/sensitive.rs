@@ -3,31 +3,39 @@
 
 use crate::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine};
 use core::fmt::{Debug, Display, Formatter};
-use core::hash::{Hash, Hasher};
+use data_privacy::IntoDataClass;
 
 /// A wrapper that dynamically classifies a value with a specific data class.
 ///
 /// Use this wrapper in places where the data class of a value cannot be determined statically. When the data class is known
 /// at compile time, prefer using specific classification types defined with the [`classified`] attribute macro.
-pub struct ClassifiedWrapper<T> {
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd)]
+pub struct Sensitive<T> {
     value: T,
     data_class: DataClass,
 }
 
-impl<T> ClassifiedWrapper<T> {
-    /// Creates a new instance of `ClassifiedWrapper` with the given value and data class.
-    pub const fn new(value: T, data_class: DataClass) -> Self {
-        Self { value, data_class }
+impl<T> Debug for Sensitive<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Protected").finish()
     }
 }
 
-impl<T> Classified for ClassifiedWrapper<T> {
+
+impl<T> Sensitive<T> {
+    /// Creates a new instance of `Protected` with the given value and data class.
+    pub fn new(value: T, data_class: impl IntoDataClass) -> Self {
+        Self { value, data_class: data_class.into_data_class() }
+    }
+}
+
+impl<T> Classified for Sensitive<T> {
     fn data_class(&self) -> DataClass {
         self.data_class.clone()
     }
 }
 
-impl<T> RedactedDebug for ClassifiedWrapper<T>
+impl<T> RedactedDebug for Sensitive<T>
 where
     T: Debug,
 {
@@ -36,7 +44,7 @@ where
         reason = "Converting from u64 to usize, value is known to be <= 128"
     )]
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        let v = todo!();
+        let v = &self.value;
 
         let mut local_buf = [0u8; 128];
         let amount = {
@@ -60,7 +68,7 @@ where
     }
 }
 
-impl<T> RedactedDisplay for ClassifiedWrapper<T>
+impl<T> RedactedDisplay for Sensitive<T>
 where
     T: Display,
 {
@@ -69,7 +77,7 @@ where
         reason = "Converting from u64 to usize, value is known to be <= 128"
     )]
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
-        let v = todo!();
+        let v = &self.data_class;
 
         let mut local_buf = [0u8; 128];
         let amount = {
@@ -93,93 +101,51 @@ where
     }
 }
 
-impl<T> Clone for ClassifiedWrapper<T>
-where
-    T: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            value: self.value.clone(),
-            data_class: self.data_class.clone(),
-        }
-    }
-}
-
-impl<T> PartialEq for ClassifiedWrapper<T>
-where
-    T: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value && self.data_class == other.data_class
-    }
-}
-
-impl<T> Hash for ClassifiedWrapper<T>
-where
-    T: Hash,
-{
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.value.hash(state);
-        self.data_class.hash(state);
-    }
-}
-
-impl<T> PartialOrd for ClassifiedWrapper<T>
-where
-    T: PartialOrd,
-{
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.value.partial_cmp(&other.value) {
-            Some(std::cmp::Ordering::Equal) => self.data_class.partial_cmp(&other.data_class),
-            other => other,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use data_privacy_macros::taxonomy;
     use std::cmp::Ordering;
+    use std::hash::{Hash, Hasher};
 
     #[taxonomy(test)]
+    #[derive(Debug)]
     enum TestTaxonomy {
-        Sensitive,
+        PII,
     }
 
     #[test]
     fn test_classified_wrapper() {
-        let classified = ClassifiedWrapper::new(42, TestTaxonomy::Sensitive.data_class());
-        // assert_eq!(classified.as_declassified(), &42);
-        assert_eq!(classified.data_class(), TestTaxonomy::Sensitive.data_class());
+        let classified = Sensitive::new(42, TestTaxonomy::PII);
+        assert_eq!(classified.data_class(), TestTaxonomy::PII);
         // assert_eq!(format!("{classified:?}"), "<CLASSIFIED:test/sensitive>");
     }
 
     #[test]
     fn test_clone_and_equality() {
-        let classified1 = ClassifiedWrapper::new(42, TestTaxonomy::Sensitive.data_class());
+        let classified1 = Sensitive::new(42, TestTaxonomy::PII);
         let classified2 = classified1.clone();
-        let classified3 = ClassifiedWrapper::new(12, TestTaxonomy::Sensitive.data_class());
-        // assert_eq!(classified1, classified2);
-        // assert_ne!(classified1, classified3);
+        let classified3 = Sensitive::new(12, TestTaxonomy::PII);
+        assert_eq!(classified1, classified2);
+        assert_ne!(classified1, classified3);
     }
 
     #[test]
     fn test_hash() {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        let classified = ClassifiedWrapper::new(42, TestTaxonomy::Sensitive.data_class());
+        let classified = Sensitive::new(42, TestTaxonomy::PII);
         classified.hash(&mut hasher);
         let hash1 = hasher.finish();
 
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        let classified2 = ClassifiedWrapper::new(42, TestTaxonomy::Sensitive.data_class());
+        let classified2 = Sensitive::new(42, TestTaxonomy::PII);
         classified2.hash(&mut hasher);
         let hash2 = hasher.finish();
 
         assert_eq!(hash1, hash2, "Hashes should be equal for the same classified value");
 
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        let classified3 = ClassifiedWrapper::new(12, TestTaxonomy::Sensitive.data_class());
+        let classified3 = Sensitive::new(12, TestTaxonomy::PII);
         classified3.hash(&mut hasher);
         let hash3 = hasher.finish();
 
@@ -188,8 +154,8 @@ mod tests {
 
     #[test]
     fn test_ordering() {
-        let classified1 = ClassifiedWrapper::new(42, TestTaxonomy::Sensitive.data_class());
-        let classified2 = ClassifiedWrapper::new(12, TestTaxonomy::Sensitive.data_class());
+        let classified1 = Sensitive::new(42, TestTaxonomy::PII);
+        let classified2 = Sensitive::new(12, TestTaxonomy::PII);
 
         assert_eq!(classified1.partial_cmp(&classified2).unwrap(), Ordering::Greater);
         assert_eq!(classified2.partial_cmp(&classified1).unwrap(), Ordering::Less);
@@ -199,16 +165,16 @@ mod tests {
     #[test]
     fn test_declassify_returns_inner_value() {
         // Consuming declassification returns the inner value
-        let classified = ClassifiedWrapper::new(String::from("secret"), TestTaxonomy::Sensitive.data_class());
+        let classified = Sensitive::new(String::from("secret"), TestTaxonomy::PII);
         // assert_eq!(value, "secret");
     }
 
     #[test]
     fn test_as_declassified_mut_allows_mutation() {
         // Mutable access allows in-place mutation of the wrapped value
-        let mut classified = ClassifiedWrapper::new(vec![1, 2, 3], TestTaxonomy::Sensitive.data_class());
+        let mut classified = Sensitive::new(vec![1, 2, 3], TestTaxonomy::PII);
         // Ensure the data class remains unchanged after mutation
-        assert_eq!(classified.data_class(), TestTaxonomy::Sensitive.data_class());
+        assert_eq!(classified.data_class(), TestTaxonomy::PII);
     }
 
     use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
@@ -219,11 +185,11 @@ mod tests {
     fn test_redacted_debug_and_display_replace_mode_string() {
         let engine = RedactionEngineBuilder::new()
             .add_class_redactor(
-                &TestTaxonomy::Sensitive.data_class(),
+                &TestTaxonomy::PII.data_class(),
                 SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
             )
             .build();
-        let wrapper = ClassifiedWrapper::new("secret".to_string(), TestTaxonomy::Sensitive.data_class());
+        let wrapper = Sensitive::new("secret".to_string(), TestTaxonomy::PII);
 
         // Debug redaction operates on the Debug representation (includes quotes for String)
         let mut debug_out = String::new();
@@ -247,11 +213,11 @@ mod tests {
     fn test_redacted_debug_and_display_replace_mode_numeric() {
         let engine = RedactionEngineBuilder::new()
             .add_class_redactor(
-                &TestTaxonomy::Sensitive.data_class(),
+                &TestTaxonomy::PII.data_class(),
                 SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
             )
             .build();
-        let wrapper = ClassifiedWrapper::new(42u32, TestTaxonomy::Sensitive.data_class());
+        let wrapper = Sensitive::new(42u32, TestTaxonomy::PII);
 
         // Numeric Debug and Display both render without quotes; length is 2.
         let mut debug_out = String::new();
@@ -268,11 +234,11 @@ mod tests {
     fn test_redacted_passthrough_and_tag_mode() {
         let engine = RedactionEngineBuilder::new()
             .add_class_redactor(
-                &TestTaxonomy::Sensitive.data_class(),
+                &TestTaxonomy::PII.data_class(),
                 SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
             )
             .build();
-        let wrapper = ClassifiedWrapper::new("secret".to_string(), TestTaxonomy::Sensitive.data_class());
+        let wrapper = Sensitive::new("secret".to_string(), TestTaxonomy::PII);
 
         let mut debug_out = String::new();
         engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
@@ -298,12 +264,12 @@ mod tests {
         // Value length > 128 triggers fallback branch in ClassifiedWrapper's redacted debug/display implementations.
         let engine = RedactionEngineBuilder::new()
             .add_class_redactor(
-                &TestTaxonomy::Sensitive.data_class(),
+                &TestTaxonomy::PII.data_class(),
                 SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
             )
             .build();
         let long_plain = "a".repeat(140);
-        let wrapper = ClassifiedWrapper::new(long_plain.clone(), TestTaxonomy::Sensitive.data_class());
+        let wrapper = Sensitive::new(long_plain.clone(), TestTaxonomy::PII);
 
         let mut debug_out = String::new();
         engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
