@@ -13,14 +13,15 @@ keywords = ["cargo", "subcommand", "dependencies", "cycles"]
 categories = ["development-tools::cargo-plugins"]
 
 [dependencies]
-cargo_metadata = { version = "0.18", default-features = false }
+cargo_metadata = { workspace = true }
 anyhow = { workspace = true, features = ["std"] }
-clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
+clap = { workspace = true, features = ["derive", "std", "help", "usage", "error-context"] }
+petgraph = { workspace = true }
 
 [dev-dependencies]
-assert_cmd = { version = "2.0", default-features = false }
-predicates = { version = "3.1", default-features = false, features = ["diff"] }
-tempfile = { version = "3.13", default-features = false }
+assert_cmd = { workspace = true }
+predicates = { workspace = true, features = ["diff"] }
+tempfile = { workspace = true }
 
 [[bin]]
 name = "cargo-ensure-no-cyclic-deps"

@@ -22,7 +22,9 @@
 use anyhow::{Context, Result};
 use cargo_metadata::{Metadata, MetadataCommand, PackageId};
 use clap::Parser;
-use std::collections::{HashMap, HashSet};
+use petgraph::algo::tarjan_scc;
+use petgraph::graph::DiGraph;
+use std::collections::HashMap;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -83,120 +85,43 @@ fn main() -> Result<()> {
     }
 }
 
-/// Detects cycles in workspace crate dependencies
+/// Detects cycles in workspace crate dependencies using Tarjan's strongly connected components algorithm
 fn detect_cycles(metadata: &Metadata) -> Vec<Vec<PackageId>> {
-    // Build a map of workspace packages
-    let workspace_package_ids: HashSet<PackageId> = metadata
-        .workspace_packages()
-        .iter()
-        .map(|pkg| pkg.id.clone())
-        .collect();
+    let mut graph = DiGraph::<PackageId, ()>::new();
+    let mut node_map = HashMap::new();
 
-    // Build adjacency list of workspace crate dependencies
-    let mut graph: HashMap<PackageId, Vec<PackageId>> = HashMap::new();
-
+    // Add nodes for each workspace package
     for package in metadata.workspace_packages() {
-        let mut deps = Vec::new();
+        let idx = graph.add_node(package.id.clone());
+        node_map.insert(package.id.clone(), idx);
+    }
 
+    // Add edges for dependencies (only workspace dependencies)
+    for package in metadata.workspace_packages() {
+        let from_idx = node_map[&package.id];
+        
         for dep in &package.dependencies {
             // Only consider workspace dependencies
             if let Some(dep_pkg) = metadata.packages.iter().find(|p| p.name == dep.name) {
-                if workspace_package_ids.contains(&dep_pkg.id) {
-                    deps.push(dep_pkg.id.clone());
-                }
-            }
-        }
-
-        graph.insert(package.id.clone(), deps);
-    }
-
-    // Find all cycles using DFS
-    let mut cycles = Vec::new();
-    let mut visited = HashSet::new();
-    let mut rec_stack = HashSet::new();
-    let mut path = Vec::new();
-
-    for pkg_id in &workspace_package_ids {
-        if !visited.contains(pkg_id) {
-            dfs_find_cycles(
-                pkg_id,
-                &graph,
-                &mut visited,
-                &mut rec_stack,
-                &mut path,
-                &mut cycles,
-            );
-        }
-    }
-
-    cycles
-}
-
-/// DFS-based cycle detection
-fn dfs_find_cycles(
-    node: &PackageId,
-    graph: &HashMap<PackageId, Vec<PackageId>>,
-    visited: &mut HashSet<PackageId>,
-    rec_stack: &mut HashSet<PackageId>,
-    path: &mut Vec<PackageId>,
-    cycles: &mut Vec<Vec<PackageId>>,
-) {
-    visited.insert(node.clone());
-    rec_stack.insert(node.clone());
-    path.push(node.clone());
-
-    if let Some(neighbors) = graph.get(node) {
-        for neighbor in neighbors {
-            if !visited.contains(neighbor) {
-                dfs_find_cycles(neighbor, graph, visited, rec_stack, path, cycles);
-            } else if rec_stack.contains(neighbor) {
-                // Found a cycle - extract it from the path
-                let cycle_start = path.iter().position(|p| p == neighbor).expect("neighbor must be in path");
-                let cycle: Vec<PackageId> = path[cycle_start..].to_vec();
-
-                // Only add if we haven't seen this cycle before (considering rotations)
-                if !is_duplicate_cycle(&cycle, cycles) {
-                    cycles.push(cycle);
+                if let Some(&to_idx) = node_map.get(&dep_pkg.id) {
+                    graph.add_edge(from_idx, to_idx, ());
                 }
             }
         }
     }
 
-    path.pop();
-    rec_stack.remove(node);
-}
+    // Find strongly connected components using Tarjan's algorithm
+    let sccs = tarjan_scc(&graph);
 
-/// Check if a cycle is a duplicate (considering rotations and reversals)
-fn is_duplicate_cycle(cycle: &[PackageId], existing_cycles: &[Vec<PackageId>]) -> bool {
-    for existing in existing_cycles {
-        if cycles_equal(cycle, existing) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if two cycles are equal (considering rotations)
-fn cycles_equal(a: &[PackageId], b: &[PackageId]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-
-    // Check all rotations
-    for start in 0..a.len() {
-        let mut matches = true;
-        for i in 0..a.len() {
-            if a[(start + i) % a.len()] != b[i] {
-                matches = false;
-                break;
-            }
-        }
-        if matches {
-            return true;
-        }
-    }
-
-    false
+    // Extract cycles (SCCs with more than one node indicate a cycle)
+    sccs.into_iter()
+        .filter(|scc| scc.len() > 1)
+        .map(|scc| {
+            scc.iter()
+                .map(|&idx| graph[idx].clone())
+                .collect()
+        })
+        .collect()
 }
 
 /// Format a cycle for display
@@ -213,51 +138,4 @@ fn format_cycle(cycle: &[PackageId], metadata: &Metadata) -> String {
         .collect();
 
     format!("{} -> {}", names.join(" -> "), names[0])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cycles_equal() {
-        // Create mock package IDs
-        let id1 = PackageId {
-            repr: "a".to_string(),
-        };
-        let id2 = PackageId {
-            repr: "b".to_string(),
-        };
-        let id3 = PackageId {
-            repr: "c".to_string(),
-        };
-
-        let cycle1 = vec![id1.clone(), id2.clone(), id3.clone()];
-        let cycle2 = vec![id2.clone(), id3.clone(), id1.clone()]; // rotation of cycle1
-        let cycle3 = vec![id1, id3, id2]; // different cycle
-
-        assert!(cycles_equal(&cycle1, &cycle2));
-        assert!(!cycles_equal(&cycle1, &cycle3));
-    }
-
-    #[test]
-    fn test_is_duplicate_cycle() {
-        let id1 = PackageId {
-            repr: "a".to_string(),
-        };
-        let id2 = PackageId {
-            repr: "b".to_string(),
-        };
-        let id3 = PackageId {
-            repr: "c".to_string(),
-        };
-
-        let cycle = vec![id1.clone(), id2.clone(), id3.clone()];
-        let existing = vec![vec![id2.clone(), id3.clone(), id1.clone()]]; // rotation
-
-        assert!(is_duplicate_cycle(&cycle, &existing));
-
-        let different_cycle = vec![id1, id3, id2];
-        assert!(!is_duplicate_cycle(&different_cycle, &existing));
-    }
 }
