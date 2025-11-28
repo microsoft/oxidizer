@@ -67,8 +67,8 @@ This crate is built around two primary traits:
 * The [`Classified`](https://docs.rs/data_privacy/latest/data_privacy/classified/trait.Classified.html) trait is used to mark types that hold sensitive data. The trait exposes
   explicit mechanisms to access the data in a safe and auditable way.
 
-* The [`Redactor`](https://docs.rs/data_privacy/latest/data_privacy/redactor/trait.Redactor.html) trait defines the logic needed by an individual redactor. This crate provides a
-  few implementations of this trait, such as [`SimpleRedactor`](https://docs.rs/data_privacy/latest/data_privacy/simple_redactor/struct.SimpleRedactor.html), but others can
+* The `Redactor` trait defines the logic needed by an individual redactor. This crate provides a
+  few implementations of this trait, such as `SimpleRedactor`, but others can
   be implemented and used by applications as well.
 
 This crate also exposes additional traits which are usually, but not necessarily, implemented by types that implement the
@@ -126,8 +126,8 @@ How this all works:
 * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
   sensitive data is not accidentally exposed through telemetry or other means.
 
-* On startup, the application initializes a [`RedactionEngine`](https://docs.rs/data_privacy/latest/data_privacy/redaction_engine/struct.RedactionEngine.html) using the [`RedactionEngineBuilder`](https://docs.rs/data_privacy/latest/data_privacy/redaction_engine_builder/struct.RedactionEngineBuilder.html)
-  type. The engine is configured with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
+* On startup, the application initializes a `RedactionEngine` via [`RedactionEngine::builder()`]. The engine is configured
+  with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
   For example, for a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 
 * When it's time to log or otherwise process the sensitive data, the application uses the redaction engine to redact the data.
@@ -138,7 +138,8 @@ This example shows how to define a simple taxonomy and a few classified containe
 container types.
 
 ```rust
-use data_privacy::{classified, RedactionEngine, RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode, taxonomy};
+use data_privacy::{classified, RedactionEngine, taxonomy};
+use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 
 // A simple taxonomy definition for the Contoso organization.
 #[taxonomy(contoso)]
@@ -177,11 +178,6 @@ let c = Customer {
 // Displaying the customer record will not leak sensitive data because the classified containers protect the data
 println!("Customer record: {:?}", c);
 
-// To access the sensitive data, it must be declassified explicitly, which is easily audited in your source code.
-let name: &String = c.name.as_declassified();
-let address: &String = c.address.as_declassified();
-let memo: &String = c.memo.as_declassified();
-
 // You can get redacted representations of classified data using a [`RedactionEngine`](crate::redaction_engine::RedactionEngine).
 
 // Initialize some redactors
@@ -189,8 +185,8 @@ let asterisk_redactor = SimpleRedactor::new();
 let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 
 // Create the redaction engine. This is typically done once when the application starts.
-let engine = RedactionEngineBuilder::new()
-    .add_class_redactor(&ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
+let engine = RedactionEngine::builder()
+    .add_class_redactor(ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
     .set_fallback_redactor(erasing_redactor)
     .build();
 

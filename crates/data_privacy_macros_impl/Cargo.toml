@@ -33,4 +33,5 @@ workspace = true
 allowed_external_types = [
     "proc_macro2::TokenStream",
     "syn::error::Error",
+    "syn::error::Result",
 ]
