@@ -191,7 +191,7 @@
 // Workaround for https://github.com/bkchr/proc-macro-crate/issues/14
 extern crate self as data_privacy;
 mod classified;
-mod classified_wrapper;
+mod sensitive;
 mod data_class;
 mod redacted;
 mod redaction_engine;
@@ -201,8 +201,7 @@ mod macros;
 
 
 pub use classified::Classified;
-pub use classified_wrapper::ClassifiedWrapper;
-pub use data_class::DataClass;
+pub use data_class::{DataClass, IntoDataClass};
 pub use macros::{classified, taxonomy, RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
@@ -210,3 +209,4 @@ pub use redactors::simple_redactor;
 #[cfg(feature = "xxh3")]
 pub use redactors::xxh3_redactor;
 pub use redactors::{Redactor, Redactors};
+pub use sensitive::Sensitive;

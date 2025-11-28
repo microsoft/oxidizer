@@ -42,3 +42,13 @@ impl Display for DataClass {
         write!(f, "{}/{}", self.taxonomy, self.name)
     }
 }
+
+pub trait IntoDataClass {
+    fn into_data_class(self) -> DataClass;
+}
+
+impl IntoDataClass for DataClass {
+    fn into_data_class(self) -> DataClass {
+        self
+    }
+}

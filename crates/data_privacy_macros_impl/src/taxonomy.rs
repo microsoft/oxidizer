@@ -5,7 +5,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parse;
 use syn::spanned::Spanned;
-use syn::{Fields, ItemEnum, parse2};
+use syn::{parse2, Fields, ItemEnum};
 
 type SynResult<T> = Result<T, syn::Error>;
 
@@ -50,7 +50,7 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
         ));
     }
 
-    let data_privacy_path = quote!(data_privacy);
+    let data_privacy_path = quote!(::data_privacy);
     let enum_name = &input.ident;
 
     let mut taxonomy_variants = Vec::new();
@@ -94,8 +94,8 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
                 impl #enum_name {
                     #[doc = "Constructs a classified value for this data class."]
                     #[must_use]
-                    pub fn #fn_name<T>(payload: T) -> #data_privacy_path::ClassifiedWrapper<T> {
-                        #data_privacy_path::ClassifiedWrapper::new(payload, #data_privacy_path::DataClass::new(#taxonomy_name, #snake_case))
+                    pub fn #fn_name<T>(payload: T) -> #data_privacy_path::Sensitive<T> {
+                        #data_privacy_path::Sensitive::new(payload, #data_privacy_path::DataClass::new(#taxonomy_name, #snake_case))
                     }
                 }
             }
@@ -115,13 +115,19 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
             }
         }
 
-        impl core::cmp::PartialEq<#data_privacy_path::DataClass> for #enum_name {
+        impl #data_privacy_path::IntoDataClass for #enum_name {
+            fn into_data_class(self) -> #data_privacy_path::DataClass {
+                self.data_class()
+            }
+        }
+
+        impl ::core::cmp::PartialEq<#data_privacy_path::DataClass> for #enum_name {
             fn eq(&self, other: &#data_privacy_path::DataClass) -> core::primitive::bool {
                 self.data_class() == *other
             }
         }
 
-        impl core::cmp::PartialEq<#enum_name> for #data_privacy_path::DataClass {
+        impl ::core::cmp::PartialEq<#enum_name> for #data_privacy_path::DataClass {
             fn eq(&self, other: &#enum_name) -> core::primitive::bool {
                 other == self
             }
