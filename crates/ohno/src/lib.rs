@@ -235,13 +235,14 @@ mod error_ext;
 mod error_trace;
 mod source;
 mod trace_info;
+mod unimplemented;
 
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
 
 pub use core::OhnoCore;
-
 pub use error_ext::ErrorExt;
 pub use error_trace::{ErrorTrace, ErrorTraceExt};
 pub use ohno_macros::{Error, error, error_trace};
 pub use trace_info::{Location, TraceInfo};
+pub use unimplemented::Unimplemented;
