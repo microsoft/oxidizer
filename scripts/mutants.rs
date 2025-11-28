@@ -21,9 +21,15 @@ const TIMEOUT_SEC: u32 = 300;
 const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 
 fn main() -> Result<()> {
-    let workspace_root = Path::new(env!("CARGO_SCRIPT_BASE_PATH")).parent().unwrap();
+    println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let all_packages = ci_aids::list_packages(workspace_root)?;
 
+    // Test groups define groups of packages to test together for each code mutation
+    // This helps reduce overall test time by sharing build/test overhead
+    // 
+    // If packages are not listed here, they will be tested individually which reduces the number of running tests
+    // and may cause some mutations to fail if test located in another package.
     let mut test_groups: Vec<Vec<String>> = vec![
         vec!["bytesbuf".to_string()],
         vec!["data_privacy".to_string(), "data_privacy_macros".to_string()],
@@ -67,29 +73,32 @@ fn main() -> Result<()> {
     println!("=====================================\n");
 
     for group in &test_groups {
-        mutate_group(&group)?;
+        mutate_group(&group[..])?;
     }
 
     Ok(())
 }
 
-fn mutate_group(group: &[&String]) -> Result<()> {
+fn mutate_group(group: &[String]) -> Result<()> {
     println!("Mutating: {}", group.join(", "));
 
     let mut args = vec![
         "mutants".to_owned(), 
-        "--no-shuffle",
-        "--baseline=skip",
-        "--colors=never"
+        "--no-shuffle".into(),
+        "--baseline=skip".into(),
+        "--colors=never".into(),
          format!("--jobs={JOBS}"),
          format!("--build-timeout={BUILD_TIMEOUT_SEC}"),
          format!("--timeout={TIMEOUT_SEC}"),
          format!("--minimum-test-timeout={MINIMUM_TEST_TIMEOUT_SEC}"),
-         "-vV",
+         "-vV".into(),
     ];
 
     let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
     args.extend(package_args);
 
-    ci_aids::run_cargo(&args)
+    let output = ci_aids::run_cargo(args.into_iter())?;
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    println!("{}", String::from_utf8_lossy(&output.stderr));
+    Ok(())
 }
