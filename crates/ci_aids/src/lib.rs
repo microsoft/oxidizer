@@ -3,6 +3,8 @@
 
 //! Shared code for writing Rust scripts
 
+#![allow(clippy::missing_errors_doc, reason = "this is an internal crate for scripts")]
+
 use std::path::Path;
 use std::process::Command;
 

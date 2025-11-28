@@ -139,6 +139,8 @@ should_panic_without_expect = "allow"
 significant_drop_tightening = "allow"
 # Blocked by Clippy bug: https://github.com/rust-lang/rust-clippy/issues/15036
 wildcard_imports = "allow"
+# In a large workspace, duplicate dependencies are inevitable; this lint causes more maintenance burden than practical benefit.
+multiple_crate_versions = "allow"
 
 [profile.release]
 debug = "line-tables-only"
