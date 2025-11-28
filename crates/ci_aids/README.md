@@ -1,4 +1,4 @@
-# Testing Aids
+# CI Aids
 
 [![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)

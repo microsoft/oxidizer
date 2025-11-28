@@ -111,10 +111,10 @@ fn mutate_group(group: &[String], args: &Args) -> Result<()> {
         "--no-shuffle".into(),
         "--baseline=skip".into(),
         "--colors=never".into(),
-         format!("--build-timeout={BUILD_TIMEOUT_SEC}"),
-         format!("--timeout={TIMEOUT_SEC}"),
-         format!("--minimum-test-timeout={MINIMUM_TEST_TIMEOUT_SEC}"),
-         "-vV".into(),
+        format!("--build-timeout={BUILD_TIMEOUT_SEC}"),
+        format!("--timeout={TIMEOUT_SEC}"),
+        format!("--minimum-test-timeout={MINIMUM_TEST_TIMEOUT_SEC}"),
+        "-vV".into(),
     ];
 
     if args.in_place {
