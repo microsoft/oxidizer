@@ -82,9 +82,7 @@ fn test_with_enrich() {
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
-
-    let traces: Vec<_> = error.traces().collect();
-    assert_eq!(traces.len(), 1);
+    assert_eq!(error.traces().count(), 1);
 }
 
 #[test]
