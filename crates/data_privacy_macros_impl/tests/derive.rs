@@ -15,6 +15,7 @@ macro_rules! test_derive {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_debug_single() {
     let input = quote! {
         struct EmailAddress(String);
@@ -24,6 +25,7 @@ fn redacted_debug_single() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_debug_multiple() {
     let input = quote! {
         struct EmailAddress(String, String);
@@ -33,6 +35,7 @@ fn redacted_debug_multiple() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_debug_multiple_named() {
     let input = quote! {
         struct EmailAddress {
@@ -45,6 +48,7 @@ fn redacted_debug_multiple_named() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_debug_unit() {
     let input = quote! {
         struct EmailAddress;
@@ -54,6 +58,7 @@ fn redacted_debug_unit() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_debug_enum() {
     let input = quote! {
         enum EmailAddress {
@@ -65,6 +70,7 @@ fn redacted_debug_enum() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_display_single() {
     let input = quote! {
         struct EmailAddress(String);
@@ -74,6 +80,7 @@ fn redacted_display_single() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_display_multiple() {
     let input = quote! {
         struct EmailAddress(String, String);
@@ -83,6 +90,7 @@ fn redacted_display_multiple() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_display_multiple_named() {
     let input = quote! {
         struct EmailAddress {
@@ -95,6 +103,7 @@ fn redacted_display_multiple_named() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_display_unit() {
     let input = quote! {
         struct EmailAddress;
@@ -104,6 +113,7 @@ fn redacted_display_unit() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn redacted_display_enum() {
     let input = quote! {
         enum EmailAddress {

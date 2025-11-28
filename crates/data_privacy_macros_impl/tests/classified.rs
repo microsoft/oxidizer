@@ -79,6 +79,7 @@ fn test_classified_impl_too_many_fields() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_success() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {

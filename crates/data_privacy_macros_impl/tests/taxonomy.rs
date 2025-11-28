@@ -141,6 +141,7 @@ fn test_taxonomy_impl_invalid_syn_parse() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_success() {
     let args = quote! { tax };
     let input = quote! {

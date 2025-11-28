@@ -51,6 +51,7 @@ impl Redactors {
     }
 
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Simple forward we have to pacify clippy
     pub fn is_empty(&self) -> bool {
         self.redactors.is_empty()
     }
