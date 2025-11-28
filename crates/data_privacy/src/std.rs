@@ -2,12 +2,13 @@
 // Licensed under the MIT License.
 
 use crate::{Classified, DataClass, RedactedDebug};
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 /// Data class for public/standard library types.
 pub const PUBLIC: DataClass = DataClass::new("public", "data");
 
-/// Implements Classified and RedactedDebug for non-generic std types.
+/// Implements Classified and `RedactedDebug` for non-generic std types.
 macro_rules! impl_std_traits_debug_only {
     ($ty:ty, $data_class:expr) => {
         impl $crate::Classified for $ty {
@@ -24,7 +25,7 @@ macro_rules! impl_std_traits_debug_only {
     };
 }
 
-/// Implements Classified, RedactedDebug, and RedactedDisplay for non-generic std types.
+/// Implements Classified, `RedactedDebug`, and `RedactedDisplay` for non-generic std types.
 macro_rules! impl_std_traits {
     ($ty:ty, $data_class:expr) => {
         impl_std_traits_debug_only!($ty, $data_class);
@@ -37,7 +38,7 @@ macro_rules! impl_std_traits {
     };
 }
 
-/// Implements Classified and RedactedDebug for generic std types (no Display).
+/// Implements Classified and `RedactedDebug` for generic std types (no Display).
 macro_rules! impl_std_traits_generic_debug_only {
     ($ty:ty, $data_class:expr, $($bounds:tt)*) => {
         impl<$($bounds)*> $crate::Classified for $ty {
@@ -93,27 +94,27 @@ impl_std_traits_generic_debug_only!(&[T], PUBLIC, T: RedactedDebug + Classified 
 impl_std_traits_generic_debug_only!(&mut [T], PUBLIC, T: RedactedDebug + Classified + Debug);
 
 // Box can display if T can display (manual impl for ?Sized)
-impl<T: ?Sized> crate::Classified for ::std::boxed::Box<T>
+impl<T> crate::Classified for ::std::boxed::Box<T>
 where
-    T: crate::Classified,
+    T: ?Sized + crate::Classified,
 {
     fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T: ?Sized> crate::RedactedDebug for ::std::boxed::Box<T>
+impl<T> crate::RedactedDebug for ::std::boxed::Box<T>
 where
-    T: crate::RedactedDebug + ::std::fmt::Debug,
+    T: ?Sized + crate::RedactedDebug + ::std::fmt::Debug,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> crate::RedactedDisplay for ::std::boxed::Box<T>
+impl<T> crate::RedactedDisplay for ::std::boxed::Box<T>
 where
-    T: crate::RedactedDisplay + ::std::fmt::Display,
+    T: ?Sized + crate::RedactedDisplay + ::std::fmt::Display,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Display>::fmt(self, f)
@@ -142,54 +143,54 @@ where
 }
 
 // Smart pointers (can display if T can display, manual impl for ?Sized)
-impl<T: ?Sized> crate::Classified for ::std::rc::Rc<T>
+impl<T> crate::Classified for ::std::rc::Rc<T>
 where
-    T: crate::Classified,
+    T: ?Sized + crate::Classified,
 {
     fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T: ?Sized> crate::RedactedDebug for ::std::rc::Rc<T>
+impl<T> crate::RedactedDebug for ::std::rc::Rc<T>
 where
-    T: crate::RedactedDebug + ::std::fmt::Debug,
+    T: ?Sized + crate::RedactedDebug + ::std::fmt::Debug,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> crate::RedactedDisplay for ::std::rc::Rc<T>
+impl<T> crate::RedactedDisplay for ::std::rc::Rc<T>
 where
-    T: crate::RedactedDisplay + ::std::fmt::Display,
+    T: ?Sized + crate::RedactedDisplay + ::std::fmt::Display,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Display>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> crate::Classified for ::std::sync::Arc<T>
+impl<T> crate::Classified for ::std::sync::Arc<T>
 where
-    T: crate::Classified,
+    T: ?Sized + crate::Classified,
 {
     fn data_class(&self) -> crate::DataClass {
         PUBLIC
     }
 }
 
-impl<T: ?Sized> crate::RedactedDebug for ::std::sync::Arc<T>
+impl<T> crate::RedactedDebug for ::std::sync::Arc<T>
 where
-    T: crate::RedactedDebug + ::std::fmt::Debug,
+    T: ?Sized + crate::RedactedDebug + ::std::fmt::Debug,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<T: ?Sized> crate::RedactedDisplay for ::std::sync::Arc<T>
+impl<T> crate::RedactedDisplay for ::std::sync::Arc<T>
 where
-    T: crate::RedactedDisplay + ::std::fmt::Display,
+    T: ?Sized + crate::RedactedDisplay + ::std::fmt::Display,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Display>::fmt(self, f)
@@ -197,7 +198,7 @@ where
 }
 
 // Cow with lifetime (no Display in general)
-impl<'a, T> crate::Classified for ::std::borrow::Cow<'a, T>
+impl<T> crate::Classified for ::std::borrow::Cow<'_, T>
 where
     T: ::std::borrow::ToOwned + ?Sized,
     T::Owned: crate::Classified,
@@ -207,10 +208,10 @@ where
     }
 }
 
-impl<'a, T> crate::RedactedDebug for ::std::borrow::Cow<'a, T>
+impl<T> crate::RedactedDebug for ::std::borrow::Cow<'_, T>
 where
     T: ::std::borrow::ToOwned + ?Sized,
-    ::std::borrow::Cow<'a, T>: ::std::fmt::Debug,
+    Self: ::std::fmt::Debug,
 {
     fn fmt(&self, _engine: &crate::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         <Self as ::std::fmt::Debug>::fmt(self, f)
@@ -224,7 +225,7 @@ impl_std_traits_generic_debug_only!(std::collections::HashSet<T>, PUBLIC, T: Red
 impl_std_traits_generic_debug_only!(std::collections::BTreeSet<T>, PUBLIC, T: RedactedDebug + Classified + Debug + Ord);
 
 // Maps with two type parameters (no Display)
-impl<K, V> crate::Classified for ::std::collections::HashMap<K, V>
+impl<K, V, S: ::std::hash::BuildHasher> crate::Classified for HashMap<K, V, S>
 where
     K: crate::Classified,
     V: crate::Classified,
@@ -234,7 +235,7 @@ where
     }
 }
 
-impl<K, V> crate::RedactedDebug for ::std::collections::HashMap<K, V>
+impl<K, V, S: ::std::hash::BuildHasher> crate::RedactedDebug for HashMap<K, V, S>
 where
     K: crate::RedactedDebug + ::std::fmt::Debug,
     V: crate::RedactedDebug + ::std::fmt::Debug,

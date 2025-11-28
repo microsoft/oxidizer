@@ -59,9 +59,9 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
 
     let name_str = name.to_string();
     let (opening, closing) = match &data_struct.fields {
-        syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
-        syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
-        syn::Fields::Unit => (name_str.clone(), ""),
+        syn::Fields::Named(_) => (format!("{name_str} {{{{"), " }}"),
+        syn::Fields::Unnamed(_) => (format!("{name_str}("), ")"),
+        syn::Fields::Unit => (name_str, ""),
     };
 
     Ok(quote! {
@@ -134,9 +134,9 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
 
     let name_str = name.to_string();
     let (opening, closing) = match &data_struct.fields {
-        syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
-        syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
-        syn::Fields::Unit => (name_str.clone(), ""),
+        syn::Fields::Named(_) => (format!("{name_str} {{{{"), " }}"),
+        syn::Fields::Unnamed(_) => (format!("{name_str}("), ")"),
+        syn::Fields::Unit => (name_str, ""),
     };
 
     Ok(quote! {
@@ -214,8 +214,8 @@ pub fn redacted_to_string(input: TokenStream) -> Result<TokenStream> {
 
     let name_str = name.to_string();
     let (opening, closing) = match &data_struct.fields {
-        syn::Fields::Named(_) => (format!("{} {{{{", name_str), " }}"),
-        syn::Fields::Unnamed(_) => (format!("{}(", name_str), ")"),
+        syn::Fields::Named(_) => (format!("{name_str} {{{{"), " }}"),
+        syn::Fields::Unnamed(_) => (format!("{name_str}("), ")"),
         syn::Fields::Unit => (name_str, ""),
     };
 

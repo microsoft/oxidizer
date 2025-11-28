@@ -63,10 +63,10 @@ where
             // SAFETY: We know the buffer contains valid UTF-8 because the Debug impl can only write valid UTF-8.
             let s = unsafe { core::str::from_utf8_unchecked(&local_buf[..amount]) };
 
-            engine.redact(&self.data_class(), s, f)
+            engine.redact(self.data_class(), s, f)
         } else {
             // If the value is too large to fit in the buffer, we fall back to using the Debug format directly.
-            engine.redact(&self.data_class(), format!("{v:?}"), f)
+            engine.redact(self.data_class(), format!("{v:?}"), f)
         }
     }
 }
@@ -96,10 +96,10 @@ where
             // SAFETY: We know the buffer contains valid UTF-8 because the Debug impl can only write valid UTF-8.
             let s = unsafe { core::str::from_utf8_unchecked(&local_buf[..amount]) };
 
-            engine.redact(&self.data_class(), s, f)
+            engine.redact(self.data_class(), s, f)
         } else {
             // If the value is too large to fit in the buffer, we fall back to using the Debug format directly.
-            engine.redact(&self.data_class(), format!("{v}"), f)
+            engine.redact(self.data_class(), format!("{v}"), f)
         }
     }
 }
