@@ -1,21 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating `error_trace` macro with argument interpolation.
-//!
-//! Shows how the `error_trace` macro can interpolate function arguments into the trace message.
+//! Example demonstrating `enrich_err` macro with argument interpolation.
 
-use ohno::error_trace;
+#![expect(clippy::unwrap_used, reason = "Example code")]
+
+use ohno::enrich_err;
 
 #[ohno::error]
 struct MyError;
 
-#[error_trace("failed to load config from '{path}'")]
+#[enrich_err("failed to load config from '{path}'")]
 fn failing_function(path: &str) -> Result<String, MyError> {
     Err(MyError::caused_by("file not found"))
 }
 
-#[expect(clippy::unwrap_used, reason = "Example code")]
 fn main() {
     let e = failing_function("config.toml").unwrap_err();
     println!("Error: {e}");

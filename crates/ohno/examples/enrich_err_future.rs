@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use futures::task::{Context, noop_waker};
-use ohno::error_trace;
+use ohno::enrich_err;
 
 #[ohno::error]
 struct MyError;
@@ -18,7 +18,7 @@ struct SimpleFuture {
 impl Future for SimpleFuture {
     type Output = Result<String, MyError>;
 
-    #[error_trace("SimpleFuture::poll failed after {} polls", self.poll_count)]
+    #[enrich_err("SimpleFuture::poll failed after {} polls", self.poll_count)]
     fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.poll_count += 1;
         match self.poll_count {

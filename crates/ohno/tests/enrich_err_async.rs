@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for the `error_trace` macro with async functions.
+//! Tests for the `enrich_err` macro with async functions.
 #![cfg(not(miri))] // unsupported operation: can't call foreign function `CreateIoCompletionPort` on OS `windows`
 #![expect(clippy::drop_non_drop, reason = "this is test code")]
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ohno::{Error, OhnoCore, error_trace};
+use ohno::{Error, OhnoCore, enrich_err};
 
 #[macro_use]
 mod util;
@@ -18,8 +18,8 @@ struct AsyncTestError {
 }
 
 #[tokio::test]
-async fn simple_async_error_trace() {
-    #[error_trace("async operation failed")]
+async fn simple_async_enrich_err() {
+    #[enrich_err("async operation failed")]
     async fn simple_async_failure() -> Result<String, AsyncTestError> {
         // Simulate async work
         std::future::ready(()).await;
@@ -34,8 +34,8 @@ async fn simple_async_error_trace() {
 }
 
 #[tokio::test]
-async fn async_error_trace_with_params() {
-    #[error_trace("async operation failed with {value}")]
+async fn async_enrich_err_with_params() {
+    #[enrich_err("async operation failed with {value}")]
     async fn async_with_param(value: i32) -> Result<String, AsyncTestError> {
         // Simulate async work
         std::future::ready(()).await;
@@ -52,7 +52,7 @@ async fn async_error_trace_with_params() {
 // Test that the async function actually returns a Future
 #[tokio::test]
 async fn async_plus_impl_as_ref() {
-    #[error_trace("async operation failed. Path: {}", path.as_ref().display())]
+    #[enrich_err("async operation failed. Path: {}", path.as_ref().display())]
     async fn simple_async_failure(path: impl AsRef<std::path::Path>) -> Result<String, AsyncTestError> {
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by("async error"))
@@ -81,21 +81,21 @@ impl AsyncService {
             atomic_counter: AtomicI32::new(0),
         }
     }
-    #[error_trace("read-only method failed")]
+    #[enrich_err("read-only method failed")]
     async fn read_only(&self) -> Result<i32, AsyncTestError> {
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by("counter is zero"))
     }
 
-    #[error_trace("method with self field access, counter: {}", self.counter)]
+    #[enrich_err("method with self field access, counter: {}", self.counter)]
     async fn with_self_field(&self) -> Result<i32, AsyncTestError> {
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by("failed with field"))
     }
 
-    #[error_trace("service method failed with value {value}")]
+    #[enrich_err("service method failed with value {value}")]
     async fn with_mut_self_and_copiable_value(&mut self, value: i32) -> Result<i32, AsyncTestError> {
         self.counter += value;
         self.atomic_counter.fetch_add(value, Ordering::SeqCst);
@@ -103,7 +103,7 @@ impl AsyncService {
         Err(AsyncTestError::caused_by("negative value"))
     }
 
-    #[error_trace("mutable method failed, atomic: {}", self.atomic_counter.load(Ordering::SeqCst))]
+    #[enrich_err("mutable method failed, atomic: {}", self.atomic_counter.load(Ordering::SeqCst))]
     async fn with_mut_self_no_args(&mut self) -> Result<i32, AsyncTestError> {
         self.counter += 1;
         self.atomic_counter.fetch_add(1, Ordering::SeqCst);
@@ -111,7 +111,7 @@ impl AsyncService {
         Err(AsyncTestError::caused_by("mutation failed"))
     }
 
-    #[error_trace("method failed")] // you can't use message as it consumed in the function
+    #[enrich_err("method failed")] // you can't use message as it consumed in the function
     async fn with_self_and_string(&self, message: String) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         let e = AsyncTestError::caused_by(format!("message was: {message}"));
@@ -119,13 +119,13 @@ impl AsyncService {
         Err(e)
     }
 
-    #[error_trace("method failed with string ref: {message}")]
+    #[enrich_err("method failed with string ref: {message}")]
     async fn with_self_and_string_ref(&self, message: &String) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         Err(AsyncTestError::caused_by(format!("message was: {message}")))
     }
 
-    #[error_trace("consuming method failed")]
+    #[enrich_err("consuming method failed")]
     async fn consume_self(self) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         let counter = self.counter;
@@ -133,14 +133,14 @@ impl AsyncService {
         Err(AsyncTestError::caused_by(format!("consumed with counter: {counter}")))
     }
 
-    #[error_trace("consuming method with arg failed, value: {value}")]
+    #[enrich_err("consuming method with arg failed, value: {value}")]
     async fn consume_self_with_arg(self, value: i32) -> Result<i32, AsyncTestError> {
         std::future::ready(()).await;
         drop(self); // ensure self is consumed
         Err(AsyncTestError::caused_by(format!("consumed with value: {value}")))
     }
 
-    #[error_trace("consuming mutable method failed")]
+    #[enrich_err("consuming mutable method failed")]
     async fn consume_self_mut(mut self) -> Result<i32, AsyncTestError> {
         self.counter += 1;
         std::future::ready(()).await;
@@ -257,14 +257,14 @@ struct CustomFuture;
 impl std::future::Future for CustomFuture {
     type Output = Result<i32, AsyncTestError>;
 
-    #[error_trace("custom future poll failed")]
+    #[enrich_err("custom future poll failed")]
     fn poll(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         std::task::Poll::Ready(Err(AsyncTestError::caused_by("poll error")))
     }
 }
 
 #[tokio::test]
-async fn error_trace_on_future_poll() {
+async fn enrich_err_on_future_poll() {
     let future = CustomFuture;
     let error = future.await.unwrap_err();
 
