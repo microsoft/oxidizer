@@ -3,6 +3,7 @@
 
 //! Shared code for writing Rust scripts
 
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -112,9 +113,14 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<Package>> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn run_cargo(args: &[&str]) -> Result<Output> {
+pub fn run_cargo(args: impl Iterator<Item = impl AsRef<OsStr>>) -> Result<Output> {
+    let args: Vec<_> = args.map(|s| s.as_ref().to_os_string()).collect();
+    let args_str = args.iter().map(|s| s.to_string_lossy()).collect::<Vec<_>>().join(" ");
+
+    println!("cargo {args_str}");
+
     let output = Command::new("cargo")
-        .args(args)
+        .args(&args)
         .output()
         .context("Failed to execute cargo command")?;
 
@@ -123,7 +129,7 @@ pub fn run_cargo(args: &[&str]) -> Result<Output> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         anyhow::bail!(
             "cargo {} failed with exit code {:?}\nstdout: {}\nstderr: {}",
-            args.join(" "),
+            args_str,
             output.status.code(),
             stdout,
             stderr
