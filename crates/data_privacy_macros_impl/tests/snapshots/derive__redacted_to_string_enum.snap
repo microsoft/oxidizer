@@ -1,0 +1,8 @@
+---
+source: crates/data_privacy_macros_impl/tests/derive.rs
+assertion_line: 166
+expression: pretty
+---
+::core::compile_error! {
+    "RedactedToString can only be derived for structs"
+}
