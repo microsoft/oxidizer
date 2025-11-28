@@ -27,10 +27,10 @@ use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware};
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{MemoryAffinity, ThreadAware, PerCore, relocate_once, create_manual_affinities};
+/// # use thread_aware::{MemoryAffinity, ThreadAware, PerCore, relocate_once, create_manual_memory_affinities};
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # use std::sync::Arc;
-/// # let affinities = create_manual_affinities(&[2]);
+/// # let affinities = create_manual_memory_affinities(&[2]);
 /// # let affinity1 = affinities[0];
 /// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
@@ -238,10 +238,10 @@ where
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_affinities};
+    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
-    /// # let affinities = create_manual_affinities(&[2]);
+    /// # let affinities = create_manual_memory_affinities(&[2]);
     /// # let affinity1 = affinities[0];
     /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
@@ -327,10 +327,10 @@ where
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_affinities};
+    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
-    /// # let affinities = create_manual_affinities(&[2]);
+    /// # let affinities = create_manual_memory_affinities(&[2]);
     /// # let affinity1 = affinities[0];
     /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
