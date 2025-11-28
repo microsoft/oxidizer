@@ -8,11 +8,11 @@ use quote::quote;
 #[test]
 fn test_taxonomy_impl_empty_args() {
     let input = quote! {
-            pub enum MyEnum {
-                VariantOne,
-                VariantTwo,
-            }
-        };
+        pub enum MyEnum {
+            VariantOne,
+            VariantTwo,
+        }
+    };
 
     let attr_args = quote! {};
     let result = taxonomy(attr_args, input);
@@ -25,11 +25,11 @@ fn test_taxonomy_impl_empty_args() {
 #[test]
 fn test_taxonomy_impl_invalid_taxonomy_name() {
     let input = quote! {
-            pub enum MyEnum {
-                VariantOne,
-                VariantTwo,
-            }
-        };
+        pub enum MyEnum {
+            VariantOne,
+            VariantTwo,
+        }
+    };
 
     let attr_args = quote! { "InvalidName" };
     let result = taxonomy(attr_args, input);
@@ -42,11 +42,11 @@ fn test_taxonomy_impl_invalid_taxonomy_name() {
 #[test]
 fn test_taxonomy_impl_missing_comma() {
     let input = quote! {
-            pub enum MyEnum {
-                VariantOne,
-                VariantTwo,
-            }
-        };
+        pub enum MyEnum {
+            VariantOne,
+            VariantTwo,
+        }
+    };
 
     let attr_args = quote! { MyTaxonomy serde = true };
     let result = taxonomy(attr_args, input);
@@ -59,10 +59,10 @@ fn test_taxonomy_impl_missing_comma() {
 #[test]
 fn test_taxonomy_impl_non_enum_struct() {
     let input = quote! {
-            pub struct MyStruct {
-                field: i32,
-            }
-        };
+        pub struct MyStruct {
+            field: i32,
+        }
+    };
 
     let attr_args = quote! { MyTaxonomy };
     let result = taxonomy(attr_args, input);
@@ -75,11 +75,11 @@ fn test_taxonomy_impl_non_enum_struct() {
 #[test]
 fn test_taxonomy_impl_generic_enum() {
     let input = quote! {
-            pub enum MyEnum<T> {
-                VariantOne(T),
-                VariantTwo,
-            }
-        };
+        pub enum MyEnum<T> {
+            VariantOne(T),
+            VariantTwo,
+        }
+    };
 
     let attr_args = quote! { MyTaxonomy };
     let result = taxonomy(attr_args, input);
@@ -95,11 +95,11 @@ fn test_taxonomy_impl_generic_enum() {
 #[test]
 fn test_taxonomy_impl_non_unit_variant_named() {
     let input = quote! {
-            pub enum MyEnum {
-                VariantOne { field: i32 },
-                VariantTwo,
-            }
-        };
+        pub enum MyEnum {
+            VariantOne { field: i32 },
+            VariantTwo,
+        }
+    };
 
     let attr_args = quote! { MyTaxonomy };
     let result = taxonomy(attr_args, input);
@@ -112,11 +112,11 @@ fn test_taxonomy_impl_non_unit_variant_named() {
 #[test]
 fn test_taxonomy_impl_non_unit_variant_unnamed() {
     let input = quote! {
-            pub enum MyEnum {
-                VariantOne(i32),
-                VariantTwo,
-            }
-        };
+        pub enum MyEnum {
+            VariantOne(i32),
+            VariantTwo,
+        }
+    };
 
     let attr_args = quote! { MyTaxonomy };
     let result = taxonomy(attr_args, input);
@@ -129,8 +129,8 @@ fn test_taxonomy_impl_non_unit_variant_unnamed() {
 #[test]
 fn test_taxonomy_impl_invalid_syn_parse() {
     let input = quote! {
-            invalid rust syntax here
-        };
+        invalid rust syntax here
+    };
 
     let attr_args = quote! { MyTaxonomy };
     let result = taxonomy(attr_args, input);
@@ -144,13 +144,13 @@ fn test_taxonomy_impl_invalid_syn_parse() {
 fn test_success() {
     let args = quote! { tax };
     let input = quote! {
-            enum GovTaxonomy {
-                #[doc("Really secret data")]
-                Confidential,
-                #[doc("More secret data")]
-                TopSecret,
-            }
-        };
+        enum GovTaxonomy {
+            #[doc("Really secret data")]
+            Confidential,
+            #[doc("More secret data")]
+            TopSecret,
+        }
+    };
 
     let result = taxonomy(args, input);
     let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();

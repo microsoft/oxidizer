@@ -3,7 +3,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, DeriveInput, Result};
+use syn::{DeriveInput, Result, parse2};
 
 pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
@@ -12,10 +12,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let syn::Data::Struct(data_struct) = &input.data else {
-        return Err(syn::Error::new_spanned(
-            input,
-            "RedactedDebug can only be derived for structs",
-        ))
+        return Err(syn::Error::new_spanned(input, "RedactedDebug can only be derived for structs"));
     };
 
     let field_fmt_calls = match &data_struct.fields {
@@ -90,10 +87,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let syn::Data::Struct(data_struct) = &input.data else {
-        return Err(syn::Error::new_spanned(
-            input,
-            "RedactedDisplay can only be derived for structs",
-        ))
+        return Err(syn::Error::new_spanned(input, "RedactedDisplay can only be derived for structs"));
     };
 
     let field_fmt_calls = match &data_struct.fields {
@@ -173,10 +167,7 @@ pub fn redacted_to_string(input: TokenStream) -> Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let syn::Data::Struct(data_struct) = &input.data else {
-        return Err(syn::Error::new_spanned(
-            input,
-            "RedactedToString can only be derived for structs",
-        ))
+        return Err(syn::Error::new_spanned(input, "RedactedToString can only be derived for structs"));
     };
 
     let field_to_string_calls = match &data_struct.fields {
@@ -239,4 +230,3 @@ pub fn redacted_to_string(input: TokenStream) -> Result<TokenStream> {
         }
     })
 }
-

@@ -9,8 +9,8 @@ use quote::quote;
 fn test_classified_impl_empty_args() {
     let attr_args = quote! {};
     let input = quote! {
-            pub struct EmailAddress(String);
-        };
+        pub struct EmailAddress(String);
+    };
 
     let result = classified(attr_args, input);
 
@@ -26,8 +26,8 @@ fn test_classified_impl_empty_args() {
 fn test_classified_impl_random_args() {
     let attr_args = quote! {Foo::Bar Baz};
     let input = quote! {
-            struct EmailAddress(String);
-        };
+        struct EmailAddress(String);
+    };
 
     let result = classified(attr_args, input);
 
@@ -40,8 +40,8 @@ fn test_classified_impl_random_args() {
 fn test_classified_impl_named_fields() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {
-            struct EmailAddress { x : String }
-        };
+        struct EmailAddress { x : String }
+    };
 
     let result = classified(attr_args, input);
 
@@ -54,8 +54,8 @@ fn test_classified_impl_named_fields() {
 fn test_classified_impl_no_fields() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {
-            struct EmailAddress;
-        };
+        struct EmailAddress;
+    };
 
     let result = classified(attr_args, input);
 
@@ -68,8 +68,8 @@ fn test_classified_impl_no_fields() {
 fn test_classified_impl_too_many_fields() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {
-            struct EmailAddress(String, i32);
-        };
+        struct EmailAddress(String, i32);
+    };
 
     let result = classified(attr_args, input);
 
@@ -82,8 +82,8 @@ fn test_classified_impl_too_many_fields() {
 fn test_success() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {
-            struct EmailAddress(String);
-        };
+        struct EmailAddress(String);
+    };
 
     let result = classified(attr_args, input);
     let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();

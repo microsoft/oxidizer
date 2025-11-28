@@ -1,9 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{DataClass, Redactor, SimpleRedactor, SimpleRedactorMode};
+use crate::DataClass;
+use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use core::fmt::Debug;
 use std::collections::HashMap;
+use std::fmt::Write;
+
+pub mod simple_redactor;
+#[cfg(feature = "xxh3")]
+pub mod xxh3_redactor;
+
+/// Represents types that can redact data.
+pub trait Redactor {
+    /// Redacts the given value and writes the results to the given output sink.
+    ///
+    /// # Errors
+    ///
+    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
+    /// this function only returns a [`std::fmt::Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
+    /// has occurred back up the stack.
+    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> std::fmt::Result;
+}
 
 pub struct Redactors {
     redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
@@ -13,7 +31,7 @@ pub struct Redactors {
 /// Type holding all redactors registered for different data classes.
 impl Redactors {
     #[must_use]
-    pub(crate) fn get(&self, data_class: &DataClass) -> Option<&(dyn Redactor + Send + Sync)> {
+    pub fn get(&self, data_class: &DataClass) -> Option<&(dyn Redactor + Send + Sync)> {
         self.redactors.get(data_class).map(AsRef::as_ref)
     }
 
@@ -23,25 +41,24 @@ impl Redactors {
     }
 
     #[must_use]
-    pub(crate) fn get_or_fallback(&self, data_class: &DataClass) -> &(dyn Redactor + Send + Sync) {
+    pub fn get_or_fallback(&self, data_class: &DataClass) -> &(dyn Redactor + Send + Sync) {
         self.get(data_class).unwrap_or_else(|| self.fallback())
     }
 
-    #[cfg(test)]
     #[must_use]
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.redactors.len()
     }
 
-    pub(crate) fn shrink(&mut self) {
+    pub fn shrink(&mut self) {
         self.redactors.shrink_to_fit();
     }
 
-    pub(crate) fn insert(&mut self, data_class: DataClass, redactor: impl Redactor + Send + Sync + 'static) {
+    pub fn insert(&mut self, data_class: DataClass, redactor: impl Redactor + Send + Sync + 'static) {
         self.redactors.insert(data_class, Box::new(redactor));
     }
 
-    pub(crate) fn set_fallback(&mut self, redactor: impl Redactor + Send + Sync + 'static) {
+    pub fn set_fallback(&mut self, redactor: impl Redactor + Send + Sync + 'static) {
         self.fallback = Box::new(redactor);
     }
 }
@@ -63,10 +80,17 @@ impl Debug for Redactors {
 
 #[cfg(test)]
 mod tests {
-    use crate::redactors::Redactors;
-    use crate::{SimpleRedactor, SimpleRedactorMode};
+    use super::*;
+    use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
     use data_privacy_macros::taxonomy;
-    use std::collections::HashMap;
+
+    struct TestRedactor;
+
+    impl Redactor for TestRedactor {
+        fn redact(&self, _data_class: &DataClass, value: &str, output: &mut dyn Write) -> std::fmt::Result {
+            write!(output, "{value}tomato")
+        }
+    }
 
     #[taxonomy(test)]
     enum TestTaxonomy {
@@ -100,5 +124,14 @@ mod tests {
         // Check size after shrinking
         assert_eq!(redactors.redactors.len(), 2, "Shrink should not change the number of redactors");
         assert!(redactors.redactors.capacity() < 42, "Capacity should shrink below 42");
+    }
+
+    #[test]
+    fn test_exact_len_default_behavior() {
+        let redactor = TestRedactor;
+        let mut output_buffer = String::new();
+        _ = redactor.redact(&TestTaxonomy::Sensitive.data_class(), "test_value", &mut output_buffer);
+
+        assert_eq!(output_buffer, "test_valuetomato");
     }
 }

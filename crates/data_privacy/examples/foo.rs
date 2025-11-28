@@ -8,10 +8,11 @@
 // - emit `const` checks for RedactedDebug and `RedactedDisplay` that types actually implement that?
 // - create our own formatter for struct pretty printing.
 
-use std::fmt::{Debug, Formatter};
-use data_privacy::{Classified, RedactedToString, RedactionEngine, RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode};
+use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+use data_privacy::{Classified, RedactedToString};
+use data_privacy::{RedactedDebug, RedactionEngine};
 use data_privacy_macros::{classified, taxonomy};
-use data_privacy::RedactedDebug;
+use std::fmt::Debug;
 
 #[taxonomy(example)]
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -30,14 +31,9 @@ struct Foo {
     b: Personal,
 }
 
-
-
 fn main() {
-    let engine = RedactionEngineBuilder::new()
-        .add_class_redactor(
-            &Tax::PII.data_class(),
-            SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
-        )
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(&Tax::PII.data_class(), SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
         .add_class_redactor(
             &Tax::OII.data_class(),
             SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
