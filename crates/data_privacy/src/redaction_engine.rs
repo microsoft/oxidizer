@@ -146,9 +146,9 @@ impl RedactionEngine {
     /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
     /// this function only returns a [`std::fmt::Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
     /// has occurred back up the stack.
-    pub fn redact(&self, data_class: &DataClass, value: impl AsRef<str>, output: &mut impl Write) -> core::fmt::Result {
-        let redactor = self.redactors.get_or_fallback(data_class);
-        redactor.redact(data_class, value.as_ref(), output)
+    pub fn redact(&self, data_class: impl AsRef<DataClass>, value: impl AsRef<str>, output: &mut impl Write) -> core::fmt::Result {
+        let redactor = self.redactors.get_or_fallback(data_class.as_ref());
+        redactor.redact(data_class.as_ref(), value.as_ref(), output)
     }
 }
 

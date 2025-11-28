@@ -85,6 +85,16 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
         })
         .collect();
 
+    let data_class_ref_arms: Vec<_> = taxonomy_variants
+        .iter()
+        .map(|(_, variant_name, snake_case)| {
+            quote! {
+                #enum_name::#variant_name => const { &#data_privacy_path::DataClass::new(#taxonomy_name, #snake_case) }
+            }
+        })
+        .collect();
+
+
     let classification_fns: Vec<_> = taxonomy_variants
         .iter()
         .map(|(docs, variant_name, snake_case)| {
@@ -111,6 +121,14 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
             pub const fn data_class(&self) -> #data_privacy_path::DataClass {
                 match self {
                     #( #data_class_match_arms ),*
+                }
+            }
+        }
+
+        impl ::core::convert::AsRef<#data_privacy_path::DataClass> for #enum_name {
+            fn as_ref(&self) -> &#data_privacy_path::DataClass {
+                match self {
+                    #( #data_class_ref_arms ),*
                 }
             }
         }

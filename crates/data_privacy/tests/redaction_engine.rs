@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-use data_privacy::{DataClass, RedactedDisplay, RedactionEngine, Redactors};
+use data_privacy::{DataClass, IntoDataClass, RedactedDisplay, RedactionEngine, Redactors};
 use data_privacy_macros::{classified, taxonomy};
 
 #[taxonomy(test)]
@@ -58,9 +58,9 @@ where
     output
 }
 
-fn collect_output_as_class(engine: &RedactionEngine, data_class: &DataClass, value: &str) -> String {
+fn collect_output_as_class(engine: &RedactionEngine, data_class: impl IntoDataClass, value: &str) -> String {
     let mut output = String::new();
-    engine.redact(data_class, value, &mut output).unwrap();
+    engine.redact(&data_class.into_data_class(), value, &mut output).unwrap();
     output
 }
 
@@ -80,7 +80,7 @@ fn test_redact_uses_specific_redactor_for_registered_class() {
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
     let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
+    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
     redactors.set_fallback(fallback_redactor);
 
     let engine = RedactionEngine::new(redactors);
@@ -97,7 +97,7 @@ fn test_redact_uses_fallback_for_unregistered_class() {
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Replace('X'));
 
     let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
+    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
     redactors.set_fallback(fallback_redactor);
 
     let engine = RedactionEngine::new(redactors);
@@ -114,12 +114,12 @@ fn test_redact_as_class_uses_specific_redactor() {
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
     let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
+    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
     redactors.set_fallback(fallback_redactor);
 
     let engine = RedactionEngine::new(redactors);
 
-    let result = collect_output_as_class(&engine, &TestTaxonomy::Sensitive.data_class(), "confidential");
+    let result = collect_output_as_class(&engine, TestTaxonomy::Sensitive, "confidential");
 
     assert_eq!(result, "************"); // Should use asterisk redactor
 }
@@ -136,7 +136,7 @@ fn test_redact_as_class_uses_fallback_for_unknown_class() {
     let engine = RedactionEngine::new(redactors);
 
     let unknown_class = DataClass::new("unknown", "test");
-    let result = collect_output_as_class(&engine, &unknown_class, "data");
+    let result = collect_output_as_class(&engine, unknown_class, "data");
 
     assert_eq!(result, "????"); // Should use fallback redactor
 }
@@ -216,12 +216,12 @@ fn test_redact_as_class_with_empty_string() {
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
     let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
+    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
     redactors.set_fallback(fallback_redactor);
 
     let engine = RedactionEngine::new(redactors);
 
-    let result = collect_output_as_class(&engine, &TestTaxonomy::Sensitive.data_class(), "");
+    let result = collect_output_as_class(&engine, TestTaxonomy::Sensitive, "");
 
     assert_eq!(result, ""); // Empty string should remain empty
 }
@@ -243,7 +243,7 @@ fn test_basic() {
     let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 
     let engine = RedactionEngine::builder()
-        .add_class_redactor(&TestTaxonomy::Sensitive.data_class(), asterisk_redactor)
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
         .set_fallback_redactor(erasing_redactor)
         .build();
 
@@ -272,7 +272,7 @@ fn test_simple() {
     let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 
     let engine = RedactionEngine::builder()
-        .add_class_redactor(&TestTaxonomy::Sensitive.data_class(), tagging_redactor)
+        .add_class_redactor(TestTaxonomy::Sensitive, tagging_redactor)
         .set_fallback_redactor(erasing_redactor)
         .build();
 
@@ -327,10 +327,7 @@ fn test_debug_trait_with_default_redactors() {
 #[test]
 fn test_long_strings() {
     let engine = RedactionEngine::builder()
-        .add_class_redactor(
-            &TestTaxonomy::Sensitive.data_class(),
-            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
-        )
+        .add_class_redactor(TestTaxonomy::Sensitive, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
         .build();
 
     let long_string = "a".repeat(148);
@@ -379,8 +376,8 @@ fn add_multiple_class_redactors() {
     let data_class3 = DataClass::new("taxonomy", "class3");
 
     let engine = RedactionEngine::builder()
-        .add_class_redactor(&data_class1, redactor1)
-        .add_class_redactor(&data_class2, redactor2).build();
+        .add_class_redactor(data_class1.clone(), redactor1)
+        .add_class_redactor(data_class2.clone(), redactor2).build();
 
     test_redaction(&engine, &data_class1, "sensitive data", "XX");
     test_redaction(&engine, &data_class2, "sensitive data", "YY");
@@ -398,8 +395,8 @@ fn set_fallback_redactor_overwrites_default() {
     let data_class3 = DataClass::new("taxonomy", "class3");
 
     let engine = RedactionEngine::builder()
-        .add_class_redactor(&data_class1, redactor1)
-        .add_class_redactor(&data_class2, redactor2)
+        .add_class_redactor(data_class1.clone(), redactor1)
+        .add_class_redactor(data_class2.clone(), redactor2)
         .set_fallback_redactor(redactor3).build();
 
     test_redaction(&engine, &data_class1, "sensitive data", "XX");
@@ -416,8 +413,8 @@ fn debug_trait_implementation() {
     let data_class2 = DataClass::new("taxonomy", "class2");
 
     let engine = RedactionEngine::builder()
-        .add_class_redactor(&data_class1, redactor1)
-        .add_class_redactor(&data_class2, redactor2).build();
+        .add_class_redactor(data_class1, redactor1)
+        .add_class_redactor(data_class2, redactor2).build();
 
     let debug_output = format!("{engine:?}");
 

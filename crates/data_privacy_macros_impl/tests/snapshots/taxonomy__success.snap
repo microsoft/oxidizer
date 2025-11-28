@@ -12,21 +12,38 @@ enum GovTaxonomy {
 impl GovTaxonomy {
     /// Returns the data class associated with the current variant.
     #[must_use]
-    pub const fn data_class(&self) -> data_privacy::DataClass {
+    pub const fn data_class(&self) -> ::data_privacy::DataClass {
         match self {
             GovTaxonomy::Confidential => {
-                data_privacy::DataClass::new("tax", "confidential")
+                ::data_privacy::DataClass::new("tax", "confidential")
             }
-            GovTaxonomy::TopSecret => data_privacy::DataClass::new("tax", "top_secret"),
+            GovTaxonomy::TopSecret => ::data_privacy::DataClass::new("tax", "top_secret"),
         }
     }
 }
-impl core::cmp::PartialEq<data_privacy::DataClass> for GovTaxonomy {
-    fn eq(&self, other: &data_privacy::DataClass) -> core::primitive::bool {
+impl ::core::convert::AsRef<::data_privacy::DataClass> for GovTaxonomy {
+    fn as_ref(&self) -> &::data_privacy::DataClass {
+        match self {
+            GovTaxonomy::Confidential => {
+                const { &::data_privacy::DataClass::new("tax", "confidential") }
+            }
+            GovTaxonomy::TopSecret => {
+                const { &::data_privacy::DataClass::new("tax", "top_secret") }
+            }
+        }
+    }
+}
+impl ::data_privacy::IntoDataClass for GovTaxonomy {
+    fn into_data_class(self) -> ::data_privacy::DataClass {
+        self.data_class()
+    }
+}
+impl ::core::cmp::PartialEq<::data_privacy::DataClass> for GovTaxonomy {
+    fn eq(&self, other: &::data_privacy::DataClass) -> core::primitive::bool {
         self.data_class() == *other
     }
 }
-impl core::cmp::PartialEq<GovTaxonomy> for data_privacy::DataClass {
+impl ::core::cmp::PartialEq<GovTaxonomy> for ::data_privacy::DataClass {
     fn eq(&self, other: &GovTaxonomy) -> core::primitive::bool {
         other == self
     }
@@ -35,10 +52,10 @@ impl core::cmp::PartialEq<GovTaxonomy> for data_privacy::DataClass {
 impl GovTaxonomy {
     ///Constructs a classified value for this data class.
     #[must_use]
-    pub fn classify_confidential<T>(payload: T) -> data_privacy::ClassifiedWrapper<T> {
-        data_privacy::ClassifiedWrapper::new(
+    pub fn classify_confidential<T>(payload: T) -> ::data_privacy::Sensitive<T> {
+        ::data_privacy::Sensitive::new(
             payload,
-            data_privacy::DataClass::new("tax", "confidential"),
+            ::data_privacy::DataClass::new("tax", "confidential"),
         )
     }
 }
@@ -46,10 +63,10 @@ impl GovTaxonomy {
 impl GovTaxonomy {
     ///Constructs a classified value for this data class.
     #[must_use]
-    pub fn classify_top_secret<T>(payload: T) -> data_privacy::ClassifiedWrapper<T> {
-        data_privacy::ClassifiedWrapper::new(
+    pub fn classify_top_secret<T>(payload: T) -> ::data_privacy::Sensitive<T> {
+        ::data_privacy::Sensitive::new(
             payload,
-            data_privacy::DataClass::new("tax", "top_secret"),
+            ::data_privacy::DataClass::new("tax", "top_secret"),
         )
     }
 }

@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::DataClass;
 use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+use crate::{DataClass, IntoDataClass};
 use core::fmt::Debug;
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -50,12 +50,17 @@ impl Redactors {
         self.redactors.len()
     }
 
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.redactors.is_empty()
+    }
+
     pub fn shrink(&mut self) {
         self.redactors.shrink_to_fit();
     }
 
-    pub fn insert(&mut self, data_class: DataClass, redactor: impl Redactor + Send + Sync + 'static) {
-        self.redactors.insert(data_class, Box::new(redactor));
+    pub fn insert(&mut self, data_class: impl IntoDataClass, redactor: impl Redactor + Send + Sync + 'static) {
+        self.redactors.insert(data_class.into_data_class(), Box::new(redactor));
     }
 
     pub fn set_fallback(&mut self, redactor: impl Redactor + Send + Sync + 'static) {
@@ -81,7 +86,6 @@ impl Debug for Redactors {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
     use data_privacy_macros::taxonomy;
 
     struct TestRedactor;

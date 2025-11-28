@@ -5,7 +5,7 @@ use data_privacy::{Classified, DataClass};
 
 #[derive(Debug, Clone)]
 struct ClassifiedExample {
-    data: u32,
+    _data: u32,
 }
 
 impl Classified for ClassifiedExample {
@@ -16,6 +16,6 @@ impl Classified for ClassifiedExample {
 
 #[test]
 fn test_default_trait_methods() {
-    let classified = ClassifiedExample { data: 42 };
+    let classified = ClassifiedExample { _data: 42 };
     assert_eq!(classified.data_class().name(), "classified_example");
 }
