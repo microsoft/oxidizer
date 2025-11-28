@@ -5,12 +5,18 @@
             "**/*.cs",
             "**/*.cpp",
             "**/*.c",
-            "**/*.h",
-            "scripts/repo-template/**/*.rs"
+            "**/*.h"
         ],
         "exclude": [
             "target",
             "scripts/**/*.rs"
+        ],
+        "license": "./.github/license-check/slash-slash.txt"
+    },
+
+    {
+        "include": [
+            "scripts/repo-template/**/*.rs"
         ],
         "license": "./.github/license-check/slash-slash.txt"
     },
