@@ -44,7 +44,7 @@ fn main() {
         x: "x".to_string(),
         b: x.clone(),
     };
-    println!("{}", x);
-    println!("{:?}", x);
+    println!("{x}");
+    println!("{x:?}");
     println!("{}", <Foo as RedactedToString>::to_string(&f, &engine));
 }

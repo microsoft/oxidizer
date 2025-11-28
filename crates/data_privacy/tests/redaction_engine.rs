@@ -60,7 +60,7 @@ where
 
 fn collect_output_as_class(engine: &RedactionEngine, data_class: impl IntoDataClass, value: &str) -> String {
     let mut output = String::new();
-    engine.redact(&data_class.into_data_class(), value, &mut output).unwrap();
+    engine.redact(data_class.into_data_class(), value, &mut output).unwrap();
     output
 }
 
