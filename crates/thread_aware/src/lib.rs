@@ -26,7 +26,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use thread_aware::{MemoryAffinity, ThreadAware, Unaware, create_manual_affinities};
+//! use thread_aware::{MemoryAffinity, ThreadAware, Unaware, create_manual_memory_affinities};
 //!
 //! // Define a type that implements ThreadAware
 //! #[derive(Debug, Clone)]
@@ -43,7 +43,7 @@
 //!
 //! fn do_transfer() {
 //!     // Create two affinities
-//!     let affinities = create_manual_affinities(&[2]);
+//!     let affinities = create_manual_memory_affinities(&[2]);
 //!
 //!     // Create an instance of MyData
 //!     let data = MyData { value: 42 };
@@ -65,7 +65,7 @@
 //! derive [`ThreadAware`] instead of writing the implementation manually.
 //!
 //! ```rust
-//! use thread_aware::{ThreadAware, create_manual_affinities};
+//! use thread_aware::{ThreadAware, create_manual_memory_affinities};
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
 //! struct Point {
@@ -74,7 +74,7 @@
 //! }
 //!
 //! fn derived_example() {
-//!     let affinities = create_manual_affinities(&[2]);
+//!     let affinities = create_manual_memory_affinities(&[2]);
 //!     let p = Point { x: 5, y: 9 };
 //!     // Transfer the value between two affinities. In this simple case the
 //!     // data just gets copied, but for complex types the generated impl
@@ -89,6 +89,7 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
 
+mod affinity;
 mod cell;
 mod closure;
 pub mod core;
@@ -101,7 +102,9 @@ mod validator;
 #[cfg(feature = "threads")]
 mod registry;
 
-pub use core::{MemoryAffinity, ThreadAware, create_manual_affinities};
+pub use core::{ThreadAware, create_manual_memory_affinities, create_manual_pinned_affinities};
+
+pub use affinity::{MemoryAffinity, PinnedAffinity};
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the

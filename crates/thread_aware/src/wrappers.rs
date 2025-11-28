@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_unaware_thread_aware() {
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
 
         // Test with simple type
         let value = Unaware(42);
@@ -225,7 +225,7 @@ mod tests {
         let unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
         let relocated = unaware_wrapper.relocated(affinities[0], affinities[1]);
 
         // Both should still point to the same underlying data
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
 
         // Test with relocation
-        let affinities = crate::create_manual_affinities(&[2]);
+        let affinities = crate::create_manual_memory_affinities(&[2]);
         let relocated = unaware_complex.relocated(affinities[0], affinities[1]);
         assert_eq!(relocated.0.id, 1);
         assert_eq!(relocated.0.name, "test");

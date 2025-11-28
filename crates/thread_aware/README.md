@@ -46,7 +46,7 @@ However [`ThreadAware`] is provided for many common types, so you can use it out
 ## Examples
 
 ```rust
-use thread_aware::{MemoryAffinity, ThreadAware, Unaware, create_manual_affinities};
+use thread_aware::{MemoryAffinity, ThreadAware, Unaware, create_manual_memory_affinities};
 
 // Define a type that implements ThreadAware
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ impl ThreadAware for MyData {
 
 fn do_transfer() {
     // Create two affinities
-    let affinities = create_manual_affinities(&[2]);
+    let affinities = create_manual_memory_affinities(&[2]);
 
     // Create an instance of MyData
     let data = MyData { value: 42 };
@@ -85,7 +85,7 @@ When the `derive` feature (enabled by default) is active you can simply
 derive [`ThreadAware`] instead of writing the implementation manually.
 
 ```rust
-use thread_aware::{ThreadAware, create_manual_affinities};
+use thread_aware::{ThreadAware, create_manual_memory_affinities};
 
 #[derive(Debug, Clone, ThreadAware)]
 struct Point {
@@ -94,7 +94,7 @@ struct Point {
 }
 
 fn derived_example() {
-    let affinities = create_manual_affinities(&[2]);
+    let affinities = create_manual_memory_affinities(&[2]);
     let p = Point { x: 5, y: 9 };
     // Transfer the value between two affinities. In this simple case the
     // data just gets copied, but for complex types the generated impl
