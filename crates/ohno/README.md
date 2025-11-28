@@ -179,9 +179,9 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 ## Error Enrichment
 
-The `#[enrich_err("message")]` attribute macro adds error traces with file and line info to function errors.
+The [`#[enrich_err("message")]`](enrich_err) attribute macro adds error traces with file and line info to function errors.
 
-Functions annotated with `#[enrich_err("message")]` automatically wrap any returned `Result`. If
+Functions annotated with [`#[enrich_err("message")]`](enrich_err) automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a trace with the provided message, including file and line information, into the error chain.
 
 **Requirements:**
