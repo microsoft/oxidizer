@@ -5,7 +5,8 @@
             "**/*.cs",
             "**/*.cpp",
             "**/*.c",
-            "**/*.h"
+            "**/*.h",
+            "scripts/repo-template/**/*.rs"
         ],
         "exclude": [
             "target",
@@ -17,6 +18,9 @@
     {
         "include": [
             "scripts/**/*.rs"
+        ],
+        "exclude": [
+            "scripts/repo-template/**/*.rs"
         ],
         "license": "./.github/license-check/hash.txt"
     },
