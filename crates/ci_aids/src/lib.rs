@@ -28,14 +28,14 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
         .arg("--no-deps")
         .current_dir(workspace_root.as_ref())
         .output()
-        .context("Failed to execute cargo metadata")?;
+        .context("failed to execute cargo metadata")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("cargo metadata failed: {stderr}");
     }
 
-    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).context("Failed to parse cargo metadata output")?;
+    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).context("failed to parse cargo metadata output")?;
 
     Ok(metadata.packages)
 }
@@ -70,16 +70,11 @@ mod tests {
 
     #[test]
     fn test_list_packages() {
-        // Test from the workspace root
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let packages = list_packages(workspace_root).expect("failed to list packages");
+        assert!(!packages.is_empty());
 
-        let packages = list_packages(workspace_root).expect("Failed to list packages");
-
-        // Verify we got some packages
-        assert!(!packages.is_empty(), "Should find workspace packages");
-
-        // Verify ci_aids itself is in the list
         let ci_aids = packages.iter().find(|p| p.name == "ci_aids");
-        assert!(ci_aids.is_some(), "ci_aids should be in workspace");
+        assert!(ci_aids.is_some(), "{packages:?}");
     }
 }
