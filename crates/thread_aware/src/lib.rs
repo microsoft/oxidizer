@@ -86,6 +86,9 @@
 //! If you disable default features (or the `derive` feature explicitly) you
 //! can still implement [`ThreadAware`] manually as shown in the earlier example.
 
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
+
 mod affinity;
 mod cell;
 mod closure;
