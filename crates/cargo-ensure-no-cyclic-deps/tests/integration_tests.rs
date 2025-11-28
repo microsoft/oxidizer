@@ -14,6 +14,7 @@ fn get_fixture_path(fixture_name: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_workspace_with_cycle() {
     let fixture_path = get_fixture_path("with_cycle");
     let manifest_path = fixture_path.join("Cargo.toml");
@@ -34,6 +35,7 @@ fn test_workspace_with_cycle() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_workspace_without_cycle() {
     let fixture_path = get_fixture_path("without_cycle");
     let manifest_path = fixture_path.join("Cargo.toml");
@@ -47,6 +49,7 @@ fn test_workspace_without_cycle() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_workspace_with_dev_cycle() {
     let fixture_path = get_fixture_path("with_dev_cycle");
     let manifest_path = fixture_path.join("Cargo.toml");
@@ -63,6 +66,7 @@ fn test_workspace_with_dev_cycle() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_command_without_manifest_path() {
     // This test runs in the current workspace (oxidizer-github)
     // which should not have cycles
