@@ -17,8 +17,8 @@ use std::sync::Arc;
 /// ## Example
 ///
 /// ```rust
-/// use core::fmt::Write;
-/// use data_privacy::{classified, RedactionEngineBuilder, Redactor, taxonomy};
+/// use data_privacy::{classified, RedactionEngine, taxonomy};
+/// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 ///
 /// // The taxonomy defines the different data classes we will use in our application.
 /// #[taxonomy(simple)]
@@ -45,8 +45,8 @@ use std::sync::Arc;
 /// let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 ///
 /// // Create the redaction engine. This is typically done once when the application starts.
-/// let engine = RedactionEngineBuilder::new()
-///     .add_class_redactor(&SimpleTaxonomy::Sensitive.data_class(), asterisk_redactor)
+/// let engine = RedactionEngine::builder()
+///     .add_class_redactor(SimpleTaxonomy::Sensitive.data_class(), asterisk_redactor)
 ///     .set_fallback_redactor(erasing_redactor)
 ///     .build();
 ///

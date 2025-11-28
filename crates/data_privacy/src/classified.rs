@@ -21,13 +21,12 @@ use crate::DataClass;
 /// redaction policies.
 ///
 /// Types that implement the [`Classified`] trait should generally not implement the [`Display`] trait, and if they implement
-/// the [`Debug`] trait, the implementation should avoid exposing the classified payload. Most types should derive the [`ClassifiedDebug`](data_privacy::ClassifiedDebug) macro
-/// to get an appropriate implementation of the [`Debug`] trait.
+/// the [`Debug`] trait, the implementation should avoid exposing the classified payload.
 ///
 /// # Example
 ///
 /// ```rust
-/// use data_privacy::{Classified, ClassifiedDebug, DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
+/// use data_privacy::{Classified, DataClass};
 ///
 /// #[derive(Debug)]
 /// struct Person {
@@ -42,7 +41,7 @@ use crate::DataClass;
 /// }
 ///
 /// // A classified wrapper is usually a newtype around the payload.
-/// #[derive(ClassifiedDebug, RedactedDebug)]
+/// #[derive(Debug)]
 /// struct ClassifiedPerson(Person);
 ///
 /// impl ClassifiedPerson {
@@ -52,24 +51,15 @@ use crate::DataClass;
 /// }
 ///
 /// impl Classified for ClassifiedPerson {
-///     type Payload = Person;
-///
-///     fn declassify(self) -> Person {
-///         self.0
-///     }
-///
-///     fn as_declassified(&self) -> &Person {
-///         &self.0
-///     }
-///
-///     fn as_declassified_mut(&mut self) -> &mut Person {
-///         &mut self.0
-///     }
-///
 ///     fn data_class(&self) -> DataClass {
 ///         DataClass::new("example_taxonomy", "classified_person")
 ///     }
 /// }
+///
+/// let person = Person::new("John Doe".to_string(), "123 Main St".to_string());
+/// let classified = ClassifiedPerson::new(person);
+/// assert_eq!(classified.data_class().taxonomy(), "example_taxonomy");
+/// assert_eq!(classified.data_class().name(), "classified_person");
 ///  ```
 pub trait Classified {
     /// Returns the data class of the classified data.
