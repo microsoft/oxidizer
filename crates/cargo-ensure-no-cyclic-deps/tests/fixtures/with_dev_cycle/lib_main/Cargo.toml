@@ -1,0 +1,9 @@
+[package]
+name = "lib_main"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dev-dependencies]
+lib_test_helpers = { path = "../lib_test_helpers" }

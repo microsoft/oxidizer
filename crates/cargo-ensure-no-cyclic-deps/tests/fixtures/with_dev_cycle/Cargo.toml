@@ -1,0 +1,3 @@
+[workspace]
+members = ["lib_main", "lib_test_helpers"]
+resolver = "2"

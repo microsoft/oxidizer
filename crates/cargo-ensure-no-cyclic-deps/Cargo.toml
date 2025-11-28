@@ -1,0 +1,30 @@
+[package]
+name = "cargo-ensure-no-cyclic-deps"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+description = "A cargo subcommand to detect cyclic dependencies in workspace crates"
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["cargo", "subcommand", "dependencies", "cycles"]
+categories = ["development-tools::cargo-plugins"]
+
+[dependencies]
+cargo_metadata = { version = "0.18", default-features = false }
+anyhow = { workspace = true, features = ["std"] }
+clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
+
+[dev-dependencies]
+assert_cmd = { version = "2.0", default-features = false }
+predicates = { version = "3.1", default-features = false, features = ["diff"] }
+tempfile = { version = "3.13", default-features = false }
+
+[[bin]]
+name = "cargo-ensure-no-cyclic-deps"
+path = "src/main.rs"
+
+[lints]
+workspace = true
