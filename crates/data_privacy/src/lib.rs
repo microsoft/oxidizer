@@ -204,10 +204,13 @@ mod std;
 // Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
 // Workaround for https://github.com/bkchr/proc-macro-crate/issues/14
 extern crate self as data_privacy;
-
-pub use classified::Classified;
-pub use classified_wrapper::ClassifiedWrapper;
-pub use data_class::DataClass;
+mod classified;
+mod classified_wrapper;
+mod data_class;
+mod redacted;
+mod redaction_engine;
+mod redactors;
+mod std;
 
 /// Implements the [`Classified`] trait on a newtype.
 ///
@@ -232,6 +235,7 @@ pub use data_class::DataClass;
 /// #[classified(ContosoTaxonomy::CustomerIdentifier)]
 /// struct CustomerId(String);
 pub use data_privacy_macros::classified;
+
 
 /// Generates implementation logic and types to expose a data taxonomy.
 ///
@@ -259,19 +263,17 @@ pub use data_privacy_macros::classified;
 /// }
 /// ```
 pub use data_privacy_macros::taxonomy;
-
 pub use data_privacy_macros::RedactedDebug;
 pub use data_privacy_macros::RedactedDisplay;
 pub use data_privacy_macros::RedactedToString;
 
-pub use redacted_debug::RedactedDebug;
-pub use redacted_display::RedactedDisplay;
-pub use redacted_to_string::RedactedToString;
-pub use redaction_engine::RedactionEngine;
-pub use redaction_engine_builder::RedactionEngineBuilder;
-pub use redactor::Redactor;
-pub use simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 
+pub use classified::Classified;
+pub use classified_wrapper::ClassifiedWrapper;
+pub use data_class::DataClass;
+pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
+pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
+pub use redactors::simple_redactor;
 #[cfg(feature = "xxh3")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 pub use crate::xxh3_redactor::xxH3Redactor;

@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{Debug, Display, Formatter};
 use crate::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactionEngine};
+use std::fmt::{Debug, Display, Formatter};
 
 /// Data class for public/standard library types.
 pub const PUBLIC: DataClass = DataClass::new("public", "data");
@@ -278,4 +278,3 @@ where
         <Self as ::std::fmt::Debug>::fmt(self, f)
     }
 }
-

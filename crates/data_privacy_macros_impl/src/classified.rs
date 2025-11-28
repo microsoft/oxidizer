@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::Parse;
 use syn::spanned::Spanned;
-use syn::{parse2, Fields, ItemStruct, Path};
+use syn::{Fields, ItemStruct, Path, parse2};
 
 type SynResult<T> = Result<T, syn::Error>;
 

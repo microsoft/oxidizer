@@ -5,7 +5,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parse;
 use syn::spanned::Spanned;
-use syn::{parse2, Fields, ItemEnum};
+use syn::{Fields, ItemEnum, parse2};
 
 type SynResult<T> = Result<T, syn::Error>;
 
@@ -162,4 +162,3 @@ mod tests {
         assert_eq!(pascal_to_snake_case("WithNumbers123"), "with_numbers123");
     }
 }
-

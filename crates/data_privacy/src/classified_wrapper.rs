@@ -211,8 +211,9 @@ mod tests {
         assert_eq!(classified.data_class(), TestTaxonomy::Sensitive.data_class());
     }
 
+    use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
     // New tests exercising RedactedDebug, RedactedDisplay, and RedactedToString implementations.
-    use crate::{RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode};
+    use crate::RedactionEngineBuilder;
 
     #[test]
     fn test_redacted_debug_and_display_replace_mode_string() {
