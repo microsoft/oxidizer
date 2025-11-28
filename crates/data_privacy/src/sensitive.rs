@@ -24,11 +24,13 @@ impl<T> Debug for Sensitive<T> {
     }
 }
 
-
 impl<T> Sensitive<T> {
     /// Creates a new instance of `Protected` with the given value and data class.
     pub fn new(value: T, data_class: impl IntoDataClass) -> Self {
-        Self { value, data_class: data_class.into_data_class() }
+        Self {
+            value,
+            data_class: data_class.into_data_class(),
+        }
     }
 }
 
@@ -103,4 +105,3 @@ where
         }
     }
 }
-

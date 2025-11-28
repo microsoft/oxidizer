@@ -5,7 +5,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parse;
 use syn::spanned::Spanned;
-use syn::{parse2, Fields, ItemEnum};
+use syn::{Fields, ItemEnum, parse2};
 
 type SynResult<T> = Result<T, syn::Error>;
 
@@ -93,7 +93,6 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
             }
         })
         .collect();
-
 
     let classification_fns: Vec<_> = taxonomy_variants
         .iter()

@@ -61,7 +61,6 @@ fn test_ordering() {
     assert_eq!(classified1.partial_cmp(&classified1).unwrap(), Ordering::Equal);
 }
 
-
 #[test]
 fn test_as_declassified_mut_allows_mutation() {
     // Mutable access allows in-place mutation of the wrapped value
@@ -80,7 +79,10 @@ fn test_redacted_debug_and_display_replace_mode_string() {
     // Debug redaction operates on the Debug representation (includes quotes for String)
     let mut debug_out = String::new();
     engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
-    assert_eq!(debug_out, "********", "Debug redaction should produce 8 asterisks (including quotes)");
+    assert_eq!(
+        debug_out, "********",
+        "Debug redaction should produce 8 asterisks (including quotes)"
+    );
 
     // Display redaction operates on the Display representation (no quotes)
     let mut display_out = String::new();
@@ -120,11 +122,17 @@ fn test_redacted_passthrough_and_tag_mode() {
     let mut debug_out = String::new();
     engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
     // Debug includes quotes in inner representation
-    assert_eq!(debug_out, "<test/p_i_i:\"secret\">", "PassthroughAndTag debug should include quotes inside tag");
+    assert_eq!(
+        debug_out, "<test/p_i_i:\"secret\">",
+        "PassthroughAndTag debug should include quotes inside tag"
+    );
 
     let mut display_out = String::new();
     engine.redacted_display(&wrapper, &mut display_out).unwrap();
-    assert_eq!(display_out, "<test/p_i_i:secret>", "PassthroughAndTag display should not include quotes");
+    assert_eq!(
+        display_out, "<test/p_i_i:secret>",
+        "PassthroughAndTag display should not include quotes"
+    );
 
     let to_string_out = engine.redacted_to_string(&wrapper);
     assert_eq!(to_string_out, "<test/p_i_i:secret>");
@@ -154,4 +162,3 @@ fn test_redacted_long_value_fallback_path() {
     assert_eq!(to_string_out.len(), long_plain.len());
     assert!(to_string_out.chars().all(|c| c == '*'));
 }
-

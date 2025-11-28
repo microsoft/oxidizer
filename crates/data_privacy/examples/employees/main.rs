@@ -39,13 +39,13 @@ mod example_taxonomy;
 mod logging;
 
 use crate::employee::{Employee, EmployeeID, UserAddress, UserName};
-use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use data_privacy::RedactionEngine;
+use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use example_taxonomy::ExampleTaxonomy;
 use logging::{log, set_redaction_engine_for_logging};
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
-use std::io::{stdin, stdout, Write};
+use std::io::{Write, stdin, stdout};
 
 fn main() {
     // First step, we create a redaction engine that prescribes how to redact individual data classes.
@@ -55,8 +55,14 @@ fn main() {
     // If at runtime, an unconfigured data class is encountered, then the data just
     // gets erased, so it is not logged at all, avoiding a potential privacy leak.
     let engine = RedactionEngine::builder()
-        .add_class_redactor(ExampleTaxonomy::PersonallyIdentifiableInformation, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
-        .add_class_redactor(ExampleTaxonomy::OrganizationallyIdentifiableInformation, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
+        .add_class_redactor(
+            ExampleTaxonomy::PersonallyIdentifiableInformation,
+            SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
+        )
+        .add_class_redactor(
+            ExampleTaxonomy::OrganizationallyIdentifiableInformation,
+            SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag),
+        )
         .build();
 
     // now configure the logging system to use the redaction engine

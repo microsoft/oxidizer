@@ -58,7 +58,6 @@ macro_rules! impl_std_traits_generic_debug_only {
     };
 }
 
-
 // Non-generic types with Display
 impl_std_traits!(String, PUBLIC);
 impl_std_traits!(&str, PUBLIC);
