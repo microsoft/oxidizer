@@ -24,7 +24,6 @@ fn main() -> Result<()> {
     let workspace_root = Path::new(env!("CARGO_SCRIPT_BASE_PATH")).parent().unwrap();
     let all_packages = ci_aids::list_packages(workspace_root)?;
 
-    // Initial test groups
     let mut test_groups: Vec<Vec<String>> = vec![
         vec!["bytesbuf".to_string()],
         vec!["data_privacy".to_string(), "data_privacy_macros".to_string()],
@@ -33,103 +32,64 @@ fn main() -> Result<()> {
         vec!["thread_aware".to_string(), "thread_aware_macros".to_string(), "thread_aware_macros_impl".to_string()],
     ];
 
-    let mut publishable_packages = Vec::new();
-    let mut skipped_packages = Vec::new();
-    
-    for pkg in all_packages {
-        if pkg.is_publishable {
-            publishable_packages.push(pkg.name);
-        } else {
-            skipped_packages.push(pkg.name);
-        }
-    }
+    let (publishable, skipped): (Vec<_>, Vec<_>) = all_packages
+        .into_iter()
+        .partition(|pkg| pkg.is_publishable);
 
-    // Dynamically expand test groups with packages not in any group
-    let initial_group_count = test_groups.len();
-    for package_name in &publishable_packages {
-        if !test_groups.iter().any(|group| group.contains(package_name)) {
-            test_groups.push(vec![package_name.clone()]);
+    // Add ungrouped packages
+    let initial_count = test_groups.len();
+    for pkg in &publishable {
+        if !test_groups.iter().any(|g| g.contains(&pkg.name)) {
+            test_groups.push(vec![pkg.name.clone()]);
         }
     }
-    let added_count = test_groups.len() - initial_group_count;
 
     // Log configuration
-    println!("=== Mutants Testing Configuration ===");
-    println!();
+    println!("=== Mutants Testing Configuration ===\n");
     println!("Settings:");
-    println!("  Jobs: {}", JOBS);
-    println!("  Build timeout: {}s", BUILD_TIMEOUT_SEC);
-    println!("  Test timeout: {}s", TIMEOUT_SEC);
-    println!("  Minimum test timeout: {}s", MINIMUM_TEST_TIMEOUT_SEC);
-    println!();
-    println!("Test groups:");
+    println!("  Jobs: {JOBS}");
+    println!("  Build timeout: {BUILD_TIMEOUT_SEC}s");
+    println!("  Test timeout: {TIMEOUT_SEC}s");
+    println!("  Min timeout: {MINIMUM_TEST_TIMEOUT_SEC}s");
+    println!("Test groups ({} total):", test_groups.len());
     for (i, group) in test_groups.iter().enumerate() {
-        println!("  Group {}: [{}]", i + 1, group.join(", "));
-    }
-    println!();
-    
-    if !skipped_packages.is_empty() {
-        println!("Skipped packages (not publishable):");
-        for package_name in &skipped_packages {
-            println!("  - {package_name}");
-        }
-        println!();
+        println!("  {}: [{}]", i + 1, group.join(", "));
     }
 
-    if added_count > 0 {
-        println!("Note: {added_count} package(s) not in predefined groups were added as individual groups");
-        println!();
+    if !skipped.is_empty() {
+        println!("\nSkipped (not publishable): {}", skipped.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
     }
-    
-    println!("Starting mutants testing...");
-    println!("=====================================");
-    println!();
+    if test_groups.len() > initial_count {
+        println!("\nAdded {} ungrouped package(s) as individual groups", test_groups.len() - initial_count);
+    }
 
-    // Test each group
+    println!("\nStarting mutants testing...");
+    println!("=====================================\n");
+
     for group in &test_groups {
-        let group_refs: Vec<&str> = group.iter().map(String::as_str).collect();
-        mutate_group(&group_refs)?;
+        mutate_group(&group)?;
     }
 
     Ok(())
 }
 
-fn mutate_group(group: &[&str]) -> Result<()> {
-    let crates = group.join(",");
-    println!("Mutating group: {}", crates);
+fn mutate_group(group: &[&String]) -> Result<()> {
+    println!("Mutating: {}", group.join(", "));
 
     let mut args = vec![
-        "mutants",
+        "mutants".to_owned(), 
         "--no-shuffle",
         "--baseline=skip",
-        "--colors=never",
+        "--colors=never"
+         format!("--jobs={JOBS}"),
+         format!("--build-timeout={BUILD_TIMEOUT_SEC}"),
+         format!("--timeout={TIMEOUT_SEC}"),
+         format!("--minimum-test-timeout={MINIMUM_TEST_TIMEOUT_SEC}"),
+         "-vV",
     ];
 
-    let jobs = format!("--jobs={}", JOBS);
-    let build_timeout = format!("--build-timeout={}", BUILD_TIMEOUT_SEC);
-    let timeout = format!("--timeout={}", TIMEOUT_SEC);
-    let min_timeout = format!("--minimum-test-timeout={}", MINIMUM_TEST_TIMEOUT_SEC);
+    let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
+    args.extend(package_args);
 
-    args.extend_from_slice(&[
-        &jobs,
-        &build_timeout,
-        &timeout,
-        &min_timeout,
-        "-vV",
-    ]);
-
-    // Add package arguments
-    let package_args: Vec<String> = group
-        .iter()
-        .map(|pkg| format!("--package={}", pkg))
-        .collect();
-    
-    let package_refs: Vec<&str> = package_args.iter().map(String::as_str).collect();
-    args.extend_from_slice(&package_refs);
-
-    println!("Running command: cargo {}", args.join(" "));
-
-    ci_aids::run_cargo(&args)?;
-
-    Ok(())
+    ci_aids::run_cargo(&args)
 }
