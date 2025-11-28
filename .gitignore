@@ -36,3 +36,6 @@ ARROW
 
 # Agent files
 .claude
+
+# Test fixture Cargo.lock files
+tests/fixtures/**/Cargo.lock
