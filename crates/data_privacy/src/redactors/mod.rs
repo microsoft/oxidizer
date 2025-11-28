@@ -17,7 +17,7 @@ pub trait Redactor {
     ///
     /// # Errors
     ///
-    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
+    /// This function should return [`Err`] if, and only if, the provided [`Formatter`](std::fmt::Formatter) returns [`Err`]. String redaction is considered an infallible operation;
     /// this function only returns a [`std::fmt::Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
     /// has occurred back up the stack.
     fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> std::fmt::Result;
