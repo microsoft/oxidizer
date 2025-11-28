@@ -2,9 +2,9 @@
 # Licensed under the MIT License.
 
 [package]
-name = "data_privacy_macros"
+name = "data_privacy_macros_impl"
 description = "Macros for the data_privacy crate."
-version = "0.4.0"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
@@ -16,14 +16,15 @@ license-file.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[lib]
-proc-macro = true
-
 [dependencies]
-data_privacy_macros_impl.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["derive", "full", "parsing", "printing", "proc-macro"] }
 
 [dev-dependencies]
 mutants.workspace = true
+insta = { workspace = true, features = ["yaml"] }
+prettyplease.workspace = true
 
 [lints]
 workspace = true

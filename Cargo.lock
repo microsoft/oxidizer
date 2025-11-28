@@ -204,6 +204,14 @@ dependencies = [
 name = "data_privacy_macros"
 version = "0.4.0"
 dependencies = [
+ "data_privacy_macros_impl",
+ "mutants",
+]
+
+[[package]]
+name = "data_privacy_macros_impl"
+version = "0.3.0"
+dependencies = [
  "insta",
  "mutants",
  "prettyplease",
