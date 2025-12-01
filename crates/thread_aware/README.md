@@ -46,7 +46,7 @@ However [`ThreadAware`] is provided for many common types, so you can use it out
 ## Examples
 
 ```rust
-use thread_aware::{MemoryAffinity, ThreadAware, Unaware, create_manual_memory_affinities};
+use thread_aware::{MemoryAffinity, PinnedAffinity, ThreadAware, Unaware, create_manual_memory_affinities};
 
 // Define a type that implements ThreadAware
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ struct MyData {
 }
 
 impl ThreadAware for MyData {
-    fn relocated(mut self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    fn relocated(mut self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         self.value = self.value.relocated(source, destination);
         self
     }
