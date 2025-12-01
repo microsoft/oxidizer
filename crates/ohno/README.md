@@ -26,7 +26,7 @@
 
 High-quality error handling for Rust.
 
-Ohno combines error wrapping, enrichment message stacking, backtrace capture, and procedural macros
+Ohno combines error wrapping, enrichment messages stacking, backtrace capture, and procedural macros
 into one ergonomic crate for comprehensive error handling.
 
 ## Key Features
@@ -179,7 +179,7 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 ## Error Enrichment
 
-The [`#[enrich_err("message")]`](enrich_err) attribute macro adds error traces with file and line info to function errors.
+The [`#[enrich_err("message")]`](enrich_err) attribute macro adds error enrichment with file and line info to function errors.
 
 Functions annotated with [`#[enrich_err("message")]`](enrich_err) automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a message, including file and line information, into the error chain.
