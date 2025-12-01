@@ -165,8 +165,8 @@ fn generate_enrichable_impl(
     let error_field_access = error_field.to_field_access();
     quote! {
         impl #impl_generics ohno::Enrichable for #name #ty_generics #where_clause {
-            fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
-                self.#error_field_access.add_enrichment(trace);
+            fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+                self.#error_field_access.add_enrichment(entry);
             }
         }
     }

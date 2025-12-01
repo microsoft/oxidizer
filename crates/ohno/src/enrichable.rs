@@ -51,12 +51,12 @@ pub trait EnrichableExt: Enrichable {
     /// It uses [`std::panic::Location::caller`] to capture the file and line number
     /// where this method is invoked.
     #[must_use]
-    fn enrich(mut self, trace: impl Into<Cow<'static, str>>) -> Self
+    fn enrich(mut self, msg: impl Into<Cow<'static, str>>) -> Self
     where
         Self: Sized,
     {
         let location = std::panic::Location::caller();
-        self.add_enrichment(EnrichmentEntry::new(trace, location.file(), location.line()));
+        self.add_enrichment(EnrichmentEntry::new(msg, location.file(), location.line()));
         self
     }
 
@@ -92,15 +92,15 @@ mod tests {
     #[test]
     fn test_enrich() {
         let mut error = TestError::default();
-        error.add_enrichment(EnrichmentEntry::new("Test trace", "test.rs", 5));
+        error.add_enrichment(EnrichmentEntry::new("Test enrichment", "test.rs", 5));
         assert_eq!(error.data.data.enrichment.len(), 1);
-        assert_eq!(error.data.data.enrichment[0].message, "Test trace");
+        assert_eq!(error.data.data.enrichment[0].message, "Test enrichment");
         assert_eq!(error.data.data.enrichment[0].location.file, "test.rs");
         assert_eq!(error.data.data.enrichment[0].location.line, 5);
 
-        error.add_enrichment(EnrichmentEntry::new("Test trace", "test.rs", 10));
+        error.add_enrichment(EnrichmentEntry::new("Test enrichment", "test.rs", 10));
         assert_eq!(error.data.data.enrichment.len(), 2);
-        assert_eq!(error.data.data.enrichment[1].message, "Test trace");
+        assert_eq!(error.data.data.enrichment[1].message, "Test enrichment");
         let location = &error.data.data.enrichment[1].location;
         assert_eq!(location.file, "test.rs");
         assert_eq!(location.line, 10);
@@ -111,19 +111,19 @@ mod tests {
         let error = TestError::default();
         let mut result: Result<(), _> = Err(error);
 
-        result.add_enrichment(EnrichmentEntry::new("Immediate trace", "test.rs", 15));
+        result.add_enrichment(EnrichmentEntry::new("Immediate enrichment", "test.rs", 15));
 
         let err = result.unwrap_err();
         assert_eq!(err.data.data.enrichment.len(), 1);
-        assert_eq!(err.data.data.enrichment[0].message, "Immediate trace");
+        assert_eq!(err.data.data.enrichment[0].message, "Immediate enrichment");
         assert_eq!(err.data.data.enrichment[0].location.file, "test.rs");
         assert_eq!(err.data.data.enrichment[0].location.line, 15);
 
-        result = Err(err).enrich("Detailed trace");
+        result = Err(err).enrich("Detailed enrichment");
         let err = result.unwrap_err();
 
         assert_eq!(err.data.data.enrichment.len(), 2);
-        assert_eq!(err.data.data.enrichment[1].message, "Detailed trace");
+        assert_eq!(err.data.data.enrichment[1].message, "Detailed enrichment");
         let location = &err.data.data.enrichment[1].location;
         assert!(location.file.ends_with("enrichable.rs"));
     }
