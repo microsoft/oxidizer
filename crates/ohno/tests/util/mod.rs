@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Utilities for testing error traces.
+//! Utilities for testing error enrichment.
 
-/// Asserts that the error contains the expected trace.
+/// Asserts that the error contains the expected enrichment.
 /// The message should be provided without the `(at file:line)` part.
 /// The `(at file:line)` suffix is stripped from each line before comparison.
 ///
@@ -16,7 +16,7 @@
 /// }
 ///
 /// let error = failing_function(42).unwrap_err();
-/// assert_trace!(error, "operation failed with value 42");
+/// assert_enrichment!(error, "operation failed with value 42");
 /// ```
 #[macro_export]
 macro_rules! assert_enrichment {

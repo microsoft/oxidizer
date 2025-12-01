@@ -56,24 +56,24 @@ impl std::error::Error for TestError {
 #[test]
 fn test_detailed_enrich() {
     let error = OhnoCore::from("base error")
-        .enrich("first trace")
-        .enrich("second trace")
-        .enrich("third trace");
+        .enrich("first message")
+        .enrich("second message")
+        .enrich("third message");
 
     let display = error.to_string();
     assert!(display.contains("base error"));
-    assert!(display.contains("first trace"));
-    assert!(display.contains("second trace"));
-    assert!(display.contains("third trace"));
+    assert!(display.contains("first message"));
+    assert!(display.contains("second message"));
+    assert!(display.contains("third message"));
 
     // Test enrichment iteration
     let enrichments: Vec<_> = error.enrichments().collect();
     assert_eq!(enrichments.len(), 3);
 
     // Most recent first
-    assert_eq!(enrichments[0].message, "third trace");
-    assert_eq!(enrichments[1].message, "second trace");
-    assert_eq!(enrichments[2].message, "first trace");
+    assert_eq!(enrichments[0].message, "third message");
+    assert_eq!(enrichments[1].message, "second message");
+    assert_eq!(enrichments[2].message, "first message");
 }
 
 #[test]
@@ -138,11 +138,11 @@ fn error_source_is_accessible() {
 
 #[test]
 fn clone_ohno_core() {
-    let original = OhnoCore::from("original error").enrich("first trace").enrich("second trace");
+    let original = OhnoCore::from("original error").enrich("first message").enrich("second message");
     let mut cloned = original.clone();
     assert_eq!(original.to_string(), cloned.to_string());
 
-    cloned = cloned.enrich("additional trace");
+    cloned = cloned.enrich("additional message");
     assert_ne!(original.to_string(), cloned.to_string());
 }
 

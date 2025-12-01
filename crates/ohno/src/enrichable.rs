@@ -40,11 +40,7 @@ impl Enrichable for OhnoCore {
     }
 }
 
-/// Extension trait providing ergonomic error enrichment addition methods.
-///
-/// This trait extends `Enrichable` with convenient methods for adding error traces
-/// when converting or working with errors. It provides both immediate and
-/// lazy evaluation options.
+/// Extension trait providing ergonomic error enrichment methods.
 pub trait EnrichableExt: Enrichable {
     /// Adds enrichment information to the error.
     ///

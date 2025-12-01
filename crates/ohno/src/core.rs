@@ -18,10 +18,10 @@ pub struct Inner {
     pub(super) enrichment: Vec<EnrichmentEntry>,
 }
 
-/// Core error type that wraps source errors, captures backtraces, and holds enrichment traces.
+/// Core error type that wraps source errors, captures backtraces, and holds enrichment.
 ///
 /// `OhnoCore` is the foundation of the ohno error handling system. It can wrap any error
-/// type while providing automatic backtrace capture and enrichment trace stacking capabilities.
+/// type while providing automatic backtrace capture and enrichment message stacking capabilities.
 ///
 /// The internal error data is boxed to keep the `Err` variant in `Result` small. This minimizes
 /// cases where the `Err` is larger than the `Ok` variant. If the error only contains a
@@ -151,7 +151,7 @@ impl OhnoCore {
         self.data.enrichment.iter().rev().map(|ctx| ctx.message.as_ref())
     }
 
-    /// Formats the main error message without backtrace or error traces.
+    /// Formats the main error message without backtrace and error enrichment.
     #[must_use]
     pub fn format_message(&self, default_message: &str, override_message: Option<Cow<'_, str>>) -> String {
         MessageFormatter {

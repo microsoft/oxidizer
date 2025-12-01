@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates error enrichment extension methods for adding traces to Results.
+//! Demonstrates enrichment of Result types.
 
 #![expect(clippy::unwrap_used, reason = "Example code")]
 

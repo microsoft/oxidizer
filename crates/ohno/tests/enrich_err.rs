@@ -332,8 +332,8 @@ fn empty_context_iter() {
 fn context_iter_reverse_order() {
     let mut core = OhnoCore::default();
 
-    let traces = ["msg 1", "msg 2", "msg 3", "msg 4", "msg 5"];
-    for (i, &msg) in traces.iter().enumerate() {
+    let messages = ["msg 1", "msg 2", "msg 3", "msg 4", "msg 5"];
+    for (i, &msg) in messages.iter().enumerate() {
         #[expect(clippy::cast_possible_truncation, reason = "Test")]
         let entry = EnrichmentEntry::new(msg, "test.rs", (i + 1) as u32 * 10);
         core.add_enrichment(entry);
