@@ -229,9 +229,9 @@ extern crate self as ohno;
 mod backtrace;
 mod core;
 mod enrichable;
+mod enrichment_entry;
 mod error_ext;
 mod source;
-mod trace_info;
 
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
@@ -239,6 +239,6 @@ pub mod test_util;
 pub use core::OhnoCore;
 
 pub use enrichable::{Enrichable, EnrichableExt};
+pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
 pub use ohno_macros::{Error, enrich_err, error};
-pub use trace_info::{Location, TraceInfo};

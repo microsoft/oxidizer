@@ -79,7 +79,7 @@ fn test_tuple_add_enrichment() {
     use ohno::Enrichable;
 
     let mut error = SimpleTupleError(OhnoCore::from("test"));
-    error.add_enrichment(ohno::TraceInfo::new("trace message", "test.rs", 80));
+    error.add_enrichment(ohno::EnrichmentEntry::new("trace message", "test.rs", 80));
 
     // The error should still be valid after adding trace
     assert!(error.to_string().contains("test"));

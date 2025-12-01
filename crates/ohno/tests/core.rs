@@ -67,7 +67,7 @@ fn test_detailed_enrich() {
     assert!(display.contains("third trace"));
 
     // Test enrichment iteration
-    let traces: Vec<_> = error.traces().collect();
+    let enrichments: Vec<_> = error.enrichments().collect();
     assert_eq!(traces.len(), 3);
 
     // Most recent first
@@ -82,7 +82,7 @@ fn test_with_enrich() {
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
-    assert_eq!(error.traces().count(), 1);
+    assert_eq!(error.enrichments().count(), 1);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn test_backtrace_capture() {
 fn test_trace_messages_iterator() {
     let error = OhnoCore::from("base").enrich("first").enrich("second");
 
-    let messages: Vec<_> = error.trace_messages().collect();
+    let messages: Vec<_> = error.enrichment_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);
 }
 

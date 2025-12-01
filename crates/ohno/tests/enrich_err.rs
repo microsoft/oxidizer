@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ohno::{Enrichable, Error, ErrorExt, OhnoCore, TraceInfo, enrich_err};
+use ohno::{Enrichable, EnrichmentEntry, Error, ErrorExt, OhnoCore, enrich_err};
 
 #[macro_use]
 mod util;
@@ -325,7 +325,7 @@ fn impl_as_ref() {
 #[test]
 fn empty_context_iter() {
     let core = OhnoCore::default();
-    assert!(core.traces().next().is_none());
+    assert!(core.enrichments().next().is_none());
 }
 
 #[test]
@@ -335,15 +335,15 @@ fn context_iter_reverse_order() {
     let traces = ["trace 1", "trace 2", "trace 3", "trace 4", "trace 5"];
     for (i, &msg) in traces.iter().enumerate() {
         #[expect(clippy::cast_possible_truncation, reason = "Test")]
-        let trace = TraceInfo::new(msg, "test.rs", (i + 1) as u32 * 10);
-        core.add_enrichment(trace);
+        let entry = EnrichmentEntry::new(msg, "test.rs", (i + 1) as u32 * 10);
+        core.add_enrichment(entry);
     }
 
     let messages: Vec<(&str, &str, u32)> = core
-        .traces()
-        .map(|trace| {
-            let location = &trace.location;
-            (trace.message.as_ref(), location.file, location.line)
+        .enrichments()
+        .map(|entry| {
+            let location = &entry.location;
+            (entry.message.as_ref(), location.file, location.line)
         })
         .collect();
 

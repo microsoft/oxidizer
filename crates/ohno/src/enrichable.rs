@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::error::Error as StdError;
 
-use crate::{OhnoCore, TraceInfo};
+use crate::{EnrichmentEntry, OhnoCore};
 
 /// Base trait for adding error trace to error types.
 ///
@@ -20,23 +20,23 @@ pub trait Enrichable {
     /// This method is not intended to be used directly. Instead, use:
     /// - The [`enrich_err!`](crate::enrich_err) macro for convenient error enrichment
     /// - Methods from [`EnrichableExt`] trait ([`enrich`](EnrichableExt::enrich), [`enrich_with`](EnrichableExt::enrich_with))
-    fn add_enrichment(&mut self, trace: TraceInfo);
+    fn add_enrichment(&mut self, entry: EnrichmentEntry);
 }
 
 impl<T, E> Enrichable for Result<T, E>
 where
     E: StdError + Enrichable,
 {
-    fn add_enrichment(&mut self, trace: TraceInfo) {
+    fn add_enrichment(&mut self, entry: EnrichmentEntry) {
         if let Err(e) = self {
-            e.add_enrichment(trace);
+            e.add_enrichment(entry);
         }
     }
 }
 
 impl Enrichable for OhnoCore {
-    fn add_enrichment(&mut self, trace: TraceInfo) {
-        self.data.enrichment.push(trace);
+    fn add_enrichment(&mut self, entry: EnrichmentEntry) {
+        self.data.enrichment.push(entry);
     }
 }
 
@@ -56,7 +56,7 @@ pub trait EnrichableExt: Enrichable {
         Self: Sized,
     {
         let location = std::panic::Location::caller();
-        self.add_enrichment(TraceInfo::new(trace, location.file(), location.line()));
+        self.add_enrichment(EnrichmentEntry::new(trace, location.file(), location.line()));
         self
     }
 
@@ -72,7 +72,7 @@ pub trait EnrichableExt: Enrichable {
         Self: Sized,
     {
         let location = std::panic::Location::caller();
-        self.add_enrichment(TraceInfo::new(f(), location.file(), location.line()));
+        self.add_enrichment(EnrichmentEntry::new(f(), location.file(), location.line()));
         self
     }
 }
@@ -92,13 +92,13 @@ mod tests {
     #[test]
     fn test_enrich() {
         let mut error = TestError::default();
-        error.add_enrichment(TraceInfo::new("Test trace", "test.rs", 5));
+        error.add_enrichment(EnrichmentEntry::new("Test trace", "test.rs", 5));
         assert_eq!(error.data.data.enrichment.len(), 1);
         assert_eq!(error.data.data.enrichment[0].message, "Test trace");
         assert_eq!(error.data.data.enrichment[0].location.file, "test.rs");
         assert_eq!(error.data.data.enrichment[0].location.line, 5);
 
-        error.add_enrichment(TraceInfo::new("Test trace", "test.rs", 10));
+        error.add_enrichment(EnrichmentEntry::new("Test trace", "test.rs", 10));
         assert_eq!(error.data.data.enrichment.len(), 2);
         assert_eq!(error.data.data.enrichment[1].message, "Test trace");
         let location = &error.data.data.enrichment[1].location;
@@ -111,7 +111,7 @@ mod tests {
         let error = TestError::default();
         let mut result: Result<(), _> = Err(error);
 
-        result.add_enrichment(TraceInfo::new("Immediate trace", "test.rs", 15));
+        result.add_enrichment(EnrichmentEntry::new("Immediate trace", "test.rs", 15));
 
         let err = result.unwrap_err();
         assert_eq!(err.data.data.enrichment.len(), 1);

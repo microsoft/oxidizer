@@ -8,14 +8,14 @@ use std::fmt;
 
 use super::backtrace::Backtrace;
 use super::source::Source;
-use super::trace_info::TraceInfo;
+use super::EnrichmentEntry;
 
 /// Internal error data that is boxed to keep `OhnoCore` lightweight.
 #[derive(Debug, Clone)]
 pub struct Inner {
     pub(super) source: Source,
     pub(super) backtrace: Backtrace,
-    pub(super) enrichment: Vec<TraceInfo>,
+    pub(super) enrichment: Vec<EnrichmentEntry>,
 }
 
 /// Core error type that wraps source errors, captures backtraces, and holds enrichment traces.
@@ -142,12 +142,12 @@ impl OhnoCore {
     }
 
     /// Returns an iterator over the enrichment information in reverse order (most recent first).
-    pub fn traces(&self) -> impl Iterator<Item = &TraceInfo> {
+    pub fn enrichments(&self) -> impl Iterator<Item = &EnrichmentEntry> {
         self.data.enrichment.iter().rev()
     }
 
     /// Returns an iterator over just the enrichment messages in reverse order (most recent first).
-    pub fn trace_messages(&self) -> impl Iterator<Item = &str> {
+    pub fn enrichment_messages(&self) -> impl Iterator<Item = &str> {
         self.data.enrichment.iter().rev().map(|ctx| ctx.message.as_ref())
     }
 
@@ -340,9 +340,9 @@ mod tests {
     #[test]
     fn test_enrichment_iter_and_messages() {
         let mut error = OhnoCore::from("msg");
-        error.add_enrichment(TraceInfo::new("ctx1", "test.rs", 1));
-        error.add_enrichment(TraceInfo::new("ctx2", "test.rs", 2));
-        let messages: Vec<_> = error.trace_messages().collect();
+        error.add_enrichment(EnrichmentEntry::new("ctx1", "test.rs", 1));
+        error.add_enrichment(EnrichmentEntry::new("ctx2", "test.rs", 2));
+        let messages: Vec<_> = error.enrichment_messages().collect();
         assert_eq!(messages, vec!["ctx2", "ctx1"]);
     }
 
