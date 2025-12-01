@@ -36,7 +36,7 @@ fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definiti
     // Parse the arguments as either:
     // 1. A simple string literal: "message"
     // 2. A format string with args: "format {}", expr
-    let trace_expr = if msg_args.is_empty() {
+    let msg_expr = if msg_args.is_empty() {
         // No arguments provided, use function name as default message
         let msg = format!("error in function {}", &fn_definition.sig.ident);
         quote! { #msg }
@@ -52,7 +52,7 @@ fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definiti
     let block = quote! {
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
-                let msg = #trace_expr;
+                let msg = #msg_expr;
                 ohno::Enrichable::add_enrichment(&mut e, ohno::EnrichmentEntry::new(msg, file!(), line!()));
                 e
             })
