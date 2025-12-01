@@ -149,9 +149,13 @@ fn clone_ohno_core() {
 #[test]
 fn clone_with_inner_error() {
     let inner = TestError::new("inner error");
-    let original = OhnoCore::from(inner).enrich("trace message");
+    let original = OhnoCore::from(inner).enrich("enrichment message");
     let cloned = original.clone();
 
     let _ = original.source().unwrap().downcast_ref::<TestError>().unwrap();
     let _ = cloned.source().unwrap().downcast_ref::<TestError>().unwrap();
+
+    let original_msg = original.to_string();
+    let cloned_msg = cloned.to_string();
+    assert_eq!(original_msg, cloned_msg);
 }

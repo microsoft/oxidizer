@@ -6,14 +6,14 @@ use std::error::Error as StdError;
 
 use crate::{EnrichmentEntry, OhnoCore};
 
-/// Base trait for adding error trace to error types.
+/// Base trait for adding error enrichment to error types.
 ///
-/// This trait provides the fundamental error trace addition method and is dyn-compatible.
+/// This trait provides the fundamental error enrichment addition method and is dyn-compatible.
 /// It serves as the base for the more ergonomic `EnrichableExt` trait.
 pub trait Enrichable {
-    /// Adds enrichment trace information to the error.
+    /// Adds enrichment information to the error.
     ///
-    /// This is the core method that other error trace methods build upon.
+    /// This is the core method that other error enrichment methods build upon.
     ///
     /// # Note
     ///
@@ -40,7 +40,7 @@ impl Enrichable for OhnoCore {
     }
 }
 
-/// Extension trait providing ergonomic error trace addition methods.
+/// Extension trait providing ergonomic error enrichment addition methods.
 ///
 /// This trait extends `Enrichable` with convenient methods for adding error traces
 /// when converting or working with errors. It provides both immediate and

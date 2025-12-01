@@ -23,7 +23,7 @@ Macros for the [`ohno`](https://docs.rs/ohno) crate.
 ## Macros
 
 - `#[derive(Error)]` - Automatically implement error traits
-- `#[enrich_err("message")]` - Add error trace with file/line information to function errors
+- `#[enrich_err("message")]` - Add error enrichment with file/line information to function errors
 
 <!-- cargo-rdme end -->
 

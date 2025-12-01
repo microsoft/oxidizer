@@ -13,7 +13,7 @@ use syn::{ItemFn, Result, parse_macro_input};
 
 use crate::utils::bail;
 
-/// Attribute macro for adding detailed error trace (with file and line info) to function errors.
+/// Attribute macro for adding detailed error enrichment (with file and line info) to function errors.
 ///
 /// Now supports complex format expressions like:
 /// - `#[enrich_err("failed to read file: {}", path.display())]`
@@ -64,7 +64,7 @@ fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definiti
     Ok(quote! { #fn_definition })
 }
 
-/// Generate error trace expression for complex format expressions.
+/// Generate error enrichment expression for complex format expressions.
 /// Supports both simple string literals and format strings with complex expressions.
 /// Also supports legacy-style parameter interpolation like "{param}".
 pub fn generate_msg_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
