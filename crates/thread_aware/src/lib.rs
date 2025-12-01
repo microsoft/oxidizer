@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! A library for creating isolated affinities in Rust, allowing for safe and efficient data transfer between them.
 //!
 //! This is useful in scenarios where you want to isolate data to different affinities, such as NUMA nodes, threads, or specific CPU cores.
