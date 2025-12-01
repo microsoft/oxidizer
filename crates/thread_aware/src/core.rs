@@ -165,9 +165,8 @@ mod tests {
         let affinities = create_manual_memory_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
         for (i, affinity) in affinities.iter().enumerate() {
-            let affinity = match affinity {
-                crate::MemoryAffinity::Pinned(pinned) => pinned,
-                _ => panic!("Unexpected affinity type"),
+            let crate::MemoryAffinity::Pinned(affinity) = affinity else {
+                panic!("Unexpected affinity type")
             };
 
             assert_eq!(affinity.processor_index(), i);
