@@ -466,10 +466,7 @@ impl<T, S: Strategy> ThreadAware for Trc<T, S> {
         };
 
         if let MemoryAffinity::Pinned(source) = source {
-            self.storage
-                .write()
-                .expect("Failed to acquire write lock")
-                .replace(source, self.value);
+            guard.replace(source, self.value);
         }
 
         drop(guard);
