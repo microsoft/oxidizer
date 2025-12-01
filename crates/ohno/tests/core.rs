@@ -68,12 +68,12 @@ fn test_detailed_enrich() {
 
     // Test enrichment iteration
     let enrichments: Vec<_> = error.enrichments().collect();
-    assert_eq!(traces.len(), 3);
+    assert_eq!(enrichments.len(), 3);
 
     // Most recent first
-    assert_eq!(traces[0].message, "third trace");
-    assert_eq!(traces[1].message, "second trace");
-    assert_eq!(traces[2].message, "first trace");
+    assert_eq!(enrichments[0].message, "third trace");
+    assert_eq!(enrichments[1].message, "second trace");
+    assert_eq!(enrichments[2].message, "first trace");
 }
 
 #[test]

@@ -68,7 +68,7 @@ fn test_basic_error_struct_expansion() {
         },
         parse_quote! {
             impl ohno::Enrichable for TestError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.inner.add_enrichment(trace);
                 }
             }
@@ -170,7 +170,7 @@ fn test_from_attribute_expansion() {
         },
         parse_quote! {
             impl ohno::Enrichable for IoWrapperError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.inner.add_enrichment(trace);
                 }
             }
@@ -265,7 +265,7 @@ fn test_no_debug_attribute_expansion() {
         },
         parse_quote! {
             impl ohno::Enrichable for NoDebugError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.inner.add_enrichment(trace);
                 }
             }
@@ -334,7 +334,7 @@ fn test_no_constructors_expansion() {
         },
         parse_quote! {
             impl ohno::Enrichable for NoConstructorsError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.inner.add_enrichment(trace);
                 }
             }
@@ -431,7 +431,7 @@ fn test_generate_from_implementations_tuple() {
         },
         parse_quote! {
             impl ohno::Enrichable for TestError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.1.add_enrichment(trace);
                 }
             }
@@ -529,7 +529,7 @@ fn test_ohno_core_first_position_struct() {
         },
         parse_quote! {
             impl ohno::Enrichable for FirstPositionError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.inner.add_enrichment(trace);
                 }
             }
@@ -628,7 +628,7 @@ fn test_ohno_core_middle_position_struct() {
         },
         parse_quote! {
             impl ohno::Enrichable for MiddlePositionError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.inner.add_enrichment(trace);
                 }
             }

@@ -53,7 +53,7 @@ fn test_tuple_only_ohno_core() {
         },
         parse_quote! {
             impl ohno::Enrichable for OnlyCoreError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.0.add_enrichment(trace);
                 }
             }
@@ -137,7 +137,7 @@ fn test_tuple_struct_expansion() {
         },
         parse_quote! {
             impl ohno::Enrichable for TupleError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.1.add_enrichment(trace);
                 }
             }
@@ -222,7 +222,7 @@ fn test_ohno_core_first_position_tuple() {
         },
         parse_quote! {
             impl ohno::Enrichable for FirstPositionTupleError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.0.add_enrichment(trace);
                 }
             }
@@ -308,7 +308,7 @@ fn test_ohno_core_middle_position_tuple() {
         },
         parse_quote! {
             impl ohno::Enrichable for MiddlePositionTupleError {
-                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                fn add_enrichment(&mut self, trace: ohno::EnrichmentEntry) {
                     self.1.add_enrichment(trace);
                 }
             }

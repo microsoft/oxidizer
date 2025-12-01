@@ -53,7 +53,7 @@ fn impl_enrich_err_attribute(trace_args: proc_macro2::TokenStream, mut fn_defini
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
                 let trace_msg = #trace_expr;
-                ohno::Enrichable::add_enrichment(&mut e, ohno::TraceInfo::new(trace_msg, file!(), line!()));
+                ohno::Enrichable::add_enrichment(&mut e, ohno::EnrichmentEntry::new(trace_msg, file!(), line!()));
                 e
             })
         }

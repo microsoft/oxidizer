@@ -6,9 +6,9 @@ use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt;
 
+use super::EnrichmentEntry;
 use super::backtrace::Backtrace;
 use super::source::Source;
-use super::EnrichmentEntry;
 
 /// Internal error data that is boxed to keep `OhnoCore` lightweight.
 #[derive(Debug, Clone)]
