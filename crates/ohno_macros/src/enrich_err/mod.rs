@@ -32,16 +32,16 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
-fn impl_enrich_err_attribute(trace_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
+fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
     // Parse the arguments as either:
     // 1. A simple string literal: "message"
     // 2. A format string with args: "format {}", expr
-    let trace_expr = if trace_args.is_empty() {
+    let trace_expr = if msg_args.is_empty() {
         // No arguments provided, use function name as default message
-        let fn_name = &fn_definition.sig.ident;
-        quote! { format!("error in function {}", stringify!(#fn_name)) }
+        let msg = format!("error in function {}", &fn_definition.sig.ident);
+        quote! { #msg }
     } else {
-        generate_trace_expr(trace_args)?
+        generate_msg_expr(msg_args)?
     };
 
     check_return_type(&fn_definition.sig.output)?;
@@ -52,8 +52,8 @@ fn impl_enrich_err_attribute(trace_args: proc_macro2::TokenStream, mut fn_defini
     let block = quote! {
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
-                let trace_msg = #trace_expr;
-                ohno::Enrichable::add_enrichment(&mut e, ohno::EnrichmentEntry::new(trace_msg, file!(), line!()));
+                let msg = #trace_expr;
+                ohno::Enrichable::add_enrichment(&mut e, ohno::EnrichmentEntry::new(msg, file!(), line!()));
                 e
             })
         }
@@ -67,7 +67,7 @@ fn impl_enrich_err_attribute(trace_args: proc_macro2::TokenStream, mut fn_defini
 /// Generate error trace expression for complex format expressions.
 /// Supports both simple string literals and format strings with complex expressions.
 /// Also supports legacy-style parameter interpolation like "{param}".
-pub fn generate_trace_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
+pub fn generate_msg_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
     // Parse the token stream - it could be:
     // 1. A single string literal: "message"
     // 2. A single string literal with parameter interpolation: "failed to read {path}"
@@ -119,90 +119,90 @@ mod inline_tests {
     use super::*;
 
     #[test]
-    fn generate_trace_expr_simple() {
-        let expr = generate_trace_expr(quote! { "simple message" }).unwrap();
+    fn generate_msg_expr_simple() {
+        let expr = generate_msg_expr(quote! { "simple message" }).unwrap();
         let expected = quote! { "simple message" };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_trace_expr_empty_args_stream() {
-        let err = generate_trace_expr(proc_macro2::TokenStream::new()).unwrap_err();
+    fn generate_msg_expr_empty_args_stream() {
+        let err = generate_msg_expr(proc_macro2::TokenStream::new()).unwrap_err();
         assert_eq!(err.to_string(), "enrich_err requires a message or format string");
     }
 
     #[test]
-    fn generate_trace_expr_invalid_format() {
+    fn generate_msg_expr_invalid_format() {
         // let format macro check for invalid format strings
-        let expr = generate_trace_expr(quote! { "simple message", 123, 345 }).unwrap();
+        let expr = generate_msg_expr(quote! { "simple message", 123, 345 }).unwrap();
         let expected = quote! { format!("simple message", 123, 345) };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_trace_expr_with_one_brace() {
-        let expr = generate_trace_expr(quote! { "simple {message" }).unwrap();
+    fn generate_msg_expr_with_one_brace() {
+        let expr = generate_msg_expr(quote! { "simple {message" }).unwrap();
         let expected = quote! { "simple {message" };
         assert_eq!(expr.to_string(), expected.to_string());
 
-        let expr = generate_trace_expr(quote! { "simple }message" }).unwrap();
+        let expr = generate_msg_expr(quote! { "simple }message" }).unwrap();
         let expected = quote! { "simple }message" };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_trace_expr_format() {
-        let err = generate_trace_expr(quote! { format!("error in {}", name) }).unwrap_err();
+    fn generate_msg_expr_format() {
+        let err = generate_msg_expr(quote! { format!("error in {}", name) }).unwrap_err();
         let expected_err = "cannot parse enrich_err arguments as a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
     #[test]
-    fn generate_trace_expr_interpolation() {
-        let expr = generate_trace_expr(quote! { "failed to read {path}" }).unwrap();
+    fn generate_msg_expr_interpolation() {
+        let expr = generate_msg_expr(quote! { "failed to read {path}" }).unwrap();
         let expected = quote! { format!("failed to read {path}") };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn test_generate_trace_expr() {
-        let expr = generate_trace_expr(quote! { "error in {}: {}", module, error_code }).unwrap();
+    fn test_generate_msg_expr() {
+        let expr = generate_msg_expr(quote! { "error in {}: {}", module, error_code }).unwrap();
         let expected = quote! { format!("error in {}: {}", module, error_code) };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_trace_expr_multiple_tokens_no_braces() {
+    fn generate_msg_expr_multiple_tokens_no_braces() {
         // This test ensures that format! is used when tokens.len() > 1, even without braces.
         // If the condition is changed from `> 1` to `== 1`, this test will fail because
         // the string "error occurred" has no braces, so it would be returned as a simple literal
         // instead of being wrapped in format!().
-        let expr = generate_trace_expr(quote! { "error occurred", extra_arg }).unwrap();
+        let expr = generate_msg_expr(quote! { "error occurred", extra_arg }).unwrap();
         let expected = quote! { format!("error occurred", extra_arg) };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_trace_expr_invalid_literal() {
+    fn generate_msg_expr_invalid_literal() {
         // Test with a number literal instead of string literal
-        let err = generate_trace_expr(quote! { 42 }).unwrap_err();
+        let err = generate_msg_expr(quote! { 42 }).unwrap_err();
         let expected_err = "enrich_err requires a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
     #[test]
-    fn generate_trace_expr_boolean_literal() {
+    fn generate_msg_expr_boolean_literal() {
         // Test with a boolean literal instead of string literal
         // Boolean literals are parsed as identifiers, not literals, so they trigger the earlier error
-        let err = generate_trace_expr(quote! { true }).unwrap_err();
+        let err = generate_msg_expr(quote! { true }).unwrap_err();
         let expected_err = "cannot parse enrich_err arguments as a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
     #[test]
-    fn generate_trace_expr_char_literal() {
+    fn generate_msg_expr_char_literal() {
         // Test with a char literal instead of string literal
-        let err = generate_trace_expr(quote! { 'c' }).unwrap_err();
+        let err = generate_msg_expr(quote! { 'c' }).unwrap_err();
         let expected_err = "enrich_err requires a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
