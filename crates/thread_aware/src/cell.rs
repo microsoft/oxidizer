@@ -462,7 +462,10 @@ impl<T, S: Strategy> ThreadAware for Trc<T, S> {
                 let value = data;
 
                 let old_data = guard.replace(destination, Arc::<T>::clone(&value));
-                assert!(old_data.is_none(), "Data already exists for the destination affinity. This should be unreachable due to the the early write lock.");
+                assert!(
+                    old_data.is_none(),
+                    "Data already exists for the destination affinity. This should be unreachable due to the the early write lock."
+                );
 
                 (value, factory)
             }
