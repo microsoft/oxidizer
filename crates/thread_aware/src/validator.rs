@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{MemoryAffinity, ThreadAware, ThreadRegistry};
+use crate::{MemoryAffinity, PinnedAffinity, ThreadAware, ThreadRegistry};
 
 /// A validator that checks if the current thread is running on its home memory affinity.
 ///
@@ -39,8 +39,8 @@ impl ThreadAwareValidator {
 }
 
 impl ThreadAware for ThreadAwareValidator {
-    fn relocated(mut self, _source: MemoryAffinity, destination: MemoryAffinity) -> Self {
-        self.home = destination;
+    fn relocated(mut self, _source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        self.home = destination.into();
         self
     }
 }
@@ -120,7 +120,7 @@ mod tests {
         assert!(!validator.is_valid()); // not pinned yet
 
         let registry_ref = Arc::clone(&validator.registry);
-        let relocated = validator.relocated(affinity_a.into(), affinity_b.into());
+        let relocated = validator.relocated(affinity_a.into(), affinity_b);
         registry_ref.pin_to(affinity_b);
         assert!(
             relocated.is_valid(),

@@ -87,7 +87,7 @@ pub fn create_manual_memory_affinities(counts: &[usize]) -> Vec<MemoryAffinity> 
 /// ```rust
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # use std::sync::Arc;
-/// # use thread_aware::{ThreadAware, MemoryAffinity};
+/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity};
 ///
 /// #[derive(Clone)]
 /// struct Counter {
@@ -111,7 +111,7 @@ pub fn create_manual_memory_affinities(counts: &[usize]) -> Vec<MemoryAffinity> 
 /// }
 ///
 /// impl ThreadAware for Counter {
-///     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+///     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
 ///         Self {
 ///             // Initialize a new value in the destination affinity independent
 ///             // of the source affinity.
@@ -139,7 +139,7 @@ pub trait ThreadAware {
     /// to avoid calling transfer when source and destination match as that's a useless operation
     /// and transfer implementations may be non-trivial.
     #[must_use]
-    fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self;
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self;
 }
 
 #[cfg(test)]

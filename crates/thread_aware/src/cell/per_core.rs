@@ -20,11 +20,11 @@ use crate::{MemoryAffinity, PinnedAffinity, Storage, ThreadAware, relocate_once}
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{MemoryAffinity, ThreadAware, PerCore, create_manual_memory_affinities};
+/// # use thread_aware::{PinnedAffinity, MemoryAffinity, ThreadAware, PerCore, create_manual_pinned_affinities};
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # use std::sync::Arc;
-/// # let affinities = create_manual_memory_affinities(&[2]);
-/// # let affinity1 = affinities[0];
+/// # let affinities = create_manual_pinned_affinities(&[2]);
+/// # let affinity1 = affinities[0].into();
 /// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
 /// # struct Counter {
@@ -48,7 +48,7 @@ use crate::{MemoryAffinity, PinnedAffinity, Storage, ThreadAware, relocate_once}
 /// # }
 /// #
 /// # impl ThreadAware for Counter {
-/// #     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+/// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
 /// #         Self {
 /// #             // Initialize a new value in the destination affinity independent
 /// #             // of the source affinity.
@@ -112,7 +112,7 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
+    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
     /// # let affinities = create_manual_memory_affinities(&[2]);
@@ -139,7 +139,7 @@ where
     /// #     }
     /// # }
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, _source: MemoryAffinity, _destination: MemoryAffinity) -> Self {
+    /// #     fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
@@ -168,7 +168,7 @@ where
         }
 
         impl<T> ThreadAware for Ctor<T> {
-            fn relocated(self, _source: MemoryAffinity, _destination: MemoryAffinity) -> Self {
+            fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
                 self
             }
         }
@@ -228,7 +228,7 @@ where
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, create_manual_memory_affinities};
+    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
     /// # let affinities = create_manual_memory_affinities(&[2]);
@@ -256,7 +256,7 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
@@ -320,7 +320,7 @@ impl<T> Deref for PerCore<T> {
 }
 
 impl<T> ThreadAware for PerCore<T> {
-    fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         Self(self.0.relocated(source, destination))
     }
 }
@@ -330,7 +330,7 @@ mod tests {
     use std::sync::atomic::{AtomicI32, Ordering};
 
     use super::*;
-    use crate::{create_manual_memory_affinities, create_manual_pinned_affinities};
+    use crate::create_manual_pinned_affinities;
 
     #[derive(Clone, Debug)]
     struct Counter {
@@ -352,7 +352,7 @@ mod tests {
     }
 
     impl ThreadAware for Counter {
-        fn relocated(self, _source: MemoryAffinity, _destination: MemoryAffinity) -> Self {
+        fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
             Self {
                 value: Arc::new(AtomicI32::new(0)),
             }
@@ -361,10 +361,10 @@ mod tests {
 
     #[test]
     fn transfer_creates_new_value() {
-        let affinities = create_manual_memory_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let pmr = PerCore::new(Counter::new);
         pmr.increment_by(10);
-        let pmr2 = pmr.clone().relocated(affinities[0], affinities[1]);
+        let pmr2 = pmr.clone().relocated(affinities[0].into(), affinities[1]);
         assert_eq!(pmr.value(), 10);
         assert_eq!(pmr2.value(), 0);
     }
@@ -391,8 +391,8 @@ mod tests {
         assert_eq!(*per_core, 42);
 
         // Verify it can be relocated
-        let affinities = create_manual_memory_affinities(&[2]);
-        let relocated = per_core.relocated(affinities[0], affinities[1]);
+        let affinities = create_manual_pinned_affinities(&[2]);
+        let relocated = per_core.relocated(affinities[0].into(), affinities[1]);
         assert_eq!(*relocated, 42);
     }
 
@@ -424,8 +424,8 @@ mod tests {
     #[test]
     fn test_counter_relocated() {
         // This test explicitly covers line 355 (Counter's ThreadAware::relocated implementation)
-        let affinities = create_manual_memory_affinities(&[2]);
-        let affinity1 = affinities[0];
+        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinity1 = affinities[0].into();
         let affinity2 = affinities[1];
 
         // Create a counter and set a value

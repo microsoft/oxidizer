@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::MemoryAffinity;
+use crate::{MemoryAffinity, PinnedAffinity};
 use crate::{RelocateFnOnce, ThreadAware};
 
 pub struct ErasedClosureOnce<T> {
@@ -36,7 +36,7 @@ impl<T> RelocateFnOnce<T> for ErasedClosureOnce<T> {
 }
 
 impl<T> ThreadAware for ErasedClosureOnce<T> {
-    fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         self.inner.transfer_boxed(source, destination)
     }
 }
@@ -52,7 +52,7 @@ impl<T> Clone for ErasedClosureOnce<T> {
 trait Erased<T>: Sync + Send {
     fn call_boxed_once(self: Box<Self>) -> T;
     fn clone_boxed(&self) -> Box<dyn Erased<T>>;
-    fn transfer_boxed(self: Box<Self>, source: MemoryAffinity, destination: MemoryAffinity) -> ErasedClosureOnce<T>;
+    fn transfer_boxed(self: Box<Self>, source: MemoryAffinity, destination: PinnedAffinity) -> ErasedClosureOnce<T>;
 }
 
 struct Wrapper<C> {
@@ -73,7 +73,7 @@ where
         })
     }
 
-    fn transfer_boxed(self: Box<Self>, source: MemoryAffinity, destination: MemoryAffinity) -> ErasedClosureOnce<T> {
+    fn transfer_boxed(self: Box<Self>, source: MemoryAffinity, destination: PinnedAffinity) -> ErasedClosureOnce<T> {
         ErasedClosureOnce {
             inner: Box::new(Self {
                 closure: self.closure.relocated(source, destination),
