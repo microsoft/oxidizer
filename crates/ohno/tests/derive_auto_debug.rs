@@ -123,17 +123,15 @@ fn test_no_debug_with_complex_attributes() {
 }
 
 #[test]
-fn test_debug_with_context() {
-    use ohno::ErrorTraceExt;
+fn test_debug_with_enrichment() {
+    use ohno::EnrichableExt;
 
     let error = SimpleError {
-        inner_error: OhnoCore::from("base error")
-            .error_trace("first context")
-            .error_trace("second context"),
+        inner_error: OhnoCore::from("base error").enrich("first enrichment").enrich("second enrichment"),
     };
 
     let debug_str = format!("{error:?}");
     assert!(debug_str.contains("SimpleError"));
-    // The inner OhnoCore should contain the context
-    assert!(debug_str.contains("context"));
+    // The inner OhnoCore should contain the enrichment
+    assert!(debug_str.contains("enrichment"));
 }

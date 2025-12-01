@@ -16,23 +16,23 @@ use crate::utils::bail;
 /// Attribute macro for adding detailed error trace (with file and line info) to function errors.
 ///
 /// Now supports complex format expressions like:
-/// - `#[error_trace("failed to read file: {}", path.display())]`
-/// - `#[error_trace("error in {}: {}", name, value.len())]`
-/// - `#[error_trace("simple message")]`
-/// - `#[error_trace("param interpolation: {param}")]`
+/// - `#[enrich_err("failed to read file: {}", path.display())]`
+/// - `#[enrich_err("error in {}: {}", name, value.len())]`
+/// - `#[enrich_err("simple message")]`
+/// - `#[enrich_err("param interpolation: {param}")]`
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
-pub fn error_trace(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = proc_macro2::TokenStream::from(args);
     let input = parse_macro_input!(input as ItemFn);
 
-    impl_error_trace_attribute(args, input)
+    impl_enrich_err_attribute(args, input)
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
 }
 
-fn impl_error_trace_attribute(trace_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
+fn impl_enrich_err_attribute(trace_args: proc_macro2::TokenStream, mut fn_definition: ItemFn) -> Result<proc_macro2::TokenStream> {
     // Parse the arguments as either:
     // 1. A simple string literal: "message"
     // 2. A format string with args: "format {}", expr
@@ -41,7 +41,7 @@ fn impl_error_trace_attribute(trace_args: proc_macro2::TokenStream, mut fn_defin
         let fn_name = &fn_definition.sig.ident;
         quote! { format!("error in function {}", stringify!(#fn_name)) }
     } else {
-        generate_complex_context_expr(trace_args)?
+        generate_trace_expr(trace_args)?
     };
 
     check_return_type(&fn_definition.sig.output)?;
@@ -53,7 +53,7 @@ fn impl_error_trace_attribute(trace_args: proc_macro2::TokenStream, mut fn_defin
         {
             (#asyncness || #body)() #await_suffix .map_err(|mut e| {
                 let trace_msg = #trace_expr;
-                ohno::ErrorTrace::add_error_trace(&mut e, ohno::TraceInfo::detailed(trace_msg, file!(), line!()));
+                ohno::Enrichable::add_enrichment(&mut e, ohno::TraceInfo::new(trace_msg, file!(), line!()));
                 e
             })
         }
@@ -67,7 +67,7 @@ fn impl_error_trace_attribute(trace_args: proc_macro2::TokenStream, mut fn_defin
 /// Generate error trace expression for complex format expressions.
 /// Supports both simple string literals and format strings with complex expressions.
 /// Also supports legacy-style parameter interpolation like "{param}".
-pub fn generate_complex_context_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
+pub fn generate_trace_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
     // Parse the token stream - it could be:
     // 1. A single string literal: "message"
     // 2. A single string literal with parameter interpolation: "failed to read {path}"
@@ -75,16 +75,16 @@ pub fn generate_complex_context_expr(args_stream: proc_macro2::TokenStream) -> R
 
     let tokens: Vec<_> = args_stream.into_iter().collect();
     if tokens.is_empty() {
-        bail!("error_trace requires a message or format string");
+        bail!("enrich_err requires a message or format string");
     }
 
     // Check if it starts with a string literal
     let Some(proc_macro2::TokenTree::Literal(lit)) = tokens.first() else {
-        bail!("cannot parse error_trace arguments as a string literal or format expression");
+        bail!("cannot parse enrich_err arguments as a string literal or format expression");
     };
     let lit_str = lit.to_string();
     if !is_quoted_string(&lit_str) {
-        bail!("error_trace requires a string literal or format expression");
+        bail!("enrich_err requires a string literal or format expression");
     }
 
     // Check if we have multiple tokens (format string with arguments) or interpolation
@@ -109,7 +109,7 @@ fn check_return_type(output: &syn::ReturnType) -> Result<()> {
             Ok(())
         }
         syn::ReturnType::Default => {
-            bail!("context attribute can only be applied to functions returning Result")
+            bail!("enrich_err attribute can only be applied to functions returning Result")
         }
     }
 }
@@ -119,91 +119,91 @@ mod inline_tests {
     use super::*;
 
     #[test]
-    fn generate_complex_context_expr_simple() {
-        let expr = generate_complex_context_expr(quote! { "simple message" }).unwrap();
+    fn generate_trace_expr_simple() {
+        let expr = generate_trace_expr(quote! { "simple message" }).unwrap();
         let expected = quote! { "simple message" };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_complex_context_expr_empty_args_stream() {
-        let err = generate_complex_context_expr(proc_macro2::TokenStream::new()).unwrap_err();
-        assert_eq!(err.to_string(), "error_trace requires a message or format string");
+    fn generate_trace_expr_empty_args_stream() {
+        let err = generate_trace_expr(proc_macro2::TokenStream::new()).unwrap_err();
+        assert_eq!(err.to_string(), "enrich_err requires a message or format string");
     }
 
     #[test]
-    fn generate_complex_context_expr_invalid_format() {
+    fn generate_trace_expr_invalid_format() {
         // let format macro check for invalid format strings
-        let expr = generate_complex_context_expr(quote! { "simple message", 123, 345 }).unwrap();
+        let expr = generate_trace_expr(quote! { "simple message", 123, 345 }).unwrap();
         let expected = quote! { format!("simple message", 123, 345) };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_complex_context_expr_with_one_brace() {
-        let expr = generate_complex_context_expr(quote! { "simple {message" }).unwrap();
+    fn generate_trace_expr_with_one_brace() {
+        let expr = generate_trace_expr(quote! { "simple {message" }).unwrap();
         let expected = quote! { "simple {message" };
         assert_eq!(expr.to_string(), expected.to_string());
 
-        let expr = generate_complex_context_expr(quote! { "simple }message" }).unwrap();
+        let expr = generate_trace_expr(quote! { "simple }message" }).unwrap();
         let expected = quote! { "simple }message" };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_complex_context_expr_format() {
-        let err = generate_complex_context_expr(quote! { format!("error in {}", name) }).unwrap_err();
-        let expected_err = "cannot parse error_trace arguments as a string literal or format expression";
+    fn generate_trace_expr_format() {
+        let err = generate_trace_expr(quote! { format!("error in {}", name) }).unwrap_err();
+        let expected_err = "cannot parse enrich_err arguments as a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
     #[test]
-    fn generate_complex_context_expr_interpolation() {
-        let expr = generate_complex_context_expr(quote! { "failed to read {path}" }).unwrap();
+    fn generate_trace_expr_interpolation() {
+        let expr = generate_trace_expr(quote! { "failed to read {path}" }).unwrap();
         let expected = quote! { format!("failed to read {path}") };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn test_generate_complex_context_expr() {
-        let expr = generate_complex_context_expr(quote! { "error in {}: {}", module, error_code }).unwrap();
+    fn test_generate_trace_expr() {
+        let expr = generate_trace_expr(quote! { "error in {}: {}", module, error_code }).unwrap();
         let expected = quote! { format!("error in {}: {}", module, error_code) };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_complex_context_expr_multiple_tokens_no_braces() {
+    fn generate_trace_expr_multiple_tokens_no_braces() {
         // This test ensures that format! is used when tokens.len() > 1, even without braces.
         // If the condition is changed from `> 1` to `== 1`, this test will fail because
         // the string "error occurred" has no braces, so it would be returned as a simple literal
         // instead of being wrapped in format!().
-        let expr = generate_complex_context_expr(quote! { "error occurred", extra_arg }).unwrap();
+        let expr = generate_trace_expr(quote! { "error occurred", extra_arg }).unwrap();
         let expected = quote! { format!("error occurred", extra_arg) };
         assert_eq!(expr.to_string(), expected.to_string());
     }
 
     #[test]
-    fn generate_complex_context_expr_invalid_literal() {
+    fn generate_trace_expr_invalid_literal() {
         // Test with a number literal instead of string literal
-        let err = generate_complex_context_expr(quote! { 42 }).unwrap_err();
-        let expected_err = "error_trace requires a string literal or format expression";
+        let err = generate_trace_expr(quote! { 42 }).unwrap_err();
+        let expected_err = "enrich_err requires a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
     #[test]
-    fn generate_complex_context_expr_boolean_literal() {
+    fn generate_trace_expr_boolean_literal() {
         // Test with a boolean literal instead of string literal
         // Boolean literals are parsed as identifiers, not literals, so they trigger the earlier error
-        let err = generate_complex_context_expr(quote! { true }).unwrap_err();
-        let expected_err = "cannot parse error_trace arguments as a string literal or format expression";
+        let err = generate_trace_expr(quote! { true }).unwrap_err();
+        let expected_err = "cannot parse enrich_err arguments as a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
     #[test]
-    fn generate_complex_context_expr_char_literal() {
+    fn generate_trace_expr_char_literal() {
         // Test with a char literal instead of string literal
-        let err = generate_complex_context_expr(quote! { 'c' }).unwrap_err();
-        let expected_err = "error_trace requires a string literal or format expression";
+        let err = generate_trace_expr(quote! { 'c' }).unwrap_err();
+        let expected_err = "enrich_err requires a string literal or format expression";
         assert_eq!(err.to_string(), expected_err);
     }
 
@@ -231,7 +231,7 @@ mod inline_tests {
         let err = check_return_type(&return_type).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "context attribute can only be applied to functions returning Result"
+            "enrich_err attribute can only be applied to functions returning Result"
         );
     }
 }

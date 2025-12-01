@@ -12,7 +12,7 @@ struct ProcessingError {
     error_code: i32,
 }
 
-#[ohno::error_trace("processing failed")]
+#[ohno::enrich_err("processing failed")]
 fn process(item_id: u32) -> Result<(), ProcessingError> {
     Err(ProcessingError::new(item_id, -456))
 }

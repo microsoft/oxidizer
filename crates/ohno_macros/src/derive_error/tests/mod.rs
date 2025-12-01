@@ -67,9 +67,9 @@ fn test_basic_error_struct_expansion() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for TestError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.inner.add_error_trace(trace);
+            impl ohno::Enrichable for TestError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.inner.add_enrichment(trace);
                 }
             }
         },
@@ -169,9 +169,9 @@ fn test_from_attribute_expansion() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for IoWrapperError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.inner.add_error_trace(trace);
+            impl ohno::Enrichable for IoWrapperError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.inner.add_enrichment(trace);
                 }
             }
         },
@@ -264,9 +264,9 @@ fn test_no_debug_attribute_expansion() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for NoDebugError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.inner.add_error_trace(trace);
+            impl ohno::Enrichable for NoDebugError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.inner.add_enrichment(trace);
                 }
             }
         },
@@ -333,9 +333,9 @@ fn test_no_constructors_expansion() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for NoConstructorsError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.inner.add_error_trace(trace);
+            impl ohno::Enrichable for NoConstructorsError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.inner.add_enrichment(trace);
                 }
             }
         },
@@ -430,9 +430,9 @@ fn test_generate_from_implementations_tuple() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for TestError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.1.add_error_trace(trace);
+            impl ohno::Enrichable for TestError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.1.add_enrichment(trace);
                 }
             }
         },
@@ -528,9 +528,9 @@ fn test_ohno_core_first_position_struct() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for FirstPositionError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.inner.add_error_trace(trace);
+            impl ohno::Enrichable for FirstPositionError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.inner.add_enrichment(trace);
                 }
             }
         },
@@ -627,9 +627,9 @@ fn test_ohno_core_middle_position_struct() {
             }
         },
         parse_quote! {
-            impl ohno::ErrorTrace for MiddlePositionError {
-                fn add_error_trace(&mut self, trace: ohno::TraceInfo) {
-                    self.inner.add_error_trace(trace);
+            impl ohno::Enrichable for MiddlePositionError {
+                fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
+                    self.inner.add_enrichment(trace);
                 }
             }
         },

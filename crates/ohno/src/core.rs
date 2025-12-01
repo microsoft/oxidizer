@@ -15,13 +15,13 @@ use super::trace_info::TraceInfo;
 pub struct Inner {
     pub(super) source: Source,
     pub(super) backtrace: Backtrace,
-    pub(super) context: Vec<TraceInfo>,
+    pub(super) enrichment: Vec<TraceInfo>,
 }
 
-/// Core error type that wraps source errors, captures backtraces, and holds context messages.
+/// Core error type that wraps source errors, captures backtraces, and holds enrichment traces.
 ///
 /// `OhnoCore` is the foundation of the ohno error handling system. It can wrap any error
-/// type while providing automatic backtrace capture and context stacking capabilities.
+/// type while providing automatic backtrace capture and enrichment trace stacking capabilities.
 ///
 /// The internal error data is boxed to keep the `Err` variant in `Result` small. This minimizes
 /// cases where the `Err` is larger than the `Ok` variant. If the error only contains a
@@ -79,7 +79,7 @@ impl OhnoCore {
             data: Box::new(Inner {
                 source: Source::Error(error.into().into()),
                 backtrace: Backtrace::disabled(),
-                context: Vec::new(),
+                enrichment: Vec::new(),
             }),
         }
     }
@@ -89,7 +89,7 @@ impl OhnoCore {
             data: Box::new(Inner {
                 source,
                 backtrace: Backtrace::capture(),
-                context: Vec::new(),
+                enrichment: Vec::new(),
             }),
         }
     }
@@ -141,14 +141,14 @@ impl OhnoCore {
         self.data.backtrace.as_backtrace()
     }
 
-    /// Returns an iterator over the context information in reverse order (most recent first).
-    pub fn context_iter(&self) -> impl Iterator<Item = &TraceInfo> {
-        self.data.context.iter().rev()
+    /// Returns an iterator over the enrichment information in reverse order (most recent first).
+    pub fn traces(&self) -> impl Iterator<Item = &TraceInfo> {
+        self.data.enrichment.iter().rev()
     }
 
-    /// Returns an iterator over just the context messages in reverse order (most recent first).
-    pub fn context_messages(&self) -> impl Iterator<Item = &str> {
-        self.data.context.iter().rev().map(|ctx| ctx.message.as_ref())
+    /// Returns an iterator over just the enrichment messages in reverse order (most recent first).
+    pub fn trace_messages(&self) -> impl Iterator<Item = &str> {
+        self.data.enrichment.iter().rev().map(|ctx| ctx.message.as_ref())
     }
 
     /// Formats the main error message without backtrace or error traces.
@@ -179,7 +179,7 @@ impl OhnoCore {
 
         std::fmt::Display::fmt(&m, f)?;
 
-        for ctx in &self.data.context {
+        for ctx in &self.data.enrichment {
             write!(f, "\n> {ctx}")?;
         }
 
@@ -196,7 +196,7 @@ impl std::fmt::Debug for OhnoCore {
         f.debug_struct("OhnoCore")
             .field("source", &self.data.source)
             .field("backtrace", &self.data.backtrace)
-            .field("context", &self.data.context)
+            .field("enrichment", &self.data.enrichment)
             .finish()
     }
 }
@@ -270,7 +270,7 @@ impl fmt::Display for MessageFormatter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error_trace::ErrorTrace;
+    use crate::enrichable::Enrichable;
 
     #[test]
     fn test_default() {
@@ -289,7 +289,7 @@ mod tests {
     fn test_new() {
         let error = OhnoCore::new();
         assert!(matches!(error.data.source, Source::None));
-        assert!(error.data.context.is_empty());
+        assert!(error.data.enrichment.is_empty());
     }
 
     #[test]
@@ -338,11 +338,11 @@ mod tests {
     }
 
     #[test]
-    fn test_context_iter_and_messages() {
+    fn test_enrichment_iter_and_messages() {
         let mut error = OhnoCore::from("msg");
-        error.add_error_trace(TraceInfo::new("ctx1"));
-        error.add_error_trace(TraceInfo::new("ctx2"));
-        let messages: Vec<_> = error.context_messages().collect();
+        error.add_enrichment(TraceInfo::new("ctx1", "test.rs", 1));
+        error.add_enrichment(TraceInfo::new("ctx2", "test.rs", 2));
+        let messages: Vec<_> = error.trace_messages().collect();
         assert_eq!(messages, vec!["ctx2", "ctx1"]);
     }
 
