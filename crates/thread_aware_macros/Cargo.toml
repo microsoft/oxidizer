@@ -25,7 +25,6 @@ thread_aware_macros_impl.workspace = true
 
 [dev-dependencies]
 mutants.workspace = true
-thread_aware = { path = "../thread_aware" }
 
 [lints]
 workspace = true
