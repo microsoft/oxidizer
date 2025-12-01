@@ -126,7 +126,7 @@ jobs:
       - name: Docs
         run: cargo doc --no-deps --workspace --all-features
       - name: Rdme
-        run: cargo workspaces exec cargo rdme --check --no-fail-on-warnings
+        run: cargo workspaces exec cargo rdme --check
       - name: Default Features
         run: cargo ensure-no-default-features
       - name: Cyclic Dependencies
