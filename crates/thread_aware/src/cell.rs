@@ -427,44 +427,45 @@ impl<T, S: Strategy> ThreadAware for Trc<T, S> {
         let (value, new_factory) = if let Some(value) = value {
             (value, self.factory)
         } else {
-            // We need to transfer or recreate the data
-            let (data, factory) = match &self.factory {
-                // We can use the closure to create new data
-                Factory::Closure(factory, factory_source_affinity) => {
-                    let factory_clone = (**factory).clone();
+            let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
-                    // In case factory source is stored in factory, use that - it means we already transferred the factory
-                    // once, so we know the original source affinity. Otherwise, use source as that means this is the first
-                    // time we're transferring the Trc, so source is the source affinity of the factory as well.
-                    let factory_source = factory_source_affinity.unwrap_or(source);
+            if let Some(value) = guard.get_clone(destination) {
+                (value, self.factory)
+            } else {
+                // We need to transfer or recreate the data
+                let (data, factory) = match &self.factory {
+                    // We can use the closure to create new data
+                    Factory::Closure(factory, factory_source_affinity) => {
+                        let factory_clone = (**factory).clone();
 
-                    (
-                        Arc::new(factory_clone.relocated(factory_source, destination).call_once()),
-                        Factory::Closure(Arc::clone(factory), Some(factory_source)),
-                    )
-                }
+                        // In case factory source is stored in factory, use that - it means we already transferred the factory
+                        // once, so we know the original source affinity. Otherwise, use source as that means this is the first
+                        // time we're transferring the Trc, so source is the source affinity of the factory as well.
+                        let factory_source = factory_source_affinity.unwrap_or(source);
 
-                // We can clone and transfer the data
-                Factory::Data(factory) => (Arc::new(factory(&self.value, source, destination)), self.factory),
+                        (
+                            Arc::new(factory_clone.relocated(factory_source, destination).call_once()),
+                            Factory::Closure(Arc::clone(factory), Some(factory_source)),
+                        )
+                    }
 
-                Factory::Manual => {
-                    // If we are in manual mode, we just clone the data
-                    // This effectively makes it behave like `Arc<T>`
-                    (Arc::clone(&self.value), self.factory)
-                }
-            };
+                    // We can clone and transfer the data
+                    Factory::Data(factory) => (Arc::new(factory(&self.value, source, destination)), self.factory),
 
-            let value = data;
+                    Factory::Manual => {
+                        // If we are in manual mode, we just clone the data
+                        // This effectively makes it behave like `Arc<T>`
+                        (Arc::clone(&self.value), self.factory)
+                    }
+                };
 
-            let old_data = self
-                .storage
-                .write()
-                .expect("Failed to acquire write lock")
-                .replace(destination, Arc::<T>::clone(&value));
+                let value = data;
 
-            assert!(old_data.is_none(), "Data already exists for the destination affinity");
+                let old_data = guard.replace(destination, Arc::<T>::clone(&value));
+                assert!(old_data.is_none(), "Data already exists for the destination affinity. This should be unreachable due to the the early write lock.");
 
-            (value, factory)
+                (value, factory)
+            }
         };
 
         if let MemoryAffinity::Pinned(source) = source {
