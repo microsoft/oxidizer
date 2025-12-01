@@ -16,15 +16,11 @@ repository = "https://github.com/microsoft/oxidizer"
 # Adhere to the following rules when adding dependencies:
 # * All dependencies specified here need to have default-features turned off - individual crates can enable the
 #   features they need
-# * Avoid cyclic dependencies caused by dev-dependencies. If a dev-dependency causes a cyclic dependency, the
-#   cycle needs to be broken by utilizing a path-based dependency specification. For example, `thread_aware`
-#   has a dependency on `thread_aware_macros`, but `thread_aware_macros` has a dev-dependency on `thread_aware`
-#   (for tests and examples). In this case `thread_aware_macros` needs to use a path spec instead of utilizing
-#   a workspace dependency:
-#   ```
-#   [dev-dependencies]
-#   thread_aware = { path = "../thread_aware" }
-#   ```
+# * Do not create dependency cycles involving dev-dependencies. While Cargo itself may allow this, and even
+#   `cargo-release` can deal with them when path-based dependencies are used, they introduce cognitive overhead
+#   and tooling uncertainties (e.g. rust-analyzer issues warnings if cycles are present). Until a strong reason
+#   is found to allow cycles, we pre-emptively disallow them.
+
 [workspace.dependencies]
 
 # local dependencies
