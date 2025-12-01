@@ -30,8 +30,8 @@ data_privacy_macros = { path = "crates/data_privacy_macros", default-features = 
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.1.0" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.1.0" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
+ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false, version = "0.0.0" }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.3.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.3.0" }

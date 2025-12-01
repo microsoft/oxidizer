@@ -18,10 +18,10 @@ fn preserves_pub_visibility() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         pub fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -45,10 +45,10 @@ fn preserves_pub_crate_visibility() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         pub(crate) fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -72,10 +72,10 @@ fn preserves_pub_super_visibility() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         pub(super) fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -99,10 +99,10 @@ fn preserves_const_modifier() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         const fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -126,10 +126,10 @@ fn preserves_unsafe_modifier() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         unsafe fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -153,10 +153,10 @@ fn preserves_generic_type_parameter() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T>(value: T) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -180,10 +180,10 @@ fn preserves_generic_with_trait_bound() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T: Display>(value: T) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -207,10 +207,10 @@ fn preserves_multiple_generics_with_bounds() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<T: Display, U: Clone>(value: T, other: U) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -240,10 +240,10 @@ fn preserves_where_clause() {
             T: Display + Clone,
         {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -275,10 +275,10 @@ fn preserves_complex_where_clause() {
             U: Into<String> + 'static,
         {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -302,10 +302,10 @@ fn preserves_lifetime_parameters() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<'a>(value: &'a str) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -329,10 +329,10 @@ fn preserves_multiple_lifetime_parameters() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<'a, 'b>(first: &'a str, second: &'b str) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -356,10 +356,10 @@ fn preserves_lifetimes_and_generics_combined() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function<'a, T: Display>(value: &'a T) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -383,10 +383,10 @@ fn preserves_extern_abi() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         extern "C" fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -414,10 +414,10 @@ fn preserves_attributes() {
         #[allow(clippy::unused)]
         fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -445,10 +445,10 @@ fn preserves_doc_comments() {
         /// It does some work.
         fn test_function() -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -472,10 +472,10 @@ fn preserves_impl_trait_params() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function(value: impl Display) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -499,10 +499,10 @@ fn preserves_impl_trait_with_bounds() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function(value: impl Display + Clone + Send) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -526,10 +526,10 @@ fn preserves_dyn_trait_params() {
     let expected: proc_macro2::TokenStream = syn::parse_quote! {
         fn test_function(value: &dyn Display) -> Result<(), OhnoErrorType> {
             (|| { Ok(()) })().map_err(|mut e| {
-                let trace_msg = format!("error in function {}", stringify!(test_function));
+                let msg = "error in function test_function";
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
@@ -593,10 +593,10 @@ fn preserves_all_features_combined() {
                 callback();
                 Ok(())
             })().await.map_err(|mut e| {
-                let trace_msg = format!("operation failed: {}", operation_name);
+                let msg = format!("operation failed: {}", operation_name);
                 ohno::Enrichable::add_enrichment(
                     &mut e,
-                    ohno::TraceInfo::new(trace_msg, file!(), line!())
+                    ohno::EnrichmentEntry::new(msg, file!(), line!())
                 );
                 e
             })
