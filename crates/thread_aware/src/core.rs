@@ -142,6 +142,7 @@ pub trait ThreadAware {
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self;
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use crate::create_manual_memory_affinities;
