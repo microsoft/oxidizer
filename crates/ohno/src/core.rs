@@ -18,7 +18,7 @@ pub struct Inner {
     pub(super) enrichment: Vec<EnrichmentEntry>,
 }
 
-/// Core error type that wraps source errors, captures backtraces, and holds enrichment.
+/// Core error type that wraps source errors, captures backtraces, and holds enrichment entries.
 ///
 /// `OhnoCore` is the foundation of the ohno error handling system. It can wrap any error
 /// type while providing automatic backtrace capture and enrichment message stacking capabilities.
