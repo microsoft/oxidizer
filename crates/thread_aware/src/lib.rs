@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! A library for creating isolated affinities in Rust, allowing for safe and efficient data transfer between them.
 //!
 //! This is useful in scenarios where you want to isolate data to different affinities, such as NUMA nodes, threads, or specific CPU cores.
@@ -26,7 +28,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use thread_aware::{MemoryAffinity, ThreadAware, Unaware, create_manual_affinities};
+//! use thread_aware::{PinnedAffinity, MemoryAffinity, ThreadAware, Unaware, create_manual_pinned_affinities};
 //!
 //! // Define a type that implements ThreadAware
 //! #[derive(Debug, Clone)]
@@ -35,7 +37,7 @@
 //! }
 //!
 //! impl ThreadAware for MyData {
-//!     fn relocated(mut self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+//!     fn relocated(mut self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
 //!         self.value = self.value.relocated(source, destination);
 //!         self
 //!     }
@@ -43,19 +45,19 @@
 //!
 //! fn do_transfer() {
 //!     // Create two affinities
-//!     let affinities = create_manual_affinities(&[2]);
+//!     let affinities = create_manual_pinned_affinities(&[2]);
 //!
 //!     // Create an instance of MyData
 //!     let data = MyData { value: 42 };
 //!
 //!     // Transfer data from one affinity to another
-//!     let transferred_data = data.relocated(affinities[0], affinities[1]);
+//!     let transferred_data = data.relocated(affinities[0].into(), affinities[1]);
 //!
 //!     // Use Inert to create a type that does not transfer data
 //!     struct MyInertData(i32);
 //!
 //!     let inert_data = Unaware(MyInertData(100));
-//!     let transferred_inert_data = inert_data.relocated(affinities[0], affinities[1]);
+//!     let transferred_inert_data = inert_data.relocated(affinities[0].into(), affinities[1]);
 //! }
 //! ```
 //!
@@ -65,7 +67,7 @@
 //! derive [`ThreadAware`] instead of writing the implementation manually.
 //!
 //! ```rust
-//! use thread_aware::{ThreadAware, create_manual_affinities};
+//! use thread_aware::{ThreadAware, create_manual_pinned_affinities};
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
 //! struct Point {
@@ -74,12 +76,12 @@
 //! }
 //!
 //! fn derived_example() {
-//!     let affinities = create_manual_affinities(&[2]);
+//!     let affinities = create_manual_pinned_affinities(&[2]);
 //!     let p = Point { x: 5, y: 9 };
 //!     // Transfer the value between two affinities. In this simple case the
 //!     // data just gets copied, but for complex types the generated impl
 //!     // calls `transfer` on each field.
-//!     let _p2 = p.relocated(affinities[0], affinities[1]);
+//!     let _p2 = p.relocated(affinities[0].into(), affinities[1]);
 //! }
 //! ```
 //!
@@ -89,6 +91,7 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
 
+mod affinity;
 mod cell;
 mod closure;
 pub mod core;
@@ -101,7 +104,9 @@ mod validator;
 #[cfg(feature = "threads")]
 mod registry;
 
-pub use core::{MemoryAffinity, ThreadAware, create_manual_affinities};
+pub use core::{ThreadAware, create_manual_memory_affinities, create_manual_pinned_affinities};
+
+pub use affinity::{MemoryAffinity, PinnedAffinity};
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
@@ -128,7 +133,7 @@ pub use core::{MemoryAffinity, ThreadAware, create_manual_affinities};
 ///
 /// # Example
 /// ```rust
-/// use thread_aware::{MemoryAffinity, ThreadAware};
+/// use thread_aware::{PinnedAffinity, MemoryAffinity, ThreadAware};
 ///
 /// #[derive(ThreadAware)]
 /// struct Payload {
@@ -145,9 +150,9 @@ pub use core::{MemoryAffinity, ThreadAware, create_manual_affinities};
 ///     raw_len: usize,
 /// }
 ///
-/// fn demo(mut a1: MemoryAffinity, mut a2: MemoryAffinity, w: Wrapper) -> Wrapper {
+/// fn demo(mut a1: MemoryAffinity, mut a2: PinnedAffinity, w: Wrapper) -> Wrapper {
 ///     // Move the wrapper from a1 to a2.
-///     let moved = w.relocated(a1.clone(), a2.clone());
+///     let moved = w.relocated(a1.clone(), a2.clone().into());
 ///     moved
 /// }
 /// ```

@@ -30,7 +30,7 @@ fn struct_basic() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let Self { a, b } = self;
             Self {
@@ -60,7 +60,7 @@ fn struct_attr_skip() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let Self { id, data } = self;
             Self {
@@ -91,7 +91,7 @@ fn tuple_struct_and_enum() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             match self {
                 Self::A(_v0) => {
@@ -131,7 +131,7 @@ fn generics_add_bounds() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let Gen(_f0, _f1) = self;
             Gen(::thread_aware::ThreadAware::relocated(_f0, source, destination), _f1)
@@ -156,7 +156,7 @@ fn generics_prebound_no_dup() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let PreBound(_f0) = self;
             PreBound(::thread_aware::ThreadAware::relocated(_f0, source, destination))
@@ -181,7 +181,7 @@ fn generics_prebound_fq_no_dup() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let PreBoundFq(_f0) = self;
             PreBoundFq(::thread_aware::ThreadAware::relocated(_f0, source, destination))
@@ -205,7 +205,7 @@ fn generics_ref_usage_adds_bound() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let RefUse(_f0) = self;
             RefUse(::thread_aware::ThreadAware::relocated(_f0, source, destination))
@@ -229,7 +229,7 @@ fn generics_tuple_usage_adds_bound() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let TupUse(_f0) = self;
             TupUse(::thread_aware::ThreadAware::relocated(_f0, source, destination))
@@ -253,7 +253,7 @@ fn generics_array_usage_adds_bound() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let ArrUse(_f0) = self;
             ArrUse(::thread_aware::ThreadAware::relocated(_f0, source, destination))
@@ -294,7 +294,7 @@ fn phantom_data_named_fields() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let Self { data, marker } = self;
             Self {
@@ -322,7 +322,7 @@ fn phantom_data_unnamed_fields() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let TupleWithPhantom(_f0, _f1) = self;
             TupleWithPhantom(
@@ -390,7 +390,7 @@ fn generics_group_usage_adds_bound() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let GroupUse(_f0) = self;
             GroupUse(::thread_aware::ThreadAware::relocated(_f0, source, destination))
@@ -418,7 +418,7 @@ fn enum_unnamed_phantom_data() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             match self {
                 Self::Variant(_v0, _v1) => {
@@ -464,7 +464,7 @@ fn enum_named_phantom_data() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             match self {
                 Self::Variant { data, marker } => {
@@ -509,7 +509,7 @@ fn struct_unit() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             self
         }
@@ -536,7 +536,7 @@ fn generics_paren_adds_bound() {
         fn relocated(
             self,
             source: ::thread_aware::MemoryAffinity,
-            destination: ::thread_aware::MemoryAffinity,
+            destination: ::thread_aware::PinnedAffinity,
         ) -> Self {
             let Self { field } = self;
             Self {

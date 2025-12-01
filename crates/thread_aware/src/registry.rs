@@ -8,7 +8,7 @@ use std::thread::ThreadId;
 
 use many_cpus::{Processor, ProcessorSet};
 
-use crate::MemoryAffinity;
+use crate::{MemoryAffinity, PinnedAffinity};
 
 /// The number of processors to use for the registry.
 ///
@@ -43,7 +43,7 @@ impl NumaNode {
 /// A registry for managing pinning threads to specific processors.
 #[derive(Debug)]
 pub struct ThreadRegistry {
-    threads: Mutex<HashMap<ThreadId, MemoryAffinity>>,
+    threads: Mutex<HashMap<ThreadId, PinnedAffinity>>,
     processors: Vec<Processor>,
     numa_nodes: Vec<NumaNode>,
 }
@@ -101,11 +101,11 @@ impl ThreadRegistry {
 
     /// Get an iterator over all available memory affinities.
     #[expect(clippy::cast_possible_truncation, reason = "Checked in new()")]
-    pub fn affinities(&self) -> impl Iterator<Item = MemoryAffinity> {
+    pub fn affinities(&self) -> impl Iterator<Item = PinnedAffinity> {
         self.processors.iter().enumerate().map(|(core_index, processor)| {
             let dense_numa_index = self.numa_nodes[processor.memory_region_id() as usize];
 
-            MemoryAffinity::new(
+            PinnedAffinity::new(
                 core_index as _,
                 dense_numa_index.0 as _,
                 self.processors.len() as _,
@@ -126,12 +126,13 @@ impl ThreadRegistry {
     ///
     /// This will panic if the internal lock is poisoned.
     #[must_use]
-    pub fn current_affinity(&self) -> Option<MemoryAffinity> {
+    pub fn current_affinity(&self) -> MemoryAffinity {
         self.threads
             .lock()
             .expect("Failed to acquire lock")
             .get(&std::thread::current().id())
             .copied()
+            .map_or(MemoryAffinity::Unknown, MemoryAffinity::Pinned)
     }
 
     /// Pins the current thread to the specified memory affinity.
@@ -139,7 +140,7 @@ impl ThreadRegistry {
     /// # Panics
     ///
     /// This will panic if the internal lock is poisoned.
-    pub fn pin_to(&self, affinity: MemoryAffinity) {
+    pub fn pin_to(&self, affinity: PinnedAffinity) {
         let core_index = affinity.processor_index();
         let processor = &self.processors[core_index];
 

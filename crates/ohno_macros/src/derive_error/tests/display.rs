@@ -55,8 +55,8 @@ fn test_display_attribute_expansion() {
             }
         }
         impl ohno::Enrichable for FileError {
-            fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
-                self.inner.add_enrichment(trace);
+            fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+                self.inner.add_enrichment(entry);
             }
         }
         impl ::core::fmt::Debug for FileError {
@@ -132,8 +132,8 @@ fn test_display_with_format_specifiers_and_lifetime() {
             }
         }
         impl<'a> ohno::Enrichable for FilesError<'a> {
-            fn add_enrichment(&mut self, trace: ohno::TraceInfo) {
-                self.inner.add_enrichment(trace);
+            fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+                self.inner.add_enrichment(entry);
             }
         }
         impl<'a> ::core::fmt::Debug for FilesError<'a> {

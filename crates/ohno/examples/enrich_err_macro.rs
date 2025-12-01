@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating the `#[enrich_err]` macro for automatic error trace injection.
+//! Example demonstrating the `#[enrich_err]` macro for automatic error enrichment.
 
 #![expect(clippy::unwrap_used, reason = "Example code")]
 

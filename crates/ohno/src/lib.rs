@@ -5,16 +5,16 @@
 
 //! High-quality error handling for Rust.
 //!
-//! Ohno combines error wrapping, enrichment trace stacking, backtrace capture, and procedural macros
+//! Ohno combines error wrapping, enrichment messages stacking, backtrace capture, and procedural macros
 //! into one ergonomic crate for comprehensive error handling.
 //!
 //! # Key Features
 //!
 //! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
 //! - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
-//! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error trace injection with file and line information.
+//! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
-//! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment traces
+//! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
 //!
 //! # Quick Start
 //!
@@ -158,10 +158,10 @@
 //!
 //! # Error Enrichment
 //!
-//! The [`#[enrich_err("message")]`](enrich_err) attribute macro adds error traces with file and line info to function errors.
+//! The [`#[enrich_err("message")]`](enrich_err) attribute macro adds error enrichment with file and line info to function errors.
 //!
 //! Functions annotated with [`#[enrich_err("message")]`](enrich_err) automatically wrap any returned `Result`. If
-//! the function returns an error, the macro injects a trace with the provided message, including file and line information, into the error chain.
+//! the function returns an error, the macro injects a message, including file and line information, into the error chain.
 //!
 //! **Requirements:**
 //! - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
@@ -229,9 +229,9 @@ extern crate self as ohno;
 mod backtrace;
 mod core;
 mod enrichable;
+mod enrichment_entry;
 mod error_ext;
 mod source;
-mod trace_info;
 
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
@@ -239,6 +239,6 @@ pub mod test_util;
 pub use core::OhnoCore;
 
 pub use enrichable::{Enrichable, EnrichableExt};
+pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
 pub use ohno_macros::{Error, enrich_err, error};
-pub use trace_info::{Location, TraceInfo};

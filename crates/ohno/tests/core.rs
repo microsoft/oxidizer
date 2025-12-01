@@ -56,24 +56,24 @@ impl std::error::Error for TestError {
 #[test]
 fn test_detailed_enrich() {
     let error = OhnoCore::from("base error")
-        .enrich("first trace")
-        .enrich("second trace")
-        .enrich("third trace");
+        .enrich("first message")
+        .enrich("second message")
+        .enrich("third message");
 
     let display = error.to_string();
     assert!(display.contains("base error"));
-    assert!(display.contains("first trace"));
-    assert!(display.contains("second trace"));
-    assert!(display.contains("third trace"));
+    assert!(display.contains("first message"));
+    assert!(display.contains("second message"));
+    assert!(display.contains("third message"));
 
     // Test enrichment iteration
-    let traces: Vec<_> = error.traces().collect();
-    assert_eq!(traces.len(), 3);
+    let enrichments: Vec<_> = error.enrichments().collect();
+    assert_eq!(enrichments.len(), 3);
 
     // Most recent first
-    assert_eq!(traces[0].message, "third trace");
-    assert_eq!(traces[1].message, "second trace");
-    assert_eq!(traces[2].message, "first trace");
+    assert_eq!(enrichments[0].message, "third message");
+    assert_eq!(enrichments[1].message, "second message");
+    assert_eq!(enrichments[2].message, "first message");
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn test_with_enrich() {
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
-    assert_eq!(error.traces().count(), 1);
+    assert_eq!(error.enrichments().count(), 1);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn test_backtrace_capture() {
 fn test_trace_messages_iterator() {
     let error = OhnoCore::from("base").enrich("first").enrich("second");
 
-    let messages: Vec<_> = error.trace_messages().collect();
+    let messages: Vec<_> = error.enrichment_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);
 }
 
@@ -138,20 +138,24 @@ fn error_source_is_accessible() {
 
 #[test]
 fn clone_ohno_core() {
-    let original = OhnoCore::from("original error").enrich("first trace").enrich("second trace");
+    let original = OhnoCore::from("original error").enrich("first message").enrich("second message");
     let mut cloned = original.clone();
     assert_eq!(original.to_string(), cloned.to_string());
 
-    cloned = cloned.enrich("additional trace");
+    cloned = cloned.enrich("additional message");
     assert_ne!(original.to_string(), cloned.to_string());
 }
 
 #[test]
 fn clone_with_inner_error() {
     let inner = TestError::new("inner error");
-    let original = OhnoCore::from(inner).enrich("trace message");
+    let original = OhnoCore::from(inner).enrich("enrichment message");
     let cloned = original.clone();
 
     let _ = original.source().unwrap().downcast_ref::<TestError>().unwrap();
     let _ = cloned.source().unwrap().downcast_ref::<TestError>().unwrap();
+
+    let original_msg = original.to_string();
+    let cloned_msg = cloned.to_string();
+    assert_eq!(original_msg, cloned_msg);
 }

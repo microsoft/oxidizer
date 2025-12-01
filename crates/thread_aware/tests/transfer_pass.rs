@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 // compile-pass tests for #[derive(ThreadAware)]
-use thread_aware::create_manual_affinities;
+use thread_aware::create_manual_pinned_affinities;
 use thread_aware_macros::ThreadAware;
 
 #[derive(ThreadAware)]
@@ -29,8 +29,8 @@ enum E {
 
 #[test]
 fn derive_compiles_and_runs() {
-    let affinities = create_manual_affinities(&[2]);
-    let d0 = affinities[0];
+    let affinities = create_manual_pinned_affinities(&[2]);
+    let d0 = affinities[0].into();
     let d1 = affinities[1];
 
     let s = Simple {
