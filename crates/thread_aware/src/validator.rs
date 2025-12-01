@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{MemoryAffinity, ThreadAware, ThreadRegistry};
+use crate::{MemoryAffinity, PinnedAffinity, ThreadAware, ThreadRegistry};
 
 /// A validator that checks if the current thread is running on its home memory affinity.
 ///
@@ -17,8 +17,11 @@ pub struct ThreadAwareValidator {
 
 impl ThreadAwareValidator {
     /// Creates a new validator for the given home memory affinity and thread registry.
-    pub fn with_affinity(home: MemoryAffinity, registry: Arc<ThreadRegistry>) -> Self {
-        Self { home, registry }
+    pub fn with_affinity(home: impl Into<MemoryAffinity>, registry: Arc<ThreadRegistry>) -> Self {
+        Self {
+            home: home.into(),
+            registry,
+        }
     }
 
     /// Checks if the current thread is running on its home memory affinity.
@@ -31,13 +34,13 @@ impl ThreadAwareValidator {
     pub fn is_valid(&self) -> bool {
         let current_affinity = self.registry.current_affinity();
 
-        current_affinity == Some(self.home)
+        current_affinity == self.home
     }
 }
 
 impl ThreadAware for ThreadAwareValidator {
-    fn relocated(mut self, _source: MemoryAffinity, destination: MemoryAffinity) -> Self {
-        self.home = destination;
+    fn relocated(mut self, _source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        self.home = destination.into();
         self
     }
 }
@@ -117,7 +120,7 @@ mod tests {
         assert!(!validator.is_valid()); // not pinned yet
 
         let registry_ref = Arc::clone(&validator.registry);
-        let relocated = validator.relocated(affinity_a, affinity_b);
+        let relocated = validator.relocated(affinity_a.into(), affinity_b);
         registry_ref.pin_to(affinity_b);
         assert!(
             relocated.is_valid(),

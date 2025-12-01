@@ -15,7 +15,7 @@ pub use per_numa::PerNuma;
 pub use storage::{PerAppStorage, PerCoreStorage, PerCoreStrategy, PerNumaStorage, PerNumaStrategy, PerProcessStrategy, Storage, Strategy};
 
 use crate::closure::ErasedClosureOnce;
-use crate::{MemoryAffinity, RelocateFnOnce, ThreadAware};
+use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware};
 
 /// Transferable reference counted type.
 ///
@@ -27,11 +27,11 @@ use crate::{MemoryAffinity, RelocateFnOnce, ThreadAware};
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{MemoryAffinity, ThreadAware, PerCore, relocate_once, create_manual_affinities};
+/// # use thread_aware::{PinnedAffinity, MemoryAffinity, ThreadAware, PerCore, relocate_once, create_manual_pinned_affinities};
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # use std::sync::Arc;
-/// # let affinities = create_manual_affinities(&[2]);
-/// # let affinity1 = affinities[0];
+/// # let affinities = create_manual_pinned_affinities(&[2]);
+/// # let affinity1 = affinities[0].into();
 /// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
 /// # struct Counter {
@@ -55,7 +55,7 @@ use crate::{MemoryAffinity, RelocateFnOnce, ThreadAware};
 /// # }
 /// #
 /// # impl ThreadAware for Counter {
-/// #     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+/// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
 /// #         Self {
 /// #             // Initialize a new value in the destination affinity independent
 /// #             // of the source affinity.
@@ -121,7 +121,7 @@ impl<T, S: Strategy> Clone for Trc<T, S> {
     }
 }
 
-type DataFn<T> = fn(&T, MemoryAffinity, MemoryAffinity) -> T;
+type DataFn<T> = fn(&T, MemoryAffinity, PinnedAffinity) -> T;
 
 #[derive(Debug)]
 enum Factory<T> {
@@ -166,7 +166,7 @@ where
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_affinities};
+    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
     /// # let affinities = create_manual_affinities(&[2]);
@@ -194,7 +194,7 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
@@ -238,10 +238,10 @@ where
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_affinities};
+    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
-    /// # let affinities = create_manual_affinities(&[2]);
+    /// # let affinities = create_manual_memory_affinities(&[2]);
     /// # let affinity1 = affinities[0];
     /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
@@ -266,7 +266,7 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
@@ -327,10 +327,10 @@ where
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_affinities};
+    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync::Arc;
-    /// # let affinities = create_manual_affinities(&[2]);
+    /// # let affinities = create_manual_memory_affinities(&[2]);
     /// # let affinity1 = affinities[0];
     /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
@@ -355,7 +355,7 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
+    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
@@ -397,7 +397,7 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: Arc<RwLock<Storage<Arc<T>, S>>>, current_affinity: MemoryAffinity) -> Self {
+    pub fn from_storage(storage: Arc<RwLock<Storage<Arc<T>, S>>>, current_affinity: PinnedAffinity) -> Self {
         let value = storage
             .read()
             .expect("Failed to acquire read lock")
@@ -421,10 +421,10 @@ impl<T, S: Strategy> Trc<T, S> {
 }
 
 impl<T, S: Strategy> ThreadAware for Trc<T, S> {
-    fn relocated(self, source: MemoryAffinity, destination: MemoryAffinity) -> Self {
-        let value = self.storage.read().expect("Failed to acquire read lock").get_clone(destination);
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
-        let (value, new_factory) = if let Some(value) = value {
+        let (value, new_factory) = if let Some(value) = guard.get_clone(destination) {
             (value, self.factory)
         } else {
             // We need to transfer or recreate the data
@@ -456,21 +456,20 @@ impl<T, S: Strategy> ThreadAware for Trc<T, S> {
 
             let value = data;
 
-            let old_data = self
-                .storage
-                .write()
-                .expect("Failed to acquire write lock")
-                .replace(destination, Arc::<T>::clone(&value));
-
-            assert!(old_data.is_none(), "Data already exists for the destination affinity");
+            let old_data = guard.replace(destination, Arc::<T>::clone(&value));
+            assert!(
+                old_data.is_none(),
+                "Data already exists for the destination affinity. This should be unreachable due to the the early write lock."
+            );
 
             (value, factory)
         };
 
-        self.storage
-            .write()
-            .expect("Failed to acquire write lock")
-            .replace(source, self.value);
+        if let MemoryAffinity::Pinned(source) = source {
+            guard.replace(source, self.value);
+        }
+
+        drop(guard);
 
         Self {
             storage: self.storage,
@@ -576,10 +575,10 @@ mod tests {
 
     #[test]
     fn test_trc_relocated_with_factory_data() {
-        use crate::{ThreadAware, create_manual_affinities};
+        use crate::{ThreadAware, create_manual_pinned_affinities};
 
-        let affinities = create_manual_affinities(&[2]);
-        let affinity1 = affinities[0];
+        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinity1 = affinities[0].into();
         let affinity2 = affinities[1];
 
         // Create a Trc with a value that implements ThreadAware + Clone
@@ -595,10 +594,10 @@ mod tests {
 
     #[test]
     fn test_trc_relocated_reuses_existing_value() {
-        use crate::{ThreadAware, create_manual_affinities};
+        use crate::{ThreadAware, create_manual_pinned_affinities};
 
-        let affinities = create_manual_affinities(&[2]);
-        let affinity1 = affinities[0];
+        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinity1 = affinities[0].into();
         let affinity2 = affinities[1];
 
         // Create a Trc and clone it before relocating
@@ -622,10 +621,10 @@ mod tests {
 
     #[test]
     fn test_from_storage() {
-        use crate::create_manual_affinities;
+        use crate::create_manual_pinned_affinities;
         use std::sync::{Arc, RwLock};
 
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let affinity1 = affinities[0];
 
         // Create a storage and populate it with a value for affinity1
@@ -651,10 +650,10 @@ mod tests {
         // This test covers line 142: Self::Data(data_fn) => Self::Data(*data_fn)
         // We create a Trc with Factory::Data, clone it, and verify the factory is properly cloned
 
-        use crate::{ThreadAware, create_manual_affinities};
+        use crate::{ThreadAware, create_manual_pinned_affinities};
 
-        let affinities = create_manual_affinities(&[2]);
-        let affinity1 = affinities[0];
+        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinity1 = affinities[0].into();
         let affinity2 = affinities[1];
 
         // Create a Trc with a value that uses Factory::Data (ThreadAware + Clone)
@@ -680,10 +679,10 @@ mod tests {
         // This test covers line 141: Self::Closure(closure, closure_source) => Self::Closure(Arc::clone(closure), *closure_source)
         // We create a Trc with Factory::Closure via with_closure, clone it, and verify the factory is properly cloned
 
-        use crate::{ThreadAware, create_manual_affinities};
+        use crate::{ThreadAware, create_manual_pinned_affinities};
 
-        let affinities = create_manual_affinities(&[2]);
-        let affinity1 = affinities[0];
+        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinity1 = affinities[0].into();
         let affinity2 = affinities[1];
 
         // Create a Trc with a closure that uses Factory::Closure
@@ -712,10 +711,10 @@ mod tests {
         // This test covers line 143: Self::Manual => Self::Manual
         // We create a Trc from storage (Factory::Manual), clone it, and verify the factory is properly cloned
 
-        use crate::create_manual_affinities;
+        use crate::create_manual_pinned_affinities;
         use std::sync::{Arc, RwLock};
 
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let affinity1 = affinities[0];
 
         // Create a storage and populate it with a value for affinity1
@@ -745,10 +744,10 @@ mod tests {
         // When a Trc is created from storage (Factory::Manual) and relocated to a new affinity,
         // it should behave like Arc<T> and just clone the value without creating new data
 
-        use crate::{ThreadAware, create_manual_affinities};
+        use crate::{ThreadAware, create_manual_pinned_affinities};
         use std::sync::{Arc, RwLock};
 
-        let affinities = create_manual_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let affinity1 = affinities[0];
         let affinity2 = affinities[1];
 
@@ -766,7 +765,7 @@ mod tests {
         // Relocate to affinity2 where no data exists
         // This should trigger line 453 (Factory::Manual branch)
         // and behave like Arc<T> by just cloning the reference
-        let trc_relocated = trc.relocated(affinity1, affinity2);
+        let trc_relocated = trc.relocated(affinity1.into(), affinity2);
 
         // The value should still be 100
         assert_eq!(**trc_relocated, 100);
@@ -774,5 +773,20 @@ mod tests {
         // The relocated Trc should point to the same Arc as the original
         // because Factory::Manual just clones the Arc
         assert!(Arc::ptr_eq(&*trc_relocated, &value));
+    }
+
+    #[test]
+    fn test_relocated_unknown_source() {
+        use crate::{MemoryAffinity, ThreadAware, create_manual_pinned_affinities};
+
+        let affinities = create_manual_pinned_affinities(&[2]);
+
+        let source = MemoryAffinity::Unknown;
+        let destination = affinities[1];
+
+        let trc = Trc::new(42);
+
+        let relocated_trc = trc.relocated(source, destination);
+        assert_eq!(**relocated_trc, 42);
     }
 }
