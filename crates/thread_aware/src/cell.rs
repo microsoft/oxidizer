@@ -9,7 +9,7 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::{self, RwLock};
 
-pub use storage::{PerAppStorage, PerCoreStorage, PerCore, PerNumaStorage, PerNuma, PerProcess, Storage, Strategy};
+pub use storage::{PerAppStorage, PerCore, PerCoreStorage, PerNuma, PerNumaStorage, PerProcess, Storage, Strategy};
 
 use crate::cell::factory::Factory;
 use crate::closure::ErasedClosureOnce;
@@ -126,7 +126,11 @@ impl<T, S: Strategy> Deref for Arc<T, S> {
     }
 }
 
-impl<T, S> Arc<T, S> where T: Send + 'static, S: Strategy {
+impl<T, S> Arc<T, S>
+where
+    T: Send + 'static,
+    S: Strategy,
+{
     /// Creates a new `Arc` with the given value and strategy.
     ///
     /// This variant takes a zero-argument constructor function (`fn() -> T`).
@@ -217,7 +221,7 @@ impl<T, S> Arc<T, S> where T: Send + 'static, S: Strategy {
         }
 
         // Use Self::with_closure to ensure Factory::Closure path.
-        Self::with_closure(Ctor { f: ctor }).into()
+        Self::with_closure(Ctor { f: ctor })
     }
 }
 
