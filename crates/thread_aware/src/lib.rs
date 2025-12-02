@@ -159,8 +159,8 @@ pub use affinity::{MemoryAffinity, PinnedAffinity};
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
 pub use cell::{
-    PerAppStorage, PerCore, PerCoreStorage, PerCoreStrategy, PerNuma, PerNumaStorage, PerNumaStrategy, PerProcessStrategy, Storage,
-    Strategy,
+    PerAppStorage, PerCore, PerCoreStorage, PerNuma, PerNumaStorage, PerProcess, Storage,
+    Strategy, Arc,
 };
 pub use closure::{Closure, ClosureMut, ClosureOnce, RelocateFn, RelocateFnMut, RelocateFnOnce, relocate, relocate_mut, relocate_once};
 #[cfg(feature = "threads")]
