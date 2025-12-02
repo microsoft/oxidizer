@@ -23,7 +23,7 @@ pub trait Redactor {
     fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> std::fmt::Result;
 }
 
-pub struct Redactors {
+pub(crate) struct Redactors {
     redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
     fallback: Box<dyn Redactor + Send + Sync>,
 }
@@ -139,5 +139,14 @@ mod tests {
         _ = redactor.redact(&TestTaxonomy::Sensitive.data_class(), "test_value", &mut output_buffer);
 
         assert_eq!(output_buffer, "test_valuetomato");
+    }
+
+
+    #[test]
+    fn test_fallback_isnt_redactor() {
+        let fallback_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
+        let mut redactors = Redactors::default();
+        redactors.set_fallback(fallback_redactor);
+        assert_eq!(redactors.len(), 0);
     }
 }

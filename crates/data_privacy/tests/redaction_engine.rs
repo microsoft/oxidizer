@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-use data_privacy::{DataClass, IntoDataClass, RedactedDisplay, RedactionEngine, Redactors};
+use data_privacy::{DataClass, IntoDataClass, RedactedDisplay, RedactionEngine};
 use data_privacy_macros::{classified, taxonomy};
 
 #[taxonomy(test)]
@@ -69,25 +69,14 @@ fn collect_output_as_class(engine: &RedactionEngine, data_class: impl IntoDataCl
 }
 
 #[test]
-fn test_fallback_isnt_redactor() {
-    let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
-
-    let mut redactors = Redactors::default();
-    redactors.set_fallback(fallback_redactor);
-
-    assert_eq!(redactors.len(), 0);
-}
-
-#[test]
 fn test_redact_uses_specific_redactor_for_registered_class() {
     let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let sensitive_data = Sensitive::new("secret".to_string());
     let result = collect_output(&engine, &sensitive_data);
