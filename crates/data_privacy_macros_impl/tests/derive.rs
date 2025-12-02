@@ -40,6 +40,7 @@ fn redacted_debug_multiple_named() {
     let input = quote! {
         struct EmailAddress {
             x: String,
+            #[unredacted]
             y: String
         }
     };
@@ -95,6 +96,7 @@ fn redacted_display_multiple_named() {
     let input = quote! {
         struct EmailAddress {
             x: String,
+            #[unredacted]
             y: String
         }
     };

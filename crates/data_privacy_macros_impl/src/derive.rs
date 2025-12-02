@@ -5,6 +5,11 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Result, parse2};
 
+/// Check if a field has the `#[unredacted]` attribute
+fn is_unredacted(field: &syn::Field) -> bool {
+    field.attrs.iter().any(|attr| attr.path().is_ident("unredacted"))
+}
+
 pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
@@ -21,15 +26,29 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                 let field_name = &field.ident;
                 let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                if i == 0 {
-                    quote! {
-                        ::std::write!(f, " {}: ", #field_name_str)?;
-                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                let unredacted = is_unredacted(field);
+
+                if unredacted {
+                    if i == 0 {
+                        quote! {
+                            ::std::write!(f, " {}: {:?}", #field_name_str, &self.#field_name)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", {}: {:?}", #field_name_str, &self.#field_name)?;
+                        }
                     }
                 } else {
-                    quote! {
-                        ::std::write!(f, ", {}: ", #field_name_str)?;
-                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                    if i == 0 {
+                        quote! {
+                            ::std::write!(f, " {}: ", #field_name_str)?;
+                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", {}: ", #field_name_str)?;
+                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                        }
                     }
                 }
             });
@@ -39,14 +58,28 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                if i == 0 {
-                    quote! {
-                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                let unredacted = is_unredacted(field);
+
+                if unredacted {
+                    if i == 0 {
+                        quote! {
+                            ::std::write!(f, "{:?}", &self.#index)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", {:?}", &self.#index)?;
+                        }
                     }
                 } else {
-                    quote! {
-                        ::std::write!(f, ", ")?;
-                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                    if i == 0 {
+                        quote! {
+                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", ")?;
+                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                        }
                     }
                 }
             });
@@ -96,15 +129,29 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                 let field_name = &field.ident;
                 let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                if i == 0 {
-                    quote! {
-                        ::std::write!(f, " {}: ", #field_name_str)?;
-                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                let unredacted = is_unredacted(field);
+
+                if unredacted {
+                    if i == 0 {
+                        quote! {
+                            ::std::write!(f, " {}: {}", #field_name_str, &self.#field_name)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", {}: {}", #field_name_str, &self.#field_name)?;
+                        }
                     }
                 } else {
-                    quote! {
-                        ::std::write!(f, ", {}: ", #field_name_str)?;
-                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                    if i == 0 {
+                        quote! {
+                            ::std::write!(f, " {}: ", #field_name_str)?;
+                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", {}: ", #field_name_str)?;
+                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                        }
                     }
                 }
             });
@@ -114,14 +161,28 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                if i == 0 {
-                    quote! {
-                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                let unredacted = is_unredacted(field);
+
+                if unredacted {
+                    if i == 0 {
+                        quote! {
+                            ::std::write!(f, "{}", &self.#index)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", {}", &self.#index)?;
+                        }
                     }
                 } else {
-                    quote! {
-                        ::std::write!(f, ", ")?;
-                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                    if i == 0 {
+                        quote! {
+                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                        }
+                    } else {
+                        quote! {
+                            ::std::write!(f, ", ")?;
+                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                        }
                     }
                 }
             });

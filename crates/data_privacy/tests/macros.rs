@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use data_privacy_macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
+use data_privacy_macros::{classified, taxonomy, RedactedDebug, RedactedDisplay};
 
 #[taxonomy(example)]
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -16,6 +16,7 @@ struct EMailAddress(String);
 
 #[derive(Clone, Eq, PartialEq, Hash, RedactedDisplay, RedactedDebug)]
 struct Contact {
+    #[unredacted]
     name: String,
     email: EMailAddress,
 }

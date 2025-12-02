@@ -1,6 +1,6 @@
 ---
 source: crates/data_privacy_macros_impl/tests/derive.rs
-assertion_line: 84
+assertion_line: 104
 expression: pretty
 ---
 impl ::data_privacy::RedactedDisplay for EmailAddress {
@@ -12,8 +12,7 @@ impl ::data_privacy::RedactedDisplay for EmailAddress {
         ::std::write!(f, "EmailAddress {{")?;
         ::std::write!(f, " {}: ", "x")?;
         <String as ::data_privacy::RedactedDisplay>::fmt(&self.x, engine, f)?;
-        ::std::write!(f, ", {}: ", "y")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.y, engine, f)?;
+        ::std::write!(f, ", {}: {}", "y", & self.y)?;
         ::std::write!(f, " }}")?;
         ::std::result::Result::Ok(())
     }
