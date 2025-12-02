@@ -4,14 +4,15 @@
 use crate::RedactionEngine;
 use core::fmt::{Formatter, Result};
 
+/// Formats the redacted value using the given formatter.
+///
+/// This trait behaves similarly to the standard library's [`std::fmt::Debug`] trait, but it produces a redacted
+/// representation of the value based on the provided [`RedactionEngine`].
+///
+/// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDebug`] as well.
+/// Generally speaking, you should just derive an implementation of this trait.
 pub trait RedactedDebug {
-    /// Formats the redacted value using the given formatter.
-    ///
-    /// This trait behaves similarly to the standard library's [`std::fmt::Debug`] trait, but it produces a redacted
-    /// representation of the value based on the provided [`RedactionEngine`].
-    ///
-    /// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDebug`] as well.
-    /// Generally speaking, you should just derive an implementation of this trait.
+    /// Performs the formatting.
     ///
     /// # Errors
     ///
@@ -21,14 +22,15 @@ pub trait RedactedDebug {
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> Result;
 }
 
+/// Formats the redacted value using the given formatter.
+///
+/// This trait behaves similarly to the standard library's [`std::fmt::Display`] trait, but it produces a redacted
+/// representation of the value based on the provided [`RedactionEngine`].
+///
+/// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDisplay`] as well.
+/// Generally speaking, you should just derive an implementation of this trait.
 pub trait RedactedDisplay {
-    /// Formats the redacted value using the given formatter.
-    ///
-    /// This trait behaves similarly to the standard library's [`std::fmt::Display`] trait, but it produces a redacted
-    /// representation of the value based on the provided [`RedactionEngine`].
-    ///
-    /// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDisplay`] as well.
-    /// Generally speaking, you should just derive an implementation of this trait.
+    /// Performs the formatting.
     ///
     /// # Errors
     ///
@@ -38,6 +40,7 @@ pub trait RedactedDisplay {
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> Result;
 }
 
+/// Converts a type implementing [`RedactedDisplay`] to a redacted string representation.
 pub trait RedactedToString {
     /// Converts the value to a redacted string representation.
     fn to_string(&self, engine: &RedactionEngine) -> String;
