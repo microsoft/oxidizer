@@ -3,7 +3,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, DeriveInput, Result};
+use syn::{DeriveInput, Result, parse2};
 
 /// Check if a field has the `#[unredacted]` attribute
 fn is_unredacted(field: &syn::Field) -> bool {
