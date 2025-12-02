@@ -3,7 +3,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Result, parse2};
+use syn::{parse2, DeriveInput, Result};
 
 /// Check if a field has the `#[unredacted]` attribute
 fn is_unredacted(field: &syn::Field) -> bool {
@@ -28,27 +28,16 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                 let field_type = &field.ty;
                 let unredacted = is_unredacted(field);
 
+                let separator = if i == 0 { " " } else { ", " };
+
                 if unredacted {
-                    if i == 0 {
-                        quote! {
-                            ::std::write!(f, " {}: {:?}", #field_name_str, &self.#field_name)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", {}: {:?}", #field_name_str, &self.#field_name)?;
-                        }
+                    quote! {
+                        ::std::write!(f, "{}{}: {:?}", #separator, #field_name_str, &self.#field_name)?;
                     }
                 } else {
-                    if i == 0 {
-                        quote! {
-                            ::std::write!(f, " {}: ", #field_name_str)?;
-                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", {}: ", #field_name_str)?;
-                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
-                        }
+                    quote! {
+                        ::std::write!(f, "{}{}: ", #separator, #field_name_str)?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
                     }
                 }
             });
@@ -60,27 +49,25 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                 let index = syn::Index::from(i);
                 let unredacted = is_unredacted(field);
 
-                if unredacted {
-                    if i == 0 {
-                        quote! {
-                            ::std::write!(f, "{:?}", &self.#index)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", {:?}", &self.#index)?;
-                        }
+                let separator = if i > 0 {
+                    quote! { ::std::write!(f, ", ")?; }
+                } else {
+                    quote! {}
+                };
+
+                let format_call = if unredacted {
+                    quote! {
+                        ::std::write!(f, "{:?}", &self.#index)?;
                     }
                 } else {
-                    if i == 0 {
-                        quote! {
-                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", ")?;
-                            <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
-                        }
+                    quote! {
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
                     }
+                };
+
+                quote! {
+                    #separator
+                    #format_call
                 }
             });
             quote! { #(#calls)* }
@@ -131,27 +118,16 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                 let field_type = &field.ty;
                 let unredacted = is_unredacted(field);
 
+                let separator = if i == 0 { " " } else { ", " };
+
                 if unredacted {
-                    if i == 0 {
-                        quote! {
-                            ::std::write!(f, " {}: {}", #field_name_str, &self.#field_name)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", {}: {}", #field_name_str, &self.#field_name)?;
-                        }
+                    quote! {
+                        ::std::write!(f, "{}{}: {}", #separator, #field_name_str, &self.#field_name)?;
                     }
                 } else {
-                    if i == 0 {
-                        quote! {
-                            ::std::write!(f, " {}: ", #field_name_str)?;
-                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", {}: ", #field_name_str)?;
-                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
-                        }
+                    quote! {
+                        ::std::write!(f, "{}{}: ", #separator, #field_name_str)?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
                     }
                 }
             });
@@ -163,27 +139,25 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                 let index = syn::Index::from(i);
                 let unredacted = is_unredacted(field);
 
-                if unredacted {
-                    if i == 0 {
-                        quote! {
-                            ::std::write!(f, "{}", &self.#index)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", {}", &self.#index)?;
-                        }
+                let separator = if i > 0 {
+                    quote! { ::std::write!(f, ", ")?; }
+                } else {
+                    quote! {}
+                };
+
+                let format_call = if unredacted {
+                    quote! {
+                        ::std::write!(f, "{}", &self.#index)?;
                     }
                 } else {
-                    if i == 0 {
-                        quote! {
-                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
-                        }
-                    } else {
-                        quote! {
-                            ::std::write!(f, ", ")?;
-                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
-                        }
+                    quote! {
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
                     }
+                };
+
+                quote! {
+                    #separator
+                    #format_call
                 }
             });
             quote! { #(#calls)* }

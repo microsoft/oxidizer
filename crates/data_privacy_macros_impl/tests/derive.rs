@@ -28,7 +28,7 @@ fn redacted_debug_single() {
 #[cfg_attr(miri, ignore)]
 fn redacted_debug_multiple() {
     let input = quote! {
-        struct EmailAddress(String, String);
+        struct EmailAddress(String, #[unredacted] String);
     };
 
     test_derive!(input, redacted_debug);
@@ -84,7 +84,7 @@ fn redacted_display_single() {
 #[cfg_attr(miri, ignore)]
 fn redacted_display_multiple() {
     let input = quote! {
-        struct EmailAddress(String, String);
+        struct EmailAddress(String, #[unredacted] String);
     };
 
     test_derive!(input, redacted_display);

@@ -10,9 +10,9 @@ impl ::data_privacy::RedactedDebug for EmailAddress {
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         ::std::write!(f, "EmailAddress {{")?;
-        ::std::write!(f, " {}: ", "x")?;
+        ::std::write!(f, "{}{}: ", " ", "x")?;
         <String as ::data_privacy::RedactedDebug>::fmt(&self.x, engine, f)?;
-        ::std::write!(f, ", {}: {:?}", "y", & self.y)?;
+        ::std::write!(f, "{}{}: {:?}", ", ", "y", & self.y)?;
         ::std::write!(f, " }}")?;
         ::std::result::Result::Ok(())
     }
