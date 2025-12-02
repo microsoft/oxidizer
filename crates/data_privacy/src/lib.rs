@@ -47,8 +47,8 @@
 //! * The [`Classified`](crate::classified::Classified) trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
 //!
-//! * The [`Redactor`](crate::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
-//!   few implementations of this trait, such as [`SimpleRedactor`](crate::simple_redactor::SimpleRedactor), but others can
+//! * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
+//!   few implementations of this trait, such as [`SimpleRedactor`](simple_redactor::SimpleRedactor), but others can
 //!   be implemented and used by applications as well.
 //!
 //! This crate also exposes additional traits which are usually, but not necessarily, implemented by types that implement the
@@ -106,7 +106,7 @@
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
-//! * On startup, the application initializes a [`RedactionEngine`](crate::RedactionEngine) via [`RedactionEngine::builder()`]. The engine is configured
+//! * On startup, the application initializes a [`RedactionEngine`] via [`RedactionEngine::builder()`]. The engine is configured
 //!   with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
 //!   For example, for a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
@@ -158,7 +158,7 @@
 //! // Displaying the customer record will not leak sensitive data because the classified containers protect the data
 //! println!("Customer record: {:?}", c);
 //!
-//! // You can get redacted representations of classified data using a [`RedactionEngine`](crate::redaction_engine::RedactionEngine).
+//! // You can get redacted representations of classified data using a [`RedactionEngine`](redaction_engine::RedactionEngine).
 //!
 //! // Initialize some redactors
 //! let asterisk_redactor = SimpleRedactor::new();
