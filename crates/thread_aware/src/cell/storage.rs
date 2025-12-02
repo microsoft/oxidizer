@@ -115,13 +115,13 @@ where
     }
 }
 
-/// Storage type that uses the [`PerCoreStrategy`] strategy.
+/// Storage type that uses the [`PerCore`] strategy.
 pub type PerCoreStorage<T> = Storage<T, PerCore>;
 
-/// Storage type that uses the [`PerNumaStrategy`] strategy.
+/// Storage type that uses the [`PerNuma`] strategy.
 pub type PerNumaStorage<T> = Storage<T, PerNuma>;
 
-/// Storage type that uses the [`PerProcessStrategy`] strategy.
+/// Storage type that uses the [`PerProcess`] strategy.
 pub type PerAppStorage<T> = Storage<T, PerProcess>;
 
 #[cfg(test)]
