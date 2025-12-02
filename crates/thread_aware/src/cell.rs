@@ -153,7 +153,7 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
+    /// # use thread_aware::{Arc, PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # let affinities = create_manual_memory_affinities(&[2]);
@@ -167,7 +167,7 @@ where
     /// # impl Counter {
     /// #     fn new() -> Self {
     /// #         Self {
-    /// #             value: Arc::new(AtomicI32::new(0)),
+    /// #             value: sync::Arc::new(AtomicI32::new(0)),
     /// #         }
     /// #     }
     /// #
@@ -184,7 +184,7 @@ where
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
-    /// #             value: Arc::new(AtomicI32::new(0)),
+    /// #             value: sync::Arc::new(AtomicI32::new(0)),
     /// #         }
     /// #     }
     /// # }
@@ -243,7 +243,7 @@ where
     /// # use std::sync::{self, Mutex};
     /// # use thread_aware::{Arc, PerCore};
     /// struct MyStruct {
-    ///     inner: Arc<Mutex<i32>>,
+    ///     inner: sync::Arc<Mutex<i32>>,
     /// }
     ///
     /// impl MyStruct {
@@ -293,7 +293,7 @@ where
     /// #         Self {
     /// #             // Initialize a new value in the destination affinity independent
     /// #             // of the source affinity.
-    /// #             value: Arc::new(AtomicI32::new(0)),
+    /// #             value: sync::Arc::new(AtomicI32::new(0)),
     /// #         }
     /// #     }
     /// # }
@@ -348,22 +348,22 @@ impl<T, S: Strategy> Arc<T, S>
 where
     T: Clone + 'static + Send,
 {
-    /// Creates a new `Trc` with the given value.
+    /// Creates a new `Arc` with the given value.
     ///
-    /// The value must implement `ThreadAware` and `Clone`. When transferring to another affinity
+    /// The value must implement `Clone`. When transferring to another affinity
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
     /// affinity and transferring it to the new affinity.
+    ///
+    /// This is useful for types that do not implement [`ThreadAware`]. In such cases, the same value
+    /// is cloned for each affinity without any relocation logic.
     ///
     /// For example, the counter type we implemented in the documentation for [`ThreadAware`] trait
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
+    /// # use thread_aware::{Arc, PerCore};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
-    /// # use std::sync::sync::Arc;
-    /// # let affinities = create_manual_memory_affinities(&[2]);
-    /// # let affinity1 = affinities[0];
-    /// # let affinity2 = affinities[1];
+    /// # use std::sync;
     /// # #[derive(Clone)]
     /// # struct Counter {
     /// #     value: sync::Arc<AtomicI32>,
@@ -384,18 +384,8 @@ where
     /// #         self.value.load(Ordering::Acquire)
     /// #     }
     /// # }
-    /// #
-    /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-    /// #         Self {
-    /// #             // Initialize a new value in the destination affinity independent
-    /// #             // of the source affinity.
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
-    /// #     }
-    /// # }
     ///
-    /// let trc = PerCore::new(Counter::new);
+    /// let trc = Arc::<_, PerCore>::new(Counter::new);
     /// let trc_clone = trc.clone();
     /// trc.increment_by(42);
     /// assert_eq!(trc.value(), 42);
@@ -416,87 +406,11 @@ impl<T, S: Strategy> Arc<T, S>
 where
     T: 'static,
 {
-    /// Creates a new `Trc` with a closure that will be called once per-affinity to create the inner value.
+    /// Creates a new `Arc` with a closure that will be called once per-affinity to create the inner value.
     ///
-    /// The closure only gets called once for each affinity, and it's called only when a Trc is actually transferred
+    /// The closure only gets called once for each affinity, and it's called only when an `Arc` is actually transferred
     /// to another affinity. The closure is a [`RelocateFnOnce`] to ensure it captures only values that are safe to
     /// transfer themselves.
-    ///
-    /// This function can be used to create a `Trc` of a type that itself doesn't implement [`ThreadAware`] because
-    /// we can ensure that each affinity will get its own, independenty-initialized value:
-    ///
-    /// ```rust
-    /// # use std::sync::{sync::Arc, Mutex};
-    /// # use thread_aware::{PerCore, relocate_once};
-    /// struct MyStruct {
-    ///     inner: sync::Arc<Mutex<i32>>,
-    /// }
-    ///
-    /// impl MyStruct {
-    ///     fn new() -> Self {
-    ///         Self {
-    ///             inner: sync::Arc::new(Mutex::new(0)),
-    ///         }
-    ///     }
-    /// }
-    ///
-    /// let trc = PerCore::new_with((), |_| MyStruct::new());
-    /// ```
-    ///
-    /// The constructor can depend on other values that implement [`ThreadAware`] (this example uses the Counter
-    /// defined in [`ThreadAware`] documentation):
-    ///
-    /// ```rust
-    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
-    /// # use std::sync::atomic::{AtomicI32, Ordering};
-    /// # use std::sync::sync::Arc;
-    /// # let affinities = create_manual_memory_affinities(&[2]);
-    /// # let affinity1 = affinities[0];
-    /// # let affinity2 = affinities[1];
-    /// # #[derive(Clone)]
-    /// # struct Counter {
-    /// #     value: sync::Arc<AtomicI32>,
-    /// # }
-    /// #
-    /// # impl Counter {
-    /// #     fn new() -> Self {
-    /// #         Self {
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
-    /// #     }
-    /// #
-    /// #     fn increment_by(&self, v: i32) {
-    /// #         self.value.fetch_add(v, Ordering::AcqRel);
-    /// #     }
-    /// #
-    /// #     fn value(&self) -> i32 {
-    /// #         self.value.load(Ordering::Acquire)
-    /// #     }
-    /// # }
-    /// #
-    /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-    /// #         Self {
-    /// #             // Initialize a new value in the destination affinity independent
-    /// #             // of the source affinity.
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
-    /// #     }
-    /// # }
-    ///
-    /// struct MyStruct;
-    ///
-    /// impl MyStruct {
-    ///     fn new(value: i32) -> Self {
-    ///         Self
-    ///     }
-    /// }
-    ///
-    /// let counter = Counter::new();
-    /// let trc = PerCore::new_with(counter, |counter| {
-    ///     MyStruct::new(counter.value())
-    /// });
-    /// ```
     pub(crate) fn with_closure<F>(closure: F) -> Self
     where
         F: RelocateFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
@@ -555,7 +469,7 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
 
                     // In case factory source is stored in factory, use that - it means we already transferred the factory
                     // once, so we know the original source affinity. Otherwise, use source as that means this is the first
-                    // time we're transferring the Trc, so source is the source affinity of the factory as well.
+                    // time we're transferring the Arc, so source is the source affinity of the factory as well.
                     let factory_source = factory_source_affinity.unwrap_or(source);
 
                     (
