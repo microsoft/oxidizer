@@ -4,6 +4,7 @@
 mod factory;
 mod storage;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests;
 
@@ -21,10 +22,10 @@ use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware, relocat
 /// Transferable reference counted type.
 ///
 /// This type works like a per-affinity (per-thread) [`sync::Arc`]. Each affinity gets a unique value that is shared by clones
-/// of the `Trc`, but the [`ThreadAware`] implementation ensures that when moving to another affinity, the resulting
-/// `Trc` will point to the value in the destination affinity. See [`new`](`Arc::new`) for information on constructing instances.
+/// of the `Arc`, but the [`ThreadAware`] implementation ensures that when moving to another affinity, the resulting
+/// `Arc` will point to the value in the destination affinity. See [`new`](`Arc::new`) for information on constructing instances.
 ///
-/// `ThreadAware` of different clones of the `Trc` result in "deduplication" in the destination affinity. The following
+/// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
 /// ```rust
@@ -64,19 +65,19 @@ use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware, relocat
 /// #     }
 /// # }
 ///
-/// let trc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
-/// let trc_affinity1_clone = trc_affinity1.clone();
+/// let arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
+/// let arc_affinity1_clone = arc_affinity1.clone();
 ///
-/// trc_affinity1.increment_by(42);
-/// assert_eq!(trc_affinity1.value(), 42);
+/// arc_affinity1.increment_by(42);
+/// assert_eq!(arc_affinity1.value(), 42);
 ///
-/// let trc_affinity2 = trc_affinity1.relocated(affinity1, affinity2);
-/// assert_eq!(trc_affinity2.value(), 0);
-/// assert_eq!(trc_affinity1_clone.value(), 42);
+/// let arc_affinity2 = arc_affinity1.relocated(affinity1, affinity2);
+/// assert_eq!(arc_affinity2.value(), 0);
+/// assert_eq!(arc_affinity1_clone.value(), 42);
 ///
-/// trc_affinity2.increment_by(11);
-/// let trc_affinity2_clone = trc_affinity1_clone.relocated(affinity1, affinity2);
-/// assert_eq!(trc_affinity2_clone.value(), 11);
+/// arc_affinity2.increment_by(11);
+/// let arc_affinity2_clone = arc_affinity1_clone.relocated(affinity1, affinity2);
+/// assert_eq!(arc_affinity2_clone.value(), 11);
 /// ```
 #[derive(Debug)]
 pub struct Arc<T, S: Strategy> {
@@ -324,7 +325,7 @@ impl<T, S: Strategy> Arc<T, S>
 where
     T: ThreadAware + Clone + 'static + Send,
 {
-    /// Creates a new `Trc` with the given value.
+    /// Creates a new `Arc` with the given value.
     ///
     /// The value must implement `ThreadAware` and `Clone`. When transferring to another affinity
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
@@ -388,11 +389,11 @@ where
     /// #     }
     /// # }
     ///
-    /// let trc = Arc::<_, PerCore>::new(Counter::new);
-    /// let trc_clone = trc.clone();
-    /// trc.increment_by(42);
-    /// assert_eq!(trc.value(), 42);
-    /// assert_eq!(trc_clone.value(), 42);
+    /// let arc = Arc::<_, PerCore>::new(Counter::new);
+    /// let arc_clone = arc.clone();
+    /// arc.increment_by(42);
+    /// assert_eq!(arc.value(), 42);
+    /// assert_eq!(arc_clone.value(), 42);
     /// ```
     pub fn from_unaware(value: T) -> Self {
         let value = sync::Arc::new(value);
@@ -450,7 +451,7 @@ where
 }
 
 impl<T, S: Strategy> Arc<T, S> {
-    /// Converts the `Trc<T>` into an `sync::Arc<T>`.
+    /// Converts the `Arc<T, S>` into an `sync::Arc<T>`.
     #[must_use]
     pub fn into_arc(self) -> sync::Arc<T> {
         self.value

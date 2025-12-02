@@ -1,4 +1,10 @@
-use std::sync::{self, atomic::{AtomicI32, Ordering}};
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use std::sync::{
+    self,
+    atomic::{AtomicI32, Ordering},
+};
 
 use crate::{MemoryAffinity, PinnedAffinity, ThreadAware, Unaware, create_manual_pinned_affinities, relocate};
 
