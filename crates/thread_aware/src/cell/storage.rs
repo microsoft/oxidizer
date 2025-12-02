@@ -19,8 +19,8 @@ pub trait Strategy {
 /// This strategy uses the processor index and count from the `PinnedAffinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerCoreStrategy;
-impl Strategy for PerCoreStrategy {
+pub struct PerCore;
+impl Strategy for PerCore {
     fn index(affinity: PinnedAffinity) -> usize {
         affinity.processor_index()
     }
@@ -35,8 +35,8 @@ impl Strategy for PerCoreStrategy {
 /// This strategy uses the memory region index and count from the `PinnedAffinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerNumaStrategy;
-impl Strategy for PerNumaStrategy {
+pub struct PerNuma;
+impl Strategy for PerNuma {
     fn index(affinity: PinnedAffinity) -> usize {
         affinity.memory_region_index()
     }
@@ -50,8 +50,8 @@ impl Strategy for PerNumaStrategy {
 ///
 /// This strategy does not differentiate between affinities, storing all data in a single slot.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerProcessStrategy;
-impl Strategy for PerProcessStrategy {
+pub struct PerProcess;
+impl Strategy for PerProcess {
     fn index(_affinity: PinnedAffinity) -> usize {
         0
     }
@@ -115,14 +115,14 @@ where
     }
 }
 
-/// Storage type that uses the [`PerCoreStrategy`] strategy.
-pub type PerCoreStorage<T> = Storage<T, PerCoreStrategy>;
+/// Storage type that uses the [`PerCore`] strategy.
+pub type PerCoreStorage<T> = Storage<T, PerCore>;
 
-/// Storage type that uses the [`PerNumaStrategy`] strategy.
-pub type PerNumaStorage<T> = Storage<T, PerNumaStrategy>;
+/// Storage type that uses the [`PerNuma`] strategy.
+pub type PerNumaStorage<T> = Storage<T, PerNuma>;
 
-/// Storage type that uses the [`PerProcessStrategy`] strategy.
-pub type PerAppStorage<T> = Storage<T, PerProcessStrategy>;
+/// Storage type that uses the [`PerProcess`] strategy.
+pub type PerAppStorage<T> = Storage<T, PerProcess>;
 
 #[cfg(test)]
 mod tests {
@@ -168,8 +168,8 @@ mod tests {
     fn per_app() {
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
-        let index = super::PerProcessStrategy::index(affinities[0]);
-        let count = super::PerProcessStrategy::count(affinities[0]);
+        let index = super::PerProcess::index(affinities[0]);
+        let count = super::PerProcess::count(affinities[0]);
         assert_eq!(index, 0);
         assert_eq!(count, 1);
     }
@@ -179,8 +179,8 @@ mod tests {
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
-            let index = super::PerNumaStrategy::index(affinity);
-            let count = super::PerNumaStrategy::count(affinity);
+            let index = super::PerNuma::index(affinity);
+            let count = super::PerNuma::count(affinity);
             assert_eq!(index, affinity.memory_region_index());
             assert_eq!(count, affinity.memory_region_count());
         }
@@ -191,8 +191,8 @@ mod tests {
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
-            let index = super::PerCoreStrategy::index(affinity);
-            let count = super::PerCoreStrategy::count(affinity);
+            let index = super::PerCore::index(affinity);
+            let count = super::PerCore::count(affinity);
             assert_eq!(index, affinity.processor_index());
             assert_eq!(count, affinity.processor_count());
         }
