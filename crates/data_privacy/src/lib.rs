@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![expect(rustdoc::redundant_explicit_links, reason = "Needed to support cargo-rdme link mapping.")]
 
 //! Mechanisms to classify, manipulate, and redact sensitive data.
@@ -196,6 +197,7 @@ mod redactors;
 mod simple_redactor;
 
 #[cfg(feature = "xxh3")]
+#[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 mod xxh3_redactor;
 
 // Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
@@ -271,4 +273,5 @@ pub use redactor::Redactor;
 pub use simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 
 #[cfg(feature = "xxh3")]
+#[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 pub use crate::xxh3_redactor::xxH3Redactor;

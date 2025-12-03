@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! A library for creating isolated affinities in Rust, allowing for safe and efficient data transfer between them.
@@ -99,9 +100,11 @@ mod impls;
 mod wrappers;
 
 #[cfg(feature = "threads")]
+#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
 mod validator;
 
 #[cfg(feature = "threads")]
+#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
 mod registry;
 
 pub use core::{ThreadAware, create_manual_memory_affinities, create_manual_pinned_affinities};
@@ -157,11 +160,14 @@ pub use affinity::{MemoryAffinity, PinnedAffinity};
 /// }
 /// ```
 #[cfg(feature = "derive")]
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
 pub use cell::{Arc, PerAppStorage, PerCore, PerCoreStorage, PerNuma, PerNumaStorage, PerProcess, Storage, Strategy};
 pub use closure::{Closure, ClosureMut, ClosureOnce, RelocateFn, RelocateFnMut, RelocateFnOnce, relocate, relocate_mut, relocate_once};
 #[cfg(feature = "threads")]
+#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
 pub use registry::{ProcessorCount, ThreadRegistry};
 #[cfg(feature = "threads")]
+#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
 pub use validator::ThreadAwareValidator;
 pub use wrappers::{Unaware, unaware};

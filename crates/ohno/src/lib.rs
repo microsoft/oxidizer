@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! High-quality error handling for Rust.
@@ -234,6 +235,7 @@ mod error_ext;
 mod source;
 
 #[cfg(any(feature = "test-util", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub mod test_util;
 
 pub use core::OhnoCore;
