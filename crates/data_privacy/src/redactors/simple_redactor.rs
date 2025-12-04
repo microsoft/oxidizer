@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A redactor supporting a variety of simple transformations.
+
 use crate::{DataClass, Redactor};
 use std::borrow::Cow;
 use std::fmt::Write;
