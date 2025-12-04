@@ -64,7 +64,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_MSRV }}
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.53
+        uses: taiki-e/install-action@v2.62.62
         with:
           tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
 
@@ -112,7 +112,7 @@ jobs:
           toolchain: ${{ env.RUST_LATEST }}
           components: clippy, rustfmt
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.53
+        uses: taiki-e/install-action@v2.62.62
         with:
           tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
 
@@ -159,7 +159,7 @@ jobs:
           toolchain: ${{ env.RUST_NIGHTLY }}
           components: miri
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.53
+        uses: taiki-e/install-action@v2.62.62
         with:
           tool: cargo-udeps@${{ env.CARGO_UDEPS_VERSION }}
 
@@ -202,7 +202,7 @@ jobs:
       - name: Installing Wild Linker
         uses: davidlattimore/wild-action@0.7.0
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.53
+        uses: taiki-e/install-action@v2.62.62
         with:
           tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
 
@@ -248,7 +248,7 @@ jobs:
           toolchain: ${{ env.RUST_NIGHTLY }}
           components: llvm-tools-preview
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.53
+        uses: taiki-e/install-action@v2.62.62
         with:
           tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
 
@@ -312,7 +312,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
       - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.53
+        uses: taiki-e/install-action@v2.62.62
         with:
           tool: cargo-check-external-types@${{ env.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
 
