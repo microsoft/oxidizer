@@ -46,15 +46,11 @@ impl Redactors {
     }
 
     #[must_use]
+    #[allow(dead_code, reason = "This function is used from testing")]
     pub fn len(&self) -> usize {
         self.redactors.len()
     }
 
-    #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Simple forward we have to pacify clippy
-    pub fn is_empty(&self) -> bool {
-        self.redactors.is_empty()
-    }
 
     pub fn shrink(&mut self) {
         self.redactors.shrink_to_fit();
@@ -121,7 +117,6 @@ mod tests {
 
         // Check initial size
         assert_eq!(redactors.redactors.len(), 2);
-        assert!(!redactors.is_empty());
         assert!(redactors.redactors.capacity() >= 42, "Initial capacity should be at least 42");
 
         // Shrink the redactors
