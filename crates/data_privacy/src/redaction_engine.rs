@@ -69,7 +69,7 @@ impl RedactionEngine {
     }
 
     #[must_use]
-    pub fn new(mut redactors: Redactors) -> Self {
+    pub(crate) fn new(mut redactors: Redactors) -> Self {
         redactors.shrink();
         Self {
             redactors: Arc::new(redactors),

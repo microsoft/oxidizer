@@ -89,11 +89,10 @@ fn test_redact_uses_fallback_for_unregistered_class() {
     let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Replace('X'));
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let unknown_data = UnknownSensitivity::new("john@example.com".to_string());
     let result = collect_output(&engine, &unknown_data);
@@ -106,11 +105,10 @@ fn test_redact_as_class_uses_specific_redactor() {
     let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let result = collect_output_as_class(&engine, TestTaxonomy::Sensitive, "confidential");
 
@@ -122,11 +120,10 @@ fn test_redact_as_class_uses_fallback_for_unknown_class() {
     let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Replace('?'));
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let unknown_class = DataClass::new("unknown", "test");
     let result = collect_output_as_class(&engine, unknown_class, "data");
@@ -140,12 +137,11 @@ fn test_redact_with_multiple_redactors() {
     let hash_redactor = create_test_redactor(SimpleRedactorMode::Replace('#'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
-    redactors.insert(TestTaxonomy::Personal.data_class(), hash_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .add_class_redactor(TestTaxonomy::Personal, hash_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let sensitive_data = Sensitive::new("secret".to_string());
     let personal_data = Personal::new("email".to_string());
@@ -163,12 +159,11 @@ fn test_redact_with_different_redactor_modes() {
     let passthrough_redactor = create_test_redactor(SimpleRedactorMode::Passthrough);
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), insert_redactor);
-    redactors.insert(TestTaxonomy::UnknownSensitivity.data_class(), passthrough_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, insert_redactor)
+        .add_class_redactor(TestTaxonomy::UnknownSensitivity, passthrough_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let sensitive_data = Sensitive::new("secret".to_string());
     let unknown_data = UnknownSensitivity::new("public".to_string());
@@ -191,11 +186,10 @@ fn test_redact_with_empty_string() {
     let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let empty_data = Sensitive::new(String::new());
     let result = collect_output(&engine, &empty_data);
@@ -208,11 +202,10 @@ fn test_redact_as_class_with_empty_string() {
     let asterisk_redactor = create_test_redactor(SimpleRedactorMode::Replace('*'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive, asterisk_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     let result = collect_output_as_class(&engine, TestTaxonomy::Sensitive, "");
 
@@ -285,12 +278,11 @@ fn test_debug_trait_implementation() {
     let hash_redactor = create_test_redactor(SimpleRedactorMode::Replace('#'));
     let fallback_redactor = create_test_redactor(SimpleRedactorMode::Erase);
 
-    let mut redactors = Redactors::default();
-    redactors.insert(TestTaxonomy::Sensitive.data_class(), asterisk_redactor);
-    redactors.insert(TestTaxonomy::Personal.data_class(), hash_redactor);
-    redactors.set_fallback(fallback_redactor);
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, asterisk_redactor)
+        .add_class_redactor(TestTaxonomy::Personal, hash_redactor)
+        .set_fallback_redactor(fallback_redactor)
+        .build();
 
     // Test the Debug trait implementation
     let debug_output = format!("{engine:?}");
@@ -307,9 +299,7 @@ fn test_debug_trait_implementation() {
 
 #[test]
 fn test_debug_trait_with_default_redactors() {
-    let redactors = Redactors::default();
-
-    let engine = RedactionEngine::new(redactors);
+    let engine = RedactionEngine::builder().build();
 
     // Test the Debug trait implementation with no redactors
     let debug_output = format!("{engine:?}");
