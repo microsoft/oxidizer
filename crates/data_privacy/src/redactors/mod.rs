@@ -51,7 +51,6 @@ impl Redactors {
         self.redactors.len()
     }
 
-
     pub fn shrink(&mut self) {
         self.redactors.shrink_to_fit();
     }
@@ -135,7 +134,6 @@ mod tests {
 
         assert_eq!(output_buffer, "test_valuetomato");
     }
-
 
     #[test]
     fn test_fallback_isnt_redactor() {

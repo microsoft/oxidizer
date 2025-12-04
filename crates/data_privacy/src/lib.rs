@@ -177,12 +177,8 @@
 //! assert_eq!(output_buffer, "********");
 //! ```
 
-#![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png"
-)]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico")]
 
 mod classified;
 mod classified_wrapper;
@@ -214,13 +210,13 @@ mod sensitive;
 
 pub use classified::Classified;
 pub use data_class::{DataClass, IntoDataClass};
-pub use macros::{classified, taxonomy, RedactedDebug, RedactedDisplay};
+pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
+pub use redactors::Redactor;
 pub use redactors::simple_redactor;
 #[cfg(feature = "xxh3")]
 pub use redactors::xxh3_redactor;
-pub use redactors::Redactor;
 pub use sensitive::Sensitive;
 #[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 pub use crate::xxh3_redactor::xxH3Redactor;
