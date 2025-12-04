@@ -3,7 +3,8 @@
 
 //! A redactor supporting a variety of simple transformations.
 
-use crate::{DataClass, Redactor};
+use crate::DataClass;
+use crate::redactors::Redactor;
 use std::borrow::Cow;
 use std::fmt::Write;
 

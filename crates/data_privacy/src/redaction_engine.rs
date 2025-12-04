@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::redactors::Redactors;
-use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor};
+use crate::redactors::{Redactor, Redactors};
+use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
 use core::fmt::Debug;
 use data_privacy::IntoDataClass;
 use std::fmt::{Display, Formatter, Write};

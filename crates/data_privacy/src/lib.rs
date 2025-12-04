@@ -176,30 +176,13 @@
 //! // check that the data in the output buffer has indeed been redacted as expected.
 //! assert_eq!(output_buffer, "********");
 //! ```
-
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico")]
-
-mod classified;
-mod classified_wrapper;
-mod data_class;
-mod redacted_debug;
-mod redacted_display;
-mod redacted_to_string;
-mod redaction_engine;
-mod redaction_engine_builder;
-mod redactor;
-mod redactors;
-mod simple_redactor;
-
-#[cfg(feature = "xxh3")]
-#[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
-mod xxh3_redactor;
-mod std;
 
 // Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
 // Workaround for https://github.com/bkchr/proc-macro-crate/issues/14
 extern crate self as data_privacy;
+
 mod classified;
 mod data_class;
 mod macros;
@@ -213,10 +196,8 @@ pub use data_class::{DataClass, IntoDataClass};
 pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
-pub use redactors::Redactor;
-pub use redactors::simple_redactor;
 #[cfg(feature = "xxh3")]
-pub use redactors::xxh3_redactor;
-pub use sensitive::Sensitive;
 #[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
-pub use crate::xxh3_redactor::xxH3Redactor;
+pub use redactors::xxh3_redactor;
+pub use redactors::{Redactor, simple_redactor};
+pub use sensitive::Sensitive;
