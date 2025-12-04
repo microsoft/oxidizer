@@ -40,6 +40,10 @@ workspace = true
 name = "employees"
 path = "examples/employees/main.rs"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde::*",

@@ -80,8 +80,8 @@ trivial_numeric_casts = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
-# Allow cfg attributes for coverage builds
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
+# Allow cfg attributes for coverage builds and docs.rs builds
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)', 'cfg(docsrs)'] }
 
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }
