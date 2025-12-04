@@ -8,6 +8,7 @@
     clippy::items_after_statements,
     clippy::unused_async,
     clippy::unnecessary_wraps,
+    missing_docs,
     reason = "Unit tests"
 )]
 

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Example code")]
+
 use std::pin::Pin;
 use std::task::Poll;
 

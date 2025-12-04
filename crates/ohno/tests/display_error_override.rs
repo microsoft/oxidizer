@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "test-util")]
 
 use ohno::{EnrichableExt, Error, ErrorExt, OhnoCore, assert_error_message};

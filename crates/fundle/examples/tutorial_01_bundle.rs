@@ -1,7 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(missing_debug_implementations, clippy::empty_structs_with_brackets, reason = "Unit tests")]
+#![expect(
+    missing_docs,
+    missing_debug_implementations,
+    clippy::empty_structs_with_brackets,
+    reason = "Unit tests"
+)]
 
 // Assume these are random dependencies we want to create and inject.
 pub struct Logger {}

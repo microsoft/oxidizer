@@ -4,7 +4,7 @@
 use crate::RedactionEngine;
 use core::fmt::{Formatter, Result};
 
-// Trait for types that support redacted display formatting.
+/// Trait for types that support redacted display formatting.
 pub trait RedactedDisplay {
     /// Formats the redacted value using the given formatter.
     ///

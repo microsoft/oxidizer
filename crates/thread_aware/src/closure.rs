@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "TODO")]
+
 pub mod erased;
 
 pub use erased::ErasedClosureOnce;

@@ -1,7 +1,13 @@
-#![expect(missing_debug_implementations, clippy::empty_structs_with_brackets, reason = "Unit tests")]
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-#![expect(dead_code, reason = "This is just an example.")]
+
+#![expect(
+    missing_docs,
+    dead_code,
+    missing_debug_implementations,
+    clippy::empty_structs_with_brackets,
+    reason = "Example code"
+)]
 
 // Assume these are random dependencies we want to inject.
 #[derive(Clone)]

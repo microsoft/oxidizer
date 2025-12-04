@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 /// Test that our automatic Debug implementation produces identical output to standard #[derive(Debug)]
 use ohno::{Error, OhnoCore};
 

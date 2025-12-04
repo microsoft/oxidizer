@@ -3,6 +3,7 @@
     clippy::empty_structs_with_brackets,
     clippy::must_use_candidate,
     clippy::items_after_statements,
+    missing_docs,
     reason = "Unit tests"
 )]
 

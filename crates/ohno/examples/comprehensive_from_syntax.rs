@@ -4,7 +4,7 @@
 //! Demonstrates #[from] attribute with multiple field expressions.
 
 #[derive(Debug, PartialEq, Eq, Default)]
-pub enum ErrorKind {
+enum ErrorKind {
     #[default]
     Unknown,
     Io,
@@ -12,7 +12,7 @@ pub enum ErrorKind {
 
 #[ohno::error]
 #[from(std::io::Error(kind: ErrorKind::Io, message: "IO failed".to_string()))]
-pub struct MyError {
+struct MyError {
     kind: ErrorKind,
     message: String,
 }

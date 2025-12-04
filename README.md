@@ -12,19 +12,12 @@
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
 - [Crates](#crates)
-<<<<<<< HEAD
-- [Repo Guidelines](#repo-guidelines)
-- [Building This Repo](#building-this-repo)
-- [Generating Documentation](#generating-documentation)
-- [Releasing Crate Versions](#releasing-crate-versions)
-=======
 - [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
     - [CI Workflows](#ci-workflows)
     - [Pull Request Gates](#pull-request-gates)
->>>>>>> 3d23ae8 (docs: Expand README content)
 - [Trademarks](#trademarks)
 
 ## Crates
@@ -79,7 +72,7 @@ this simple process:
 2. Create a branch off of main.
 
 3. Run `./scripts/release-crate.ps1 <crate_name> [new_version]` to bump a crate's version and update the crate's `CHANGELOG.md` file.
-Tun the script many times if you want to release several crates in the same PR.
+Run the script many times if you want to release several crates in the same PR.
 
 4. Create a PR like normal to push changes out.
 
