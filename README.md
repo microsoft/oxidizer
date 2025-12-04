@@ -14,6 +14,7 @@ This repository contains a set of crates that help you build robust highly scala
 - [Crates](#crates)
 - [Repo Guidelines](#repo-guidelines)
 - [Building This Repo](#building-this-repo)
+- [Generating Documentation](#generating-documentation)
 - [Releasing Crate Versions](#releasing-crate-versions)
 - [Trademarks](#trademarks)
 
@@ -69,6 +70,17 @@ tools, which you may wish to install:
 - [`cargo-rdme`](https://crates.io/crates/cargo-rdme) - generates README files based on a crate's top-level docs.
 
 - [`cargo-udeps`](https://crates.io/crates/cargo-udeps) - used to ensure crates don't declare superfluous dependencies.
+
+## Generating Documentation
+
+To generate documentation locally with all features enabled (including feature-gated items), run:
+
+```powershell
+.\scripts\generate-docs.ps1
+```
+
+This requires the Rust nightly toolchain to be installed. The script will generate documentation
+and open it in your default browser.
 
 ## Releasing Crate Versions
 
