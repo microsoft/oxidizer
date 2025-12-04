@@ -1,6 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+/// Derives the [`RedactedDebug`](crate::RedactedDebug) trait for a struct.
+///
+/// This macro generates an implementation that formats the struct similarly to the standard
+/// library's [`Debug`](std::fmt::Debug) trait, but produces redacted output based on the provided [`RedactionEngine`](crate::RedactionEngine).
+/// All fields implementing [`Classified`](crate::Classified) will be automatically redacted according to the engine's policy.
+///
+/// Fields can be marked with `#[unredacted]` to exclude them from redaction.
+///
+/// # Example
+///
+/// ```
+/// use data_privacy::{RedactedDebug, taxonomy, classified};
+///
+/// #[taxonomy(example)]
+/// enum ExampleTaxonomy {
+///     Sensitive,
+/// }
+///
+/// #[classified(ExampleTaxonomy::Sensitive)]
+/// struct UserId(String);
+///
+/// #[derive(RedactedDebug)]
+/// struct User {
+///     id: UserId,
+///     #[unredacted]
+///     age: u32,
+/// }
+/// ```
+pub use data_privacy_macros::RedactedDebug;
 /// Implements the [`Classified`](crate::Classified) trait on a newtype.
 ///
 /// This macro is applied to a newtype struct declaration. The newtype
@@ -25,8 +54,36 @@
 /// struct CustomerId(String);
 pub use data_privacy_macros::classified;
 
-pub use data_privacy_macros::RedactedDebug;
+/// Derives the [`RedactedDisplay`](crate::RedactedDisplay) trait for a struct.
+///
+/// This macro generates an implementation that formats the struct similarly to the standard
+/// library's [`Display`](std::fmt::Display) trait, but produces redacted output based on the provided [`RedactionEngine`](crate::RedactionEngine).
+/// All fields implementing [`Classified`](crate::Classified) will be automatically redacted according to the engine's policy.
+///
+/// Fields can be marked with `#[unredacted]` to exclude them from redaction.
+///
+/// # Example
+///
+/// ```
+/// use data_privacy::{RedactedDisplay, taxonomy, classified};
+///
+/// #[taxonomy(example)]
+/// enum ExampleTaxonomy {
+///     Sensitive,
+/// }
+///
+/// #[classified(ExampleTaxonomy::Sensitive)]
+/// struct UserId(String);
+///
+/// #[derive(RedactedDisplay)]
+/// struct User {
+///     id: UserId,
+///     #[unredacted]
+///     age: u32,
+/// }
+/// ```
 pub use data_privacy_macros::RedactedDisplay;
+
 /// Generates implementation logic and types to expose a data taxonomy.
 ///
 /// This macro is applied to an enum declaration. Each variant of the enum
