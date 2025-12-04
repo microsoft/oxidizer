@@ -32,6 +32,33 @@ impl<T> Sensitive<T> {
             data_class: data_class.into_data_class(),
         }
     }
+
+    /// Changes the data class of this value.
+    #[must_use]
+    pub fn reclassify(self, data_class: impl IntoDataClass) -> Self {
+        Self {
+            data_class: data_class.into_data_class(),
+            ..self
+        }
+    }
+
+    /// Extracts the wrapped value, consuming the `Sensitive` wrapper.
+    #[must_use]
+    pub fn declassify_into(self) -> T {
+        self.value
+    }
+
+    /// Returns a reference to the wrapped value.
+    #[must_use]
+    pub fn declassify_ref(&self) -> &T {
+        &self.value
+    }
+
+    /// Returns a mutable reference to the wrapped value.
+    #[must_use]
+    pub fn declassify_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
 }
 
 impl<T> Classified for Sensitive<T> {

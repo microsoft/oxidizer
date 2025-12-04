@@ -12,6 +12,7 @@ use std::hash::{Hash, Hasher};
 #[allow(clippy::upper_case_acronyms, reason = "PII is a well-known acronym")]
 enum TestTaxonomy {
     PII,
+    EUII,
 }
 
 #[test]
@@ -22,6 +23,20 @@ fn test_classified_wrapper() {
         format!("{classified:?}"),
         "Sensitive { value: \"***\", data_class: DataClass { taxonomy: \"test\", name: \"p_i_i\" } }"
     );
+}
+
+#[test]
+fn test_declassification() {
+    let mut classified = Sensitive::new(42, TestTaxonomy::PII);
+    assert_eq!(*classified.declassify_ref(), 42);
+    assert_eq!(*classified.declassify_mut(), 42);
+    assert_eq!(classified.declassify_into(), 42);
+}
+
+#[test]
+fn test_reclassify() {
+    let classified = Sensitive::new(42, TestTaxonomy::PII).reclassify(TestTaxonomy::EUII);
+    assert_eq!(classified.data_class(), TestTaxonomy::EUII);
 }
 
 #[test]
