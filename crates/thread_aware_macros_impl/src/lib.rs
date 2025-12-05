@@ -29,6 +29,7 @@ mod enum_gen;
 
 /// Public so the wrapper proc-macro crate can access is_phantom_data
 pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldAttrCfg
+
 mod struct_gen;
 
 use enum_gen::build_enum_body;
@@ -42,10 +43,9 @@ use struct_gen::build_struct_body;
 #[must_use]
 pub fn derive_thread_aware(input: TokenStream2, root_path: &Path) -> TokenStream2 {
     let parsed: syn::Result<DeriveInput> = syn::parse2(input);
-    match parsed.and_then(|di| impl_transfer(&di, root_path)) {
-        Ok(ts) => ts,
-        Err(e) => e.to_compile_error(),
-    }
+    parsed
+        .and_then(|di| impl_transfer(&di, root_path))
+        .unwrap_or_else(|e| e.to_compile_error())
 }
 
 fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStream2> {

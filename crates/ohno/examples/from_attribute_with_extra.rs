@@ -4,7 +4,7 @@
 //! Demonstrates multiple #[from] attributes.
 
 #[derive(Debug, PartialEq, Eq, Default)]
-pub enum ErrorKind {
+enum ErrorKind {
     #[default]
     Unknown,
     Io,
@@ -14,7 +14,7 @@ pub enum ErrorKind {
 #[ohno::error]
 #[from(std::io::Error(kind: ErrorKind::Io))]
 #[from(std::fmt::Error(kind: ErrorKind::Format))]
-pub struct MyError {
+struct MyError {
     kind: ErrorKind,
 }
 

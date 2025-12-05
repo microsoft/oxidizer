@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 #[macro_export]
 macro_rules! expand_fundle_bundle {
     ($item:expr) => {{

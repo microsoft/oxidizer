@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Benchmark code")]
+
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};

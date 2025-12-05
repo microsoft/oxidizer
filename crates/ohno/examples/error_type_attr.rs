@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(dead_code, reason = "Example code")]
+
 //! Demonstrates #[`ohno::error`] transforming existing structs into error types.
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub enum ErrorKind {
+enum ErrorKind {
     #[default]
     Network,
     Database,
@@ -13,7 +15,7 @@ pub enum ErrorKind {
 /// Doc comment
 #[ohno::error]
 #[from(std::io::Error(kind: ErrorKind::Network, operation: "network_request".to_owned()))]
-pub struct AppError {
+struct AppError {
     pub kind: ErrorKind,
     pub operation: String,
 }

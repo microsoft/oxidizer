@@ -1,12 +1,13 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     missing_debug_implementations,
     clippy::empty_structs_with_brackets,
     clippy::must_use_candidate,
+    missing_docs,
     reason = "Unit tests"
 )]
-
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
 
 pub struct Logger {}
 pub struct Database {}

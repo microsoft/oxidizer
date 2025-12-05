@@ -2,6 +2,7 @@
     missing_debug_implementations,
     clippy::empty_structs_with_brackets,
     clippy::must_use_candidate,
+    missing_docs,
     reason = "Unit tests"
 )]
 

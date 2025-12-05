@@ -70,7 +70,7 @@ jobs:
 
       # execute
       - name: Build
-        run: cargo hack build --each-feature --workspace --verbose --locked
+        run: cargo hack build --each-feature --workspace --verbose --locked --color always
       - name: Tests
         run: cargo test --verbose --workspace --all-features
       - name: Docs
@@ -165,7 +165,7 @@ jobs:
 
       # execute
       - name: Udeps
-        run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace
+        run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
       - name: Miri
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
 

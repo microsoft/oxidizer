@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Example code")]
+
 // Example demonstrating the `message()` method on Ohno error types
 
 use ohno::ErrorExt;

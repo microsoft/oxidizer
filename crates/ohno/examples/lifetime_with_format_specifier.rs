@@ -5,7 +5,7 @@
 
 #[ohno::error]
 #[display("Validation failed for '{input}' with rules: {rules:?}")]
-pub struct ValidationError<'input, 'rules> {
+struct ValidationError<'input, 'rules> {
     input: &'input str,
     rules: &'rules [&'rules str],
 }

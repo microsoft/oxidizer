@@ -1,13 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 use syn::{ItemStruct, parse_quote};
 
 mod util;
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn foward_explicit() {
+fn forward_explicit() {
     let item: ItemStruct = parse_quote! {
         #[bundle]
         struct Foo {
