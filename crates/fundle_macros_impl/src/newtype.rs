@@ -5,6 +5,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Fields, ItemStruct, parse2};
 
+/// Attribute macro to create a newtype wrapper around a single inner type.
 pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
     let name = &input.ident;

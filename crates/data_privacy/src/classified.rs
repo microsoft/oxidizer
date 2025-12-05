@@ -72,6 +72,7 @@ use crate::DataClass;
 /// }
 ///  ```
 pub trait Classified {
+    /// The type of the payload being classified.
     type Payload;
 
     /// Exfiltrates the payload, allowing it to be used outside the classified context.

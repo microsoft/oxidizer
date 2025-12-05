@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
 #![expect(clippy::drop_non_drop, reason = "this is test code")]
 
 use std::sync::atomic::{AtomicI32, Ordering};

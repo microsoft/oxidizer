@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 // compile-pass tests for #[derive(ThreadAware)]
 use thread_aware::create_manual_pinned_affinities;
 use thread_aware_macros::ThreadAware;

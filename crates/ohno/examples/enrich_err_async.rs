@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![expect(clippy::unwrap_used, reason = "Example code")]
+#![expect(missing_docs, reason = "Example code")]
 
 use ohno::enrich_err;
 

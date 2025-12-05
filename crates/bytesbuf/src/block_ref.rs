@@ -125,6 +125,7 @@ pub struct BlockRefVTable<T> {
 }
 
 impl<T: BlockRefDynamicWithMeta> BlockRefVTable<T> {
+    #[expect(missing_docs, reason = "TODO")]
     #[must_use]
     pub const fn from_trait_with_meta() -> Self {
         Self {
@@ -139,6 +140,7 @@ impl<T: BlockRefDynamicWithMeta> BlockRefVTable<T> {
 }
 
 impl<T: BlockRefDynamic> BlockRefVTable<T> {
+    #[expect(missing_docs, reason = "TODO")]
     #[must_use]
     pub const fn from_trait() -> Self {
         Self {

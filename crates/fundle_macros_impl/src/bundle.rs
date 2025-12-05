@@ -9,6 +9,7 @@ use quote::quote;
 use syn::parse::Parser;
 use syn::{Attribute, Fields, FieldsNamed, ItemStruct, Path, Type, Visibility, parse2};
 
+/// Fundle bundle procedural macro implementation
 pub fn bundle(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let input: ItemStruct = parse2(item)?;
 

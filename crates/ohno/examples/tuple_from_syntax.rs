@@ -6,7 +6,7 @@
 use ohno::OhnoCore;
 
 #[derive(Debug, PartialEq, Eq, Default)]
-pub enum ErrorKind {
+enum ErrorKind {
     #[default]
     Unknown,
     Io,
@@ -14,7 +14,7 @@ pub enum ErrorKind {
 
 #[derive(ohno::Error)]
 #[from(std::io::Error(0: ErrorKind::Io))]
-pub struct MyError(ErrorKind, OhnoCore);
+struct MyError(ErrorKind, OhnoCore);
 
 fn failing_function() -> Result<(), std::io::Error> {
     Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"))

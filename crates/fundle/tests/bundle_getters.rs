@@ -6,6 +6,7 @@
     clippy::empty_structs_with_brackets,
     clippy::redundant_type_annotations,
     clippy::items_after_statements,
+    missing_docs,
     reason = "Unit tests"
 )]
 
