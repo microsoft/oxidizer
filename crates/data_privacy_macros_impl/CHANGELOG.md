@@ -1,55 +1,27 @@
 # Changelog
 
-## [0.3.0] - 2025-09-15
+## [0.7.0] - 2025-12-05
 
 - 🧩 Miscellaneous
 
-  - Fixes to enable producing a proper crates.io version ([#11](https://github.com//pull/11))
-  - Organize changelogs ([#8](https://github.com//pull/8))
-
-## [0.2.9] - 2025-09-11
-
-- 🧩 Miscellaneous
-
-  - Bump version for packages: -p data_privacy_macros -p data_privacy
-  - One more bump
-
-## [0.2.8] - 2025-09-11
-
-- 🧩 Miscellaneous
-
-  - Bump version for packages: -p data_privacy_macros
-  - Another bump
-
-## [0.2.7] - 2025-09-10
-
-- 🧩 Miscellaneous
-
-  - Bump version for packages: -p data_privacy_macros
-  - Another bump
-
-## [0.2.6] - 2025-09-10
-
-- ✔️ Tasks
-
-  - Release
-  - Release
-
-- 🧩 Miscellaneous
-
-  - Bump version for packages: -p data_privacy_macros
-  - Bump another time
-  - One more version bump
-  - Bump to alpha version
-  - Another version bump
-  - More version changes
-  - Version changes
-  - Improve code coverage ([#6](https://github.com//pull/6))
-  - Few automation/CI improvements ([#5](https://github.com//pull/5))
-
-## [0.1.0] - 2025-08-22
-
-- 🧩 Miscellaneous
-
-  - Finish repo setup and checkin data_privacy crate ([#4](https://github.com//pull/4))
+  - Address missing documentation.
+  - Format.
+  - Reduce branching.
+  - Don't make std types redacted, annotate fields with `#[unredacted]` instead.
+  - Disable various tests for miri.
+  - More CI complaints.
+  - Fix CI complaints.
+  - Remove outdated snapshot tests.
+  - Format again.
+  - Remove `RedactedToString` derive, since it was replaced by blanket trait impl.
+  - Also allow for compile error tests.
+  - Condense derive tests.
+  - Increase coverage.
+  - Format.
+  - Fix clippy
+  - Fix documentation.
+  - Fix more tests and warnings.
+  - Rename wrapper and improve UX working with DataClasses
+  - Also align data privacy with Rust Guidelines and clean up module structure.
+  - Align macro crate with existing structure.
 

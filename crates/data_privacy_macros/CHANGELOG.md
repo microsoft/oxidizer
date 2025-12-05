@@ -1,6 +1,24 @@
 # Changelog
 
-## [0.4.0] - 2025-11-26
+## [0.7.0] - 2025-12-05
+
+- 🧩 Miscellaneous
+
+  - Don't make std types redacted, annotate fields with `#[unredacted]` instead.
+  - Fix CI complaints.
+  - Format again.
+  - Remove `RedactedToString` derive, since it was replaced by blanket trait impl.
+  - Fix documentation.
+  - Also align data privacy with Rust Guidelines and clean up module structure.
+  - Align macro crate with existing structure.
+  - Re-enable tests.
+  - Update main app example and also log entire type.
+  - Fix impl issues and make it work with std.
+  - Implement derives.
+  - More design work.
+  - Change #[classified] macro to implement its own derives.
+
+## [0.4.0] - 2025-11-27
 
 - ✨ Features
 
@@ -11,6 +29,7 @@
 
 - 📚 Documentation
 
+  - A few doc-related fixes ([#80](https://github.com/microsoft/oxidizer/pull/80))
   - Add logos and favicons to our crate docs ([#44](https://github.com/microsoft/oxidizer/pull/44))
   - Add some panache to the repo ([#14](https://github.com/microsoft/oxidizer/pull/14))
 

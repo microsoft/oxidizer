@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy_macros"
 description = "Macros for the data_privacy crate."
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]

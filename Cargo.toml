@@ -25,9 +25,9 @@ repository = "https://github.com/microsoft/oxidizer"
 
 # local dependencies
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.1.0" }
-data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.6.0" }
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.6.0" }
-data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.6.0" }
+data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.7.0" }
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.7.0" }
+data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.7.0" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
