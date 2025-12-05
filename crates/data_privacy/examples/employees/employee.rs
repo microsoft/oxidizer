@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::example_taxonomy::ExampleTaxonomy;
-use data_privacy_macros::classified;
+use data_privacy_macros::{RedactedDebug, RedactedDisplay, classified};
 use derive_more::{Constructor, From};
 use serde::{Deserialize, Serialize};
 
@@ -19,10 +19,11 @@ pub struct UserAddress(String);
 pub struct EmployeeID(String);
 
 /// Holds info about a single corporate employee.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, RedactedDebug, RedactedDisplay)]
 pub struct Employee {
     pub name: UserName,
     pub address: UserAddress,
     pub id: EmployeeID,
+    #[unredacted]
     pub age: u32,
 }

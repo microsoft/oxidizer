@@ -20,14 +20,13 @@ use crate::DataClass;
 /// that when classified data is logged or printed, the sensitive information is redacted according to the configured
 /// redaction policies.
 ///
-/// Types that implement the [`Classified`] trait should generally not implement the [`core::fmt::Display`] trait, and if they implement
-/// the [`Debug`] trait, the implementation should avoid exposing the classified payload. Most types should derive the [`ClassifiedDebug`](data_privacy_macros::ClassifiedDebug) macro
-/// to get an appropriate implementation of the [`Debug`] trait.
+/// Types that implement the [`Classified`] trait should generally not implement the [`Display`](core::fmt::Display) trait, and if they implement
+/// the [`Debug`] trait, the implementation should avoid exposing the classified payload.
 ///
 /// # Example
 ///
 /// ```rust
-/// use data_privacy::{Classified, ClassifiedDebug, DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
+/// use data_privacy::{Classified, DataClass};
 ///
 /// #[derive(Debug)]
 /// struct Person {
@@ -42,7 +41,7 @@ use crate::DataClass;
 /// }
 ///
 /// // A classified wrapper is usually a newtype around the payload.
-/// #[derive(ClassifiedDebug, RedactedDebug)]
+/// #[derive(Debug)]
 /// struct ClassifiedPerson(Person);
 ///
 /// impl ClassifiedPerson {
@@ -52,119 +51,18 @@ use crate::DataClass;
 /// }
 ///
 /// impl Classified for ClassifiedPerson {
-///     type Payload = Person;
-///
-///     fn declassify(self) -> Person {
-///         self.0
-///     }
-///
-///     fn as_declassified(&self) -> &Person {
-///         &self.0
-///     }
-///
-///     fn as_declassified_mut(&mut self) -> &mut Person {
-///         &mut self.0
-///     }
-///
 ///     fn data_class(&self) -> DataClass {
 ///         DataClass::new("example_taxonomy", "classified_person")
 ///     }
 /// }
+///
+/// let person = Person::new("John Doe".to_string(), "123 Main St".to_string());
+/// let classified = ClassifiedPerson::new(person);
+/// assert_eq!(classified.data_class().taxonomy(), "example_taxonomy");
+/// assert_eq!(classified.data_class().name(), "classified_person");
 ///  ```
 pub trait Classified {
-    /// The type of the payload being classified.
-    type Payload;
-
-    /// Exfiltrates the payload, allowing it to be used outside the classified context.
-    ///
-    /// Exfiltration should be done with caution, as it may expose sensitive information.
-    ///
-    /// # Returns
-    /// The original payload.
-    #[must_use]
-    fn declassify(self) -> Self::Payload;
-
-    /// Provides a reference to the declassified payload, allowing read access without ownership transfer.
-    ///
-    /// Exfiltration should be done with caution, as it may expose sensitive information.
-    ///
-    /// # Returns
-    /// A reference to the original payload.
-    #[must_use]
-    fn as_declassified(&self) -> &Self::Payload;
-
-    /// Provides a mutable reference to the declassified payload, allowing write access without ownership transfer.
-    ///
-    /// Exfiltration should be done with caution, as it may expose sensitive information.
-    ///
-    /// # Returns
-    /// A mutable reference to the original payload.
-    #[must_use]
-    fn as_declassified_mut(&mut self) -> &mut Self::Payload;
-
-    /// Visits the payload with the provided operation.
-    fn visit(&self, operation: impl FnOnce(&Self::Payload)) {
-        operation(self.as_declassified());
-    }
-
-    /// Visits the payload with the provided operation.
-    fn visit_mut(&mut self, operation: impl FnOnce(&mut Self::Payload)) {
-        operation(self.as_declassified_mut());
-    }
-
     /// Returns the data class of the classified data.
     #[must_use]
     fn data_class(&self) -> DataClass;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Debug, Clone)]
-    struct ClassifiedExample {
-        data: u32,
-    }
-
-    impl Classified for ClassifiedExample {
-        type Payload = u32;
-
-        fn declassify(self) -> u32 {
-            self.data
-        }
-
-        fn as_declassified(&self) -> &u32 {
-            &self.data
-        }
-
-        fn as_declassified_mut(&mut self) -> &mut u32 {
-            &mut self.data
-        }
-
-        fn data_class(&self) -> DataClass {
-            DataClass::new("example", "classified_example")
-        }
-    }
-
-    #[test]
-    fn test_default_trait_methods() {
-        let mut classified = ClassifiedExample { data: 42 };
-
-        let mut call_count = 0;
-        classified.visit(|value| {
-            assert_eq!(*value, 42, "Initial value should be 42");
-            call_count += 1;
-        });
-
-        assert_eq!(call_count, 1);
-
-        classified.visit_mut(|value| {
-            *value = 20;
-        });
-        classified.visit(|value| assert_eq!(*value, 20, "Value should be updated to 20"));
-
-        assert_eq!(classified.data_class().name(), "classified_example");
-        assert_eq!(classified.as_declassified(), &20);
-        assert_eq!(classified.declassify(), 20);
-    }
 }

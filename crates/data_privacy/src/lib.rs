@@ -47,8 +47,8 @@
 //! * The [`Classified`](crate::classified::Classified) trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
 //!
-//! * The [`Redactor`](crate::redactor::Redactor) trait defines the logic needed by an individual redactor. This crate provides a
-//!   few implementations of this trait, such as [`SimpleRedactor`](crate::simple_redactor::SimpleRedactor), but others can
+//! * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
+//!   few implementations of this trait, such as [`SimpleRedactor`](simple_redactor::SimpleRedactor), but others can
 //!   be implemented and used by applications as well.
 //!
 //! This crate also exposes additional traits which are usually, but not necessarily, implemented by types that implement the
@@ -106,8 +106,8 @@
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
-//! * On startup, the application initializes a [`RedactionEngine`](crate::redaction_engine::RedactionEngine) using the [`RedactionEngineBuilder`](crate::redaction_engine_builder::RedactionEngineBuilder)
-//!   type. The engine is configured with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
+//! * On startup, the application initializes a [`RedactionEngine`] via [`RedactionEngine::builder()`]. The engine is configured
+//!   with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
 //!   For example, for a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
 //! * When it's time to log or otherwise process the sensitive data, the application uses the redaction engine to redact the data.
@@ -118,7 +118,8 @@
 //! container types.
 //!
 //! ```rust
-//! use data_privacy::{classified, RedactionEngine, RedactionEngineBuilder, SimpleRedactor, SimpleRedactorMode, taxonomy};
+//! use data_privacy::{classified, RedactionEngine, taxonomy};
+//! use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 //!
 //! // A simple taxonomy definition for the Contoso organization.
 //! #[taxonomy(contoso)]
@@ -157,20 +158,15 @@
 //! // Displaying the customer record will not leak sensitive data because the classified containers protect the data
 //! println!("Customer record: {:?}", c);
 //!
-//! // To access the sensitive data, it must be declassified explicitly, which is easily audited in your source code.
-//! let name: &String = c.name.as_declassified();
-//! let address: &String = c.address.as_declassified();
-//! let memo: &String = c.memo.as_declassified();
-//!
-//! // You can get redacted representations of classified data using a [`RedactionEngine`](crate::redaction_engine::RedactionEngine).
+//! // You can get redacted representations of classified data using a [`RedactionEngine`](redaction_engine::RedactionEngine).
 //!
 //! // Initialize some redactors
 //! let asterisk_redactor = SimpleRedactor::new();
 //! let erasing_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Erase);
 //!
 //! // Create the redaction engine. This is typically done once when the application starts.
-//! let engine = RedactionEngineBuilder::new()
-//!     .add_class_redactor(&ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
+//! let engine = RedactionEngine::builder()
+//!     .add_class_redactor(ContosoTaxonomy::CustomerIdentifier.data_class(), asterisk_redactor)
 //!     .set_fallback_redactor(erasing_redactor)
 //!     .build();
 //!
@@ -180,98 +176,28 @@
 //! // check that the data in the output buffer has indeed been redacted as expected.
 //! assert_eq!(output_buffer, "********");
 //! ```
-
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico")]
-
-mod classified;
-mod classified_wrapper;
-mod data_class;
-mod redacted_debug;
-mod redacted_display;
-mod redacted_to_string;
-mod redaction_engine;
-mod redaction_engine_builder;
-mod redactor;
-mod redactors;
-mod simple_redactor;
-
-#[cfg(feature = "xxh3")]
-#[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
-mod xxh3_redactor;
 
 // Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
 // Workaround for https://github.com/bkchr/proc-macro-crate/issues/14
 extern crate self as data_privacy;
 
+mod classified;
+mod data_class;
+mod macros;
+mod redacted;
+mod redaction_engine;
+mod redactors;
+mod sensitive;
+
 pub use classified::Classified;
-pub use classified_wrapper::ClassifiedWrapper;
-pub use data_class::DataClass;
-
-/// Implements the [`Classified`] trait on a newtype.
-///
-/// This macro is applied to a newtype struct declaration. The newtype
-/// wraps an inner type that holds sensitive data. The macro generates
-/// an implementation of the [`Classified`], [`Debug`], [`Deref`](core::ops::Deref),
-/// and [`DerefMut`](core::ops::DerefMut) traits.
-///
-/// # Example
-///
-/// ```
-/// use data_privacy::{classified, taxonomy};
-///
-/// // Declare a taxonomy
-/// #[taxonomy(contoso)]
-/// enum ContosoTaxonomy {
-///     CustomerContent,
-///     CustomerIdentifier,
-/// }
-///
-/// // Declare a classified container
-/// #[classified(ContosoTaxonomy::CustomerIdentifier)]
-/// struct CustomerId(String);
-pub use data_privacy_macros::classified;
-
-/// Generates implementation logic and types to expose a data taxonomy.
-///
-/// This macro is applied to an enum declaration. Each variant of the enum
-/// represents a data class within the taxonomy.
-///
-/// You provide a taxonomy name as first argument, followed by an optional `serde = false` or `serde = true`
-/// argument to control whether serde support is included in the generated taxonomy code.
-/// The default value for `serde` is `true`, meaning that serde support is included by default.
-///
-/// This attribute produces an implementation block for the enum which includes one method for
-/// each variant of the enum. These methods each return a [`DataClass`] instance representing that data class.
-/// In addition, classified data container types are generated for each data class.
-///
-/// ## Example
-///
-/// ```ignore
-/// use data_privacy::taxonomy;
-///
-/// #[taxonomy(contoso, serde = false)]
-/// enum ContosoTaxonomy {
-///     CustomerContent,
-///     CustomerIdentifier,
-///     OrganizationIdentifier,
-/// }
-/// ```
-pub use data_privacy_macros::taxonomy;
-
-pub use data_privacy_macros::ClassifiedDebug;
-pub use data_privacy_macros::RedactedDebug;
-pub use data_privacy_macros::RedactedDisplay;
-pub use data_privacy_macros::RedactedToString;
-
-pub use redacted_debug::RedactedDebug;
-pub use redacted_display::RedactedDisplay;
-pub use redacted_to_string::RedactedToString;
-pub use redaction_engine::RedactionEngine;
-pub use redaction_engine_builder::RedactionEngineBuilder;
-pub use redactor::Redactor;
-pub use simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-
+pub use data_class::{DataClass, IntoDataClass};
+pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
+pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
+pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
 #[cfg(feature = "xxh3")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
-pub use crate::xxh3_redactor::xxH3Redactor;
+pub use redactors::xxh3_redactor;
+pub use redactors::{Redactor, simple_redactor};
+pub use sensitive::Sensitive;
