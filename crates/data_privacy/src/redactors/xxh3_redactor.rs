@@ -1,10 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A redactor based on `xxh3`.
+
 use crate::{DataClass, Redactor};
 use core::fmt::Write;
 use xxhash_rust::xxh3::xxh3_64_with_secret;
 
+/// The length of the redacted output in hex digits.
 pub const REDACTED_LEN: usize = 16;
 
 /// A redactor that replaces the original string with the xxH3 hash of the string.
@@ -67,8 +70,6 @@ fn u64_to_hex_array(mut value: u64) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_u64_to_hex_array() {
         let result = u64_to_hex_array(0x1234_5678_9abc_def0);
