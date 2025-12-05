@@ -3,11 +3,14 @@
 
 use syn::{Attribute, Expr, Type};
 
+/// Configuration for field attributes.
 #[derive(Default, Debug)]
 pub struct FieldAttrCfg {
+    /// Whether to skip this field in thread-aware processing.
     pub skip: bool,
 }
 
+/// Parses the `thread_aware` attributes on a field.
 #[expect(clippy::missing_errors_doc, reason = "syn::internal API, no need for docs")]
 pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
     let mut cfg = FieldAttrCfg::default();
@@ -39,6 +42,7 @@ pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
     Ok(cfg)
 }
 
+/// Checks if the given type is `PhantomData`.
 #[must_use]
 pub fn is_phantom_data(ty: &Type) -> bool {
     if let Type::Path(tp) = ty

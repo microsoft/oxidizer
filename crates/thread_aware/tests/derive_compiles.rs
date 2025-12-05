@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(missing_docs, reason = "Test code")]
+#![expect(missing_docs, reason = "This is a test module")]
 
 use thread_aware::{ThreadAware, create_manual_pinned_affinities};
 use thread_aware_macros::ThreadAware as TA;
