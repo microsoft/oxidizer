@@ -27,7 +27,7 @@ mod tests;
 
 mod enum_gen;
 
-/// Public so the wrapper proc-macro crate can access is_phantom_data
+/// Public so the wrapper proc-macro crate can access `is_phantom_data`
 pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldAttrCfg
 
 mod struct_gen;
