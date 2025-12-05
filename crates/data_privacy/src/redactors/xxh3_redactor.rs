@@ -70,6 +70,8 @@ fn u64_to_hex_array(mut value: u64) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
+    use super::u64_to_hex_array;
+
     #[test]
     fn test_u64_to_hex_array() {
         let result = u64_to_hex_array(0x1234_5678_9abc_def0);
