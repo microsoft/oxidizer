@@ -16,7 +16,7 @@
 use proc_macro::TokenStream;
 use syn::{Path, parse_quote};
 
-// Documented in the thread_aware crate's reexport
+/// Implementation for the `ThreadAware` derive macro.
 #[proc_macro_derive(ThreadAware, attributes(thread_aware))]
 #[cfg_attr(test, mutants::skip)]
 pub fn derive_transfer(input: TokenStream) -> TokenStream {
