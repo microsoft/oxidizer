@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 use data_privacy::{Classified, DataClass};
 
 #[derive(Debug, Clone)]

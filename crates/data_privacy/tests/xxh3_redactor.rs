@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "xxh3")]
 
 use data_privacy::DataClass;

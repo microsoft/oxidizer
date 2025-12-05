@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Macros supporting the `#[classified]` attribute.
+
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::Parse;

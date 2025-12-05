@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 use data_privacy_macros_impl::taxonomy::taxonomy;
 use insta::assert_snapshot;
 use quote::quote;

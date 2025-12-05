@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use data_privacy::{DataClass, IntoDataClass, RedactedDisplay, RedactionEngine};
 use data_privacy_macros::{classified, taxonomy};

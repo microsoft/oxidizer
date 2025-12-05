@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Macros supporting various derives.
+
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Result, parse2};
@@ -10,6 +12,7 @@ fn is_unredacted(field: &syn::Field) -> bool {
     field.attrs.iter().any(|attr| attr.path().is_ident("unredacted"))
 }
 
+/// Derive the `RedactedDebug` trait for a struct.
 pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;
@@ -100,6 +103,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
     })
 }
 
+/// Derive the `RedactedDisplay` trait for a struct.
 pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = parse2(input)?;
     let name = &input.ident;

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Macros supporting the `#[taxonomy]` attribute.
+
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use syn::parse::Parse;

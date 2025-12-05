@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(missing_docs, reason = "Test code")]
+
 use core::hash::{Hash, Hasher};
 use data_privacy::DataClass;
 use std::collections::hash_map::DefaultHasher;

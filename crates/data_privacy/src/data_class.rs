@@ -51,6 +51,7 @@ impl Display for DataClass {
 
 /// Helper for converting a type into a [`DataClass`].
 pub trait IntoDataClass {
+    /// Converts `self` into a [`DataClass`].
     fn into_data_class(self) -> DataClass;
 }
 
