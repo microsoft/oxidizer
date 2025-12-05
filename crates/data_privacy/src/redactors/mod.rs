@@ -115,14 +115,14 @@ mod tests {
         );
 
         // Check initial size
-        assert_eq!(redactors.redactors.len(), 2);
+        assert_eq!(redactors.len(), 2);
         assert!(redactors.redactors.capacity() >= 42, "Initial capacity should be at least 42");
 
         // Shrink the redactors
         redactors.shrink();
 
         // Check size after shrinking
-        assert_eq!(redactors.redactors.len(), 2, "Shrink should not change the number of redactors");
+        assert_eq!(redactors.len(), 2, "Shrink should not change the number of redactors");
         assert!(redactors.redactors.capacity() < 42, "Capacity should shrink below 42");
     }
 
