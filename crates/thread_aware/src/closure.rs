@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(missing_docs, reason = "TODO")]
-
 pub mod erased;
 
 pub use erased::ErasedClosureOnce;
@@ -13,21 +11,27 @@ use crate::ThreadAware;
 ///
 /// Use [`relocate_once`] function to construct these.
 pub trait RelocateFnOnce<T: ?Sized>: ThreadAware {
+    /// Calls the closure, consuming it in the process.
     fn call_once(self) -> T;
 }
 
 /// A trait for callable types that can be called multiple times.
 /// This trait is used to define closures that can be called multiple times, without consuming the closure.
 pub trait RelocateFn<T>: ThreadAware {
+    /// Calls the closure, returning the result.
     fn call(&self) -> T;
 }
 
 /// A trait for callable types that can be called mutably.
 /// This trait is used to define closures that can be called mutably, allowing the closure to modify its internal state.
 pub trait RelocateFnMut<T>: ThreadAware {
+    /// Calls the closure mutably, returning the result.
     fn call_mut(&mut self) -> T;
 }
 
+/// A common implementation of [`RelocateFn`]
+///
+/// Construct this using the [`relocate`] function.
 #[derive(Debug, Copy, Hash)]
 pub struct Closure<T, D> {
     data: D,
@@ -123,6 +127,9 @@ where
     }
 }
 
+/// A common implementation of [`RelocateFnMut`]]
+///
+/// Construct this using the [`relocate_mut`] function.
 #[derive(Debug, Copy, Hash)]
 pub struct ClosureMut<T, D> {
     data: D,
@@ -169,6 +176,11 @@ where
     }
 }
 
+/// Construct a [`RelocateFn`] - a closure-like object where the captured data implement [`ThreadAware`].
+///
+/// Create a closure-like object by explicitly providing closed-over
+/// value and a function pointer to operate on that value, essentially simulating a
+/// parameterless closure that ensures that captured data implements [`ThreadAware`].
 pub fn relocate<T, D>(data: D, f: fn(&D) -> T) -> Closure<T, D>
 where
     D: ThreadAware,
@@ -176,6 +188,11 @@ where
     Closure { data, f }
 }
 
+/// Construct a [`RelocateFnMut`] - a closure-like object where the captured data implement [`ThreadAware`].
+///
+/// Create a closure-like object by explicitly providing closed-over
+/// value and a function pointer to operate on that value, essentially simulating a
+/// parameterless closure that ensures that captured data implements [`ThreadAware`].
 pub fn relocate_mut<T, D>(data: D, f: fn(&mut D) -> T) -> ClosureMut<T, D>
 where
     D: ThreadAware,
