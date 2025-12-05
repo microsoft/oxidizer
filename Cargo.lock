@@ -189,7 +189,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "data_privacy"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "data_privacy_macros",
  "derive_more",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "data_privacy_macros_impl",
  "mutants",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros_impl"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "insta",
  "mutants",
