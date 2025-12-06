@@ -188,6 +188,10 @@ impl Clock {
 
         use crate::runtime::InactiveClock;
 
+        /// How often the Tokio clock driver advances timers.
+        ///
+        /// A 10ms resolution balances precision with runtime overhead for the
+        /// background task that drives timer advancement in Tokio.
         const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
 
         let (state, driver) = InactiveClock::default().activate_with_state();

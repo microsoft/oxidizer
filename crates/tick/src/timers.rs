@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 /// Unique identifier for a timer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TimerKey {
+pub(crate) struct TimerKey {
     tick: Instant,
 
     /// Discriminator that ensures two timer IDs with the same instant can be created.
@@ -26,14 +26,19 @@ impl TimerKey {
     }
 }
 
-/// The default resolution of our timers. Timers with lower resolution will be rounded up to this value.
-pub const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
+/// The minimum resolution for timers.
+///
+/// Timers with a shorter period will be rounded up to this value. The 1ms resolution
+/// provides adequate precision for most use cases while minimizing the overhead of
+/// timer management. Setting this too low would increase CPU usage from frequent
+/// timer checks, while setting it too high would reduce timer precision.
+pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
 /// Management of one-shot timers, inspired by the [glommio runtime](https://github.com/DataDog/glommio/blob/d3f6e7a2ee7fb071ada163edcf90fc3286424c31/glommio/src/reactor.rs#L80).
 ///
 /// The timers managed by this collection are one-shot, meaning they will not fire again after being triggered.
 #[derive(Debug, Default)]
-pub struct Timers {
+pub(crate) struct Timers {
     /// An ordered map of registered timers.
     ///
     /// Timers are stored in the order in which they will fire.

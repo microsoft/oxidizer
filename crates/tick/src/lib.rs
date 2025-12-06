@@ -176,7 +176,6 @@ pub use clock_timestamp::ClockTimestamp;
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
-// No need to re-define the timeout future API, it's really minimal and already documented.
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
@@ -186,4 +185,5 @@ pub use timeout::Timeout;
 )]
 pub(crate) use timers::{TIMER_RESOLUTION, TimerKey, Timers};
 #[cfg(any(feature = "timestamp", test))]
+#[doc(inline)]
 pub use timestamp::Timestamp;

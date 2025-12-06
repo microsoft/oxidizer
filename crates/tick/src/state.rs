@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::timers::Timers;
 
 #[derive(Debug, Clone)]
-pub enum ClockState {
+pub(crate) enum ClockState {
     #[cfg(any(feature = "test-util", test))]
     ClockControl(crate::ClockControl),
     System(SynchronizedTimers),
@@ -24,7 +24,7 @@ impl ClockState {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct SynchronizedTimers {
+pub(crate) struct SynchronizedTimers {
     // The mutex here is not accessed on a hot path. Timers are accessed only when:
     //
     // 1. A new timer is registered.
@@ -51,13 +51,13 @@ impl SynchronizedTimers {
     }
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
+    pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
         self.with_timers(|timers| timers.advance_timers(now))
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub enum GlobalState {
+pub(crate) enum GlobalState {
     #[default]
     System,
     #[cfg(any(feature = "test-util", test))]
