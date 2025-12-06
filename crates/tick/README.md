@@ -142,7 +142,7 @@ timer
 
 ## Additional Examples
 
-The [time examples](https://o365exchange.visualstudio.com/O365%20Core/_git/ox-sdk?path=/crates/tick/examples)
+The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)
 contain additional examples of how to use the time primitives.
 
 <!-- cargo-rdme end -->
