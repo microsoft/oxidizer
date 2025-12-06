@@ -6,8 +6,11 @@ use std::time::{Duration, SystemTime};
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ClockTimestamp {
+    /// Represents system time.
     System(SystemTime),
+    /// Represents a specific timestamp.
     Timestamp(crate::Timestamp),
+    /// Represents an offset duration from the UNIX epoch.
     Offset(Duration),
 }
 

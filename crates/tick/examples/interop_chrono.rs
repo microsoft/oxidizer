@@ -24,18 +24,12 @@ fn main() -> anyhow::Result<()> {
     // we can convert it to chrono::DateTime<Utc>.
     let timestamp: DateTime<Utc> = now.to_system_time().into();
 
-    println!(
-        "Current time (UTC): {}",
-        timestamp.format(CHRONO_DISPLAY_FORMAT)
-    );
+    println!("Current time (UTC): {}", timestamp.format(CHRONO_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo. We need to use
     // the chrono_tz crate for timezone support.
     let zoned = timestamp.with_timezone(&chrono_tz::Asia::Tokyo);
-    println!(
-        "Current time (Asia/Tokyo): {}",
-        zoned.format(CHRONO_DISPLAY_FORMAT)
-    );
+    println!("Current time (Asia/Tokyo): {}", zoned.format(CHRONO_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in the current timezone.
 
@@ -43,11 +37,7 @@ fn main() -> anyhow::Result<()> {
 
     // Retrieving the timezone name is not supported in chrono.
     let tz = time_tz::system::get_timezone()?;
-    println!(
-        "Current time ({}): {}",
-        tz.name(),
-        zoned.format(CHRONO_DISPLAY_FORMAT)
-    );
+    println!("Current time ({}): {}", tz.name(), zoned.format(CHRONO_DISPLAY_FORMAT));
 
     Ok(())
 }

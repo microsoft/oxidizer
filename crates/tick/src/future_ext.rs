@@ -52,8 +52,7 @@ mod tests {
 
     #[test]
     fn timeout_control() {
-        let control = ClockControl::new()
-            .auto_advance_with_max(Duration::from_secs(1), Duration::from_secs(2));
+        let control = ClockControl::new().auto_advance_with_max(Duration::from_secs(1), Duration::from_secs(2));
 
         let clock = control.to_clock();
 
@@ -84,10 +83,7 @@ mod tests {
             Delay::new(&clock, Duration::from_secs(10)).await;
         };
 
-        let error = future
-            .timeout(Duration::from_millis(10), &clock)
-            .await
-            .unwrap_err();
+        let error = future.timeout(Duration::from_millis(10), &clock).await.unwrap_err();
 
         assert_eq!(error.to_string(), "future timed out");
     }
@@ -102,10 +98,7 @@ mod tests {
             10
         };
 
-        let result = future
-            .timeout(Duration::from_secs(10), &clock)
-            .await
-            .unwrap();
+        let result = future.timeout(Duration::from_secs(10), &clock).await.unwrap();
 
         assert_eq!(result, 10);
     }

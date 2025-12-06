@@ -190,10 +190,7 @@ mod tests {
         let ts = UnixSecondsTimestamp::from_secs(10).unwrap();
         let system_time: SystemTime = ts.into();
 
-        assert_eq!(
-            system_time,
-            SystemTime::UNIX_EPOCH + Duration::from_secs(10)
-        );
+        assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(10));
     }
 
     #[test]
@@ -222,17 +219,13 @@ mod tests {
         assert_eq!(stamp.to_string(), "3600");
         assert_eq!(
             Timestamp::from(stamp),
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600))
-                .unwrap()
+            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600)).unwrap()
         );
     }
 
     #[test]
     fn parse_max() {
-        let max_secs = Timestamp::MAX
-            .checked_duration_since(Timestamp::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let max_secs = Timestamp::MAX.checked_duration_since(Timestamp::UNIX_EPOCH).unwrap().as_secs();
 
         let stamp: UnixSecondsTimestamp = max_secs.to_string().parse().unwrap();
         assert_eq!(stamp.to_string(), max_secs.to_string());
@@ -240,9 +233,7 @@ mod tests {
 
     #[test]
     fn parse_max_overflow() {
-        "99999999999999999999999"
-            .parse::<UnixSecondsTimestamp>()
-            .unwrap_err();
+        "99999999999999999999999".parse::<UnixSecondsTimestamp>().unwrap_err();
     }
 
     #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.

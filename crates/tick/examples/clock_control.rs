@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 //! This example demonstrates how to use `ClockControl` to control the flow of time in tests.
 
 use std::time::Duration;
@@ -24,10 +26,7 @@ fn main() {
     control.advance(Duration::from_secs(1));
 
     // Verify that time has advanced by 1 second.
-    assert_eq!(
-        clock.timestamp().checked_duration_since(later).unwrap(),
-        Duration::from_secs(1)
-    );
+    assert_eq!(clock.timestamp().checked_duration_since(later).unwrap(), Duration::from_secs(1));
 
     // Create a stopwatch.
     let stopwatch = Stopwatch::new(&clock);

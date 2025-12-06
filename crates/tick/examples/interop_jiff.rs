@@ -25,25 +25,17 @@ fn main() -> anyhow::Result<()> {
     // First, we convert the timestamp to SystemTime. Once we have SystemTime,
     // we can convert it to jiff::Timestamp.
     let timestamp: TimestampJiff = now.to_system_time().try_into()?;
-    println!(
-        "Current time (UTC): {}",
-        timestamp.strftime(JIFF_DISPLAY_FORMAT)
-    );
+    println!("Current time (UTC): {}", timestamp.strftime(JIFF_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo.
     let zoned = timestamp.in_tz("Asia/Tokyo")?;
-    println!(
-        "Current time (Asia/Tokyo): {}",
-        zoned.strftime(JIFF_DISPLAY_FORMAT)
-    );
+    println!("Current time (Asia/Tokyo): {}", zoned.strftime(JIFF_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in the current time zone.
     let zoned = timestamp.to_zoned(TimeZone::system());
     println!(
         "Current time ({}): {}",
-        TimeZone::system()
-            .iana_name()
-            .context("failed to get time zone name")?,
+        TimeZone::system().iana_name().context("failed to get time zone name")?,
         zoned.strftime(JIFF_DISPLAY_FORMAT)
     );
 

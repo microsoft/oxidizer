@@ -46,9 +46,7 @@ mod tests {
 
     #[test]
     fn from_to_jiff() {
-        let timestamp =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_millis(123))
-                .unwrap();
+        let timestamp = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_millis(123)).unwrap();
         assert_eq!(timestamp, from_jiff(to_jiff(timestamp)).unwrap());
     }
 
@@ -56,9 +54,6 @@ mod tests {
     fn from_jiff_overflow() {
         let ts = TimestampJiff::from_duration(SignedDuration::from_secs(-10)).unwrap();
         let error = from_jiff(ts).unwrap_err();
-        assert_eq!(
-            "negative system time cannot be converted to timestamp",
-            error.to_string()
-        );
+        assert_eq!("negative system time cannot be converted to timestamp", error.to_string());
     }
 }

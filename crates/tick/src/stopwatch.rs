@@ -37,10 +37,7 @@ impl Stopwatch {
     /// Creates a high-accuracy stopwatch that measures elapsed time.
     #[cfg_attr(
         not(any(feature = "test-util", test)),
-        expect(
-            unused_variables,
-            reason = "intentionally not using self-references if test-util is disabled"
-        )
+        expect(unused_variables, reason = "intentionally not using self-references if test-util is disabled")
     )]
     #[must_use]
     pub fn new(clock: &Clock) -> Self {

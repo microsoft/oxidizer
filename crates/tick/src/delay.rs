@@ -189,10 +189,7 @@ mod tests {
     #[test]
     fn delay_close_to_max_ensure_timer_not_registered() {
         let clock = Clock::with_frozen_timers();
-        let mut delay = Delay::new(
-            &clock,
-            Duration::MAX.saturating_sub(Duration::from_millis(1)),
-        );
+        let mut delay = Delay::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
         assert_eq!(poll_delay(&mut delay), Poll::Pending);
         assert_eq!(delay.duration, Duration::MAX);

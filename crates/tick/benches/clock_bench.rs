@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 
+#![expect(missing_docs, reason = "Benchmark code")]
+
 //! Benchmark to assess the performance of the clock. The scenario:
 //! * Register 5 delays, spread across 5 seconds
 //! * Advance timers 2 times to make them all fire

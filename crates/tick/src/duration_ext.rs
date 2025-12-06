@@ -103,10 +103,7 @@ mod tests {
         assert_eq!(Duration::from_secs(59).as_minutes(), 0);
         assert_eq!(Duration::from_secs(80).as_minutes(), 1);
         assert_eq!(Duration::from_secs(121).as_minutes(), 2);
-        assert_eq!(
-            Duration::from_secs(u64::MAX).as_minutes(),
-            307_445_734_561_825_860
-        );
+        assert_eq!(Duration::from_secs(u64::MAX).as_minutes(), 307_445_734_561_825_860);
     }
 
     #[test]
@@ -117,10 +114,7 @@ mod tests {
         assert_eq!(Duration::from_secs(60 * 60 + 1).as_hours(), 1);
         assert_eq!(Duration::from_secs(60 * 60 - 1).as_hours(), 0);
         assert_eq!(Duration::from_secs(2 * 60 * 60).as_hours(), 2);
-        assert_eq!(
-            Duration::from_secs(u64::MAX).as_hours(),
-            5_124_095_576_030_431
-        );
+        assert_eq!(Duration::from_secs(u64::MAX).as_hours(), 5_124_095_576_030_431);
     }
 
     #[test]

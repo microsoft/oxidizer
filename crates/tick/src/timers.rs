@@ -16,10 +16,7 @@ pub struct TimerKey {
 
 impl TimerKey {
     const fn new(tick: Instant, id: u32) -> Self {
-        Self {
-            tick,
-            discriminator: id,
-        }
+        Self { tick, discriminator: id }
     }
 
     /// Determines when the timer will fire.
@@ -199,10 +196,7 @@ mod tests {
         let now = Instant::now();
 
         let _ = timers.register(now, Waker::noop().clone());
-        let _ = timers.register(
-            now.checked_add(Duration::from_secs(1)).unwrap(),
-            Waker::noop().clone(),
-        );
+        let _ = timers.register(now.checked_add(Duration::from_secs(1)).unwrap(), Waker::noop().clone());
 
         assert_eq!(timers.next_timer(), Some(now));
     }

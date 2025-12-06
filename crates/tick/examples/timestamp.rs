@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-#![expect(
-    clippy::use_debug,
-    reason = "debug formatting used for example purposes"
-)]
+#![expect(clippy::unwrap_used, clippy::use_debug, reason = "example code")]
 
 //! This file demonstrates the usage of `Timestamp`, which is used to represent
 //! an absolute point in time.
@@ -33,11 +30,7 @@ fn creation(clock: &Clock) -> anyhow::Result<()> {
     // Retrieve the current absolute UTC time.
     let now = clock.timestamp();
 
-    println!(
-        "Current Time (UTC): {}, System Time: {:?}",
-        now,
-        now.to_system_time()
-    );
+    println!("Current Time (UTC): {}, System Time: {:?}", now, now.to_system_time());
 
     // You can also create a timestamp manually using SystemTime.
     let _time = Timestamp::from_system_time(

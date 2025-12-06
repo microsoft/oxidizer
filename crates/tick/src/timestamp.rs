@@ -193,6 +193,10 @@ impl Timestamp {
     /// Creates a new `Timestamp` from the given [`SystemTime`]. Returns an error if
     /// conversion of the system time to the duration overflows the timestamp.
     ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if outside of the valid range supported for timestamp.
+    ///
     /// # Examples
     ///
     /// ```
@@ -210,9 +214,9 @@ impl Timestamp {
     )]
     #[cfg_attr(test, mutants::skip)] // It is infeasible to test the "beyond max" case since it is not practical to construct such a value in tests.
     pub fn from_system_time(time: SystemTime) -> Result<Self> {
-        let duration = time.duration_since(SystemTime::UNIX_EPOCH).map_err(|_| {
-            Error::out_of_range("negative system time cannot be converted to timestamp")
-        })?;
+        let duration = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| Error::out_of_range("negative system time cannot be converted to timestamp"))?;
 
         if duration > Self::MAX.unix_duration {
             return Err(Error::out_of_range(
@@ -220,9 +224,7 @@ impl Timestamp {
             ));
         }
 
-        Ok(Self {
-            unix_duration: duration,
-        })
+        Ok(Self { unix_duration: duration })
     }
 
     /// Converts the timestamp to [`SystemTime`].
@@ -241,10 +243,7 @@ impl Timestamp {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "this function is guaranteed to never panic"
-    )]
+    #[expect(clippy::missing_panics_doc, reason = "this function is guaranteed to never panic")]
     pub fn to_system_time(self) -> SystemTime {
         SystemTime::UNIX_EPOCH
             .checked_add(self.unix_duration)
@@ -271,6 +270,11 @@ impl Timestamp {
     ///
     /// Returns [`Error`] if the earlier timestamp is greater than the later timestamp.
     ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if the earlier timestamp refers to an earlier point in time
+    /// than the current timestamp.
+    ///
     /// # Examples
     /// ```
     /// use std::time::{Duration, SystemTime};
@@ -292,12 +296,17 @@ impl Timestamp {
     pub fn checked_duration_since(&self, earlier: impl Into<Self>) -> Result<Duration> {
         let timestamp: Self = earlier.into();
 
-        self.unix_duration.checked_sub(timestamp.unix_duration).ok_or_else(|| {
-            Error::out_of_range("earlier timestamp refers to a point in time that is greater than the later timestamp")
-        })
+        self.unix_duration
+            .checked_sub(timestamp.unix_duration)
+            .ok_or_else(|| Error::out_of_range("earlier timestamp refers to a point in time that is greater than the later timestamp"))
     }
 
     /// Adds the duration to the timestamp, returning an error if overflow occurs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if adding the duration results in a value greater than the maximum
+    /// value that can be represented by timestamp.
     ///
     /// # Examples
     ///
@@ -333,6 +342,11 @@ impl Timestamp {
     /// Subtracts the duration from the timestamp, returning an error if the resulting
     /// value would be less than the minimum supported timestamp value.
     ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if subtracting the duration results in a value that cannot
+    /// be represented by timestamp.
+    ///
     /// # Examples
     ///
     /// ```
@@ -354,13 +368,11 @@ impl Timestamp {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn checked_sub(&self, duration: Duration) -> Result<Self> {
-        let unix_duration = self.unix_duration.checked_sub(duration).ok_or_else(
-            || {
-                Error::out_of_range(
-                    "subtracting the duration from timestamp results in a negative value that cannot be represented by timestamp",
-                )
-            },
-        )?;
+        let unix_duration = self.unix_duration.checked_sub(duration).ok_or_else(|| {
+            Error::out_of_range(
+                "subtracting the duration from timestamp results in a negative value that cannot be represented by timestamp",
+            )
+        })?;
 
         Ok(Self::new(unix_duration))
     }
@@ -447,8 +459,7 @@ impl Timestamp {
     /// ```
     #[must_use]
     pub fn saturating_duration_since(&self, earlier: impl Into<Self>) -> Duration {
-        self.checked_duration_since(earlier)
-            .unwrap_or(Duration::ZERO)
+        self.checked_duration_since(earlier).unwrap_or(Duration::ZERO)
     }
 }
 
@@ -478,8 +489,7 @@ impl Add<Duration> for Timestamp {
     type Output = Self;
 
     fn add(self, rhs: Duration) -> Self::Output {
-        self.checked_add(rhs)
-            .expect("addition of duration to timestamp overflowed")
+        self.checked_add(rhs).expect("addition of duration to timestamp overflowed")
     }
 }
 
@@ -493,8 +503,7 @@ impl Sub<Duration> for Timestamp {
     type Output = Self;
 
     fn sub(self, rhs: Duration) -> Self::Output {
-        self.checked_sub(rhs)
-            .expect("subtraction of duration from timestamp underflowed")
+        self.checked_sub(rhs).expect("subtraction of duration from timestamp underflowed")
     }
 }
 
@@ -576,8 +585,7 @@ mod tests {
 
     #[test]
     fn from_system_time_overflow() {
-        let system_time =
-            SystemTime::UNIX_EPOCH + Timestamp::MAX.unix_duration + Duration::from_secs(1);
+        let system_time = SystemTime::UNIX_EPOCH + Timestamp::MAX.unix_duration + Duration::from_secs(1);
 
         let error = Timestamp::from_system_time(system_time).unwrap_err();
         assert_eq!(
@@ -588,16 +596,14 @@ mod tests {
 
     #[test]
     fn checked_add() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
         time.checked_add(Duration::from_secs(1)).unwrap();
         time.checked_add(Duration::MAX).unwrap_err();
     }
 
     #[test]
     fn checked_sub() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
         time.checked_sub(Duration::from_secs(1)).unwrap();
         time.checked_sub(Duration::MAX).unwrap_err();
     }
@@ -608,31 +614,22 @@ mod tests {
 
         let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + duration).unwrap();
 
-        assert_eq!(
-            time.checked_sub(duration).unwrap().unix_duration,
-            Duration::ZERO
-        );
+        assert_eq!(time.checked_sub(duration).unwrap().unix_duration, Duration::ZERO);
     }
 
     #[test]
     fn checked_duration_since() {
-        let time1 =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
-        let time2 =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
+        let time1 = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+        let time2 = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
 
-        assert_eq!(
-            time2.checked_duration_since(time1).unwrap(),
-            Duration::from_secs(1)
-        );
+        assert_eq!(time2.checked_duration_since(time1).unwrap(), Duration::from_secs(1));
 
         time1.checked_duration_since(time2).unwrap_err();
     }
 
     #[test]
     fn saturating_add() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
 
         // Normal addition
         let result = time.saturating_add(Duration::from_secs(1));
@@ -649,8 +646,7 @@ mod tests {
 
     #[test]
     fn saturating_sub() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
 
         // Normal subtraction
         let result = time.saturating_sub(Duration::from_secs(1));
@@ -667,16 +663,11 @@ mod tests {
 
     #[test]
     fn saturating_duration_since() {
-        let time1 =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
-        let time2 =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
+        let time1 = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+        let time2 = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
 
         // Normal case
-        assert_eq!(
-            time2.saturating_duration_since(time1),
-            Duration::from_secs(1)
-        );
+        assert_eq!(time2.saturating_duration_since(time1), Duration::from_secs(1));
 
         // Returns zero when earlier is greater
         assert_eq!(time1.saturating_duration_since(time2), Duration::ZERO);
@@ -687,10 +678,8 @@ mod tests {
 
     #[test]
     fn comparison_operators() {
-        let lesser =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
-        let greater =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
+        let lesser = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+        let greater = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(2)).unwrap();
 
         assert_ne!(lesser, greater);
         assert!(lesser <= greater);
@@ -707,8 +696,7 @@ mod tests {
 
     #[test]
     fn display() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1)).unwrap();
         assert_eq!(time.to_string(), "1970-01-01T00:00:01Z");
     }
 
@@ -767,18 +755,13 @@ mod tests {
     #[test]
     fn serde_deserialize_invalid() {
         // Test that invalid input fails to deserialize
-        let result: std::result::Result<Timestamp, _> =
-            serde_json::from_str("\"invalid-timestamp\"");
-        assert!(
-            result.is_err(),
-            "Expected deserialization to fail for invalid input"
-        );
+        let result: std::result::Result<Timestamp, _> = serde_json::from_str("\"invalid-timestamp\"");
+        assert!(result.is_err(), "Expected deserialization to fail for invalid input");
     }
 
     #[test]
     fn add_operator() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(10)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(10)).unwrap();
         let duration = Duration::from_secs(5);
 
         let result = time + duration;
@@ -790,8 +773,7 @@ mod tests {
 
     #[test]
     fn sub_operator() {
-        let time =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(10)).unwrap();
+        let time = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(10)).unwrap();
         let duration = Duration::from_secs(5);
 
         let result = time - duration;

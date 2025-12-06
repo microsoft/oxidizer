@@ -163,19 +163,13 @@ mod tests {
     #[test]
     fn to_system_time() {
         let stamp: Rfc2822Timestamp = "Thu, 1 Jan 1970 00:00:01 GMT".parse().unwrap();
-        assert_eq!(
-            stamp.0.to_system_time(),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(1)
-        );
+        assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
     }
 
     #[test]
     fn to_system_time_alternative_format() {
         let stamp: Rfc2822Timestamp = "Thu, 1 Jan 1970 00:00:01 -0000".parse().unwrap();
-        assert_eq!(
-            stamp.0.to_system_time(),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(1)
-        );
+        assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
     }
 
     #[test]
@@ -186,8 +180,7 @@ mod tests {
         assert_eq!(stamp.to_string(), "Thu, 01 Jan 1970 01:00:00 GMT");
         assert_eq!(
             Timestamp::from(stamp),
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600))
-                .unwrap()
+            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600)).unwrap()
         );
     }
 
@@ -212,9 +205,7 @@ mod tests {
 
     #[test]
     fn parse_max_overflow() {
-        "Thu, 30 Dec 10000 22:00:00 GMT"
-            .parse::<Rfc2822Timestamp>()
-            .unwrap_err();
+        "Thu, 30 Dec 10000 22:00:00 GMT".parse::<Rfc2822Timestamp>().unwrap_err();
     }
 
     #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.

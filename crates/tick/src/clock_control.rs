@@ -322,9 +322,7 @@ impl ClockControl {
                 self.with_state(|v| v.advance(duration, TimeFlow::Forward));
             }
             Err(_e) => {
-                let duration = now
-                    .duration_since(timestamp)
-                    .expect("the resulting duration must be positive here");
+                let duration = now.duration_since(timestamp).expect("the resulting duration must be positive here");
 
                 self.with_state(|v| v.advance(duration, TimeFlow::Backward));
             }
@@ -362,10 +360,7 @@ impl ClockControl {
     where
         F: FnOnce(&mut State) -> R,
     {
-        f(&mut self
-            .state
-            .lock()
-            .expect("acquiring lock must always succeed"))
+        f(&mut self.state.lock().expect("acquiring lock must always succeed"))
     }
 }
 
@@ -412,8 +407,7 @@ impl State {
     }
 
     fn auto_advance(&mut self, duration: Option<Duration>) {
-        let auto_advance =
-            self.get_next_auto_advance_duration(duration.unwrap_or(self.auto_advance));
+        let auto_advance = self.get_next_auto_advance_duration(duration.unwrap_or(self.auto_advance));
         self.auto_advance_total = self.auto_advance_total.saturating_add(auto_advance);
         self.advance(auto_advance, TimeFlow::Forward);
     }
@@ -464,25 +458,13 @@ impl State {
 
         match flow {
             TimeFlow::Forward => {
-                self.instant = self
-                    .instant
-                    .checked_add(duration)
-                    .expect(OUTSIDE_RANGE_MESSAGE);
-                self.system_time = self
-                    .system_time
-                    .checked_add(duration)
-                    .expect(OUTSIDE_RANGE_MESSAGE);
+                self.instant = self.instant.checked_add(duration).expect(OUTSIDE_RANGE_MESSAGE);
+                self.system_time = self.system_time.checked_add(duration).expect(OUTSIDE_RANGE_MESSAGE);
                 self.timers.advance_timers(self.instant);
             }
             TimeFlow::Backward => {
-                self.instant = self
-                    .instant
-                    .checked_sub(duration)
-                    .expect(OUTSIDE_RANGE_MESSAGE);
-                self.system_time = self
-                    .system_time
-                    .checked_sub(duration)
-                    .expect(OUTSIDE_RANGE_MESSAGE);
+                self.instant = self.instant.checked_sub(duration).expect(OUTSIDE_RANGE_MESSAGE);
+                self.system_time = self.system_time.checked_sub(duration).expect(OUTSIDE_RANGE_MESSAGE);
 
                 // There is no point in advancing/triggering the timers if we are moving back
                 // in time. Timers are only ever fired when time moves forward.
@@ -510,7 +492,8 @@ enum TimeFlow {
     Backward,
 }
 
-static OUTSIDE_RANGE_MESSAGE: &str = "moving the clock outside of the supported time range is not possible: [1970-01-01T00:00:00Z, 9999-12-30T22:00:00.9999999Z]";
+static OUTSIDE_RANGE_MESSAGE: &str =
+    "moving the clock outside of the supported time range is not possible: [1970-01-01T00:00:00Z, 9999-12-30T22:00:00.9999999Z]";
 
 #[cfg(test)]
 mod tests {
@@ -541,10 +524,7 @@ mod tests {
 
         assert_eq!(control.with_state(|s| s.auto_advance), duration);
         let now = clock.timestamp();
-        assert_eq!(
-            clock.timestamp().checked_duration_since(now).unwrap(),
-            duration
-        );
+        assert_eq!(clock.timestamp().checked_duration_since(now).unwrap(), duration);
 
         let watch = Stopwatch::new(&clock);
         assert_eq!(watch.elapsed(), duration);
@@ -561,10 +541,7 @@ mod tests {
         () = control.advance(Duration::from_secs(1));
 
         // assert
-        assert_eq!(
-            clock.timestamp().checked_duration_since(now).unwrap(),
-            Duration::from_secs(1)
-        );
+        assert_eq!(clock.timestamp().checked_duration_since(now).unwrap(), Duration::from_secs(1));
     }
 
     #[test]
@@ -578,10 +555,7 @@ mod tests {
         control.advance_to(now.checked_add(Duration::from_secs(1)).unwrap());
 
         // assert
-        assert_eq!(
-            clock.timestamp().checked_duration_since(now).unwrap(),
-            Duration::from_secs(1)
-        );
+        assert_eq!(clock.timestamp().checked_duration_since(now).unwrap(), Duration::from_secs(1));
     }
 
     #[test]
@@ -601,15 +575,9 @@ mod tests {
         let instant_now2 = clock.instant();
 
         // assert
-        assert_eq!(
-            now1.checked_duration_since(now2).unwrap(),
-            Duration::from_secs(5)
-        );
+        assert_eq!(now1.checked_duration_since(now2).unwrap(), Duration::from_secs(5));
 
-        assert_eq!(
-            instant_now1.checked_duration_since(instant_now2).unwrap(),
-            Duration::from_secs(5)
-        );
+        assert_eq!(instant_now1.checked_duration_since(instant_now2).unwrap(), Duration::from_secs(5));
     }
 
     #[test]
@@ -623,10 +591,7 @@ mod tests {
         () = control.advance_millis(123);
 
         // assert
-        assert_eq!(
-            clock.timestamp().checked_duration_since(now).unwrap(),
-            Duration::from_millis(123)
-        );
+        assert_eq!(clock.timestamp().checked_duration_since(now).unwrap(), Duration::from_millis(123));
     }
 
     #[test]
@@ -672,16 +637,10 @@ mod tests {
         let clock = control.to_clock();
         let now = clock.timestamp();
 
-        control.register_timer(
-            clock.instant() + Duration::from_secs(100),
-            Waker::noop().clone(),
-        );
+        control.register_timer(clock.instant() + Duration::from_secs(100), Waker::noop().clone());
 
         // assert
-        assert_eq!(
-            clock.timestamp().checked_duration_since(now).unwrap(),
-            Duration::from_secs(100)
-        );
+        assert_eq!(clock.timestamp().checked_duration_since(now).unwrap(), Duration::from_secs(100));
     }
 
     #[test]
@@ -689,10 +648,7 @@ mod tests {
         // arrange
         let control = ClockControl::new();
         let clock = control.to_clock();
-        control.register_timer(
-            clock.instant() + Duration::from_secs(1),
-            Waker::noop().clone(),
-        );
+        control.register_timer(clock.instant() + Duration::from_secs(1), Waker::noop().clone());
 
         // act
         control.advance(Duration::from_secs(1));
@@ -703,8 +659,7 @@ mod tests {
 
     #[test]
     fn auto_advance_with_max() {
-        let control = ClockControl::new()
-            .auto_advance_with_max(Duration::from_millis(550), Duration::from_secs(2));
+        let control = ClockControl::new().auto_advance_with_max(Duration::from_millis(550), Duration::from_secs(2));
         let clock = control.to_clock();
 
         let anchor = clock.timestamp();
@@ -799,10 +754,7 @@ mod tests {
         }
 
         // Time should have advanced to the target time exactly once
-        assert_eq!(
-            clock.instant().saturating_duration_since(start_instant),
-            Duration::from_secs(100)
-        );
+        assert_eq!(clock.instant().saturating_duration_since(start_instant), Duration::from_secs(100));
 
         // All timers should have been triggered and removed
         assert_eq!(control.timers_len(), 0);
@@ -821,10 +773,7 @@ mod tests {
         // Register many timers at different future times in a pattern that requires
         // iterative processing through the while loop
         for i in 1..=1000 {
-            control.register_timer(
-                start_instant + Duration::from_millis(i),
-                Waker::noop().clone(),
-            );
+            control.register_timer(start_instant + Duration::from_millis(i), Waker::noop().clone());
         }
 
         // Time should have advanced to process all timers
@@ -833,8 +782,6 @@ mod tests {
         assert_eq!(control.timers_len(), 0);
 
         // Time should have advanced at least to the last timer
-        assert!(
-            clock.instant().saturating_duration_since(start_instant) >= Duration::from_millis(1)
-        );
+        assert!(clock.instant().saturating_duration_since(start_instant) >= Duration::from_millis(1));
     }
 }

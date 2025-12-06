@@ -25,10 +25,7 @@ async fn main() -> anyhow::Result<()> {
     spawn(async move {
         let stopwatch = Stopwatch::new(&clock_clone);
         Delay::new(&clock_clone, Duration::from_secs(2)).await;
-        println!(
-            "Elapsed time (background): {}ms",
-            stopwatch.elapsed().as_millis()
-        );
+        println!("Elapsed time (background): {}ms", stopwatch.elapsed().as_millis());
     })
     .await?;
 

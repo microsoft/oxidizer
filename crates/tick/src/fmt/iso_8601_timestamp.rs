@@ -158,18 +158,14 @@ mod tests {
         assert_eq!(stamp.to_string(), "1970-01-01T01:00:00Z");
         assert_eq!(
             Timestamp::from(stamp),
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600))
-                .unwrap()
+            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600)).unwrap()
         );
     }
 
     #[test]
     fn to_system_time() {
         let stamp: Iso8601Timestamp = "1970-01-01T01:00:00Z".parse().unwrap();
-        assert_eq!(
-            stamp.0.to_system_time(),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(3600)
-        );
+        assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(3600));
     }
 
     #[test]
@@ -180,9 +176,7 @@ mod tests {
 
     #[test]
     fn parse_max_overflow() {
-        "10000-12-30T22:00:00.999999999Z"
-            .parse::<Iso8601Timestamp>()
-            .unwrap_err();
+        "10000-12-30T22:00:00.999999999Z".parse::<Iso8601Timestamp>().unwrap_err();
     }
 
     #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.
@@ -221,9 +215,7 @@ mod tests {
 
     #[test]
     fn ensure_nanos_rounded() {
-        let timestamp =
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::new(8, 999_999_999))
-                .unwrap();
+        let timestamp = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::new(8, 999_999_999)).unwrap();
 
         let iso: Iso8601Timestamp = timestamp.into();
 

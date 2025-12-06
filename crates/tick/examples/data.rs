@@ -79,10 +79,7 @@ impl CachedData {
     /// Checks if the cached data has expired based on the expiration duration.
     #[must_use]
     pub fn is_expired(&self, clock: &Clock) -> bool {
-        let diff = clock
-            .timestamp()
-            .checked_duration_since(self.last_access)
-            .unwrap_or(Duration::ZERO);
+        let diff = clock.timestamp().checked_duration_since(self.last_access).unwrap_or(Duration::ZERO);
 
         diff > Self::EXPIRATION
     }

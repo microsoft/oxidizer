@@ -206,9 +206,7 @@ impl Clock {
                 // - When all Clock instances are dropped, only one instance of the cancellation token remains,
                 //   which is this background task
                 // - When there are no timers and no clocks left, it's a signal to drop this routine
-                if driver.advance_timers(Instant::now()).is_none()
-                    && Arc::strong_count(&cancelation) == 1
-                {
+                if driver.advance_timers(Instant::now()).is_none() && Arc::strong_count(&cancelation) == 1 {
                     break;
                 }
             }
@@ -478,10 +476,7 @@ impl From<&Self> for Clock {
 
 #[cfg(test)]
 mod tests {
-    #![allow(
-        clippy::arithmetic_side_effects,
-        reason = "no need to be strict in tests"
-    )]
+    #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
 
     use std::thread::sleep;
     use std::time::Duration;
@@ -519,10 +514,7 @@ mod tests {
 
         () = control.advance(Duration::from_secs(10));
 
-        assert_eq!(
-            clock.system_time(),
-            now.checked_add(Duration::from_secs(10)).unwrap()
-        );
+        assert_eq!(clock.system_time(), now.checked_add(Duration::from_secs(10)).unwrap());
     }
 
     #[test]

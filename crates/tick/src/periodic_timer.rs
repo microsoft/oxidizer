@@ -220,10 +220,7 @@ mod tests {
     fn new_duration_near_max_never_fires() {
         let clock = Clock::new_frozen();
 
-        let mut timer = PeriodicTimer::new(
-            &clock,
-            Duration::MAX.saturating_sub(Duration::from_millis(1)),
-        );
+        let mut timer = PeriodicTimer::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
         assert_eq!(poll_timer(&mut timer), Poll::Pending);
         assert_eq!(poll_timer(&mut timer), Poll::Pending);
