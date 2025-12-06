@@ -475,6 +475,7 @@ impl From<&Self> for Clock {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]

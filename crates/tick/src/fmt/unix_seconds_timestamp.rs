@@ -165,6 +165,7 @@ impl<'de> serde_core::Deserialize<'de> for UnixSecondsTimestamp {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

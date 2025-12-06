@@ -42,6 +42,7 @@ pub trait FutureExt: Future {
 
 impl<T> FutureExt for T where T: Future {}
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::task;

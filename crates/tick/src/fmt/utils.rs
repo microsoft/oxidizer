@@ -18,6 +18,7 @@ pub(super) fn to_jiff(value: Timestamp) -> TimestampJiff {
         .expect("conversion of tick timestamp to jiff stamp shall never fail")
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::time::Duration;

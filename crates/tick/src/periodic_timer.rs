@@ -154,6 +154,7 @@ impl Drop for PeriodicTimer {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::thread;

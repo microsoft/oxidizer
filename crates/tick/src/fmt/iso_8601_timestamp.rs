@@ -134,6 +134,7 @@ impl<'de> serde_core::Deserialize<'de> for Iso8601Timestamp {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::time::Duration;

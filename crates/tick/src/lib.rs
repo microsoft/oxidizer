@@ -162,7 +162,6 @@ mod timers;
 
 #[cfg(any(feature = "test-util", test))]
 mod clock_timestamp;
-mod duration_ext;
 pub mod runtime;
 mod timeout;
 #[cfg(any(feature = "timestamp", test))]
@@ -174,7 +173,6 @@ pub use clock_control::ClockControl;
 #[cfg(any(feature = "test-util", test))]
 pub use clock_timestamp::ClockTimestamp;
 pub use delay::Delay;
-pub use duration_ext::DurationExt;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
 // No need to re-define the timeout future API, it's really minimal and already documented.

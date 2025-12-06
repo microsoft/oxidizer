@@ -144,6 +144,7 @@ impl<'de> serde_core::Deserialize<'de> for Rfc2822Timestamp {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::time::Duration;

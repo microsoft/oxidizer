@@ -499,6 +499,7 @@ enum TimeFlow {
 static OUTSIDE_RANGE_MESSAGE: &str =
     "moving the clock outside of the supported time range is not possible: [1970-01-01T00:00:00Z, 9999-12-30T22:00:00.9999999Z]";
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

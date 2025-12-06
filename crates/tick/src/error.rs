@@ -90,6 +90,7 @@ impl std::error::Error for Error {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::error::Error as StdError;
