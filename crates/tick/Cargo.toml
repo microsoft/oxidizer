@@ -22,11 +22,14 @@ crate-type = ["lib"]
 workspace = true
 
 [features]
-default = ["timestamp"]
+default = []
 # Enables additional test-specific APIs
 test-util = []
+# Serialization support for serde
 serde = ["dep:serde_core"]
+# Integration with tokio runtime
 tokio = ["dep:tokio"]
+# Exposes timestamp APIs
 timestamp = ["dep:jiff"]
 
 [dependencies]

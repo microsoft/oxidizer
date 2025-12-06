@@ -10,6 +10,8 @@
     )
 )]
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Provides primitives to interact with and manipulate machine time.
 //!
 //! # Why?
