@@ -1,0 +1,93 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "tick"
+description = "Provides primitives to interact with and manipulate machine time."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["time", "clock", "tick", "timestamp", "runtime", "stopwatch", "oxidizer"]
+categories = ["data-structures"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[lints]
+workspace = true
+
+[features]
+default = ["timestamp"]
+# Enables additional test-specific APIs
+test-util = []
+serde = ["dep:serde_core"]
+tokio = ["dep:tokio"]
+timestamp = ["dep:jiff"]
+
+[dependencies]
+jiff = { workspace = true, default-features = false, features = ["std"], optional = true }
+pin-project-lite = { workspace = true }
+serde_core = { workspace = true, features = ["std"], default-features = false, optional = true }
+futures-core = { workspace = true }
+tokio = { workspace = true, optional = true, features = ["time", "rt"] }
+
+[dev-dependencies]
+#external
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+chrono-tz = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
+jiff = { workspace = true, default-features = true }
+mutants = { workspace = true }
+serde = { workspace = true, features = ["std"], default-features = false }
+serde_json = { workspace = true }
+static_assertions = { workspace = true }
+time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
+time-tz = { workspace = true, features = ["system"] }
+tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
+
+[[example]]
+name = "basic"
+required-features = ["tokio"]
+
+[[example]]
+name = "clock"
+required-features = ["tokio"]
+
+[[example]]
+name = "clock_control"
+required-features = ["test-util"]
+
+[[example]]
+name = "data"
+required-features = ["test-util", "serde", "tokio"]
+
+[[example]]
+name = "interop_chrono"
+required-features = ["test-util"]
+
+[[example]]
+name = "interop_time"
+required-features = ["test-util"]
+
+[[example]]
+name = "interop_jiff"
+required-features = ["test-util"]
+
+[[example]]
+name = "timestamp"
+required-features = ["test-util"]
+
+[[example]]
+name = "basic_tokio"
+required-features = ["tokio"]
+
+[[bench]]
+name = "clock_bench"
+harness = false
