@@ -36,6 +36,7 @@ These are the crates built out of this repo:
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/README.md) - Macros for the `thread_aware` crate.
+- [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 
 ## About this Repo
 
