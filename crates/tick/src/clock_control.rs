@@ -197,11 +197,14 @@ impl ClockControl {
         self
     }
 
-    /// Sets the auto-advance duration with a maximum total limit.
+    /// Sets a limit on the total auto-advance duration.
     ///
-    /// Sets the duration by which the clock will auto-advance when accessing the current time,
-    /// along with the maximum total auto-advance duration. This method is useful when you want to
-    /// ensure that the total auto-advance duration doesn't exceed a certain limit.
+    /// When auto-advance is enabled via [`Self::auto_advance`], this method limits the total
+    /// amount of time that can be auto-advanced. Once the limit is reached, further calls to
+    /// access the current time will no longer auto-advance the clock.
+    ///
+    /// **Note:** This method only has an effect if [`Self::auto_advance`] has been called
+    /// previously to set a non-zero auto-advance duration.
     ///
     /// # Examples
     ///
@@ -210,11 +213,12 @@ impl ClockControl {
     ///
     /// use tick::{Clock, ClockControl, Delay, FutureExt};
     ///
-    /// # async fn auto_advance_with_max_example() {
+    /// # async fn auto_advance_limit_example() {
     /// // Limit the max auto-advance to 500ms. The 700ms delay never completes because
     /// // the total auto-advance is capped. Instead, the 200ms timeout completes.
     /// let clock = ClockControl::new()
-    ///     .auto_advance_with_max(Duration::from_millis(200), Duration::from_millis(500))
+    ///     .auto_advance(Duration::from_millis(200))
+    ///     .auto_advance_limit(Duration::from_millis(500))
     ///     .to_clock();
     ///
     /// // Create a long-running future
@@ -228,13 +232,11 @@ impl ClockControl {
     ///
     /// assert_eq!(timeout_error.to_string(), "future timed out");
     /// # }
-    /// # futures::executor::block_on(auto_advance_with_max_example());
     /// ```
     #[must_use]
-    pub fn auto_advance_with_max(self, duration: Duration, max: Duration) -> Self {
+    pub fn auto_advance_limit(self, limit: Duration) -> Self {
         self.with_state(|v| {
-            v.auto_advance = duration;
-            v.auto_advance_total_max = Some(max);
+            v.auto_advance_total_max = Some(limit);
         });
 
         self
@@ -242,7 +244,7 @@ impl ClockControl {
 
     /// Determines whether the clock control should automatically auto-advance all upcoming timers.
     ///
-    /// Note that when [`Self::auto_advance_with_max`] is used, the maximum total auto-advance duration is respected.
+    /// Note that when [`Self::auto_advance_limit`] is used, the maximum total auto-advance duration is respected.
     /// This means that when the total of all auto-advances exceeds the maximum, the auto-advance will stop and such timers won't be fired.
     #[must_use]
     pub fn auto_advance_timers(self, enabled: bool) -> Self {
@@ -659,8 +661,10 @@ mod tests {
     }
 
     #[test]
-    fn auto_advance_with_max() {
-        let control = ClockControl::new().auto_advance_with_max(Duration::from_millis(550), Duration::from_secs(2));
+    fn auto_advance_limit() {
+        let control = ClockControl::new()
+            .auto_advance(Duration::from_millis(550))
+            .auto_advance_limit(Duration::from_secs(2));
         let clock = control.to_clock();
 
         let anchor = clock.timestamp();

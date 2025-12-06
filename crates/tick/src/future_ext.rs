@@ -53,7 +53,9 @@ mod tests {
 
     #[test]
     fn timeout_control() {
-        let control = ClockControl::new().auto_advance_with_max(Duration::from_secs(1), Duration::from_secs(2));
+        let control = ClockControl::new()
+            .auto_advance(Duration::from_secs(1))
+            .auto_advance_limit(Duration::from_secs(2));
 
         let clock = control.to_clock();
 
