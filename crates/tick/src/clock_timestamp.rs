@@ -10,6 +10,7 @@ pub enum ClockTimestamp {
     /// Represents system time.
     System(SystemTime),
     /// Represents a specific timestamp.
+    #[cfg(any(feature = "timestamp", test))]
     Timestamp(crate::Timestamp),
     /// Represents an offset duration from the UNIX epoch.
     Offset(Duration),

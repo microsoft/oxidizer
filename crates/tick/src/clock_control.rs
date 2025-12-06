@@ -140,6 +140,7 @@ impl ClockControl {
         let this = Self::new();
         match timestamp.into() {
             ClockTimestamp::System(time) => this.advance_to(time),
+            #[cfg(any(feature = "timestamp", test))]
             ClockTimestamp::Timestamp(ts) => this.advance_to(ts.to_system_time()),
             ClockTimestamp::Offset(duration) => this.advance(duration),
         }
