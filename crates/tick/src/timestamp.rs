@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::fmt::{self, Debug, Display};
 use std::ops::{Add, Sub};

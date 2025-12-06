@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This sample demonstrates interoperability between `tick` and the "time" crate.
 //!

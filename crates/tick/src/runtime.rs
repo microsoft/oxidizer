@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Infrastructure for integrating time primitives into async runtimes.
 //!

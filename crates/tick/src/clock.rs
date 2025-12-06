@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #[cfg(any(feature = "tokio", test))]
 use std::sync::Arc;

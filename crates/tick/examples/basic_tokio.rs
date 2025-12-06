@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates the basic usage of Clock with the Tokio runtime.
 

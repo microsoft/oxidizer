@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates how to work with serializable data,
 //! especially for storing and retrieving timestamps.
