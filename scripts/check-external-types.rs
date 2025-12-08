@@ -9,28 +9,28 @@ edition = "2024"
 [dependencies]
 automation = { path = "../crates/automation" }
 anyhow = "1.0"
+argh = "0.1"
 ---
 
-use std::env;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+use argh::FromArgs;
 
 /// Check external types in all workspace library crates.
-///
-/// Usage: check-external-types.rs <TOOLCHAIN>
-///
-/// Arguments:
-///   <TOOLCHAIN>    The Rust toolchain to use (e.g., 'nightly-2025-08-06')
 ///
 /// This script iterates through all workspace packages and runs
 /// `cargo check-external-types` on library crates to verify that
 /// public APIs don't expose types from private dependencies.
+#[derive(FromArgs)]
+struct Args {
+    /// the Rust toolchain to use (e.g., 'nightly-2025-08-06')
+    #[argh(positional)]
+    toolchain: String,
+}
+
 fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    let toolchain = args
-        .get(1)
-        .context("Missing required toolchain argument (e.g., 'nightly-2025-08-06')")?;
+    let args: Args = argh::from_env();
 
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let all_packages = automation::list_packages(workspace_root)?;
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
     println!();
     println!("=== External Type Exposure Check ===");
     println!();
-    println!("Toolchain: {}", toolchain);
+    println!("Toolchain: {}", args.toolchain);
     println!("Checking {} crate(s)", filtered_packages.len());
     println!("Skipped internal crates: {}", automation::INTERNAL_CRATES.join(", "));
     println!();
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
 
         if has_lib {
             println!("Checking external types in {}", pkg.name);
-            check_external_types(&pkg.manifest_path, toolchain)?;
+            check_external_types(&pkg.manifest_path, &args.toolchain)?;
             println!("✓ Passed: {}", pkg.name);
             checked += 1;
         } else {
