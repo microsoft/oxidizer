@@ -12,11 +12,9 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license-file.workspace = true
+license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-
-[lib]
-crate-type = ["lib"]
 
 [lints]
 workspace = true
@@ -33,9 +31,9 @@ tokio = ["dep:tokio"]
 timestamp = ["dep:jiff"]
 
 [dependencies]
-jiff = { workspace = true, default-features = false, features = ["std"], optional = true }
+jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
-serde_core = { workspace = true, features = ["std"], default-features = false, optional = true }
+serde_core = { workspace = true, features = ["std"], optional = true }
 futures-core = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
@@ -54,6 +52,10 @@ static_assertions = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 time-tz = { workspace = true, features = ["system"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "basic"

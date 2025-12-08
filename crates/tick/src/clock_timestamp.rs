@@ -11,6 +11,7 @@ pub enum ClockTimestamp {
     System(SystemTime),
     /// Represents a specific timestamp.
     #[cfg(any(feature = "timestamp", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
     Timestamp(crate::Timestamp),
     /// Represents an offset duration from the UNIX epoch.
     Offset(Duration),

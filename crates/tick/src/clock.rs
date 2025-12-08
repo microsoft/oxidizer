@@ -176,6 +176,7 @@ impl Clock {
     ///
     /// Panics if called outside of a Tokio runtime context.
     #[cfg(any(feature = "tokio", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
     pub fn new_tokio() -> Self {
         Self::tokio_core().0

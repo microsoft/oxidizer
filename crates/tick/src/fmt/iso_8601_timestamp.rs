@@ -113,6 +113,7 @@ impl From<Iso8601Timestamp> for SystemTime {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde_core::Serialize for Iso8601Timestamp {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -123,6 +124,7 @@ impl serde_core::Serialize for Iso8601Timestamp {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde_core::Deserialize<'de> for Iso8601Timestamp {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

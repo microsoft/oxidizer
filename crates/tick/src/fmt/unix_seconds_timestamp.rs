@@ -145,6 +145,7 @@ impl From<UnixSecondsTimestamp> for SystemTime {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde_core::Serialize for UnixSecondsTimestamp {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -155,6 +156,7 @@ impl serde_core::Serialize for UnixSecondsTimestamp {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde_core::Deserialize<'de> for UnixSecondsTimestamp {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

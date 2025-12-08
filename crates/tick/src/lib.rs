@@ -10,20 +10,45 @@
     )
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Provides primitives to interact with and manipulate machine time.
 //!
+//! # Quick Start
+//!
+//! ```no_run
+//! use std::time::Duration;
+//! use tick::Clock;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     // Create a clock using the Tokio runtime
+//!     let clock = Clock::new_tokio();
+//!
+//!     // Get the current timestamp
+//!     let now = clock.timestamp();
+//!     println!("Current time: {now}");
+//!
+//!     // Delay execution
+//!     clock.delay(Duration::from_secs(1)).await;
+//!     println!("1 second later: {}", clock.timestamp());
+//! }
+//! ```
+//!
 //! # Why?
 //!
-//! This crate provides a way to abstract over async runtimes, allowing your code to work
-//! seamlessly across different runtimes without tight coupling. Instead of directly calling
-//! runtime-specific time functions, you depend on [`Clock`], making your code more portable
-//! and testable.
+//! This crate provides a unified API for working with time that:
 //!
-//! Additionally, the `test-util` feature provides powerful test utilities to manipulate the flow
-//! of time through `ClockControl`. This allows you to write fast and deterministic tests by
-//! controlling time advancement. You can instantly jump forward in time, verify timeout behavior,
-//! and test time-sensitive logic without waiting for real wall-clock time to pass.
+//! - **Abstracts async runtimes** - Works across Tokio, async-std, etc. without tight coupling
+//!   to any specific implementation.
+//! - **Enables deterministic testing** - With the `test-util` feature, `ClockControl` lets you
+//!   manipulate time flow—advance it instantly, pause it, or jump forward. No waiting for a
+//!   1-minute periodic job in your tests.
+//! - **Improves testability** - Time-dependent code becomes fast and reproducible to test
+//!   without relying on wall-clock time.
+//!
+//! The testability features are transparent to consumers—code using [`Clock`] works identically
+//! in production and tests, with zero runtime overhead when `test-util` is disabled.
 //!
 //! # Overview
 //!
@@ -153,6 +178,7 @@ mod delay;
 mod error;
 
 #[cfg(any(feature = "timestamp", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
 pub mod fmt;
 
 mod future_ext;
@@ -170,8 +196,10 @@ mod timestamp;
 
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use clock_control::ClockControl;
 #[cfg(any(feature = "test-util", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use clock_timestamp::ClockTimestamp;
 pub use delay::Delay;
 pub use error::{Error, Result};
@@ -185,5 +213,6 @@ pub use timeout::Timeout;
 )]
 pub(crate) use timers::{TIMER_RESOLUTION, TimerKey, Timers};
 #[cfg(any(feature = "timestamp", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
 #[doc(inline)]
 pub use timestamp::Timestamp;

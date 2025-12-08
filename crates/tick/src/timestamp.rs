@@ -547,6 +547,7 @@ impl Display for Timestamp {
 
 /// Serializes `Timestamp` as an ISO 8601 string.
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde_core::Serialize for Timestamp {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -559,6 +560,7 @@ impl serde_core::Serialize for Timestamp {
 
 /// Deserializes `Timestamp` from an ISO 8601 string.
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde_core::Deserialize<'de> for Timestamp {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where

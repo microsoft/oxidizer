@@ -13,6 +13,12 @@
 </div>
 
 * [Summary](#summary)
+* [Why?](#why)
+* [Overview](#overview)
+* [Machine-Centric vs. Human-Centric Time](#machine-centric-vs-human-centric-time)
+* [Testing](#testing)
+* [Examples](#examples)
+* [Additional Examples](#additional-examples)
 
 ## Summary
 
