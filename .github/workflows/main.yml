@@ -22,6 +22,7 @@ env:
   # Tool versions
   CARGO_AUDIT_VERSION: "0.22.0"
   CARGO_CHECK_EXTERNAL_TYPES_VERSION: "0.3.0"
+  CARGO_DENY_VERSION: "0.18.8"
   CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: "0.2.0"
   CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: "0.2.0"
   CARGO_HACK_VERSION: "0.6.39"
@@ -114,7 +115,7 @@ jobs:
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.62
         with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}
 
       # execute
       - name: Clippy
@@ -131,6 +132,8 @@ jobs:
         run: cargo ensure-no-default-features
       - name: Cyclic Dependencies
         run: cargo ensure-no-cyclic-deps
+      - name: Dependency Validation
+        run: cargo deny --all-features --workspace --color always check all
 
   extended-analysis:
     if: github.event_name == 'pull_request'
