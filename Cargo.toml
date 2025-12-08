@@ -41,7 +41,7 @@ thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-f
 
 # external dependencies
 alloc_tracker = { version = "0.5.9", default-features = false }
-anyhow = { version = "1.0.100", default-features = false  }
+anyhow = { version = "1.0.100", default-features = false }
 bytes = { version = "1.11.0", default-features = false }
 criterion = { version = "0.7.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
@@ -54,23 +54,23 @@ mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
+pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
-pretty_assertions = { version = "1.4.1", default-features = false  }
 proc-macro2 = { version = "1.0.103", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rand = { version = "0.9.2", default-features = false }
-regex = { version = "1.12.2", default-features = false  }
+regex = { version = "1.12.2", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
 syn = { version = "2.0.111", default-features = false }
-thiserror = { version = "2.0.17", default-features = false  }
+thiserror = { version = "2.0.17", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
-typeid = { version = "1.0.3", default-features = false  }
 trybuild = { version = "1.0.114", default-features = false }
+typeid = { version = "1.0.3", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]
@@ -120,8 +120,9 @@ unnecessary_safety_doc = "warn"
 unneeded_field_pattern = "warn"
 unused_result_ok = "warn"
 unwrap_used = "warn"
-
+#
 # Below are undesirable lint rules that are enabled by the categories above but are not useful.
+#
 
 # This lint in many cases produces less readable code and is not worth the trouble.
 option_if_let_else = "allow"

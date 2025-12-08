@@ -144,7 +144,10 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 
 - **Source Formatting**. We ensure the source code complies with the Rust standard format.
 
-- **Dependency Auditing**. We use [`cargo-audit`](https://aka.ms/crates.io/crates/cargo-audit) to be alerted of
+- **Cargo.toml Formatting**. We use [`cargo-sort`](https://crates.io/crates/cargo-sort) to keep Cargo.toml
+  files in a consistent format and layout.
+
+- **Dependency Auditing**. We use [`cargo-audit`](https://crates.io/crates/cargo-audit) to be alerted of
   any security vulnerabilities in our dependencies.
 
 - **Unsafe Verification**. We use Miri to verify that our unsafe code doesn't induce undefined behaviors.

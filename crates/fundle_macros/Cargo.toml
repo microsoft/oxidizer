@@ -20,7 +20,6 @@ repository.workspace = true
 [lib]
 proc-macro = true
 
-
 [dependencies]
 fundle_macros_impl.workspace = true
 
