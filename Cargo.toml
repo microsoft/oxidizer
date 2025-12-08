@@ -46,7 +46,6 @@ criterion = { version = "0.7.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 futures = { version = "0.3.31", default-features = false }
-hardware-query = { version = "0.2.1", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 many_cpus = { version = "1.1.0", default-features = false }
@@ -66,7 +65,8 @@ serde_json = { version = "1.0.145", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
 syn = { version = "2.0.111", default-features = false }
-thiserror = { version = "2.0.17", default-features = false }
+system-memory = { version = "0.1.7", default-features = false }
+thiserror = { version = "2.0.17", default-features = false  }
 tokio = { version = "1.48.0", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }

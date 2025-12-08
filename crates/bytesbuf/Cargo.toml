@@ -40,8 +40,8 @@ alloc_tracker.workspace = true
 criterion.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
+system-memory.workspace = true
 testing_aids.workspace = true
-hardware-query.workspace = true
 
 [lints]
 workspace = true
