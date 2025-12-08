@@ -182,7 +182,7 @@ pub struct Timestamp {
 impl Timestamp {
     pub(super) const UNIX_EPOCH: Self = Self::new(Duration::ZERO);
 
-    /// The maximum value that can be represented by the timestamp, i.e., `9999-30-12 22:00:00.999999999 UTC`
+    /// The maximum value that can be represented by the timestamp, i.e., `9999-12-30 22:00:00.999999999 UTC`
     ///
     /// This is aligned with Jiff's maximum timestamp value to ensure interoperability.
     pub(super) const MAX: Self = Self::new(Duration::new(253_402_207_200, 999_999_999));

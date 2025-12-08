@@ -174,7 +174,7 @@ mod tests {
         let id = clock.register_timer(Instant::now(), Waker::noop().clone());
 
         match clock.clock_state() {
-            ClockState::ClockControl(_) => panic!("Cwe are using the system clock"),
+            ClockState::ClockControl(_) => panic!("we are using the system clock"),
             ClockState::System(timers) => assert!(timers.with_timers(|t| t.contains(id))),
         }
     }
