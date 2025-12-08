@@ -24,7 +24,7 @@ use crate::state::{ClockState, GlobalState};
 /// let (clock, driver) = inactive.activate();
 ///
 /// // Use the clock for time operations
-/// let now = clock.timestamp();
+/// let now = clock.instant();
 ///
 /// // Driver must be advanced periodically (typically by the runtime)
 /// // driver.advance_timers();

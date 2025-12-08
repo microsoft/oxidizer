@@ -18,7 +18,7 @@
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use tick::Clock;
+//! use tick::{Clock, Delay};
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -30,7 +30,7 @@
 //!     println!("Current time: {now}");
 //!
 //!     // Delay execution
-//!     clock.delay(Duration::from_secs(1)).await;
+//!     Delay::new(&clock, Duration::from_secs(1)).await;
 //!     println!("1 second later: {}", clock.timestamp());
 //! }
 //! ```
