@@ -18,17 +18,25 @@ struct CargoMetadata {
     packages: Vec<PackageMetadata>,
 }
 
+/// Metadata for a Cargo package
 #[derive(Debug, Deserialize)]
 pub struct PackageMetadata {
+    /// Package name
     pub name: String,
+    /// Package ID
     pub id: String,
+    /// Path to the package's Cargo.toml
     pub manifest_path: String,
+    /// Build targets in the package
     pub targets: Vec<Target>,
 }
 
+/// A Cargo build target
 #[derive(Debug, Deserialize)]
 pub struct Target {
+    /// Target kinds (e.g., "lib", "bin")
     pub kind: Vec<String>,
+    /// Target name
     pub name: String,
 }
 
@@ -53,7 +61,7 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
 }
 
 /// Internal crates that should be skipped in CI checks
-pub const INTERNAL_CRATES: &[&str] = &["ci_aids", "testing_aids"];
+pub const INTERNAL_CRATES: &[&str] = &["automation", "testing_aids"];
 
 /// Run a cargo command and pipe the output to stdout/stderr
 pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
@@ -79,19 +87,20 @@ pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn test_list_packages() {
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
         let packages = list_packages(workspace_root).expect("failed to list packages");
         assert!(!packages.is_empty());
 
-        let ci_aids = packages.iter().find(|p| p.name == "ci_aids");
-        assert!(ci_aids.is_some(), "{packages:?}");
-        assert!(!ci_aids.unwrap().manifest_path.is_empty());
-        assert!(!ci_aids.unwrap().targets.is_empty());
+        let automation = packages.iter().find(|p| p.name == "automation");
+        assert!(automation.is_some(), "{packages:?}");
+        assert!(!automation.unwrap().manifest_path.is_empty());
+        assert!(!automation.unwrap().targets.is_empty());
     }
 }

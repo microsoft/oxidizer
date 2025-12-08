@@ -7,7 +7,7 @@
 edition = "2024"
 
 [dependencies]
-ci_aids = { path = "../crates/ci_aids" }
+automation = { path = "../crates/automation" }
 anyhow = "1.0"
 argh = "0.1.12"
 ---
@@ -51,7 +51,7 @@ fn main() -> Result<()> {
 
     println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let all_packages = ci_aids::list_packages(workspace_root)?;
+    let all_packages = automation::list_packages(workspace_root)?;
 
     let mut test_groups: Vec<Vec<String>> = TEST_GROUPS
         .iter()
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
 
     let filtered_packages: Vec<_> = all_packages
         .into_iter()
-        .filter(|pkg| !ci_aids::INTERNAL_CRATES.contains(&pkg.name.as_str()))
+        .filter(|pkg| !automation::INTERNAL_CRATES.contains(&pkg.name.as_str()))
         .collect();
 
     // Add ungrouped packages
@@ -73,7 +73,9 @@ fn main() -> Result<()> {
     }
 
     // Log configuration
-    println!("=== Mutants Testing Configuration ===\n");
+    println!();
+    println!("=== Mutants Testing Configuration ===");
+    println!();
     println!("Settings:");
     println!("  Jobs: {JOBS}");
     println!("  Build timeout: {BUILD_TIMEOUT_SEC}s");
@@ -87,14 +89,21 @@ fn main() -> Result<()> {
     for (i, group) in test_groups.iter().enumerate() {
         println!("  {}: [{}]", i + 1, group.join(", "));
     }
-    println!("\nSkipped: {}", ci_aids::INTERNAL_CRATES.join(", "));
+    println!();
+    println!("Skipped: {}", automation::INTERNAL_CRATES.join(", "));
 
     if test_groups.len() > initial_count {
-        println!("\nAdded {} ungrouped package(s) as individual groups", test_groups.len() - initial_count);
+        println!();
+        println!(
+            "Added {} ungrouped package(s) as individual groups",
+            test_groups.len() - initial_count
+        );
     }
 
-    println!("\nStarting mutants testing...");
-    println!("=====================================\n");
+    println!();
+    println!("Starting mutants testing...");
+    println!("=====================================");
+    println!();
 
     for group in &test_groups {
         mutate_group(&group[..], &args)?;
@@ -107,7 +116,7 @@ fn mutate_group(group: &[String], args: &Args) -> Result<()> {
     println!("Mutating: {}", group.join(", "));
 
     let mut cargo_args = vec![
-        "mutants".to_owned(), 
+        "mutants".to_owned(),
         "--no-shuffle".into(),
         "--baseline=skip".into(),
         "--colors=never".into(),
@@ -132,5 +141,5 @@ fn mutate_group(group: &[String], args: &Args) -> Result<()> {
     let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
     cargo_args.extend(package_args);
 
-    ci_aids::run_cargo(cargo_args.into_iter())
+    automation::run_cargo(cargo_args.into_iter())
 }
