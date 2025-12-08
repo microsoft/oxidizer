@@ -159,10 +159,8 @@ impl Drop for PeriodicTimer {
 mod tests {
     use std::thread;
 
-    use futures::StreamExt;
-
     use super::*;
-    use crate::{ClockControl, FutureExt};
+    use crate::ClockControl;
 
     #[test]
     fn assert_types() {
@@ -172,6 +170,9 @@ mod tests {
     #[cfg(not(miri))]
     #[tokio::test]
     async fn next_ensure_awaited() {
+        use crate::FutureExt;
+        use futures::StreamExt;
+
         let clock = Clock::new_tokio();
         let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
 

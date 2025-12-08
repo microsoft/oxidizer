@@ -125,7 +125,6 @@ impl Drop for Delay {
 #[cfg(test)]
 mod tests {
     use std::thread;
-    use std::time::Instant;
 
     use super::*;
     use crate::ClockControl;
@@ -139,7 +138,7 @@ mod tests {
     #[tokio::test]
     async fn delay_ok() {
         let clock = Clock::new_tokio();
-        let now = Instant::now();
+        let now = std::time::Instant::now();
         Delay::new(&clock, Duration::from_millis(5)).await;
         assert!(now.elapsed() >= Duration::from_millis(5));
     }

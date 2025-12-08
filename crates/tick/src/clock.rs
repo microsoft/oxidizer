@@ -489,7 +489,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::Delay;
 
     #[test]
     fn assert_types() {
@@ -563,7 +562,7 @@ mod tests {
     #[tokio::test]
     async fn tokio_ensure_timers_advancing() {
         let clock = Clock::new_tokio();
-        Delay::new(&clock, Duration::from_millis(15)).await;
+        crate::Delay::new(&clock, Duration::from_millis(15)).await;
     }
 
     #[cfg(not(miri))] // The logic we call talks to the real OS, which Miri cannot do.
@@ -571,7 +570,7 @@ mod tests {
     async fn tokio_ensure_future_finished_when_clock_dropped() {
         let (clock, handle) = Clock::tokio_core();
 
-        Delay::new(&clock, Duration::from_millis(15)).await;
+        crate::Delay::new(&clock, Duration::from_millis(15)).await;
 
         drop(clock);
 
