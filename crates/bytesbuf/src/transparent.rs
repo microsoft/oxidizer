@@ -86,6 +86,7 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
 #[cfg(test)]
 mod tests {
     use bytes::BufMut;
+    use hardware_query::SystemOverview;
     use static_assertions::assert_impl_all;
 
     use super::*;
@@ -115,6 +116,13 @@ mod tests {
 
     #[test]
     fn giant_allocation() {
+        // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
+        // where this may not be available, so we skip this test in that environment.
+        if SystemOverview::quick().unwrap().memory_gb < 6.0 {
+            eprintln!("Skipping giant allocation test due to insufficient memory.");
+            return;
+        }
+
         // This is a giant allocation that does not fit into one memory block.
 
         let memory = TransparentTestMemory::new();

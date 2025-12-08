@@ -41,6 +41,7 @@ criterion.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
 testing_aids.workspace = true
+hardware-query.workspace = true
 
 [lints]
 workspace = true
