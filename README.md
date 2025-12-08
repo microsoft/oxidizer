@@ -173,6 +173,9 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   have superfluous
   dependencies.
 
+- **Dependency Validation**. We use [`cargo-deny`](https://crates.io/crates/cargo-deny) to ensure our dependencies
+  have acceptable licenses and don't contain known vulnerabilities.
+
 - **PR Title**. Every PR submitted to this repo must follow
   the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
   specification. We use these PR titles as part of our automatic change log generation logic.
