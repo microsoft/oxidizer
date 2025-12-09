@@ -3,7 +3,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-//! This example demonstrates how to use `ClockControl` to control the flow of time in tests.
+//! This example demonstrates how to use `ClockControl` to control the passage of time in tests.
 
 use std::time::Duration;
 

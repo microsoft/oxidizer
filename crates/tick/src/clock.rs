@@ -14,15 +14,15 @@ use crate::state::ClockState;
 /// Provides an abstraction for time-related operations.
 ///
 /// Working with time is notoriously difficult to test and control. The clock enables time control in tests
-/// while providing near-zero overhead in production. When running with the `test-util` feature enabled, the clock
-/// provides additional functionality to control the flow of time. This makes tests faster and more reliable.
+/// while providing zero cost overhead in production. When running with the `test-util` feature enabled, the clock
+/// provides additional functionality to control the passage of time. This makes tests faster and more reliable.
 /// See the [Testing](#testing) section for more information.
 ///
 /// The clock is used for:
 ///
 /// - Retrieving the current absolute time in UTC.
-/// - Creation of [`Stopwatch`][super::Stopwatch] that
-///   simplifies time measurements and can be used as a relative unit of time.
+/// - Creating [`Stopwatch`][super::Stopwatch] instances that
+///   simplify time measurements and can be used as relative units of time.
 /// - Creating [`PeriodicTimer`][super::PeriodicTimer] and [`Delay`][super::Delay] instances.
 ///
 /// # Relative and absolute time
@@ -53,23 +53,23 @@ use crate::state::ClockState;
 /// provide different mechanisms for clock access. Consult your runtime's documentation for details.
 ///
 /// In tests, the clock can be constructed directly using `new_frozen()` or
-/// `new_frozen_at()` (available with the `test-util` feature) because the flow of time is controlled manually.
+/// `new_frozen_at()` (available with the `test-util` feature) because the passage of time is controlled manually.
 /// See the [Testing](#testing) section for more information.
 ///
 /// # Testing
 ///
 /// When working with time, it's challenging to isolate time-related operations in tests. A typical example is the sleep
-/// operation, which is hard to test and slows down tests. What you want to do is have complete control over the flow
+/// operation, which is hard to test and slows down tests. What you want to do is have complete control over the passage
 /// of time that allows you to jump forward in time. This is where the clock comes into play.
 ///
-/// The ability to jump forward in time makes tests faster, more reliable and gives you complete control over the flow of time.
-/// By default, the clock does not allow you to control the flow of time. However, when the `test-util` feature is enabled,
+/// The ability to jump forward in time makes tests faster, more reliable and gives you complete control over the passage of time.
+/// By default, the clock does not allow you to control the passage of time. However, when the `test-util` feature is enabled,
 /// this crate provides a `ClockControl` type that can be used to control time.
 ///
 /// # State sharing between clocks
 ///
 /// Multiple clock instances can be linked together and share state. In production, cloned clocks share
-/// registered timers. In tests, cloned clocks additionally share the flow of time, allowing coordinated
+/// registered timers. In tests, cloned clocks additionally share the passage of time, allowing coordinated
 /// time control across all instances.
 ///
 /// To ensure state sharing between clocks, clone the clock. The cloning operation preserves the shared state
@@ -239,9 +239,9 @@ impl Clock {
 
     /// Creates a new frozen clock.
     ///
-    /// This is a convenience method for creating a clock by calling `ClockControl::new().to_clock()`.
+    /// This is a convenience function for creating a clock that's equivalent to calling `ClockControl::new().to_clock()`.
     ///
-    /// **Note**: The returned clock will not advance time; all time and timers are frozen.
+    /// > **Note**: The returned clock will not advance time; all time and timers are frozen.
     ///
     /// # Example
     ///
@@ -263,6 +263,7 @@ impl Clock {
     /// assert_eq!(instance, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen() -> Self {
         crate::ClockControl::new().to_clock()
@@ -270,9 +271,9 @@ impl Clock {
 
     /// Creates a new frozen clock at the specified timestamp.
     ///
-    /// This is a convenience method for creating a clock by calling `ClockControl::new_at(time).to_clock()`.
+    /// This is a convenience function for creating a clock that's equivalent to calling `ClockControl::new_at(time).to_clock()`.
     ///
-    /// **Note**: The returned clock will not advance time; all time and timers are frozen at the specified timestamp.
+    /// > **Note**: The returned clock will not advance time; all time and timers are frozen at the specified timestamp.
     ///
     /// # Example
     ///
@@ -292,6 +293,7 @@ impl Clock {
     /// assert_eq!(timestamp, clock.timestamp());
     /// ```
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<crate::ClockTimestamp>) -> Self {
         crate::ClockControl::new_at(time).to_clock()
@@ -306,9 +308,9 @@ impl Clock {
     /// - Ability to send time information across process boundaries
     /// - Conversion to and from [`SystemTime`]
     ///
-    /// **Note**: The timestamp is not monotonic and can be affected by system clock changes.
-    /// When the system clock changes, the current timestamp may be older than a previously
-    /// retrieved one.
+    /// > **Note**: The timestamp is not monotonic and can be affected by system clock changes.
+    /// > When the system clock changes, the current timestamp may be older than a previously
+    /// > retrieved one.
     ///
     /// For basic absolute time needs without formatting or serialization requirements, consider
     /// using [`system_time()`][Self::system_time] instead. For relative time measurements,
@@ -327,6 +329,7 @@ impl Clock {
     /// # }
     /// ```
     #[cfg(any(feature = "timestamp", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -347,9 +350,9 @@ impl Clock {
     /// For enhanced absolute time capabilities including formatting, parsing, and serialization support,
     /// use [`timestamp()`][Self::timestamp] instead (requires the `timestamp` feature).
     ///
-    /// **Note**: The system time is not monotonic and can be affected by system clock changes.
-    /// When the system clock changes, the current time may be older than a previously retrieved one.
-    /// For relative time measurements, use [`Stopwatch`][super::Stopwatch].
+    /// > **Note**: The system time is not monotonic and can be affected by system clock changes.
+    /// > When the system clock changes, the current time may be older than a previously retrieved one.
+    /// > For relative time measurements, use [`Stopwatch`][super::Stopwatch].
     ///
     /// # Examples
     ///
@@ -378,13 +381,13 @@ impl Clock {
     /// Unlike [`system_time`][Self::system_time], the instant is not affected by system clock
     /// changes and provides a stable reference point for measuring elapsed time.
     ///
-    /// **Note**: For time measurements, consider using [`Stopwatch`][super::Stopwatch] instead,
-    /// which provides a more convenient API for measuring elapsed time.
+    /// > **Note**: For time measurements, consider using [`Stopwatch`][super::Stopwatch] instead,
+    /// > which provides a more convenient API for measuring elapsed time.
     ///
-    /// **Important**: When measuring elapsed time with [`Instant`], use [`Instant::duration_since`]
-    /// rather than `Instant::elapsed`. The `elapsed` method bypasses the clock and goes directly
-    /// to system time, which means it won't respect controlled time in tests or when using
-    /// `ClockControl`.
+    /// > **Important**: When measuring elapsed time with [`Instant`], use [`Instant::duration_since`]
+    /// > rather than `Instant::elapsed`. The `elapsed` method bypasses the clock and goes directly
+    /// > to system time, which means it won't respect controlled time in tests or when using
+    /// > `ClockControl`.
     ///
     /// # Examples
     ///

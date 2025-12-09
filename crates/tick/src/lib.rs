@@ -42,7 +42,7 @@
 //! - **Abstracts async runtimes** - Works across Tokio, async-std, etc. without tight coupling
 //!   to any specific implementation.
 //! - **Enables deterministic testing** - With the `test-util` feature, `ClockControl` lets you
-//!   manipulate time flow—advance it instantly, pause it, or jump forward. No waiting for a
+//!   manipulate time passage it instantly, pause it, or jump forward. No waiting for a
 //!   1-minute periodic job in your tests.
 //! - **Improves testability** - Time-dependent code becomes fast and reproducible to test
 //!   without relying on wall-clock time.
@@ -52,7 +52,7 @@
 //!
 //! # Overview
 //!
-//! - [`Clock`] - Interacts with and controls the flow of time. Provides absolute time
+//! - [`Clock`] - Interacts with and controls the passage of time. Provides absolute time
 //!   as `SystemTime` or optionally `Timestamp`, and relative time measurements via stopwatch.
 //!   Used when creating other time primitives.
 //! - [`Timestamp`] - Represents an absolute point in time with formatting, parsing, and
@@ -61,7 +61,7 @@
 //! - [`PeriodicTimer`] - Schedules a task to run periodically.
 //! - [`FutureExt`] - Extensions for the `Future` trait.
 //! - [`Error`] - Represents an error that can occur when working with time. Introspection is limited.
-//! - `ClockControl` - Provides a way to control the flow of time. Exposed only when the `test-util` feature is enabled.
+//! - `ClockControl` - Provides a way to control the passage of time. Exposed only when the `test-util` feature is enabled.
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!
@@ -85,7 +85,7 @@
 //!
 //! # Testing
 //!
-//! This crate provides a way to control the flow of time in tests via the `ClockControl`
+//! This crate provides a way to control the passage of time in tests via the `ClockControl`
 //! type, which is exposed when the `test-util` feature is enabled.
 //!
 //! **Important:** Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.

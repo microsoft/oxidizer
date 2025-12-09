@@ -29,6 +29,7 @@ impl From<Duration> for ClockTimestamp {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
 #[cfg(any(feature = "timestamp", test))]
 impl<T: Into<crate::Timestamp>> From<T> for ClockTimestamp {
     fn from(timestamp: T) -> Self {

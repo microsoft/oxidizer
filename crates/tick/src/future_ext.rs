@@ -9,7 +9,7 @@ use super::{Clock, Delay, Timeout};
 pub trait FutureExt: Future {
     /// Applies a timeout to the future.
     ///
-    /// This extension uses a [`Clock`] to control the flow of time and enables
+    /// This extension uses a [`Clock`] to control the passage of time and enables
     /// easy testability.
     ///
     /// # Example

@@ -10,4 +10,4 @@ These examples demonstrate the features and capabilities of `tick` primitives:
 - [Interop Jiff](interop_jiff.rs): Showcases interoperability with the [jiff](https://docs.rs/jiff) crate, including formatting timestamps into time-zone-aware date-times.
 - [Interop Chrono](interop_chrono.rs): Showcases interoperability with the [chrono](https://docs.rs/chrono) crate, including formatting timestamps into time-zone-aware date-times.
 - [Interop Time](interop_time.rs): Showcases interoperability with the [time](https://docs.rs/time) crate, including formatting timestamps into time-zone-aware date-times.
-- [Clock Control](clock_control.rs): Demonstrates how to use `ClockControl` to control the flow of time.
+- [Clock Control](clock_control.rs): Demonstrates how to use `ClockControl` to control the passage of time.

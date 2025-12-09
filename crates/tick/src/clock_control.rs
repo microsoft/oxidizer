@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 use super::{TimerKey, Timers};
 use crate::{Clock, ClockTimestamp};
 
-/// Controls the flow of time in tests.
+/// Controls the passage of time in tests.
 ///
 /// This is useful for testing time-sensitive code without having to wait for real time to pass.
 /// `ClockControl` is available when the `test-util` feature is enabled.
@@ -68,7 +68,7 @@ use crate::{Clock, ClockTimestamp};
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct ClockControl {
-    /// Clock control requires controlling the flow of time across threads.
+    /// Clock control requires controlling the passage of time across threads.
     /// For this reason, we need to use a mutex to ensure that state is consistent
     /// across all threads.
     state: Arc<Mutex<State>>,
@@ -204,8 +204,8 @@ impl ClockControl {
     /// amount of time that can be auto-advanced. Once the limit is reached, further calls to
     /// access the current time will no longer auto-advance the clock.
     ///
-    /// **Note:** This method only has an effect if [`Self::auto_advance`] has been called
-    /// previously to set a non-zero auto-advance duration.
+    /// > **Note:** This method only has an effect if [`Self::auto_advance`] has been called
+    /// > previously to set a non-zero auto-advance duration.
     ///
     /// # Examples
     ///
