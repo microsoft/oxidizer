@@ -179,6 +179,9 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **Dependency Validation**. We use [`cargo-deny`](https://crates.io/crates/cargo-deny) to ensure our dependencies
   have acceptable licenses and don't contain known vulnerabilities.
 
+- **Semantic Version Compatibility**. We use [`cargo-semver-checks`](https://crates.io/crates/cargo-semver-checks) to ensure
+  our API surface maintains the compatibility guarantees implies by semantic versioning.
+
 - **PR Title**. Every PR submitted to this repo must follow
   the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
   specification. We use these PR titles as part of our automatic change log generation logic.
