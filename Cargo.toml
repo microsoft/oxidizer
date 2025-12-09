@@ -35,6 +35,7 @@ ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false, version = "0.0.0" }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.4.0" }
+thread_aware_cache = { path = "crates/thread_aware_cache", default-features = false, version = "0.1.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.4.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.4.0" }
 
@@ -46,6 +47,7 @@ criterion = { version = "0.7.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 futures = { version = "0.3.31", default-features = false }
+hashbrown = { version = "0.15.2", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 many_cpus = { version = "1.1.0", default-features = false }
@@ -54,6 +56,7 @@ mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
+parking_lot = { version = "0.12.3", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }

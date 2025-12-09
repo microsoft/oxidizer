@@ -1,0 +1,42 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "thread_aware_cache"
+description = "A high-performance, NUMA-aware in-memory cache with SIEVE eviction."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "cache", "numa", "sieve", "concurrent"]
+categories = ["caching", "concurrency", "data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+test-util = []
+threads = ["thread_aware/threads"]
+
+[dependencies]
+hashbrown = { workspace = true, features = ["raw-entry", "default-hasher"] }
+parking_lot.workspace = true
+thread_aware = { workspace = true, features = ["threads"] }
+
+[dev-dependencies]
+criterion.workspace = true
+rand = { workspace = true, features = ["std", "std_rng"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "cache"
+harness = false
