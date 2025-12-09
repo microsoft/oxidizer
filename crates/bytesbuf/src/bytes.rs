@@ -252,6 +252,7 @@ mod tests {
     fn test_giant_bytes_to_sequence() {
         // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
         // where this may not be available, so we skip this test in that environment.
+        #[cfg(not(miri))]
         if system_memory::available() < 6_000_000_000 {
             eprintln!("Skipping giant allocation test due to insufficient memory.");
             return;
