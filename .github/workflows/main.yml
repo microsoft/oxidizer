@@ -57,10 +57,16 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
+      # TODO: Enable sccache for windows-11-arm when fixed: https://github.com/Mozilla-Actions/sccache-action/issues/189
       - name: Start sccache
+        if: matrix.os != 'windows-11-arm'
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
+      - name: Clear RUSTC_WRAPPER for unsupported platforms
+        if: matrix.os == 'windows-11-arm'
+        shell: bash
+        run: echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
@@ -104,10 +110,16 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
+      # TODO: Enable sccache for windows-11-arm when fixed: https://github.com/Mozilla-Actions/sccache-action/issues/189
       - name: Start sccache
+        if: matrix.os != 'windows-11-arm'
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
+      - name: Clear RUSTC_WRAPPER for unsupported platforms
+        if: matrix.os == 'windows-11-arm'
+        shell: bash
+        run: echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
@@ -244,10 +256,16 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
+      # TODO: Enable sccache for windows-11-arm when fixed: https://github.com/Mozilla-Actions/sccache-action/issues/189
       - name: Start sccache
+        if: matrix.os != 'windows-11-arm'
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: ${{ env.SCCACHE_VERSION }}
+      - name: Clear RUSTC_WRAPPER for unsupported platforms
+        if: matrix.os == 'windows-11-arm'
+        shell: bash
+        run: echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
       - name: Install Rust Nightly
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
