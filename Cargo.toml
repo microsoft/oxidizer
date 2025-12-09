@@ -45,6 +45,7 @@ anyhow = { version = "1.0.100", default-features = false }
 bytes = { version = "1.11.0", default-features = false }
 criterion = { version = "0.7.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
+duct = { version = "1.1.1", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
@@ -138,6 +139,8 @@ should_panic_without_expect = "allow"
 significant_drop_tightening = "allow"
 # Blocked by Clippy bug: https://github.com/rust-lang/rust-clippy/issues/15036
 wildcard_imports = "allow"
+# In a large workspace, duplicate dependencies are inevitable; this lint causes more maintenance burden than practical benefit.
+multiple_crate_versions = "allow"
 
 [profile.release]
 debug = "line-tables-only"
