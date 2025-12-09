@@ -17,6 +17,15 @@ license-file.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "proc_macro2::*",
+    "syn::attr::*",
+    "syn::error::*",
+    "syn::path::*",
+    "syn::ty::*",
+]
+
 [dependencies]
 proc-macro2.workspace = true
 quote.workspace = true
@@ -28,12 +37,3 @@ prettyplease.workspace = true
 
 [lints]
 workspace = true
-
-[package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "proc_macro2::*",
-    "syn::attr::*",
-    "syn::error::*",
-    "syn::path::*",
-    "syn::ty::*",
-]

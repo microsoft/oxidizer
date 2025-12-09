@@ -17,6 +17,13 @@ license-file.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["ohno_macros::*"]
+
 [features]
 test-util = []
 
@@ -34,12 +41,3 @@ tokio = { workspace = true, features = ["macros", "rt", "time", "rt-multi-thread
 
 [lints]
 workspace = true
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
-
-[package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "ohno_macros::*",
-]
