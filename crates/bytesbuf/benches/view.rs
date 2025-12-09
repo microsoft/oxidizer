@@ -29,7 +29,7 @@ const MAX_INLINE_SPANS: usize = bytesbuf::MAX_INLINE_SPANS;
 // This should be more than MAX_INLINE_SPANS.
 const MANY_SPANS: usize = 32;
 
-#[allow(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
+#[expect(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 

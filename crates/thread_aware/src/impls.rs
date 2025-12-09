@@ -52,7 +52,7 @@ macro_rules! impl_transfer_tuple {
                 $($tail: ThreadAware),*
                 {
                     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-                        #[allow(non_snake_case, reason = "Macro-generated code uses uppercase identifiers for tuple elements")]
+                        #[expect(non_snake_case, reason = "Macro-generated code uses uppercase identifiers for tuple elements")]
                         let ($head, $($tail),*) = self;
                         (
                             $head.relocated(source, destination),
