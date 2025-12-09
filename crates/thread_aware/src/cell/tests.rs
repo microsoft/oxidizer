@@ -126,7 +126,6 @@ fn test_ord() {
     assert_eq!(value1.cmp(&value3), std::cmp::Ordering::Equal);
 }
 
-#[allow(clippy::redundant_clone, reason = "Testing clone behavior")]
 #[test]
 fn test_trc_clone() {
     let value = PerCore::with_value(42);

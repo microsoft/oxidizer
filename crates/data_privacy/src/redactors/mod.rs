@@ -45,8 +45,8 @@ impl Redactors {
         self.get(data_class).unwrap_or_else(|| self.fallback())
     }
 
+    #[cfg(test)]
     #[must_use]
-    #[allow(dead_code, reason = "This function is used from testing")]
     pub fn len(&self) -> usize {
         self.redactors.len()
     }

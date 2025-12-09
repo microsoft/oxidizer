@@ -267,7 +267,7 @@ mod tests {
         takes_mut(x);
     }
 
-    #[allow(clippy::empty_structs_with_brackets, reason = " Testing non-clone behavior")]
+    #[expect(clippy::empty_structs_with_brackets, reason = " Testing non-clone behavior")]
     #[test]
     fn non_clone() {
         struct MyStruct {}
@@ -276,7 +276,7 @@ mod tests {
         let _z = y.call();
     }
 
-    #[allow(clippy::redundant_clone, reason = "Testing clone behavior")]
+    #[expect(clippy::redundant_clone, reason = "Testing clone behavior")]
     #[test]
     fn can_clone() {
         let x = Closure {
