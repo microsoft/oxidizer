@@ -140,3 +140,43 @@ fn byte_array_layout(len: NonZero<BlockSize>) -> Layout {
 const BLOCK_WITHOUT_MEMORY_FNS: BlockRefVTable<TestMemoryBlock> = BlockRefVTable::from_trait();
 
 const BLOCK_WITHOUT_MEMORY_FNS_WITH_META: BlockRefVTable<TestMemoryBlock> = BlockRefVTable::from_trait_with_meta();
+
+#[cfg(target_os = "linux")]
+pub(crate) fn system_memory() -> usize {
+    let mut sys_info: MaybeUninit<libc::sysinfo> = MaybeUninit::uninit();
+
+    // SAFETY: Call sysinfo syscall with a valid pointer.
+    let return_code = unsafe { sysinfo(sys_info.as_mut_ptr()) };
+
+    if return_code != 0 {
+        panic!("sysinfo syscall failed with return code {}", return_code);
+    }
+
+    // SAFETY: sysinfo syscall initialized the structure.
+    let sys_info = unsafe { sys_info.assume_init() };
+
+    usize::try_from(sys_info.totalram).expect("total memory exceeds usize")
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn system_memory() -> usize {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+
+    let mut mem_status_ex = MEMORYSTATUSEX {
+        dwLength: u32::try_from(std::mem::size_of::<MEMORYSTATUSEX>()).expect("MEMORYSTATUSEX size exceeds u32"),
+        ..Default::default()
+    };
+
+    // SAFETY: GlobalMemoryStatusEx syscall with a valid pointer.
+    let return_value = unsafe { GlobalMemoryStatusEx(&raw mut mem_status_ex) };
+
+    if return_value == 0 {
+        use windows_sys::Win32::Foundation::GetLastError;
+
+        // SAFETY: GetLastError is always safe to call.
+        let error = unsafe { GetLastError() };
+        panic!("GlobalMemoryStatusEx syscall failed: {error}");
+    } else {
+        usize::try_from(mem_status_ex.ullTotalPhys).expect("total memory exceeds usize")
+    }
+}
