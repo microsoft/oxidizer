@@ -65,7 +65,7 @@ use xutex::AsyncMutex;
 
 type SharedMapping<K, T> = Arc<SyncMutex<HashMap<K, BroadcastOnce<T>>>>;
 
-/// UniFlight represents a class of work and creates a space in which units of work
+/// Represents a class of work and creates a space in which units of work
 /// can be executed with duplicate suppression.
 #[derive(Debug)]
 pub struct UniFlight<K, T> {
@@ -74,9 +74,7 @@ pub struct UniFlight<K, T> {
 
 impl<K, T> Default for UniFlight<K, T> {
     fn default() -> Self {
-        Self {
-            mapping: Default::default(),
-        }
+        Self { mapping: Arc::default() }
     }
 }
 
@@ -126,7 +124,10 @@ impl<T> std::fmt::Debug for BroadcastOnce<T> {
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "The Result type is complex but intentionally groups related items for the retry pattern"
+)]
 impl<T> BroadcastOnce<T> {
     fn try_waiter<K, F>(
         &self,
@@ -184,8 +185,9 @@ impl<K, T> UniFlight<K, T>
 where
     K: Hash + Eq + Clone,
 {
-    /// Create a new BroadcastOnce to do work with.
+    /// Creates a new `UniFlight` instance.
     #[inline]
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -199,26 +201,23 @@ where
         Fut: Future<Output = T>,
         T: Clone,
     {
-        let owned_mapping = self.mapping.clone();
+        let owned_mapping = Arc::clone(&self.mapping);
         let mut mapping = self.mapping.lock();
         let val = mapping.get_mut(&key);
-        match val {
-            Some(call) => {
-                let (func, key, owned_mapping) = match call.try_waiter(func, key, owned_mapping) {
-                    Ok(waiter) => return waiter.wait(),
-                    Err(fm) => fm,
-                };
-                let (new_call, shared) = BroadcastOnce::new();
-                *call = new_call;
-                let waiter = BroadcastOnce::waiter(shared, func, key, owned_mapping);
-                waiter.wait()
-            }
-            None => {
-                let (call, shared) = BroadcastOnce::new();
-                mapping.insert(key.clone(), call);
-                let waiter = BroadcastOnce::waiter(shared, func, key, owned_mapping);
-                waiter.wait()
-            }
+        if let Some(call) = val {
+            let (func, key, owned_mapping) = match call.try_waiter(func, key, owned_mapping) {
+                Ok(waiter) => return waiter.wait(),
+                Err(fm) => fm,
+            };
+            let (new_call, shared) = BroadcastOnce::new();
+            *call = new_call;
+            let waiter = BroadcastOnce::waiter(shared, func, key, owned_mapping);
+            waiter.wait()
+        } else {
+            let (call, shared) = BroadcastOnce::new();
+            mapping.insert(key.clone(), call);
+            let waiter = BroadcastOnce::waiter(shared, func, key, owned_mapping);
+            waiter.wait()
         }
     }
 }
@@ -281,7 +280,7 @@ mod tests {
             }));
         }
 
-        for fut in futures.into_iter() {
+        for fut in futures {
             assert_eq!(fut.await, "Result");
         }
         assert_eq!(call_counter.load(Acquire), 1, "future should only be executed once");
@@ -370,13 +369,13 @@ mod tests {
         let group: Arc<UniFlight<String, String>> = Arc::new(UniFlight::new());
 
         // First task will panic in a spawned task (no catch_unwind)
-        let group_clone = group.clone();
+        let group_clone = Arc::clone(&group);
         let handle = tokio::spawn(async move {
             group_clone
                 .work("key".to_string(), || async {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     panic!("leader panicked in spawned task");
-                    #[allow(unreachable_code)]
+                    #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
                     "never".to_string()
                 })
                 .await
@@ -386,7 +385,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Second task should become the new leader after the first panics
-        let group_clone = group.clone();
+        let group_clone = Arc::clone(&group);
         let call_counter_ref = &call_counter;
         let fut_follower = group_clone.work("key".to_string(), || async {
             call_counter_ref.fetch_add(1, AcqRel);

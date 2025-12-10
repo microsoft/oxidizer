@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates using UniFlight to prevent thundering herd when populating a cache.
+//! Demonstrates using `UniFlight` to prevent thundering herd when populating a cache.
 //!
 //! Multiple concurrent requests for the same cache key will share a single execution,
 //! with the first request (leader) performing the work and subsequent requests (followers)
@@ -30,8 +30,8 @@ async fn main() {
     // Simulate 5 concurrent requests for the same user data
     let mut handles = Vec::new();
     for i in 1..=5 {
-        let group = cache_group.clone();
-        let counter = execution_count.clone();
+        let group = Arc::clone(&cache_group);
+        let counter = Arc::clone(&execution_count);
         let handle = tokio::spawn(async move {
             let start = tokio::time::Instant::now();
 
