@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Manipulate sequences of bytes for efficient I/O."
-version = "0.1.1"
+version = "0.1.2"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -42,7 +42,7 @@ libc.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
 testing_aids.workspace = true
-windows-sys = { workspace = true }
+windows-sys.workspace = true
 
 [lints]
 workspace = true
