@@ -128,12 +128,8 @@
 //! }
 //! ```
 
-#![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png"
-)]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
 
 mod affinity;
 mod cell;
@@ -160,7 +156,6 @@ pub use core::ThreadAware;
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
 
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
@@ -208,4 +203,5 @@ pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
 #[cfg(feature = "derive")]
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
-pub use wrappers::{unaware, Unaware};
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
+pub use wrappers::{Unaware, unaware};
