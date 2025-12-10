@@ -163,8 +163,9 @@ impl Default for ThreadRegistry {
 
 #[cfg(test)]
 mod tests {
-    use crate::registry::{NumaNode, ThreadRegistry};
+    use crate::registry::{NumaNode, ProcessorCount, ThreadRegistry};
     use crate::test_util::{create_manual_memory_affinities, create_manual_pinned_affinities};
+    use std::num::NonZero;
 
     #[test]
     fn test_registry() {
@@ -179,6 +180,12 @@ mod tests {
 
         let first = registry.affinities().next().unwrap();
         registry.pin_to(first);
+    }
+
+    #[test]
+    fn test_registry_manual() {
+        let registry = ThreadRegistry::new(&ProcessorCount::Manual(NonZero::new(1).unwrap()));
+        assert_eq!(registry.num_affinities(), 1);
     }
 
     #[test]
