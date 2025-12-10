@@ -141,7 +141,8 @@ const BLOCK_WITHOUT_MEMORY_FNS: BlockRefVTable<TestMemoryBlock> = BlockRefVTable
 
 const BLOCK_WITHOUT_MEMORY_FNS_WITH_META: BlockRefVTable<TestMemoryBlock> = BlockRefVTable::from_trait_with_meta();
 
-#[cfg(target_os = "linux")]
+#[cfg(all(not(miri), target_os = "linux"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn system_memory() -> usize {
     let mut sys_info: MaybeUninit<libc::sysinfo> = MaybeUninit::uninit();
 
@@ -156,7 +157,8 @@ pub(crate) fn system_memory() -> usize {
     usize::try_from(sys_info.totalram).expect("total memory exceeds usize")
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(not(miri), target_os = "windows"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn system_memory() -> usize {
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
