@@ -146,7 +146,7 @@ pub(crate) fn system_memory() -> usize {
     let mut sys_info: MaybeUninit<libc::sysinfo> = MaybeUninit::uninit();
 
     // SAFETY: Call sysinfo syscall with a valid pointer.
-    let return_code = unsafe { sysinfo(sys_info.as_mut_ptr()) };
+    let return_code = unsafe { libc::sysinfo(sys_info.as_mut_ptr()) };
 
     if return_code != 0 {
         panic!("sysinfo syscall failed with return code {}", return_code);
