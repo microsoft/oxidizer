@@ -14,8 +14,8 @@
 //! On a high level, this crate enables thread migrations via the provided [`ThreadAware`] trait:
 //! - Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
 //! - The authors of said types can then act on this information to implement performance optimizations. Such optimizations
-//! might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
-//! or detaching from shared, possibly contended memory with the previous thread.
+//!   might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
+//!   or detaching from shared, possibly contended memory with the previous thread.
 //!
 //! Similar to `Clone`, there are no exact semantic prescriptions of how types should behave on relocation.
 //! They might continue to share some state (e.g., a common cache) or fully detach from it for performance reasons.
@@ -128,12 +128,8 @@
 //! }
 //! ```
 
-#![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png"
-)]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
 
 mod affinity;
 mod cell;
@@ -142,7 +138,6 @@ mod impls;
 mod wrappers;
 
 pub mod closure;
-
 
 #[cfg(feature = "threads")]
 #[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
@@ -161,7 +156,6 @@ pub use core::ThreadAware;
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
 
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
@@ -209,4 +203,5 @@ pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
 #[cfg(feature = "derive")]
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
-pub use wrappers::{unaware, Unaware};
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
+pub use wrappers::{Unaware, unaware};

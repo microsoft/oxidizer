@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::closure::RelocateFnOnce;
 use crate::ThreadAware;
+use crate::closure::RelocateFnOnce;
 use crate::{MemoryAffinity, PinnedAffinity};
 
 /// A closure with erased bounds.

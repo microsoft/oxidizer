@@ -16,7 +16,7 @@ use std::sync::{self, RwLock};
 pub use storage::{PerCore, PerNuma, PerProcess, Storage, Strategy};
 
 use crate::cell::factory::Factory;
-use crate::closure::{relocate_once, ErasedClosureOnce, RelocateFnOnce};
+use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
 use crate::{MemoryAffinity, PinnedAffinity, ThreadAware};
 
 /// Transferable reference counted type.

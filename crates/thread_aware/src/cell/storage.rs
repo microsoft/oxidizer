@@ -115,14 +115,13 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn replace_returns_previous_value() {
-        use crate::{PerCore, Storage};
         use crate::test_util::create_manual_pinned_affinities;
+        use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
         let mut storage = Storage::<String, PerCore>::new();
         let affinity = affinities[0];
@@ -143,8 +142,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn get_clone() {
-        use crate::{PerCore, Storage};
         use crate::test_util::create_manual_pinned_affinities;
+        use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
 
         let mut storage = Storage::<String, PerCore>::new();
@@ -203,8 +202,8 @@ mod tests {
     #[cfg(feature = "test-util")]
     fn test_default_implementation() {
         // This test covers line 101: Self::new() in the Default trait implementation
-        use crate::{PerCore, Storage};
         use crate::test_util::create_manual_pinned_affinities;
+        use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101

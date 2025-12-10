@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(clippy::allow_attributes, reason = "Needed for conditional compilation")]
+
 /// An `MemoryAffinity` can be thought of as a placement in a system.
 ///
 /// It is used to represent a specific context or environment where data can be processed.

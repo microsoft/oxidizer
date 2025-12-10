@@ -372,8 +372,8 @@ fn test_factory_manual_relocated() {
 #[test]
 #[cfg(feature = "test-util")]
 fn test_relocated_unknown_source() {
-    use crate::{MemoryAffinity, ThreadAware};
     use crate::test_util::create_manual_pinned_affinities;
+    use crate::{MemoryAffinity, ThreadAware};
 
     let affinities = create_manual_pinned_affinities(&[2]);
 

@@ -5,7 +5,6 @@
 
 use crate::{MemoryAffinity, PinnedAffinity};
 
-
 /// Marks types that correctly handle isolation when transferred between affinities (threads).
 ///
 /// The basic invariant of the `ThreadAware` trait is that the value returned by
@@ -91,4 +90,3 @@ pub trait ThreadAware {
     #[must_use]
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self;
 }
-
