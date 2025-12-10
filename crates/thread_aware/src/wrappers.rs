@@ -81,9 +81,6 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::create_manual_pinned_affinities;
-    use std::collections::HashMap;
-    use std::sync::Mutex;
 
     #[test]
     fn test_unaware_construction() {
@@ -173,6 +170,9 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_unaware_thread_aware() {
+        use crate::test_util::create_manual_pinned_affinities;
+        use std::collections::HashMap;
+
         let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
@@ -236,6 +236,9 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_unaware_with_arc_inside() {
+        use crate::test_util::create_manual_pinned_affinities;
+        use std::sync::Mutex;
+
         // Test the warning case mentioned in docs - Arc with interior mutability
         let inner_arc = Arc::new(Mutex::new(42));
         let unaware_wrapper = Unaware(Arc::clone(&inner_arc));
@@ -270,6 +273,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_unaware_nested_structure() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         #[derive(Debug, PartialEq)]
         struct Complex {
             id: i32,

@@ -162,13 +162,12 @@ impl<T> ThreadAware for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_util::create_manual_pinned_affinities;
-    use crate::ThreadAware;
-
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(all(feature = "threads", feature = "test-util"))]
     fn test_hashmap() {
+        use crate::ThreadAware;
         use std::collections::HashMap;
+        use crate::test_util::create_manual_pinned_affinities;
 
         let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
@@ -189,8 +188,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(all(feature = "threads", feature = "test-util"))]
     fn test_tuples() {
+        use crate::ThreadAware;
+        use crate::test_util::create_manual_pinned_affinities;
         let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
@@ -236,8 +237,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
+    #[cfg(all(feature = "threads", feature = "test-util"))]
     fn test_function_pointers() {
+        use crate::ThreadAware;
+        use crate::test_util::create_manual_pinned_affinities;
+
         // Helper functions for testing
         fn no_args() -> i32 {
             42
@@ -316,6 +320,9 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_result() {
+        use crate::ThreadAware;
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
@@ -343,7 +350,9 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_arc() {
+        use crate::ThreadAware;
         use std::sync::Arc;
+        use crate::test_util::create_manual_pinned_affinities;
 
         let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();

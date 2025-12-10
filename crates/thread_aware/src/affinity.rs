@@ -45,6 +45,7 @@ pub struct PinnedAffinity {
 
 impl PinnedAffinity {
     // You should probably use the `ThreadRegistry` or `create_manual_pinned_affinities` to create these.
+    #[allow(dead_code, reason = "Used by feature gated function.")]
     #[must_use]
     pub(crate) const fn new(processor_index: u16, memory_region_index: u16, processor_count: u16, memory_region_count: u16) -> Self {
         Self {

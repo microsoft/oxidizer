@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 #![expect(missing_docs, reason = "This is a test module")]
+#![cfg(feature = "test-util")]
 
-use thread_aware::test_util::create_manual_pinned_affinities;
 use thread_aware_macros::ThreadAware;
 
 #[derive(ThreadAware)]
@@ -30,6 +30,8 @@ enum E {
 
 #[test]
 fn derive_compiles_and_runs() {
+    use thread_aware::test_util::create_manual_pinned_affinities;
+
     let affinities = create_manual_pinned_affinities(&[2]);
     let d0 = affinities[0].into();
     let d1 = affinities[1];

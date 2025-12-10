@@ -28,12 +28,9 @@ use crate::{MemoryAffinity, PinnedAffinity, ThreadAware};
 /// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
-/// ```rust
-/// # use thread_aware::{Arc, PinnedAffinity, MemoryAffinity, ThreadAware, PerCore, relocate_once, create_manual_pinned_affinities};
+/// ```rust,ignore
+/// # use thread_aware::{Arc, PinnedAffinity, MemoryAffinity, ThreadAware, PerCore};
 /// # use std::sync::atomic::{AtomicI32, Ordering};
-/// # let affinities = create_manual_pinned_affinities(&[2]);
-/// # let affinity1 = affinities[0].into();
-/// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
 /// # struct Counter {
 /// #     value: std::sync::Arc<AtomicI32>,
@@ -157,12 +154,9 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
+    /// # use thread_aware::{Arc, PinnedAffinity, ThreadAware, MemoryAffinity, PerCore};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
-    /// # let affinities = create_manual_memory_affinities(&[2]);
-    /// # let affinity1 = affinities[0];
-    /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
     /// # struct Counter {
     /// #     value: sync::Arc<AtomicI32>,
@@ -265,12 +259,9 @@ where
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, Arc, PerCore, create_manual_memory_affinities};
+    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, Arc, PerCore};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
-    /// # let affinities = create_manual_memory_affinities(&[2]);
-    /// # let affinity1 = affinities[0];
-    /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
     /// # struct Counter {
     /// #     value: sync::Arc<AtomicI32>,

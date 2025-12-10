@@ -213,7 +213,7 @@ where
 ///
 /// Usage:
 /// ```rust
-/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, relocate_once, RelocateFnOnce};
+/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, closure::relocate_once, closure::RelocateFnOnce};
 /// struct Transferrable;
 /// impl ThreadAware for Transferrable {
 ///     // ...
@@ -246,7 +246,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::create_manual_pinned_affinities;
 
     #[test]
     fn boxed_once() {
@@ -318,6 +317,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_closure_thread_aware() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2, 2]);
 
         // Test with i32
@@ -376,6 +377,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_closure_once_thread_aware() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2, 3]);
 
         // Test with String
@@ -430,6 +433,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_closure_mut_thread_aware() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2, 3]);
 
         // Test with i32 - mutating state across relocations
@@ -499,6 +504,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_closure_all_traits_together() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2]);
         let closure = relocate(vec![1, 2, 3], std::vec::Vec::len);
 
@@ -516,6 +523,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_closure_mut_all_traits_together() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2, 2]);
         let closure = relocate_mut(100_i32, |x| {
             *x += 1;
@@ -537,6 +546,8 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_closure_once_with_thread_aware_and_clone() {
+        use crate::test_util::create_manual_pinned_affinities;
+
         let affinities = create_manual_pinned_affinities(&[2]);
         let closure = relocate_once((1, 2, 3), |(a, b, c)| a + b + c);
 

@@ -109,7 +109,7 @@
 //!
 //! ```rust
 //! use thread_aware::{ThreadAware, Arc, PerCore};
-//! # #[derive(Default)]
+//! # #[derive(Debug, Default)]
 //! # struct Client;
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
