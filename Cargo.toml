@@ -48,6 +48,7 @@ duct = { version = "1.1.1", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
+libc = { version = "0.2.178", default-features = false }
 many_cpus = { version = "1.1.0", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 mutants = { version = "0.0.3", default-features = false }
@@ -71,6 +72,7 @@ tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
+windows-sys = { version = "0.61.2", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]

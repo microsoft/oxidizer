@@ -77,12 +77,14 @@ dependencies = [
  "bytes",
  "criterion",
  "infinity_pool",
+ "libc",
  "mutants",
  "new_zealand",
  "nm",
  "smallvec",
  "static_assertions",
  "testing_aids",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
