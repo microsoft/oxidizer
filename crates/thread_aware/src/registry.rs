@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::assertions_on_constants, reasons = "Testing codecov issue")]
+    #[expect(clippy::assertions_on_constants, reason = "Testing codecov issue")]
     fn test_crate_fake_memory_affinities() {
         let affinities = create_manual_memory_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
