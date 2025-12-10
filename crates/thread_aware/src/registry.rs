@@ -163,8 +163,23 @@ impl Default for ThreadRegistry {
 
 #[cfg(test)]
 mod tests {
-    use crate::registry::NumaNode;
+    use crate::registry::{NumaNode, ThreadRegistry};
     use crate::test_util::{create_manual_memory_affinities, create_manual_pinned_affinities};
+
+    #[test]
+    fn test_registry() {
+        let registry = ThreadRegistry::default();
+        for i in registry.affinities() {
+            assert!(i.processor_index() < i.processor_count());
+            assert!(i.memory_region_index() < i.memory_region_count());
+        }
+
+        assert!(registry.num_affinities() > 0);
+        assert!(registry.current_affinity().is_unknown());
+
+        let first = registry.affinities().next().unwrap();
+        registry.pin_to(first);
+    }
 
     #[test]
     fn test_numa_node() {
