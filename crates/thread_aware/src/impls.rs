@@ -170,7 +170,7 @@ mod tests {
     fn test_hashmap() {
         use std::collections::HashMap;
 
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     #[cfg(feature = "threads")]
     fn test_tuples() {
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 

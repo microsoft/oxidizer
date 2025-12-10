@@ -7,7 +7,6 @@ use std::sync::{
 };
 
 use crate::closure::relocate;
-use crate::test_util::create_manual_pinned_affinities;
 use crate::{MemoryAffinity, PinnedAffinity, ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
