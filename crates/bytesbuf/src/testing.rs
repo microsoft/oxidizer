@@ -148,9 +148,7 @@ pub(crate) fn system_memory() -> usize {
     // SAFETY: Call sysinfo syscall with a valid pointer.
     let return_code = unsafe { libc::sysinfo(sys_info.as_mut_ptr()) };
 
-    if return_code != 0 {
-        panic!("sysinfo syscall failed with return code {}", return_code);
-    }
+    assert!(return_code == 0, "sysinfo syscall failed with return code {return_code}");
 
     // SAFETY: sysinfo syscall initialized the structure.
     let sys_info = unsafe { sys_info.assume_init() };
