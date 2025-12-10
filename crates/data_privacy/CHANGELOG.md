@@ -1,54 +1,30 @@
 # Changelog
 
+## [0.8.0] - 2025-12-10
+
+- ✨ Features
+
+  - Add a redactor that uses RapidHash
+
+- 🔄 Continuous Integration
+
+  - Linting for Cargo.toml files ([#110](https://github.com/microsoft/oxidizer/pull/110))
+  - Add license check for dependencies ([#105](https://github.com/microsoft/oxidizer/pull/105))
+
+- 🧩 Miscellaneous
+
+  - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
+
 ## [0.7.0] - 2025-12-05
+
+- ✨ Features
+
+  - Improve data_privacy UX ([#89](https://github.com/microsoft/oxidizer/pull/89))
 
 - ✔️ Tasks
 
   - Enable the missing_docs compiler lint. ([#102](https://github.com/microsoft/oxidizer/pull/102))
   - enable docs.rs documentation for feature-gated code ([#99](https://github.com/microsoft/oxidizer/pull/99))
-
-- 🧩 Miscellaneous
-
-  - Fix import.
-  - Document more items.
-  - Address missing documentation.
-  - Use inherent method.
-  - Fix after rebase.
-  - Add declassification methods.
-  - Add derive documentation.
-  - Add module docs
-  - Formatter.
-  - Make Redactor non-public.
-  - Make non-public.
-  - Don't make Redactors public.
-  - Add documentation.
-  - Update README.
-  - Format.
-  - Don't make std types redacted, annotate fields with `#[unredacted]` instead.
-  - Disable various tests for miri.
-  - More CI complaints.
-  - Fix CI complaints.
-  - Format again.
-  - Remove `RedactedToString` derive, since it was replaced by blanket trait impl.
-  - Increase coverage.
-  - Fix doc tests.
-  - Format.
-  - Fix clippy
-  - Fix documentation.
-  - Fix more tests and warnings.
-  - Move out integration tests.
-  - Fix some rendering bugs and more UX.
-  - Rename wrapper and improve UX working with DataClasses
-  - Move macros into module for documentation.
-  - Also align data privacy with Rust Guidelines and clean up module structure.
-  - Re-enable tests.
-  - Update main app example and also log entire type.
-  - Fix impl issues and make it work with std.
-  - More design work.
-  - Change #[classified] macro to implement its own derives.
-  - Cleanup before reworking macro
-  - Refactoring plan.
-  - In middle of rework.
 
 ## [0.6.0] - 2025-11-27
 
