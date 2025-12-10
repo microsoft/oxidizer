@@ -29,6 +29,7 @@ env:
   CARGO_LLVM_COV_VERSION: "0.6.21"
   CARGO_MUTANTS_VERSION: "25.3.1"
   CARGO_RDME_VERSION: "1.5.0"
+  CARGO_SEMVER_CHECKS_VERSION: "0.45.0"
   CARGO_SORT_VERSION: "2.0.2"
   CARGO_UDEPS_VERSION: "0.1.60"
   CARGO_WORKSPACES_VERSION: "0.4.1"
@@ -95,6 +96,8 @@ jobs:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
+        with:
+          fetch-depth: 2
       - name: Cache Cargo Dependencies
         uses: actions/cache@v4.3.0
         with:
@@ -116,7 +119,7 @@ jobs:
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.62
         with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}, cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
 
       # execute
       - name: Clippy
@@ -137,6 +140,8 @@ jobs:
         run: cargo ensure-no-cyclic-deps
       - name: Dependency Validation
         run: cargo deny --all-features --workspace --color always check all
+      - name: Semver Compatibility
+        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
 
   extended-analysis:
     if: github.event_name == 'pull_request'
