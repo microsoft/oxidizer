@@ -30,7 +30,7 @@
 //! so the macro should 'just work' on most compounds of built-ins.
 //!
 //! External crates might often not implement [`ThreadAware`]. In many of these cases using our
-//! [`thread_aware::Arc`](crate::Arc) offers a convenient solution: It combines an upstream
+//! [`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
 //! [`std::sync::Arc`] with a relocation [`Strategy`], and implements [`ThreadAware`] for it. For
 //! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
 //! `Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
@@ -128,8 +128,12 @@
 //! }
 //! ```
 
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
+#![doc(
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico"
+)]
 
 mod affinity;
 mod cell;
@@ -156,6 +160,7 @@ pub use core::ThreadAware;
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
 
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
@@ -203,5 +208,4 @@ pub use core::ThreadAware;
 #[cfg(feature = "derive")]
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
-pub use wrappers::{Unaware, unaware};
+pub use wrappers::{unaware, Unaware};
