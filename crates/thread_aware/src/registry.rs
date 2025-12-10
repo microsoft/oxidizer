@@ -218,6 +218,8 @@ mod tests {
                 assert_eq!(affinity.processor_count(), 5);
                 assert_eq!(affinity.memory_region_index(), usize::from(i >= 2));
                 assert_eq!(affinity.memory_region_count(), 2);
+            } else {
+                panic!("Unexpected affinity type: {affinity:?}");
             }
         }
     }
