@@ -13,18 +13,20 @@
 //!
 //! The way this would be used is by restricting how work can be scheduled on other affinities (threads,
 //! NUMA nodes). If the runtime only allows work scheduling in a way that accepts work that can be
-//! transferred (e.g. by using the [`RelocateFnOnce`] trait) and makes sure that transfer is called, it can
+//! transferred (e.g. by using the [`RelocateFnOnce`](crate::closure::RelocateFnOnce) trait) and makes sure that transfer is called, it can
 //! effectively isolate the affinities as the [`ThreadAware`] trait ensures the right level of separation if
 //! implemented correctly.
 //!
-//! `ThreadAware` is an 'infectious' trait, meaning that when you implement it for a type,
+//! [`ThreadAware`] is an 'infectious' trait, meaning that when you implement it for a type,
 //! all of its fields must also implement [`ThreadAware`] and you must call their `transfer` methods.
-//! However [`ThreadAware`] is provided for many common types, so you can use it out of the box for most cases.
+//! It is, however, provided for many common types, so you can use it out of the box for most cases.
 //!
 //! # Feature Flags
 //! * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments: `default-features = false`.
+//! * **`test-util`** – Enables features used for testing.
+//! * **`threads`** – Enables features mainly used by async runtimes for OS interactions.
 //!
 //! # Examples
 //!
@@ -111,7 +113,7 @@ pub mod registry;
 
 #[cfg(feature = "test-util")]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
-pub mod tests;
+pub mod test_util;
 
 pub use affinity::{MemoryAffinity, PinnedAffinity};
 

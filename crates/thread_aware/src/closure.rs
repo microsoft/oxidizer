@@ -1,13 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-pub mod erased;
+//! Helpers for defining and calling [`ThreadAware`] closures.
 
+mod erased;
+
+#[doc(inline)]
 pub use erased::ErasedClosureOnce;
 
 use crate::ThreadAware;
 
-/// A FnOnce-like, parameterless closure whose captured values all implement [`ThreadAware`]
+/// Marks `FnOnce()`-like closures whose captured values all implement [`ThreadAware`].
 ///
 /// Use [`relocate_once`] function to construct these.
 pub trait RelocateFnOnce<T: ?Sized>: ThreadAware {
@@ -15,21 +18,23 @@ pub trait RelocateFnOnce<T: ?Sized>: ThreadAware {
     fn call_once(self) -> T;
 }
 
-/// A trait for callable types that can be called multiple times.
+/// Marks `Fn()`-like closure whose captured values all implement [`ThreadAware`].
+///
 /// This trait is used to define closures that can be called multiple times, without consuming the closure.
 pub trait RelocateFn<T>: ThreadAware {
     /// Calls the closure, returning the result.
     fn call(&self) -> T;
 }
 
-/// A trait for callable types that can be called mutably.
+/// Marks `FnMut()`-like closure whose captured values all implement [`ThreadAware`].
+///
 /// This trait is used to define closures that can be called mutably, allowing the closure to modify its internal state.
 pub trait RelocateFnMut<T>: ThreadAware {
     /// Calls the closure mutably, returning the result.
     fn call_mut(&mut self) -> T;
 }
 
-/// A common implementation of [`RelocateFn`]
+/// A common implementation of [`RelocateFn`].
 ///
 /// Construct this using the [`relocate`] function.
 #[derive(Debug, Copy, Hash)]
@@ -87,7 +92,7 @@ where
     }
 }
 
-/// A common implementation of [`RelocateFnOnce`]
+/// A common implementation of [`RelocateFnOnce`].
 ///
 /// Construct this using the [`relocate_once`] function.
 #[derive(Debug, Copy, Hash)]
@@ -127,7 +132,7 @@ where
     }
 }
 
-/// A common implementation of [`RelocateFnMut`]]
+/// A common implementation of [`RelocateFnMut`].
 ///
 /// Construct this using the [`relocate_mut`] function.
 #[derive(Debug, Copy, Hash)]
@@ -176,7 +181,7 @@ where
     }
 }
 
-/// Construct a [`RelocateFn`] - a closure-like object where the captured data implement [`ThreadAware`].
+/// Constructs a [`RelocateFn`].
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
@@ -188,7 +193,7 @@ where
     Closure { data, f }
 }
 
-/// Construct a [`RelocateFnMut`] - a closure-like object where the captured data implement [`ThreadAware`].
+/// Constructs a [`RelocateFnMut`].
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
@@ -200,7 +205,7 @@ where
     ClosureMut { data, f }
 }
 
-/// Construct a [`RelocateFnOnce`] - a closure-like object where the captured data implement [`ThreadAware`].
+/// Constructs a [`RelocateFnOnce`].
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
@@ -241,7 +246,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::create_manual_pinned_affinities;
+    use crate::test_util::create_manual_pinned_affinities;
 
     #[test]
     fn boxed_once() {

@@ -118,7 +118,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::create_manual_pinned_affinities;
+    use crate::test_util::create_manual_pinned_affinities;
     use crate::{PerCore, Storage, Strategy};
 
     #[test]

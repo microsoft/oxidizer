@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{MemoryAffinity, PinnedAffinity};
 use crate::closure::RelocateFnOnce;
 use crate::ThreadAware;
+use crate::{MemoryAffinity, PinnedAffinity};
 
+/// A closure with erased bounds.
 pub struct ErasedClosureOnce<T> {
     inner: Box<dyn Erased<T>>,
 }
@@ -20,6 +21,7 @@ impl<T> std::fmt::Debug for ErasedClosureOnce<T> {
 }
 
 impl<T> ErasedClosureOnce<T> {
+    /// Creates a new closure with erased bounds.
     pub fn new<C>(closure: C) -> Self
     where
         C: RelocateFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,

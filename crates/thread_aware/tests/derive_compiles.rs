@@ -3,7 +3,7 @@
 
 #![expect(missing_docs, reason = "This is a test module")]
 
-use thread_aware::tests::create_manual_pinned_affinities;
+use thread_aware::test_util::create_manual_pinned_affinities;
 use thread_aware::ThreadAware;
 use thread_aware_macros::ThreadAware as TA;
 

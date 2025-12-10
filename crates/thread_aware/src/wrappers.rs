@@ -11,11 +11,17 @@ use crate::{MemoryAffinity, PinnedAffinity, ThreadAware};
 /// Since the [`ThreadAware`] trait is not commonly implemented, this wrapper can
 /// be used to allow transferring values that don't implement [`ThreadAware`].
 ///
+/// # Performance Considerations
+///
 /// Care must be taken when using this type - since the value will be moved
 /// as is, if it contains shared references to data other threads may use,
-/// it can introduce contention, resulting in performance impact. As a rule
-/// of thumb, if the wrapped value contains an Arc with interior mutability
-/// somewhere inside, this wrapper should not be used, and a [`PerCore`](`crate::PerCore`) or [`PerNuma`](`crate::PerNuma`)
+/// it can introduce contention, resulting in performance impact.
+///
+/// You should never wrap types that are immediately [`ThreadAware`], hence its name.
+///
+/// In addition, if the wrapped value contains an Arc with interior mutability
+/// somewhere inside, this wrapper should not be used, and an [`Arc`](crate::Arc) with a
+/// [`PerCore`](`crate::PerCore`) or [`PerNuma`](`crate::PerNuma`)
 /// with independent initialization per affinity is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
@@ -63,6 +69,11 @@ impl<T> Unaware<T> {
 }
 
 /// Creates an [`Unaware`] wrapper around a value.
+///
+/// # Performance Considerations
+///
+/// This function should not be called on types that are [`ThreadAware`] or contain
+/// an [`std::sync::Arc`], compare the [`Unaware`] documentation.
 pub const fn unaware<T>(value: T) -> Unaware<T> {
     Unaware(value)
 }
@@ -70,7 +81,7 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::create_manual_pinned_affinities;
+    use crate::test_util::create_manual_pinned_affinities;
     use std::collections::HashMap;
     use std::sync::Mutex;
 

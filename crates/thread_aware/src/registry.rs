@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Building blocks for runtimes and thread-aware hosts.
+
 use std::collections::HashMap;
 use std::num::NonZero;
 use std::sync::Mutex;
@@ -172,6 +174,7 @@ mod tests {
 
     #[cfg(not(miri))]
     use crate::{ProcessorCount, ThreadRegistry};
+    use crate::test_util::{create_manual_memory_affinities, create_manual_pinned_affinities};
 
     #[cfg(not(miri))]
     #[test]

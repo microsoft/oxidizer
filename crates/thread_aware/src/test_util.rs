@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 
+//! Helpers mainly used for testing thread-aware types without runtimes.
+
 use crate::{MemoryAffinity, PinnedAffinity};
 
 /// Create pinned affinities for testing purposes or when not using the `ThreadRegistry`.

@@ -162,7 +162,7 @@ impl<T> ThreadAware for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::create_manual_pinned_affinities;
+    use crate::test_util::create_manual_pinned_affinities;
     use crate::ThreadAware;
 
     #[test]
