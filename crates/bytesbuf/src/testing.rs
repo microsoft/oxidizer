@@ -142,7 +142,7 @@ const BLOCK_WITHOUT_MEMORY_FNS: BlockRefVTable<TestMemoryBlock> = BlockRefVTable
 const BLOCK_WITHOUT_MEMORY_FNS_WITH_META: BlockRefVTable<TestMemoryBlock> = BlockRefVTable::from_trait_with_meta();
 
 #[cfg(all(not(miri), target_os = "linux"))]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test utility function, not meant to be covered
 pub(crate) fn system_memory() -> usize {
     let mut sys_info: MaybeUninit<libc::sysinfo> = MaybeUninit::uninit();
 
@@ -158,7 +158,7 @@ pub(crate) fn system_memory() -> usize {
 }
 
 #[cfg(all(not(miri), target_os = "windows"))]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage_nightly, coverage(off))] // Test utility function, not meant to be covered
 pub(crate) fn system_memory() -> usize {
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
