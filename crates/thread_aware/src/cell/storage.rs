@@ -123,7 +123,7 @@ mod tests {
         use crate::test_util::create_manual_pinned_affinities;
         use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
-        let mut storage = Storage::<String, PerCore>::new();
+        let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // First replace should return None (no previous value)
@@ -146,7 +146,7 @@ mod tests {
         use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
 
-        let mut storage = Storage::<String, PerCore>::new();
+        let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         assert!(storage.get_clone(affinity).is_none());
@@ -207,7 +207,7 @@ mod tests {
         let affinities = create_manual_pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
-        let mut storage = Storage::<String, PerCore>::new();
+        let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // Verify the default storage is empty (no data for any affinity)
