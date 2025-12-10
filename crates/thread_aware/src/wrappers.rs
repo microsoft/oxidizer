@@ -70,6 +70,7 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::create_manual_pinned_affinities;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -159,8 +160,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_unaware_thread_aware() {
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -221,13 +223,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_unaware_with_arc_inside() {
         // Test the warning case mentioned in docs - Arc with interior mutability
         let inner_arc = Arc::new(Mutex::new(42));
         let unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -254,6 +257,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_unaware_nested_structure() {
         #[derive(Debug, PartialEq)]
         struct Complex {
@@ -274,7 +278,7 @@ mod tests {
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
 
         // Test with relocation
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 

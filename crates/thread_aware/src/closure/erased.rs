@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 use crate::{MemoryAffinity, PinnedAffinity};
-use crate::{RelocateFnOnce, ThreadAware};
+use crate::closure::RelocateFnOnce;
+use crate::ThreadAware;
 
 pub struct ErasedClosureOnce<T> {
     inner: Box<dyn Erased<T>>,

@@ -89,32 +89,40 @@
 //! If you disable default features (or the `derive` feature explicitly) you
 //! can still implement [`ThreadAware`] manually as shown in the earlier example.
 
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
+#![doc(
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico"
+)]
 
 mod affinity;
 mod cell;
-mod closure;
-pub mod core;
+mod core;
 mod impls;
 mod wrappers;
 
-#[cfg(feature = "threads")]
-#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
-mod validator;
+pub mod closure;
+
 
 #[cfg(feature = "threads")]
 #[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
-mod registry;
+pub mod registry;
 
-pub use core::{ThreadAware, create_manual_memory_affinities, create_manual_pinned_affinities};
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub mod tests;
 
 pub use affinity::{MemoryAffinity, PinnedAffinity};
+
+#[doc(inline)]
+pub use core::ThreadAware;
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
 
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, Storage, Strategy};
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
@@ -162,12 +170,4 @@ pub use affinity::{MemoryAffinity, PinnedAffinity};
 #[cfg(feature = "derive")]
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
-pub use cell::{Arc, PerAppStorage, PerCore, PerCoreStorage, PerNuma, PerNumaStorage, PerProcess, Storage, Strategy};
-pub use closure::{Closure, ClosureMut, ClosureOnce, RelocateFn, RelocateFnMut, RelocateFnOnce, relocate, relocate_mut, relocate_once};
-#[cfg(feature = "threads")]
-#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
-pub use registry::{ProcessorCount, ThreadRegistry};
-#[cfg(feature = "threads")]
-#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
-pub use validator::ThreadAwareValidator;
-pub use wrappers::{Unaware, unaware};
+pub use wrappers::{unaware, Unaware};

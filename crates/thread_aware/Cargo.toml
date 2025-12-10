@@ -27,6 +27,7 @@ allowed_external_types = ["thread_aware_macros::ThreadAware"]
 default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
+test-util = []
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }

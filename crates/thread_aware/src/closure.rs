@@ -241,7 +241,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::create_manual_pinned_affinities;
+    use crate::tests::create_manual_pinned_affinities;
 
     #[test]
     fn boxed_once() {
@@ -311,6 +311,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_closure_thread_aware() {
         let affinities = create_manual_pinned_affinities(&[2, 2]);
 
@@ -368,6 +369,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_closure_once_thread_aware() {
         let affinities = create_manual_pinned_affinities(&[2, 3]);
 
@@ -421,6 +423,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_closure_mut_thread_aware() {
         let affinities = create_manual_pinned_affinities(&[2, 3]);
 
@@ -489,6 +492,7 @@ mod tests {
     // Integration tests combining traits
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_closure_all_traits_together() {
         let affinities = create_manual_pinned_affinities(&[2]);
         let closure = relocate(vec![1, 2, 3], std::vec::Vec::len);
@@ -505,6 +509,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_closure_mut_all_traits_together() {
         let affinities = create_manual_pinned_affinities(&[2, 2]);
         let closure = relocate_mut(100_i32, |x| {
@@ -525,6 +530,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_closure_once_with_thread_aware_and_clone() {
         let affinities = create_manual_pinned_affinities(&[2]);
         let closure = relocate_once((1, 2, 3), |(a, b, c)| a + b + c);

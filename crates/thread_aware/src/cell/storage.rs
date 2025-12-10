@@ -115,25 +115,17 @@ where
     }
 }
 
-/// Storage type that uses the [`PerCore`] strategy.
-pub type PerCoreStorage<T> = Storage<T, PerCore>;
-
-/// Storage type that uses the [`PerNuma`] strategy.
-pub type PerNumaStorage<T> = Storage<T, PerNuma>;
-
-/// Storage type that uses the [`PerProcess`] strategy.
-pub type PerAppStorage<T> = Storage<T, PerProcess>;
 
 #[cfg(test)]
 mod tests {
-    use crate::{Storage, Strategy, create_manual_pinned_affinities};
+    use crate::tests::create_manual_pinned_affinities;
+    use crate::{PerCore, Storage, Strategy};
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn replace_returns_previous_value() {
-        use super::PerCoreStorage;
-
         let affinities = create_manual_pinned_affinities(&[1]);
-        let mut storage = PerCoreStorage::new();
+        let mut storage = Storage::<String, PerCore>::new();
         let affinity = affinities[0];
 
         // First replace should return None (no previous value)
@@ -150,12 +142,11 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn get_clone() {
-        use super::PerCoreStorage;
-
         let affinities = create_manual_pinned_affinities(&[1]);
 
-        let mut storage = PerCoreStorage::new();
+        let mut storage = Storage::<String, PerCore>::new();
         let affinity = affinities[0];
 
         assert!(storage.get_clone(affinity).is_none());
@@ -165,6 +156,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn per_app() {
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
@@ -175,6 +167,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn per_memory_region() {
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
@@ -187,6 +180,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn per_processor() {
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
@@ -199,14 +193,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_default_implementation() {
         // This test covers line 101: Self::new() in the Default trait implementation
-        use super::PerCoreStorage;
 
         let affinities = create_manual_pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
-        let mut storage: PerCoreStorage<String> = Storage::default();
+        let mut storage = Storage::<String, PerCore>::new();
         let affinity = affinities[0];
 
         // Verify the default storage is empty (no data for any affinity)

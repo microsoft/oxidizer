@@ -6,7 +6,9 @@ use std::sync::{
     atomic::{AtomicI32, Ordering},
 };
 
-use crate::{MemoryAffinity, PinnedAffinity, ThreadAware, Unaware, create_manual_pinned_affinities, relocate};
+use crate::closure::relocate;
+use crate::tests::create_manual_pinned_affinities;
+use crate::{MemoryAffinity, PinnedAffinity, ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
 type PerCore<T> = crate::Arc<T, crate::PerCore>;
@@ -39,7 +41,9 @@ impl ThreadAware for Counter {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn transfer_creates_new_value() {
+    use crate::tests::create_manual_pinned_affinities;
     let affinities = create_manual_pinned_affinities(&[2]);
     let source = affinities[0].into();
     let destination = affinities[1];
@@ -59,7 +63,10 @@ fn new_with_works() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_from_unaware() {
+    use crate::tests::create_manual_pinned_affinities;
+
     // Create a PerCore from an unaware value (a simple i32)
     // This covers line 191 (from_unaware method)
     let per_core = PerCore::from_unaware(42);
@@ -158,8 +165,9 @@ fn test_from() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_trc_relocated_with_factory_data() {
-    use crate::{ThreadAware, create_manual_pinned_affinities};
+    use crate::tests::create_manual_pinned_affinities;
 
     let affinities = create_manual_pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
@@ -177,8 +185,9 @@ fn test_trc_relocated_with_factory_data() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_trc_relocated_reuses_existing_value() {
-    use crate::{ThreadAware, create_manual_pinned_affinities};
+    use crate::tests::create_manual_pinned_affinities;
 
     let affinities = create_manual_pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
@@ -204,8 +213,9 @@ fn test_trc_relocated_reuses_existing_value() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_from_storage() {
-    use crate::create_manual_pinned_affinities;
+    use crate::tests::create_manual_pinned_affinities;
     use std::sync::{Arc, RwLock};
 
     let affinities = create_manual_pinned_affinities(&[2]);
@@ -230,11 +240,11 @@ fn test_from_storage() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_factory_clone_with_data() {
     // This test covers line 142: Self::Data(data_fn) => Self::Data(*data_fn)
     // We create a Trc with Factory::Data, clone it, and verify the factory is properly cloned
-
-    use crate::{ThreadAware, create_manual_pinned_affinities};
+    use crate::tests::create_manual_pinned_affinities;
 
     let affinities = create_manual_pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
@@ -259,11 +269,11 @@ fn test_factory_clone_with_data() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_factory_clone_with_closure() {
     // This test covers line 141: Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), *closure_source)
     // We create a Trc with Factory::Closure via with_closure, clone it, and verify the factory is properly cloned
-
-    use crate::{ThreadAware, create_manual_pinned_affinities};
+    use crate::tests::create_manual_pinned_affinities;
 
     let affinities = create_manual_pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
@@ -291,11 +301,11 @@ fn test_factory_clone_with_closure() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_factory_clone_with_manual() {
     // This test covers line 143: Self::Manual => Self::Manual
     // We create a Trc from storage (Factory::Manual), clone it, and verify the factory is properly cloned
-
-    use crate::create_manual_pinned_affinities;
+    use crate::tests::create_manual_pinned_affinities;
     use std::sync::{Arc, RwLock};
 
     let affinities = create_manual_pinned_affinities(&[2]);
@@ -323,12 +333,13 @@ fn test_factory_clone_with_manual() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_factory_manual_relocated() {
     // This test covers line 453: Factory::Manual branch in relocated()
     // When a Trc is created from storage (Factory::Manual) and relocated to a new affinity,
     // it should behave like sync::Arc<T> and just clone the value without creating new data
 
-    use crate::{ThreadAware, create_manual_pinned_affinities};
+    use crate::tests::create_manual_pinned_affinities;
     use std::sync::{Arc, RwLock};
 
     let affinities = create_manual_pinned_affinities(&[2]);
@@ -360,8 +371,10 @@ fn test_factory_manual_relocated() {
 }
 
 #[test]
+#[cfg(feature = "test-util")]
 fn test_relocated_unknown_source() {
-    use crate::{MemoryAffinity, ThreadAware, create_manual_pinned_affinities};
+    use crate::{MemoryAffinity, ThreadAware};
+    use crate::tests::create_manual_pinned_affinities;
 
     let affinities = create_manual_pinned_affinities(&[2]);
 

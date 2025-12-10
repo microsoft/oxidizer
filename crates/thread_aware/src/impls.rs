@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
+use crate::core::ThreadAware;
 use crate::MemoryAffinity;
 use crate::PinnedAffinity;
-use crate::core::ThreadAware;
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -162,9 +162,11 @@ impl<T> ThreadAware for Arc<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::tests::create_manual_pinned_affinities;
     use crate::ThreadAware;
 
     #[test]
+    #[cfg(feature = "threads")]
     fn test_hashmap() {
         use std::collections::HashMap;
 
@@ -187,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "threads")]
     fn test_tuples() {
         let affinities = crate::create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
@@ -233,6 +236,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_function_pointers() {
         // Helper functions for testing
         fn no_args() -> i32 {
@@ -264,7 +268,7 @@ mod tests {
             x > 0
         }
 
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -310,8 +314,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_result() {
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -336,10 +341,11 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-util")]
     fn test_arc() {
         use std::sync::Arc;
 
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = create_manual_pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 

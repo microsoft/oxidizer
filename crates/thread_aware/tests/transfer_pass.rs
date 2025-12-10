@@ -3,8 +3,7 @@
 
 #![expect(missing_docs, reason = "This is a test module")]
 
-// compile-pass tests for #[derive(ThreadAware)]
-use thread_aware::create_manual_pinned_affinities;
+use thread_aware::tests::create_manual_pinned_affinities;
 use thread_aware_macros::ThreadAware;
 
 #[derive(ThreadAware)]
