@@ -14,7 +14,7 @@ pub trait Strategy {
     fn count(affinity: PinnedAffinity) -> usize;
 }
 
-/// A strategy that stores data per processor.
+/// A strategy that stores data per processor core / thread.
 ///
 /// This strategy uses the processor index and count from the `PinnedAffinity` to determine
 /// where to store and retrieve data.
