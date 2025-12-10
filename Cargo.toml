@@ -24,7 +24,7 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.1.0" }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.1.2" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.7.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.7.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.7.0" }
@@ -33,7 +33,7 @@ fundle_macros = { path = "crates/fundle_macros", default-features = false, versi
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
-testing_aids = { path = "crates/testing_aids", default-features = false, version = "0.0.0" }
+testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.4.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.4.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.4.0" }
@@ -50,6 +50,7 @@ futures = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
+libc = { version = "0.2.178", default-features = false }
 many_cpus = { version = "1.1.0", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 mutants = { version = "0.0.3", default-features = false }
@@ -74,6 +75,7 @@ tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
+windows-sys = { version = "0.61.2", default-features = false }
 xutex = { version = "0.2.0", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 

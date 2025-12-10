@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Manipulate sequences of bytes for efficient I/O."
-version = "0.1.0"
+version = "0.1.2"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -38,9 +38,11 @@ smallvec = { workspace = true, features = ["const_new", "union"] }
 [dev-dependencies]
 alloc_tracker.workspace = true
 criterion.workspace = true
+libc.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
 testing_aids.workspace = true
+windows-sys.workspace = true
 
 [lints]
 workspace = true
