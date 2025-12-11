@@ -213,7 +213,8 @@ where
 ///
 /// Usage:
 /// ```rust
-/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, closure::relocate_once, closure::RelocateFnOnce};
+/// # use thread_aware::{ThreadAware, closure::relocate_once, closure::RelocateFnOnce};
+/// # use thread_aware::affinity::*;
 /// struct Transferrable;
 /// impl ThreadAware for Transferrable {
 ///     // ...

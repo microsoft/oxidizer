@@ -34,6 +34,9 @@ pub use storage::{Storage, Strategy};
 /// # use thread_aware::{Arc, ThreadAware, PerThread};
 /// # use thread_aware::affinity::*;
 /// # use std::sync::atomic::{AtomicI32, Ordering};
+/// # let affinities = pinned_affinities(&[2]);
+/// # let affinity1 = affinities[0].into();
+/// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
 /// # struct Counter {
 /// #     value: std::sync::Arc<AtomicI32>,
@@ -64,8 +67,6 @@ pub use storage::{Storage, Strategy};
 /// #         }
 /// #     }
 /// # }
-/// # let affinity = pinned_affinities()
-///
 ///
 /// let arc_affinity1 = Arc::<_, PerThread>::new(Counter::new);
 /// let arc_affinity1_clone = arc_affinity1.clone();
@@ -159,7 +160,8 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PinnedAffinity, ThreadAware, MemoryAffinity, PerThread};
+    /// # use thread_aware::{Arc, ThreadAware, PerThread};
+    /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]
@@ -264,7 +266,8 @@ where
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, Arc, PerThread};
+    /// # use thread_aware::{ThreadAware, Arc, PerThread};
+    /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]

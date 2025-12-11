@@ -109,14 +109,14 @@
 //!
 //!
 //! ```rust
-//! use thread_aware::{ThreadAware, Arc, PerCore};
+//! use thread_aware::{ThreadAware, Arc, PerThread};
 //! # #[derive(Debug, Default)]
 //! # struct Client;
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
 //! struct Service {
 //!     name: String,
-//!     client: Arc<Client, PerCore>,
+//!     client: Arc<Client, PerThread>,
 //! }
 //!
 //! impl Service {
@@ -181,8 +181,8 @@ pub use cell::{Arc, PerNuma, PerProcess, PerThread};
 ///
 /// # Example
 /// ```rust
-/// use thread_aware::{PinnedAffinity, MemoryAffinity, ThreadAware};
-///
+/// use thread_aware::ThreadAware;
+/// use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 /// #[derive(ThreadAware)]
 /// struct Payload {
 ///     id: u64,

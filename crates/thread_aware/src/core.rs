@@ -36,8 +36,8 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// ```rust
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # use std::sync::Arc;
-/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity};
-///
+/// # use thread_aware::{ThreadAware};
+/// # use thread_aware::affinity::*;
 /// #[derive(Clone)]
 /// struct Counter {
 ///     value: Arc<AtomicI32>,
