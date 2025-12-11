@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 mod factory;
-mod storage;
+pub mod storage;
 
+mod builtin;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests;
@@ -13,11 +14,12 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::{self, RwLock};
 
-pub use storage::{PerAppStorage, PerCore, PerCoreStorage, PerNuma, PerNumaStorage, PerProcess, Storage, Strategy};
-
+use crate::ThreadAware;
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::cell::factory::Factory;
-use crate::closure::ErasedClosureOnce;
-use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware, relocate_once};
+use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
+pub use builtin::{PerNuma, PerProcess, PerThread};
+pub use storage::{Storage, Strategy};
 
 /// Transferable reference counted type.
 ///
@@ -29,9 +31,10 @@ use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware, relocat
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{Arc, PinnedAffinity, MemoryAffinity, ThreadAware, PerCore, relocate_once, create_manual_pinned_affinities};
+/// # use thread_aware::{Arc, ThreadAware, PerThread};
+/// # use thread_aware::affinity::*;
 /// # use std::sync::atomic::{AtomicI32, Ordering};
-/// # let affinities = create_manual_pinned_affinities(&[2]);
+/// # let affinities = pinned_affinities(&[2]);
 /// # let affinity1 = affinities[0].into();
 /// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
@@ -65,7 +68,7 @@ use crate::{MemoryAffinity, PinnedAffinity, RelocateFnOnce, ThreadAware, relocat
 /// #     }
 /// # }
 ///
-/// let arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
+/// let arc_affinity1 = Arc::<_, PerThread>::new(Counter::new);
 /// let arc_affinity1_clone = arc_affinity1.clone();
 ///
 /// arc_affinity1.increment_by(42);
@@ -157,12 +160,10 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PinnedAffinity, ThreadAware, MemoryAffinity, PerCore, relocate_once, create_manual_memory_affinities};
+    /// # use thread_aware::{Arc, ThreadAware, PerThread};
+    /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
-    /// # let affinities = create_manual_memory_affinities(&[2]);
-    /// # let affinity1 = affinities[0];
-    /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
     /// # struct Counter {
     /// #     value: sync::Arc<AtomicI32>,
@@ -193,7 +194,7 @@ where
     /// #     }
     /// # }
     ///
-    /// let container = Arc::<_, PerCore>::new(Counter::new);
+    /// let container = Arc::<_, PerThread>::new(Counter::new);
     /// let container_clone = container.clone();
     /// container.increment_by(42);
     /// assert_eq!(container.value(), 42);
@@ -245,7 +246,7 @@ where
     ///
     /// ```rust
     /// # use std::sync::{self, Mutex};
-    /// # use thread_aware::{Arc, PerCore};
+    /// # use thread_aware::{Arc, PerThread};
     /// struct MyStruct {
     ///     inner: sync::Arc<Mutex<i32>>,
     /// }
@@ -258,19 +259,17 @@ where
     ///     }
     /// }
     ///
-    /// let container = Arc::<_, PerCore>::new_with((), |_| MyStruct::new());
+    /// let container = Arc::<_, PerThread>::new_with((), |_| MyStruct::new());
     /// ```
     ///
     /// The constructor can depend on other values that implement [`ThreadAware`] (this example uses the Counter
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, Arc, PerCore, create_manual_memory_affinities};
+    /// # use thread_aware::{ThreadAware, Arc, PerThread};
+    /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
-    /// # let affinities = create_manual_memory_affinities(&[2]);
-    /// # let affinity1 = affinities[0];
-    /// # let affinity2 = affinities[1];
     /// # #[derive(Clone)]
     /// # struct Counter {
     /// #     value: sync::Arc<AtomicI32>,
@@ -311,7 +310,7 @@ where
     /// }
     ///
     /// let counter = Counter::new();
-    /// let container = Arc::<_, PerCore>::new_with(counter, |counter| MyStruct::new(counter.value()));
+    /// let container = Arc::<_, PerThread>::new_with(counter, |counter| MyStruct::new(counter.value()));
     /// ```
     pub fn new_with<D>(data: D, f: fn(D) -> T) -> Self
     where
@@ -365,7 +364,7 @@ where
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PerCore};
+    /// # use thread_aware::{Arc, PerThread};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]
@@ -389,7 +388,7 @@ where
     /// #     }
     /// # }
     ///
-    /// let arc = Arc::<_, PerCore>::new(Counter::new);
+    /// let arc = Arc::<_, PerThread>::new(Counter::new);
     /// let arc_clone = arc.clone();
     /// arc.increment_by(42);
     /// assert_eq!(arc.value(), 42);

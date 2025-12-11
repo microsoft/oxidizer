@@ -1,0 +1,7 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+::core::compile_error! {
+    "unknown thread_aware attribute (only 'skip' is supported)"
+}

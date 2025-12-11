@@ -1,14 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::core::ThreadAware;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
-
-use crate::MemoryAffinity;
-use crate::PinnedAffinity;
-use crate::core::ThreadAware;
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -162,13 +160,15 @@ impl<T> ThreadAware for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ThreadAware;
+    use crate::affinity::pinned_affinities;
 
     #[test]
+    #[cfg(feature = "threads")]
     fn test_hashmap() {
+        use crate::ThreadAware;
         use std::collections::HashMap;
 
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -187,8 +187,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "threads")]
     fn test_tuples() {
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        use crate::ThreadAware;
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -233,7 +235,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "threads")]
     fn test_function_pointers() {
+        use crate::ThreadAware;
+
         // Helper functions for testing
         fn no_args() -> i32 {
             42
@@ -264,7 +269,7 @@ mod tests {
             x > 0
         }
 
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -311,7 +316,9 @@ mod tests {
 
     #[test]
     fn test_result() {
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        use crate::ThreadAware;
+
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -337,9 +344,10 @@ mod tests {
 
     #[test]
     fn test_arc() {
+        use crate::ThreadAware;
         use std::sync::Arc;
 
-        let affinities = crate::create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 

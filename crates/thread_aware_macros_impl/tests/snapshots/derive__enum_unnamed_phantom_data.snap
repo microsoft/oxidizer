@@ -1,0 +1,30 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl<T, U> ::thread_aware::ThreadAware for EnumUnnamedPhantom<T, U> {
+    #[allow(
+        clippy::redundant_clone,
+        reason = "macro generated pattern moves each field once"
+    )]
+    fn relocated(
+        self,
+        source: ::thread_aware::affinity::MemoryAffinity,
+        destination: ::thread_aware::affinity::PinnedAffinity,
+    ) -> Self {
+        match self {
+            Self::Variant(_v0, _v1) => {
+                Self::Variant(
+                    ::thread_aware::ThreadAware::relocated(_v0, source, destination),
+                    _v1,
+                )
+            }
+            Self::Other(_v0, _v1) => {
+                Self::Other(
+                    ::thread_aware::ThreadAware::relocated(_v0, source, destination),
+                    _v1,
+                )
+            }
+        }
+    }
+}
