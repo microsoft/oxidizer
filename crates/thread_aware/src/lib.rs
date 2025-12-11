@@ -11,7 +11,7 @@
 //! memory affinities.
 //!
 //! # Theory of Operation
-//! On a high level, this crate enables thread migrations via the provided [`ThreadAware`] trait:
+//! On a high level, this crate enables thread migrations of state via [`ThreadAware`] trait:
 //! - Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
 //! - The authors of said types can then act on this information to implement performance optimizations. Such optimizations
 //!   might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
@@ -76,7 +76,6 @@
 //! happen via [`std::thread::spawn`] and other means. In these cases types should still function
 //! correctly, although they might experience degraded performance through contention of now-shared
 //! resources.
-//!
 //!
 //! # Feature Flags
 //! * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion

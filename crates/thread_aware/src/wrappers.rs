@@ -17,11 +17,12 @@ use std::sync::Arc;
 /// as is, if it contains shared references to data other threads may use,
 /// it can introduce contention, resulting in performance impact.
 ///
-/// You should never wrap types that are immediately [`ThreadAware`], hence its name.
+/// You should never wrap types that are immediately [`ThreadAware`], hence its
+/// name `Unaware`.
 ///
 /// In addition, if the wrapped value contains an Arc with interior mutability
 /// somewhere inside, this wrapper should not be used, and an [`Arc`](crate::Arc) with a
-/// [`PerCore`](`crate::PerCore`) or [`PerNuma`](`crate::PerNuma`)
+/// [`PerThread`](crate::PerThread) or [`PerNuma`](crate::PerNuma)
 /// with independent initialization per affinity is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
