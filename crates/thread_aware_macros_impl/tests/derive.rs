@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #![expect(missing_docs, reason = "This is a test module")]
-#![cfg_attr(coverage_nightly, coverage(off))]
 
 use insta::assert_snapshot;
 use quote::quote;
