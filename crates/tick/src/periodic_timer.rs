@@ -22,6 +22,8 @@ use super::{Clock, TIMER_RESOLUTION};
 /// precision of the timer other than that it will eventually tick. When the thread is healthy,
 /// the timer's period should be close to the specified one.
 ///
+/// > **Note**: The perdiodic timer is not affected by adjustements to the system clock.
+///
 /// # Examples
 ///
 /// ## Create a periodic timer
@@ -180,7 +182,7 @@ mod tests {
             assert_eq!(timer.next().await, Some(()));
             assert_eq!(timer.next().await, Some(()));
         }
-        .timeout(Duration::from_secs(5), &clock)
+        .timeout(&clock, Duration::from_secs(5))
         .await
         .unwrap();
     }

@@ -6,7 +6,7 @@ use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
 use super::{TimerKey, Timers};
-use crate::{Clock, ClockTimestamp};
+use crate::{Clock, IntoSystemTime};
 
 /// Controls the passage of time in tests.
 ///
@@ -108,10 +108,10 @@ impl ClockControl {
 
     /// Creates a new `ClockControl` instance at the specified timestamp.
     ///
-    /// This method accepts various timestamp types through the [`ClockTimestamp`] enum:
+    /// This method accepts any type that implements [`IntoSystemTime`]:
     ///
     /// - `SystemTime`: Sets the clock to an absolute system time
-    /// - `Timestamp`: Sets the clock to a specific timestamp
+    /// - `Timestamp`: Sets the clock to a specific timestamp (requires `timestamp` feature)
     /// - `Duration`: Advances the clock by the specified duration from `UNIX_EPOCH`
     ///
     /// # Examples
@@ -136,14 +136,9 @@ impl ClockControl {
     /// );
     /// ```
     #[must_use]
-    pub fn new_at(timestamp: impl Into<ClockTimestamp>) -> Self {
+    pub fn new_at(timestamp: impl IntoSystemTime) -> Self {
         let this = Self::new();
-        match timestamp.into() {
-            ClockTimestamp::System(time) => this.advance_to(time),
-            #[cfg(any(feature = "timestamp", test))]
-            ClockTimestamp::Timestamp(ts) => this.advance_to(ts.to_system_time()),
-            ClockTimestamp::Offset(duration) => this.advance(duration),
-        }
+        this.advance_to(timestamp.into_system_time());
         this
     }
 
@@ -227,7 +222,7 @@ impl ClockControl {
     ///
     /// // Apply a timeout to the future and await it
     /// let timeout_error = future
-    ///     .timeout(Duration::from_millis(200), &clock)
+    ///     .timeout(&clock, Duration::from_millis(200))
     ///     .await
     ///     .unwrap_err();
     ///

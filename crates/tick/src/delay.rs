@@ -17,6 +17,8 @@ use super::timers::TimerKey;
 /// precision of the delay other than that it will eventually complete. When the thread is healthy,
 /// the delay should be close to the specified duration.
 ///
+/// Note: `Delay` is not affected by changes in the system clock.
+///
 /// # Examples
 ///
 /// ```

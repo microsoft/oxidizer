@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Apply a timeout to long operations.
     match Delay::new(&clock, Duration::from_secs(30))
-        .timeout(Duration::from_secs(2), &clock)
+        .timeout(&clock, Duration::from_secs(2))
         .await
     {
         Ok(()) => println!("Background job completed within the timeout."),

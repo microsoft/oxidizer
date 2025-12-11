@@ -25,14 +25,14 @@ pub trait FutureExt: Future {
     ///
     /// // Apply a timeout to the future and await it
     /// let timeout_error = future
-    ///     .timeout(Duration::from_millis(200), &clock)
+    ///     .timeout(&clock, Duration::from_millis(200))
     ///     .await
     ///     .unwrap_err();
     ///
     /// assert_eq!(timeout_error.to_string(), "future timed out");
     /// # }
     /// ```
-    fn timeout(self, timeout: Duration, clock: &Clock) -> Timeout<Self, Delay>
+    fn timeout(self, clock: &Clock, timeout: Duration) -> Timeout<Self, Delay>
     where
         Self: Sized,
     {
@@ -61,7 +61,7 @@ mod tests {
         let clock = control.to_clock();
 
         let future = Delay::new(&clock, Duration::from_secs(10));
-        let mut future = future.timeout(Duration::from_secs(1), &clock);
+        let mut future = future.timeout(&clock, Duration::from_secs(1));
 
         // First poll at 0 seconds - no timeout yet.
         let mut cx = task::Context::from_waker(task::Waker::noop());
@@ -87,7 +87,7 @@ mod tests {
             Delay::new(&clock, Duration::from_secs(10)).await;
         };
 
-        let error = future.timeout(Duration::from_millis(10), &clock).await.unwrap_err();
+        let error = future.timeout(&clock, Duration::from_millis(10)).await.unwrap_err();
 
         assert_eq!(error.to_string(), "future timed out");
     }
@@ -102,7 +102,7 @@ mod tests {
             10
         };
 
-        let result = future.timeout(Duration::from_secs(10), &clock).await.unwrap();
+        let result = future.timeout(&clock, Duration::from_secs(10)).await.unwrap();
 
         assert_eq!(result, 10);
     }

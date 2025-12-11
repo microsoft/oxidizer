@@ -188,7 +188,7 @@ mod stopwatch;
 mod timers;
 
 #[cfg(any(feature = "test-util", test))]
-mod clock_timestamp;
+mod into_system_time;
 pub mod runtime;
 mod timeout;
 #[cfg(any(feature = "timestamp", test))]
@@ -198,12 +198,12 @@ pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use clock_control::ClockControl;
-#[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
-pub use clock_timestamp::ClockTimestamp;
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
+#[cfg(any(feature = "test-util", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub use into_system_time::IntoSystemTime;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
@@ -212,3 +212,8 @@ pub(crate) use timers::{TIMER_RESOLUTION, TimerKey, Timers};
 #[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
 #[doc(inline)]
 pub use timestamp::Timestamp;
+
+pub(crate) mod sealed {
+    pub trait Sealed {}
+    impl<T> Sealed for T {}
+}
