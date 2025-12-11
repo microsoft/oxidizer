@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use futures_core::Stream;
 
+use crate::timers::TIMER_RESOLUTION;
+
+use super::Clock;
 use super::timers::TimerKey;
-use super::{Clock, TIMER_RESOLUTION};
 
 /// A timer that periodically ticks.
 ///

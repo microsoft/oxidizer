@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::task::Waker;
 use std::time::{Instant, SystemTime};
 
-use super::TimerKey;
 #[cfg(any(feature = "test-util", test))]
 use super::clock_control::ClockControl;
 use crate::state::ClockState;
+use crate::timers::TimerKey;
 
 /// Provides an abstraction for time-related operations.
 ///
