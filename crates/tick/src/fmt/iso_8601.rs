@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use super::utils::from_jiff;
 use crate::fmt::utils::to_jiff;
-use crate::fmt::{Rfc2822Timestamp, UnixSecondsTimestamp};
+use crate::fmt::{Rfc2822, UnixSeconds};
 use crate::{Error, Timestamp};
 
 /// Parser and formatter for ISO 8601 timestamps.
@@ -20,7 +20,7 @@ use crate::{Error, Timestamp};
 /// - `2024-08-06T21:30:00Z` (UTC)
 /// - `2024-08-06T14:30:00-07:00` (UTC offset)
 ///
-/// The [`Iso8601Timestamp`] format is defined in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601).
+/// The [`Iso8601`] format is defined in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601).
 ///
 /// # UTC and time zones
 ///
@@ -29,7 +29,7 @@ use crate::{Error, Timestamp};
 ///
 /// # Serialization and deserialization
 ///
-/// `Iso8601Timestamp` implements the `Serialize` and `Deserialize` traits from the `serde` crate.
+/// `Iso8601` implements the `Serialize` and `Deserialize` traits from the `serde` crate.
 /// The timestamp is serialized as a string using ISO 8601 format.
 ///
 /// # Leap seconds
@@ -37,9 +37,9 @@ use crate::{Error, Timestamp};
 /// If an ISO 8601 string contains a leap second, parsing will succeed and the leap second will be trimmed.
 ///
 /// ```
-/// use tick::fmt::Iso8601Timestamp;
+/// use tick::fmt::Iso8601;
 ///
-/// let iso = "1990-12-31T23:59:60Z".parse::<Iso8601Timestamp>()?;
+/// let iso = "1990-12-31T23:59:60Z".parse::<Iso8601>()?;
 /// assert_eq!(iso.to_string(), "1990-12-31T23:59:59Z");
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -50,13 +50,13 @@ use crate::{Error, Timestamp};
 /// ### Formatting and parsing - UTC
 /// ```
 /// use tick::Timestamp;
-/// use tick::fmt::Iso8601Timestamp;
+/// use tick::fmt::Iso8601;
 ///
-/// let iso = "2024-08-06T21:30:00Z".parse::<Iso8601Timestamp>()?;
+/// let iso = "2024-08-06T21:30:00Z".parse::<Iso8601>()?;
 /// assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
 ///
 /// let timestamp: Timestamp = iso.into();
-/// assert_eq!(Iso8601Timestamp::from(timestamp), iso);
+/// assert_eq!(Iso8601::from(timestamp), iso);
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -67,20 +67,20 @@ use crate::{Error, Timestamp};
 /// Note that when formatting the absolute time, the UTC offset is not included in the formatted string.
 /// ```
 /// use tick::Timestamp;
-/// use tick::fmt::Iso8601Timestamp;
+/// use tick::fmt::Iso8601;
 ///
-/// let iso = "2024-08-06T23:30:00+02:00".parse::<Iso8601Timestamp>()?;
+/// let iso = "2024-08-06T23:30:00+02:00".parse::<Iso8601>()?;
 /// assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z"); // Note that the UTC offset is applied
 ///
 /// let timestamp: Timestamp = iso.into();
-/// assert_eq!(Iso8601Timestamp::from(timestamp), iso);
+/// assert_eq!(Iso8601::from(timestamp), iso);
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Iso8601Timestamp(Timestamp);
+pub struct Iso8601(Timestamp);
 
-impl FromStr for Iso8601Timestamp {
+impl FromStr for Iso8601 {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -89,45 +89,45 @@ impl FromStr for Iso8601Timestamp {
     }
 }
 
-impl Display for Iso8601Timestamp {
+impl Display for Iso8601 {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Display::fmt(&to_jiff(self.0.with_rounded_nanos()), f)
     }
 }
 
-impl From<Iso8601Timestamp> for Timestamp {
-    fn from(value: Iso8601Timestamp) -> Self {
+impl From<Iso8601> for Timestamp {
+    fn from(value: Iso8601) -> Self {
         value.0
     }
 }
 
-impl From<Timestamp> for Iso8601Timestamp {
+impl From<Timestamp> for Iso8601 {
     fn from(value: Timestamp) -> Self {
         Self(value)
     }
 }
 
-impl From<Iso8601Timestamp> for SystemTime {
-    fn from(value: Iso8601Timestamp) -> Self {
+impl From<Iso8601> for SystemTime {
+    fn from(value: Iso8601) -> Self {
         Timestamp::from(value).to_system_time()
     }
 }
 
-impl From<Rfc2822Timestamp> for Iso8601Timestamp {
-    fn from(value: Rfc2822Timestamp) -> Self {
+impl From<Rfc2822> for Iso8601 {
+    fn from(value: Rfc2822) -> Self {
         Timestamp::from(value).into()
     }
 }
 
-impl From<UnixSecondsTimestamp> for Iso8601Timestamp {
-    fn from(value: UnixSecondsTimestamp) -> Self {
+impl From<UnixSeconds> for Iso8601 {
+    fn from(value: UnixSeconds) -> Self {
         Timestamp::from(value).into()
     }
 }
 
 #[cfg(feature = "serde")]
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-impl serde_core::Serialize for Iso8601Timestamp {
+impl serde_core::Serialize for Iso8601 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde_core::Serializer,
@@ -138,7 +138,7 @@ impl serde_core::Serialize for Iso8601Timestamp {
 
 #[cfg(feature = "serde")]
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-impl<'de> serde_core::Deserialize<'de> for Iso8601Timestamp {
+impl<'de> serde_core::Deserialize<'de> for Iso8601 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde_core::Deserializer<'de>,
@@ -158,18 +158,18 @@ mod tests {
 
     #[test]
     fn parse_err() {
-        "date".parse::<Iso8601Timestamp>().unwrap_err();
+        "date".parse::<Iso8601>().unwrap_err();
     }
 
     #[test]
     fn parse_min() {
-        let stamp: Iso8601Timestamp = "1970-01-01T00:00:00Z".parse().unwrap();
+        let stamp: Iso8601 = "1970-01-01T00:00:00Z".parse().unwrap();
         assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH);
     }
 
     #[test]
     fn parse_then_display() {
-        let stamp: Iso8601Timestamp = "1970-01-01T01:00:00Z".parse().unwrap();
+        let stamp: Iso8601 = "1970-01-01T01:00:00Z".parse().unwrap();
 
         // Display should return the timestamp in the ISO 8601 format
         assert_eq!(stamp.to_string(), "1970-01-01T01:00:00Z");
@@ -181,26 +181,26 @@ mod tests {
 
     #[test]
     fn to_system_time() {
-        let stamp: Iso8601Timestamp = "1970-01-01T01:00:00Z".parse().unwrap();
+        let stamp: Iso8601 = "1970-01-01T01:00:00Z".parse().unwrap();
         assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(3600));
     }
 
     #[test]
     fn parse_max() {
-        let stamp: Iso8601Timestamp = "9999-12-30T22:00:00.9999999Z".parse().unwrap();
+        let stamp: Iso8601 = "9999-12-30T22:00:00.9999999Z".parse().unwrap();
         assert_eq!(stamp.to_string(), "9999-12-30T22:00:00.9999999Z");
     }
 
     #[test]
     fn parse_max_overflow() {
-        "10000-12-30T22:00:00.999999999Z".parse::<Iso8601Timestamp>().unwrap_err();
+        "10000-12-30T22:00:00.999999999Z".parse::<Iso8601>().unwrap_err();
     }
 
     #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.
     #[test]
     fn from_to() {
         let now = crate::Clock::with_frozen_timers().timestamp();
-        let iso: Iso8601Timestamp = now.into();
+        let iso: Iso8601 = now.into();
         let timestamp: Timestamp = iso.into();
 
         assert_eq!(timestamp, now);
@@ -208,23 +208,23 @@ mod tests {
 
     #[test]
     fn parse_leap_seconds() {
-        let stamp: Iso8601Timestamp = "1990-12-31T23:59:60Z".parse().unwrap();
+        let stamp: Iso8601 = "1990-12-31T23:59:60Z".parse().unwrap();
         assert_eq!(stamp.to_string(), "1990-12-31T23:59:59Z");
     }
 
     #[test]
     #[cfg(feature = "serde")]
     fn serialize_deserialize() {
-        let iso: Iso8601Timestamp = "1970-01-01T01:00:00Z".parse().unwrap();
+        let iso: Iso8601 = "1970-01-01T01:00:00Z".parse().unwrap();
         let serialized = serde_json::to_string(&iso).unwrap();
-        let deserialized: Iso8601Timestamp = serde_json::from_str(&serialized).unwrap();
+        let deserialized: Iso8601 = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(iso, deserialized);
     }
 
     #[test]
     fn ensure_precise_nanos_parsed() {
-        let iso: Iso8601Timestamp = "1970-01-01T00:00:08.999999999Z".parse().unwrap();
+        let iso: Iso8601 = "1970-01-01T00:00:08.999999999Z".parse().unwrap();
 
         // last two nanos digits are rounded
         assert_eq!(iso.to_string(), "1970-01-01T00:00:08.9999999Z");
@@ -234,7 +234,7 @@ mod tests {
     fn ensure_nanos_rounded() {
         let timestamp = Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::new(8, 999_999_999)).unwrap();
 
-        let iso: Iso8601Timestamp = timestamp.into();
+        let iso: Iso8601 = timestamp.into();
 
         assert_eq!(iso.to_string(), "1970-01-01T00:00:08.9999999Z");
     }

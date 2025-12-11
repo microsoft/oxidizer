@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use tick::fmt::UnixSecondsTimestamp;
+use tick::fmt::UnixSeconds;
 use tick::{Clock, Delay, Timestamp};
 
 #[tokio::main]
@@ -48,7 +48,7 @@ pub struct CachedData {
     id: u32,
 
     // Store the timestamp as Unix seconds.
-    last_access: UnixSecondsTimestamp,
+    last_access: UnixSeconds,
     data: String,
 }
 

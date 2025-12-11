@@ -14,11 +14,12 @@
 
 use std::time::{Duration, SystemTime};
 
-use tick::fmt::{Iso8601Timestamp, Rfc2822Timestamp};
+use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
 use tick::{Clock, Timestamp};
 
 fn main() -> anyhow::Result<()> {
-    let clock = Clock::new_frozen_at(Duration::from_secs(3600 * 100));
+    let unix_seconds = UnixSeconds::saturating_from_secs(3600);
+    let clock = Clock::new_frozen_at(unix_seconds);
 
     creation(&clock)?;
     formatting_and_parsing()?;
@@ -45,11 +46,11 @@ fn creation(clock: &Clock) -> anyhow::Result<()> {
 
 fn formatting_and_parsing() -> anyhow::Result<()> {
     // Formatting and parsing - ISO 8601
-    let time: Iso8601Timestamp = "2024-07-24T14:30:00Z".parse()?;
+    let time: Iso8601 = "2024-07-24T14:30:00Z".parse()?;
     assert_eq!(time.to_string(), "2024-07-24T14:30:00Z");
 
     // Formatting and parsing - RFC 2822
-    let time: Rfc2822Timestamp = "Tue, 15 Nov 1994 12:45:26 -0000".parse()?;
+    let time: Rfc2822 = "Tue, 15 Nov 1994 12:45:26 -0000".parse()?;
     assert_eq!(time.to_string(), "Tue, 15 Nov 1994 12:45:26 GMT");
 
     Ok(())

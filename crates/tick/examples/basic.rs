@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use tick::fmt::{Iso8601Timestamp, Rfc2822Timestamp};
+use tick::fmt::{Iso8601, Rfc2822};
 use tick::{Clock, Delay, Stopwatch};
 
 #[tokio::main]
@@ -24,8 +24,8 @@ async fn main() -> anyhow::Result<()> {
     let time = clock.timestamp();
 
     // Convert the time to various formats.
-    let iso: Iso8601Timestamp = time.into();
-    let rfc: Rfc2822Timestamp = time.into();
+    let iso: Iso8601 = time.into();
+    let rfc: Rfc2822 = time.into();
 
     // Print the current time in various formats.
     println!("Current time (ISO 8601): {iso}");

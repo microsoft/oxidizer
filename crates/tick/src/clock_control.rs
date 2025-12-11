@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::timers::{TimerKey, Timers};
 use crate::Clock;
+use crate::timers::{TimerKey, Timers};
 
 /// Controls the passage of time in tests.
 ///
@@ -517,7 +517,7 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fmt::UnixSecondsTimestamp;
+    use crate::fmt::UnixSeconds;
     use crate::{Stopwatch, Timestamp};
 
     #[test]
@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn new_at_with_timestamp_ok() {
-        let timestamp = UnixSecondsTimestamp::from_secs(222).unwrap().into();
+        let timestamp = UnixSeconds::from_secs(222).unwrap().into();
         let control = ClockControl::new_at(timestamp);
         let clock = control.to_clock();
 

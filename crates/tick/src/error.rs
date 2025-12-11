@@ -24,10 +24,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::fmt::Iso8601Timestamp;
+/// use tick::fmt::Iso8601;
 /// use tick::{Clock, Error, Timestamp};
 ///
-/// "invalid date".parse::<Iso8601Timestamp>().unwrap_err();
+/// "invalid date".parse::<Iso8601>().unwrap_err();
 /// ```
 #[derive(Debug)]
 pub struct Error(ErrorKind);

@@ -6,7 +6,7 @@ use std::ops::{Add, Sub};
 use std::time::{Duration, SystemTime};
 
 use super::{Error, Result};
-use crate::fmt::Iso8601Timestamp;
+use crate::fmt::Iso8601;
 
 /// Represents an absolute UTC point in time.
 ///
@@ -59,9 +59,9 @@ use crate::fmt::Iso8601Timestamp;
 /// use std::time::{Duration, SystemTime};
 ///
 /// use tick::Timestamp;
-/// use tick::fmt::Iso8601Timestamp;
+/// use tick::fmt::Iso8601;
 ///
-/// let iso: Iso8601Timestamp = "1970-01-01T00:00:10Z".parse::<Iso8601Timestamp>()?;
+/// let iso: Iso8601 = "1970-01-01T00:00:10Z".parse::<Iso8601>()?;
 /// let time = Timestamp::from(iso);
 ///
 /// assert_eq!(
@@ -529,10 +529,10 @@ impl Sub<Self> for Timestamp {
 ///
 /// ```
 /// use tick::Timestamp;
-/// use tick::fmt::Rfc2822Timestamp;
+/// use tick::fmt::Rfc2822;
 ///
 /// let timestamp: Timestamp = "Wed, 21 Aug 2024 07:04:37 +0000"
-///     .parse::<Rfc2822Timestamp>()?
+///     .parse::<Rfc2822>()?
 ///     .into();
 /// assert_eq!(timestamp.to_string(), "2024-08-21T07:04:37Z");
 ///
@@ -540,7 +540,7 @@ impl Sub<Self> for Timestamp {
 /// ```
 impl Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let iso: Iso8601Timestamp = (*self).into();
+        let iso: Iso8601 = (*self).into();
         fmt::Display::fmt(&iso, f)
     }
 }
@@ -553,7 +553,7 @@ impl serde_core::Serialize for Timestamp {
     where
         S: serde_core::Serializer,
     {
-        let iso = Iso8601Timestamp::from(*self);
+        let iso = Iso8601::from(*self);
         iso.serialize(serializer)
     }
 }
@@ -566,7 +566,7 @@ impl<'de> serde_core::Deserialize<'de> for Timestamp {
     where
         D: serde_core::Deserializer<'de>,
     {
-        let iso = Iso8601Timestamp::deserialize(deserializer)?;
+        let iso = Iso8601::deserialize(deserializer)?;
         Ok(iso.into())
     }
 }
@@ -575,7 +575,7 @@ impl<'de> serde_core::Deserialize<'de> for Timestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fmt::UnixSecondsTimestamp;
+    use crate::fmt::UnixSeconds;
 
     #[test]
     fn tick_max_is_jiff_max() {
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn serde_with_seconds() {
         let t = "2024-02-29T12:01:59Z";
-        let iso: crate::fmt::Iso8601Timestamp = t.parse().unwrap();
+        let iso: crate::fmt::Iso8601 = t.parse().unwrap();
         let timestamp = Timestamp::from(iso);
 
         // Test serialization
@@ -744,7 +744,7 @@ mod tests {
     #[test]
     fn serde_with_microseconds() {
         let t = "2024-12-31T23:59:59.456789Z";
-        let iso: crate::fmt::Iso8601Timestamp = t.parse().unwrap();
+        let iso: crate::fmt::Iso8601 = t.parse().unwrap();
         let timestamp = Timestamp::from(iso);
 
         let serialized = serde_json::to_string(&timestamp).unwrap();
@@ -803,8 +803,8 @@ mod tests {
 
     #[test]
     fn sub_timestamp_operator() {
-        let timestamp1: Timestamp = UnixSecondsTimestamp::from_secs(1).unwrap().into();
-        let timestamp2: Timestamp = UnixSecondsTimestamp::from_secs(10).unwrap().into();
+        let timestamp1: Timestamp = UnixSeconds::from_secs(1).unwrap().into();
+        let timestamp2: Timestamp = UnixSeconds::from_secs(10).unwrap().into();
 
         let result = timestamp2 - timestamp1;
         assert_eq!(result, Duration::from_secs(9));
