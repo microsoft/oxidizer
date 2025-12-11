@@ -54,7 +54,7 @@ This crate provides a unified API for working with time that:
 - **Abstracts async runtimes** - Works across Tokio, async-std, etc. without tight coupling
   to any specific implementation.
 - **Enables deterministic testing** - With the `test-util` feature, `ClockControl` lets you
-  manipulate time flow—advance it instantly, pause it, or jump forward. No waiting for a
+  manipulate time passage it instantly, pause it, or jump forward. No waiting for a
   1-minute periodic job in your tests.
 - **Improves testability** - Time-dependent code becomes fast and reproducible to test
   without relying on wall-clock time.
