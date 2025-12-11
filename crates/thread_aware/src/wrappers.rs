@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::ThreadAware;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-
-use crate::{MemoryAffinity, PinnedAffinity, ThreadAware};
 
 /// Allows transferring a value that doesn't implement [`ThreadAware`]
 ///
@@ -81,6 +81,7 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::affinity::create_manual_pinned_affinities;
 
     #[test]
     fn test_unaware_construction() {
@@ -168,9 +169,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn test_unaware_thread_aware() {
-        use crate::test_util::create_manual_pinned_affinities;
         use std::collections::HashMap;
 
         let affinities = create_manual_pinned_affinities(&[2]);
@@ -234,9 +233,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn test_unaware_with_arc_inside() {
-        use crate::test_util::create_manual_pinned_affinities;
         use std::sync::Mutex;
 
         // Test the warning case mentioned in docs - Arc with interior mutability
@@ -273,8 +270,6 @@ mod tests {
     #[test]
     #[cfg(feature = "test-util")]
     fn test_unaware_nested_structure() {
-        use crate::test_util::create_manual_pinned_affinities;
-
         #[derive(Debug, PartialEq)]
         struct Complex {
             id: i32,

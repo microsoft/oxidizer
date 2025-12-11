@@ -3,7 +3,7 @@
 
 //! This module contains all the core primitives the thread aware system is built upon.
 
-use crate::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 
 /// Marks types that correctly handle isolation when transferred between affinities (threads).
 ///

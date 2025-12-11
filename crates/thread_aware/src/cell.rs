@@ -2,22 +2,24 @@
 // Licensed under the MIT License.
 
 mod factory;
-mod storage;
+pub mod storage;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests;
+mod builtin;
 
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::{self, RwLock};
 
-pub use storage::{PerCore, PerNuma, PerProcess, Storage, Strategy};
-
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::cell::factory::Factory;
-use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
-use crate::{MemoryAffinity, PinnedAffinity, ThreadAware};
+use crate::closure::{relocate_once, ErasedClosureOnce, RelocateFnOnce};
+use crate::ThreadAware;
+pub use builtin::{PerCore, PerNuma, PerProcess};
+pub use storage::{Storage, Strategy};
 
 /// Transferable reference counted type.
 ///

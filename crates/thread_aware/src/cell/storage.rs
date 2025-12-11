@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::affinity::PinnedAffinity;
 use std::marker::PhantomData;
-
-use crate::PinnedAffinity;
 
 /// A strategy for storing data in a affinity-aware manner.
 pub trait Strategy {
@@ -14,52 +13,6 @@ pub trait Strategy {
     fn count(affinity: PinnedAffinity) -> usize;
 }
 
-/// A strategy that stores data per processor core / thread.
-///
-/// This strategy uses the processor index and count from the `PinnedAffinity` to determine
-/// where to store and retrieve data.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerCore;
-impl Strategy for PerCore {
-    fn index(affinity: PinnedAffinity) -> usize {
-        affinity.processor_index()
-    }
-
-    fn count(affinity: PinnedAffinity) -> usize {
-        affinity.processor_count()
-    }
-}
-
-/// A strategy that stores data per memory region.
-///
-/// This strategy uses the memory region index and count from the `PinnedAffinity` to determine
-/// where to store and retrieve data.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerNuma;
-impl Strategy for PerNuma {
-    fn index(affinity: PinnedAffinity) -> usize {
-        affinity.memory_region_index()
-    }
-
-    fn count(affinity: PinnedAffinity) -> usize {
-        affinity.memory_region_count()
-    }
-}
-
-/// A strategy that stores data per process.
-///
-/// This strategy does not differentiate between affinities, storing all data in a single slot.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerProcess;
-impl Strategy for PerProcess {
-    fn index(_affinity: PinnedAffinity) -> usize {
-        0
-    }
-
-    fn count(_affinity: PinnedAffinity) -> usize {
-        1
-    }
-}
 
 /// Type used for storing data in a affinity-aware manner.
 ///
@@ -117,11 +70,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::affinity::create_manual_pinned_affinities;
+    use crate::cell::builtin::{PerCore, PerNuma, PerProcess};
+    use crate::cell::{Storage, Strategy};
+
     #[test]
-    #[cfg(feature = "test-util")]
     fn replace_returns_previous_value() {
-        use crate::test_util::create_manual_pinned_affinities;
-        use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
         let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
@@ -140,10 +94,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn get_clone() {
-        use crate::test_util::create_manual_pinned_affinities;
-        use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
 
         let mut storage = Storage::<String, PerCore>::default();
@@ -156,54 +107,42 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn per_app() {
-        use crate::Strategy;
-        use crate::test_util::create_manual_pinned_affinities;
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
-        let index = super::PerProcess::index(affinities[0]);
-        let count = super::PerProcess::count(affinities[0]);
+        let index = PerProcess::index(affinities[0]);
+        let count = PerProcess::count(affinities[0]);
         assert_eq!(index, 0);
         assert_eq!(count, 1);
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn per_memory_region() {
-        use crate::Strategy;
-        use crate::test_util::create_manual_pinned_affinities;
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
-            let index = super::PerNuma::index(affinity);
-            let count = super::PerNuma::count(affinity);
+            let index = PerNuma::index(affinity);
+            let count = PerNuma::count(affinity);
             assert_eq!(index, affinity.memory_region_index());
             assert_eq!(count, affinity.memory_region_count());
         }
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn per_processor() {
-        use crate::Strategy;
-        use crate::test_util::create_manual_pinned_affinities;
         let affinities = create_manual_pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
-            let index = super::PerCore::index(affinity);
-            let count = super::PerCore::count(affinity);
+            let index = PerCore::index(affinity);
+            let count = PerCore::count(affinity);
             assert_eq!(index, affinity.processor_index());
             assert_eq!(count, affinity.processor_count());
         }
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn test_default_implementation() {
         // This test covers line 101: Self::new() in the Default trait implementation
-        use crate::test_util::create_manual_pinned_affinities;
-        use crate::{PerCore, Storage};
         let affinities = create_manual_pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101

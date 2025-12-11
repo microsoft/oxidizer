@@ -19,7 +19,7 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath, parse_quote};
+use syn::{parse_quote, Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath};
 
 // Skip tests with miri as miri does not support insta
 #[cfg(all(test, not(miri)))]
@@ -33,7 +33,7 @@ pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldA
 mod struct_gen;
 
 use enum_gen::build_enum_body;
-use field_attrs::{FieldAttrCfg, is_phantom_data};
+use field_attrs::{is_phantom_data, FieldAttrCfg};
 use struct_gen::build_struct_body;
 
 /// Core implementation used by both `thread_aware_macros` and `oxidizer_macros`.
@@ -70,6 +70,8 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
     let mut pinned_affinity_path = root_path.clone();
     // Append segments manually (Paths are immutable; construct via parse_quote!)
     thread_aware_path.segments.push(parse_quote!(ThreadAware));
+    affinity_path.segments.push(parse_quote!(affinity));
+    pinned_affinity_path.segments.push(parse_quote!(affinity));
     affinity_path.segments.push(parse_quote!(MemoryAffinity));
     pinned_affinity_path.segments.push(parse_quote!(PinnedAffinity));
 
@@ -129,7 +131,10 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
     Ok(generics)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
+#[cfg_attr(
+    coverage_nightly,
+    coverage(off)
+)] // can't figure out how to get to 100% coverage of this function
 fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn::Result<HashSet<syn::Ident>> {
     let mut set = HashSet::new();
     let generic_idents: HashSet<_> = generics
@@ -146,7 +151,10 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn:
     Ok(set)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
+#[cfg_attr(
+    coverage_nightly,
+    coverage(off)
+)] // can't figure out how to get to 100% coverage of this function
 fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut HashSet<syn::Ident>) -> syn::Result<()> {
     match ty {
         Type::Path(TypePath { path, .. }) => {
