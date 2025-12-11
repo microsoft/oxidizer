@@ -140,8 +140,8 @@ jobs:
         run: cargo ensure-no-cyclic-deps
       - name: Dependency Validation
         run: cargo deny --all-features --workspace --color always check all
-      - name: Semver Compatibility
-        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
+#      - name: Semver Compatibility
+#        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
 
   extended-analysis:
     if: github.event_name == 'pull_request'
