@@ -15,8 +15,16 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[lints]
-workspace = true
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "serde_core::de::*",
+    "serde_core::ser::*",
+    "futures_core::stream::Stream",
+]
 
 [features]
 default = []
@@ -30,10 +38,10 @@ tokio = ["dep:tokio"]
 timestamp = ["dep:jiff"]
 
 [dependencies]
+futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
-futures-core = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
@@ -52,9 +60,8 @@ time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 time-tz = { workspace = true, features = ["system"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+[lints]
+workspace = true
 
 [[example]]
 name = "basic"
@@ -95,10 +102,3 @@ required-features = ["tokio"]
 [[bench]]
 name = "clock_bench"
 harness = false
-
-[package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "serde_core::de::*",
-    "serde_core::ser::*",
-    "futures_core::stream::Stream",
-]
