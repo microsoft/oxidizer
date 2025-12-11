@@ -3,60 +3,9 @@
 
 //! This module contains all the core primitives the thread aware system is built upon.
 
-use crate::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 
-/// Create pinned affinities for testing purposes or when not using the `ThreadRegistry`.
-///
-/// # Parameters
-///
-/// * `counts`: A slice of usize representing the number of processors in each memory region.
-///
-/// # Panics
-///
-/// If there are more than `u16::MAX` processors or memory regions.
-#[must_use]
-#[expect(clippy::needless_range_loop, reason = "clearer in this case")]
-pub fn create_manual_pinned_affinities(counts: &[usize]) -> Vec<PinnedAffinity> {
-    let numa_count = counts.len();
-    let core_count = counts.iter().sum();
-    let mut affinities = Vec::with_capacity(core_count);
-    let mut processor_index = 0;
-
-    for numa_index in 0..numa_count {
-        for _ in 0..counts[numa_index] {
-            affinities.push(PinnedAffinity::new(
-                processor_index.try_into().expect("Too many processors"),
-                numa_index.try_into().expect("Too many memory regions"),
-                core_count.try_into().expect("Too many processors"),
-                numa_count.try_into().expect("Too many memory regions"),
-            ));
-            processor_index += 1;
-        }
-    }
-
-    affinities
-}
-
-/// Create memory affinities for testing purposes or when not using the `ThreadRegistry`.
-///
-/// This is similar to `create_manual_pinned_affinities` but returns `MemoryAffinity` values.
-///
-/// # Parameters
-///
-/// * `counts`: A slice of usize representing the number of processors in each memory region.
-///
-/// # Panics
-///
-/// If there are more than `u16::MAX` processors or memory regions.
-#[must_use]
-pub fn create_manual_memory_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
-    create_manual_pinned_affinities(counts)
-        .into_iter()
-        .map(MemoryAffinity::Pinned)
-        .collect()
-}
-
-/// Marks types that correctly handle isolation when transferred between affinities (threads).
+/// Marks types that correctly handle isolation when transferred between threads (_affinities_).
 ///
 /// The basic invariant of the `ThreadAware` trait is that the value returned by
 /// [`ThreadAware::relocated`] must be as independent as possible from any state on the source
@@ -87,8 +36,8 @@ pub fn create_manual_memory_affinities(counts: &[usize]) -> Vec<MemoryAffinity> 
 /// ```rust
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # use std::sync::Arc;
-/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity};
-///
+/// # use thread_aware::{ThreadAware};
+/// # use thread_aware::affinity::*;
 /// #[derive(Clone)]
 /// struct Counter {
 ///     value: Arc<AtomicI32>,
@@ -140,38 +89,4 @@ pub trait ThreadAware {
     /// and transfer implementations may be non-trivial.
     #[must_use]
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self;
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
-mod tests {
-    use crate::create_manual_memory_affinities;
-
-    use super::create_manual_pinned_affinities;
-
-    #[test]
-    fn test_crate_fake_affinities() {
-        let affinities = create_manual_pinned_affinities(&[2, 3]);
-        assert_eq!(affinities.len(), 5);
-        for (i, affinity) in affinities.iter().enumerate() {
-            assert_eq!(affinity.processor_index(), i);
-            assert_eq!(affinity.processor_count(), 5);
-            assert_eq!(affinity.memory_region_index(), usize::from(i >= 2));
-            assert_eq!(affinity.memory_region_count(), 2);
-        }
-    }
-
-    #[test]
-    fn test_crate_fake_memory_affinities() {
-        let affinities = create_manual_memory_affinities(&[2, 3]);
-        assert_eq!(affinities.len(), 5);
-        for (i, affinity) in affinities.iter().enumerate() {
-            if let crate::MemoryAffinity::Pinned(affinity) = affinity {
-                assert_eq!(affinity.processor_index(), i);
-                assert_eq!(affinity.processor_count(), 5);
-                assert_eq!(affinity.memory_region_index(), usize::from(i >= 2));
-                assert_eq!(affinity.memory_region_count(), 2);
-            }
-        }
-    }
 }

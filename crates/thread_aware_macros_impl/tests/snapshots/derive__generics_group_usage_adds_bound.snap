@@ -1,0 +1,18 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: rendered
+---
+impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for GroupUse<T> {
+    #[allow(
+        clippy::redundant_clone,
+        reason = "macro generated pattern moves each field once"
+    )]
+    fn relocated(
+        self,
+        source: ::thread_aware::affinity::MemoryAffinity,
+        destination: ::thread_aware::affinity::PinnedAffinity,
+    ) -> Self {
+        let GroupUse(_f0) = self;
+        GroupUse(::thread_aware::ThreadAware::relocated(_f0, source, destination))
+    }
+}

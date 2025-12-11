@@ -1,0 +1,18 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl<T: ::thread_aware::ThreadAware, U> ::thread_aware::ThreadAware for Gen<T, U> {
+    #[allow(
+        clippy::redundant_clone,
+        reason = "macro generated pattern moves each field once"
+    )]
+    fn relocated(
+        self,
+        source: ::thread_aware::affinity::MemoryAffinity,
+        destination: ::thread_aware::affinity::PinnedAffinity,
+    ) -> Self {
+        let Gen(_f0, _f1) = self;
+        Gen(::thread_aware::ThreadAware::relocated(_f0, source, destination), _f1)
+    }
+}

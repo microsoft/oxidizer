@@ -1,13 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-pub mod erased;
+//! Helpers for defining and calling [`ThreadAware`] closures.
 
-pub use erased::ErasedClosureOnce;
+mod erased;
 
 use crate::ThreadAware;
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
+pub(crate) use erased::ErasedClosureOnce;
 
-/// A FnOnce-like, parameterless closure whose captured values all implement [`ThreadAware`]
+/// Marks `FnOnce()`-like closures whose captured values all implement [`ThreadAware`].
 ///
 /// Use [`relocate_once`] function to construct these.
 pub trait RelocateFnOnce<T: ?Sized>: ThreadAware {
@@ -15,21 +17,23 @@ pub trait RelocateFnOnce<T: ?Sized>: ThreadAware {
     fn call_once(self) -> T;
 }
 
-/// A trait for callable types that can be called multiple times.
+/// Marks `Fn()`-like closure whose captured values all implement [`ThreadAware`].
+///
 /// This trait is used to define closures that can be called multiple times, without consuming the closure.
 pub trait RelocateFn<T>: ThreadAware {
     /// Calls the closure, returning the result.
     fn call(&self) -> T;
 }
 
-/// A trait for callable types that can be called mutably.
+/// Marks `FnMut()`-like closure whose captured values all implement [`ThreadAware`].
+///
 /// This trait is used to define closures that can be called mutably, allowing the closure to modify its internal state.
 pub trait RelocateFnMut<T>: ThreadAware {
     /// Calls the closure mutably, returning the result.
     fn call_mut(&mut self) -> T;
 }
 
-/// A common implementation of [`RelocateFn`]
+/// A common implementation of [`RelocateFn`].
 ///
 /// Construct this using the [`relocate`] function.
 #[derive(Debug, Copy, Hash)]
@@ -81,13 +85,13 @@ impl<T, D> ThreadAware for Closure<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(self, source: crate::MemoryAffinity, destination: crate::PinnedAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         let data = self.data.relocated(source, destination);
         Self { data, f: self.f }
     }
 }
 
-/// A common implementation of [`RelocateFnOnce`]
+/// A common implementation of [`RelocateFnOnce`].
 ///
 /// Construct this using the [`relocate_once`] function.
 #[derive(Debug, Copy, Hash)]
@@ -121,13 +125,13 @@ impl<T, D> ThreadAware for ClosureOnce<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(self, source: crate::MemoryAffinity, destination: crate::PinnedAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         let data = self.data.relocated(source, destination);
         Self { data, f: self.f }
     }
 }
 
-/// A common implementation of [`RelocateFnMut`]]
+/// A common implementation of [`RelocateFnMut`].
 ///
 /// Construct this using the [`relocate_mut`] function.
 #[derive(Debug, Copy, Hash)]
@@ -170,13 +174,13 @@ impl<T, D> ThreadAware for ClosureMut<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(self, source: crate::MemoryAffinity, destination: crate::PinnedAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         let data = self.data.relocated(source, destination);
         Self { data, f: self.f }
     }
 }
 
-/// Construct a [`RelocateFn`] - a closure-like object where the captured data implement [`ThreadAware`].
+/// Constructs a [`RelocateFn`].
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
@@ -188,7 +192,7 @@ where
     Closure { data, f }
 }
 
-/// Construct a [`RelocateFnMut`] - a closure-like object where the captured data implement [`ThreadAware`].
+/// Constructs a [`RelocateFnMut`].
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
@@ -200,7 +204,7 @@ where
     ClosureMut { data, f }
 }
 
-/// Construct a [`RelocateFnOnce`] - a closure-like object where the captured data implement [`ThreadAware`].
+/// Constructs a [`RelocateFnOnce`].
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
@@ -208,7 +212,8 @@ where
 ///
 /// Usage:
 /// ```rust
-/// # use thread_aware::{PinnedAffinity, ThreadAware, MemoryAffinity, relocate_once, RelocateFnOnce};
+/// # use thread_aware::{ThreadAware, closure::relocate_once, closure::RelocateFnOnce};
+/// # use thread_aware::affinity::*;
 /// struct Transferrable;
 /// impl ThreadAware for Transferrable {
 ///     // ...
@@ -241,7 +246,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::create_manual_pinned_affinities;
+    use crate::affinity::pinned_affinities;
 
     #[test]
     fn boxed_once() {
@@ -312,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_closure_thread_aware() {
-        let affinities = create_manual_pinned_affinities(&[2, 2]);
+        let affinities = pinned_affinities(&[2, 2]);
 
         // Test with i32
         let closure = relocate(42_i32, |x| x + 1);
@@ -369,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_closure_once_thread_aware() {
-        let affinities = create_manual_pinned_affinities(&[2, 3]);
+        let affinities = pinned_affinities(&[2, 3]);
 
         // Test with String
         let closure = relocate_once(String::from("world"), |s| format!("Hello, {s}!"));
@@ -422,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_closure_mut_thread_aware() {
-        let affinities = create_manual_pinned_affinities(&[2, 3]);
+        let affinities = pinned_affinities(&[2, 3]);
 
         // Test with i32 - mutating state across relocations
         let closure = relocate_mut(0_i32, |x| {
@@ -490,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_closure_all_traits_together() {
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let closure = relocate(vec![1, 2, 3], std::vec::Vec::len);
 
         // Test Clone
@@ -506,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_closure_mut_all_traits_together() {
-        let affinities = create_manual_pinned_affinities(&[2, 2]);
+        let affinities = pinned_affinities(&[2, 2]);
         let closure = relocate_mut(100_i32, |x| {
             *x += 1;
             *x
@@ -526,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_closure_once_with_thread_aware_and_clone() {
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let closure = relocate_once((1, 2, 3), |(a, b, c)| a + b + c);
 
         // Test Clone
