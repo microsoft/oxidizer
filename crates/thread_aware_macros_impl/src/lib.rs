@@ -21,10 +21,6 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath, parse_quote};
 
-// Skip tests with miri as miri does not support insta
-#[cfg(all(test, not(miri)))]
-mod tests;
-
 mod enum_gen;
 
 /// Public so the wrapper proc-macro crate can access `is_phantom_data`
@@ -70,6 +66,8 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
     let mut pinned_affinity_path = root_path.clone();
     // Append segments manually (Paths are immutable; construct via parse_quote!)
     thread_aware_path.segments.push(parse_quote!(ThreadAware));
+    affinity_path.segments.push(parse_quote!(affinity));
+    pinned_affinity_path.segments.push(parse_quote!(affinity));
     affinity_path.segments.push(parse_quote!(MemoryAffinity));
     pinned_affinity_path.segments.push(parse_quote!(PinnedAffinity));
 

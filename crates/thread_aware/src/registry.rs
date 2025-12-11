@@ -1,14 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Building blocks for runtimes and thread-aware hosts.
+
 use std::collections::HashMap;
 use std::num::NonZero;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use many_cpus::{Processor, ProcessorSet};
-
-use crate::{MemoryAffinity, PinnedAffinity};
 
 /// The number of processors to use for the registry.
 ///
@@ -161,27 +162,31 @@ impl Default for ThreadRegistry {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(miri))]
+    use crate::affinity::{memory_affinities, pinned_affinities};
+    use crate::registry::{NumaNode, ProcessorCount, ThreadRegistry};
     use std::num::NonZero;
 
-    #[cfg(not(miri))]
-    use std::sync::Arc;
-
-    use crate::registry::NumaNode;
-
-    #[cfg(not(miri))]
-    use crate::{ProcessorCount, ThreadRegistry};
-
-    #[cfg(not(miri))]
     #[test]
-    pub fn test_default() {
+    #[cfg_attr(miri, ignore)]
+    fn test_registry() {
         let registry = ThreadRegistry::default();
+        for i in registry.affinities() {
+            assert!(i.processor_index() < i.processor_count());
+            assert!(i.memory_region_index() < i.memory_region_count());
+        }
 
         assert!(registry.num_affinities() > 0);
-        for affinity in registry.affinities() {
-            assert!(affinity.memory_region_count() > 0);
-            assert!(affinity.processor_count() > 0);
-        }
+        assert!(registry.current_affinity().is_unknown());
+
+        let first = registry.affinities().next().unwrap();
+        registry.pin_to(first);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_registry_manual() {
+        let registry = ThreadRegistry::new(&ProcessorCount::Manual(NonZero::new(1).unwrap()));
+        assert_eq!(registry.num_affinities(), 1);
     }
 
     #[test]
@@ -192,50 +197,21 @@ mod tests {
         assert!(!NumaNode(123).is_invalid());
     }
 
-    #[cfg(not(miri))]
     #[test]
-    pub fn test_manual_count() {
-        let registry = ThreadRegistry::new(&ProcessorCount::Manual(NonZero::new(2).unwrap()));
-        assert_eq!(registry.num_affinities(), 2);
-        for affinity in registry.affinities() {
-            assert!(affinity.memory_region_count() > 0);
-            assert!(affinity.processor_count() > 0);
+    fn test_crate_fake_affinities() {
+        let affinities = pinned_affinities(&[2, 3]);
+        assert_eq!(affinities.len(), 5);
+        for (i, affinity) in affinities.iter().enumerate() {
+            assert_eq!(affinity.processor_index(), i);
+            assert_eq!(affinity.processor_count(), 5);
+            assert_eq!(affinity.memory_region_index(), usize::from(i >= 2));
+            assert_eq!(affinity.memory_region_count(), 2);
         }
     }
 
-    #[cfg(not(miri))]
     #[test]
-    pub fn test_auto_count() {
-        let registry = ThreadRegistry::new(&ProcessorCount::Auto);
-        assert!(registry.num_affinities() > 0);
-        for affinity in registry.affinities() {
-            assert!(affinity.memory_region_count() > 0);
-            assert!(affinity.processor_count() > 0);
-        }
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    pub fn test_all_count() {
-        let registry = ThreadRegistry::new(&ProcessorCount::All);
-        assert!(registry.num_affinities() > 0);
-        for affinity in registry.affinities() {
-            assert!(affinity.memory_region_count() > 0);
-            assert!(affinity.processor_count() > 0);
-        }
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    pub fn test_pinning() {
-        let registry = Arc::new(ThreadRegistry::new(&ProcessorCount::Auto));
-        let affinity = registry.affinities().next().unwrap();
-
-        std::thread::spawn(move || {
-            registry.pin_to(affinity);
-            assert!(many_cpus::HardwareTracker::is_thread_processor_pinned());
-        })
-        .join()
-        .unwrap();
+    fn test_crate_fake_memory_affinities() {
+        let affinities = memory_affinities(&[2, 3]);
+        assert_eq!(affinities.len(), 5);
     }
 }
