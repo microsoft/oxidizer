@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Module that contains primitives for parsing, formatting, and serializing the [`Timestamp`][`crate::Timestamp`].
+//! Module that contains primitives for parsing, formatting, and serializing [`Timestamp`][`crate::Timestamp`].
 //!
 //! The following types are available:
 //!
