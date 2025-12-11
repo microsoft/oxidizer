@@ -6,7 +6,7 @@ use crate::ThreadAware;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-/// Allows transferring a value that doesn't implement [`ThreadAware`]
+/// Allows transferring a value that doesn't implement [`ThreadAware`].
 ///
 /// Since the [`ThreadAware`] trait is not commonly implemented, this wrapper can
 /// be used to allow transferring values that don't implement [`ThreadAware`].
@@ -81,7 +81,7 @@ pub const fn unaware<T>(value: T) -> Unaware<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::affinity::create_manual_pinned_affinities;
+    use crate::affinity::pinned_affinities;
 
     #[test]
     fn test_unaware_construction() {
@@ -172,7 +172,7 @@ mod tests {
     fn test_unaware_thread_aware() {
         use std::collections::HashMap;
 
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -241,7 +241,7 @@ mod tests {
         let unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
 
         // Test with relocation
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 

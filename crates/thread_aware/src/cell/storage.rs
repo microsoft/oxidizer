@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Primitives for thread-aware data storage.
+
 use crate::affinity::PinnedAffinity;
 use std::marker::PhantomData;
 
@@ -70,14 +72,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::affinity::create_manual_pinned_affinities;
-    use crate::cell::builtin::{PerCore, PerNuma, PerProcess};
-    use crate::cell::{Storage, Strategy};
+    use crate::affinity::pinned_affinities;
+    use crate::storage::{Storage, Strategy};
+    use crate::{PerNuma, PerProcess, PerThread};
 
     #[test]
     fn replace_returns_previous_value() {
-        let affinities = create_manual_pinned_affinities(&[1]);
-        let mut storage = Storage::<String, PerCore>::default();
+        let affinities = pinned_affinities(&[1]);
+        let mut storage = Storage::<String, PerThread>::default();
         let affinity = affinities[0];
 
         // First replace should return None (no previous value)
@@ -95,9 +97,9 @@ mod tests {
 
     #[test]
     fn get_clone() {
-        let affinities = create_manual_pinned_affinities(&[1]);
+        let affinities = pinned_affinities(&[1]);
 
-        let mut storage = Storage::<String, PerCore>::default();
+        let mut storage = Storage::<String, PerThread>::default();
         let affinity = affinities[0];
 
         assert!(storage.get_clone(affinity).is_none());
@@ -108,7 +110,7 @@ mod tests {
 
     #[test]
     fn per_app() {
-        let affinities = create_manual_pinned_affinities(&[1, 1]);
+        let affinities = pinned_affinities(&[1, 1]);
 
         let index = PerProcess::index(affinities[0]);
         let count = PerProcess::count(affinities[0]);
@@ -118,7 +120,7 @@ mod tests {
 
     #[test]
     fn per_memory_region() {
-        let affinities = create_manual_pinned_affinities(&[1, 1]);
+        let affinities = pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
             let index = PerNuma::index(affinity);
@@ -130,11 +132,11 @@ mod tests {
 
     #[test]
     fn per_processor() {
-        let affinities = create_manual_pinned_affinities(&[1, 1]);
+        let affinities = pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
-            let index = PerCore::index(affinity);
-            let count = PerCore::count(affinity);
+            let index = PerThread::index(affinity);
+            let count = PerThread::count(affinity);
             assert_eq!(index, affinity.processor_index());
             assert_eq!(count, affinity.processor_count());
         }
@@ -143,10 +145,10 @@ mod tests {
     #[test]
     fn test_default_implementation() {
         // This test covers line 101: Self::new() in the Default trait implementation
-        let affinities = create_manual_pinned_affinities(&[1]);
+        let affinities = pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
-        let mut storage = Storage::<String, PerCore>::default();
+        let mut storage = Storage::<String, PerThread>::default();
         let affinity = affinities[0];
 
         // Verify the default storage is empty (no data for any affinity)

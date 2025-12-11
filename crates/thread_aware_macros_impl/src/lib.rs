@@ -21,10 +21,6 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_quote, Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath};
 
-// Skip tests with miri as miri does not support insta
-#[cfg(all(test, not(miri)))]
-mod tests;
-
 mod enum_gen;
 
 /// Public so the wrapper proc-macro crate can access `is_phantom_data`

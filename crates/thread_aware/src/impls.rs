@@ -160,7 +160,7 @@ impl<T> ThreadAware for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::affinity::create_manual_pinned_affinities;
+    use crate::affinity::pinned_affinities;
 
     #[test]
     #[cfg(feature = "threads")]
@@ -168,7 +168,7 @@ mod tests {
         use crate::ThreadAware;
         use std::collections::HashMap;
 
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -190,7 +190,7 @@ mod tests {
     #[cfg(feature = "threads")]
     fn test_tuples() {
         use crate::ThreadAware;
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -269,7 +269,7 @@ mod tests {
             x > 0
         }
 
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -318,7 +318,7 @@ mod tests {
     fn test_result() {
         use crate::ThreadAware;
 
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 
@@ -347,7 +347,7 @@ mod tests {
         use crate::ThreadAware;
         use std::sync::Arc;
 
-        let affinities = create_manual_pinned_affinities(&[2]);
+        let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();
         let destination = affinities[1];
 

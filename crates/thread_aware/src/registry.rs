@@ -162,7 +162,7 @@ impl Default for ThreadRegistry {
 
 #[cfg(test)]
 mod tests {
-    use crate::affinity::{create_manual_memory_affinities, create_manual_pinned_affinities};
+    use crate::affinity::{memory_affinities, pinned_affinities};
     use crate::registry::{NumaNode, ProcessorCount, ThreadRegistry};
     use std::num::NonZero;
 
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_crate_fake_affinities() {
-        let affinities = create_manual_pinned_affinities(&[2, 3]);
+        let affinities = pinned_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
         for (i, affinity) in affinities.iter().enumerate() {
             assert_eq!(affinity.processor_index(), i);
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_crate_fake_memory_affinities() {
-        let affinities = create_manual_memory_affinities(&[2, 3]);
+        let affinities = memory_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
     }
 }

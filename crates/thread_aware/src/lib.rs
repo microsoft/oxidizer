@@ -22,7 +22,7 @@
 //! However, like `Clone`, the relocation itself should be mostly transparent and predictable to users.
 //!
 //!
-//! ## Implementing [`ThreadAware`], and `Arc<T, PerCore>`
+//! ## Implementing [`ThreadAware`], and `Arc<T, PerThread>`
 //!
 //! In most cases [`ThreadAware`] should be implemented via the provided derive macro.
 //! As thread-awareness of a type usually involves letting all contained fields know of an ongoing
@@ -31,9 +31,9 @@
 //!
 //! External crates might often not implement [`ThreadAware`]. In many of these cases using our
 //! [`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
-//! [`std::sync::Arc`] with a relocation [`Strategy`], and implements [`ThreadAware`] for it. For
+//! [`std::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and implements [`ThreadAware`] for it. For
 //! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-//! `Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
+//! `Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
 //!
 //!
 //! ## Relation to [`Send`]
@@ -41,6 +41,15 @@
 //! Although [`ThreadAware`] has no supertraits, any runtime invoking it will usually require the underlying type to
 //! be [`Send`]. In these cases, type are first sent to another thread, then the [`ThreadAware`] relocation
 //! notification is invoked.
+//!
+//!
+//! ## Thread vs. Core Semantics
+//!
+//! As this library is primarily intended for use in thread-per-core runtimes,
+//! we use the terms 'thread' and 'core' interchangeably. The assumption is that items
+//! primarily relocate between different threads, where each thread is pinned to a different CPU core.
+//! Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
+//! be able to observe this fact.
 //!
 //! ## [`ThreadAware`] vs. [`Unaware`]
 //!
@@ -67,14 +76,6 @@
 //! happen via [`std::thread::spawn`] and other means. In these cases types should still function
 //! correctly, although they might experience degraded performance through contention of now-shared
 //! resources.
-//!
-//! ## Thread vs. Core Semantics
-//!
-//! As this library is primarily intended for use in thread-per-core runtimes,
-//! we use the terms 'thread' and 'core' interchangeably. The assumption is that items
-//! primarily relocate between different threads, where each thread is pinned to a different CPU core.
-//! Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
-//! be able to observe this fact.
 //!
 //!
 //! # Feature Flags
@@ -158,7 +159,7 @@ pub use core::ThreadAware;
 // proc-macro dependency in minimal builds.
 
 pub use cell::storage;
-pub use cell::{Arc, PerCore, PerNuma, PerProcess};
+pub use cell::{Arc, PerNuma, PerProcess, PerThread};
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own

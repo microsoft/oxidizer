@@ -6,12 +6,12 @@ use std::sync::{
     atomic::{AtomicI32, Ordering},
 };
 
-use crate::affinity::{create_manual_pinned_affinities, MemoryAffinity, PinnedAffinity};
+use crate::affinity::{pinned_affinities, MemoryAffinity, PinnedAffinity};
 use crate::closure::relocate;
 use crate::{ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
-type PerCore<T> = crate::Arc<T, crate::PerCore>;
+type PerCore<T> = crate::Arc<T, crate::PerThread>;
 
 #[derive(Clone, Debug)]
 struct Counter {
@@ -42,7 +42,7 @@ impl ThreadAware for Counter {
 
 #[test]
 fn transfer_creates_new_value() {
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let source = affinities[0].into();
     let destination = affinities[1];
 
@@ -68,7 +68,7 @@ fn test_from_unaware() {
     assert_eq!(*per_core, 42);
 
     // Verify it can be relocated
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let relocated = per_core.relocated(affinities[0].into(), affinities[1]);
     assert_eq!(*relocated, 42);
 }
@@ -161,7 +161,7 @@ fn test_from() {
 
 #[test]
 fn test_trc_relocated_with_factory_data() {
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
     let affinity2 = affinities[1];
 
@@ -178,7 +178,7 @@ fn test_trc_relocated_with_factory_data() {
 
 #[test]
 fn test_trc_relocated_reuses_existing_value() {
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
     let affinity2 = affinities[1];
 
@@ -205,7 +205,7 @@ fn test_trc_relocated_reuses_existing_value() {
 fn test_from_storage() {
     use std::sync::{Arc, RwLock};
 
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
@@ -230,7 +230,7 @@ fn test_from_storage() {
 fn test_factory_clone_with_data() {
     // This test covers line 142: Self::Data(data_fn) => Self::Data(*data_fn)
     // We create a Trc with Factory::Data, clone it, and verify the factory is properly cloned
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
     let affinity2 = affinities[1];
 
@@ -256,7 +256,7 @@ fn test_factory_clone_with_data() {
 fn test_factory_clone_with_closure() {
     // This test covers line 141: Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), *closure_source)
     // We create a Trc with Factory::Closure via with_closure, clone it, and verify the factory is properly cloned
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();
     let affinity2 = affinities[1];
 
@@ -287,7 +287,7 @@ fn test_factory_clone_with_manual() {
     // We create a Trc from storage (Factory::Manual), clone it, and verify the factory is properly cloned
     use std::sync::{Arc, RwLock};
 
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
@@ -318,7 +318,7 @@ fn test_factory_manual_relocated() {
     // it should behave like sync::Arc<T> and just clone the value without creating new data
     use std::sync::{Arc, RwLock};
 
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
     let affinity2 = affinities[1];
 
@@ -348,7 +348,7 @@ fn test_factory_manual_relocated() {
 
 #[test]
 fn test_relocated_unknown_source() {
-    let affinities = create_manual_pinned_affinities(&[2]);
+    let affinities = pinned_affinities(&[2]);
 
     let source = MemoryAffinity::Unknown;
     let destination = affinities[1];
