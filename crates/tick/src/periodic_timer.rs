@@ -82,9 +82,8 @@ pub struct PeriodicTimer {
 impl PeriodicTimer {
     /// Creates a timer that fires periodically.
     ///
-    /// This constructor automatically adjusts the provided period to the minimum allowed value.
-    /// Currently, this minimum period is 1ms, but this may change in the future. Be aware of this
-    /// when creating timers with very short periods, as these won't have the desired precision.
+    /// > **Note**: The minimum precision of the timer is 1ms. If a smaller period is specified,
+    /// > it will be adjusted to 1ms.
     #[must_use]
     pub fn new(clock: &Clock, period: Duration) -> Self {
         let period = period.max(TIMER_RESOLUTION);
