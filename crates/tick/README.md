@@ -24,7 +24,8 @@
 
 <!-- cargo-rdme start -->
 
-Provides primitives to interact with and manipulate machine time.
+Runtime-agnostic primitives for obtaining, working with, and mocking system
+time and timers, enabling faster and more robust testing.
 
 ## Quick Start
 
