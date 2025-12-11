@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use jiff::fmt::rfc2822;
 
 use super::utils::from_jiff;
+use crate::fmt::Iso8601Timestamp;
 use crate::fmt::utils::to_jiff;
 use crate::{Error, Timestamp};
 
@@ -79,7 +80,7 @@ static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rfc2822Timestamp(Timestamp);
 
 impl FromStr for Rfc2822Timestamp {
@@ -119,6 +120,12 @@ impl From<Timestamp> for Rfc2822Timestamp {
 impl From<Rfc2822Timestamp> for SystemTime {
     fn from(value: Rfc2822Timestamp) -> Self {
         Timestamp::from(value).to_system_time()
+    }
+}
+
+impl From<Iso8601Timestamp> for Rfc2822Timestamp {
+    fn from(value: Iso8601Timestamp) -> Self {
+        Timestamp::from(value).into()
     }
 }
 

@@ -207,7 +207,7 @@ pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
-#[allow(
+#[expect(
     unused_imports,
     reason = "The Timers symbol is flagged as unused when building docs, not sure why..."
 )]

@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use super::utils::from_jiff;
 use crate::fmt::utils::to_jiff;
+use crate::fmt::{Rfc2822Timestamp, UnixSecondsTimestamp};
 use crate::{Error, Timestamp};
 
 /// Parser and formatter for ISO 8601 timestamps.
@@ -76,7 +77,7 @@ use crate::{Error, Timestamp};
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Iso8601Timestamp(Timestamp);
 
 impl FromStr for Iso8601Timestamp {
@@ -109,6 +110,18 @@ impl From<Timestamp> for Iso8601Timestamp {
 impl From<Iso8601Timestamp> for SystemTime {
     fn from(value: Iso8601Timestamp) -> Self {
         Timestamp::from(value).to_system_time()
+    }
+}
+
+impl From<Rfc2822Timestamp> for Iso8601Timestamp {
+    fn from(value: Rfc2822Timestamp) -> Self {
+        Timestamp::from(value).into()
+    }
+}
+
+impl From<UnixSecondsTimestamp> for Iso8601Timestamp {
+    fn from(value: UnixSecondsTimestamp) -> Self {
+        Timestamp::from(value).into()
     }
 }
 

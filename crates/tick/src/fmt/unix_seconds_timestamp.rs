@@ -5,6 +5,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+use crate::fmt::{Iso8601Timestamp, Rfc2822Timestamp};
 use crate::{Error, Timestamp};
 
 /// A timestamp format represented as the number of whole seconds since the Unix epoch.
@@ -45,7 +46,7 @@ use crate::{Error, Timestamp};
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UnixSecondsTimestamp(Timestamp);
 
 impl UnixSecondsTimestamp {
@@ -73,9 +74,7 @@ impl UnixSecondsTimestamp {
     /// assert_eq!(timestamp.to_string(), "1970-01-01T00:00:10Z");
     /// ```
     pub fn from_secs(secs: u64) -> Result<Self, Error> {
-        let timestamp = Timestamp::UNIX_EPOCH.checked_add(Duration::from_secs(secs))?;
-
-        Ok(Self::from(timestamp))
+        Self::from_duration(Duration::from_secs(secs))
     }
 
     /// Creates a new `UnixSecondsTimestamp` from the given number of seconds since the Unix epoch.
@@ -94,7 +93,58 @@ impl UnixSecondsTimestamp {
     /// ```
     #[must_use]
     pub fn saturating_from_secs(secs: u64) -> Self {
-        Self::from_secs(secs).unwrap_or(Self(Timestamp::MAX))
+        Self::saturating_from_duration(Duration::from_secs(secs))
+    }
+
+    /// Creates a new `UnixSecondsTimestamp` from the given duration since the Unix epoch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the timestamp is out of range.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use tick::fmt::UnixSecondsTimestamp;
+    ///
+    /// UnixSecondsTimestamp::from_duration(Duration::MAX).unwrap_err();
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use tick::Timestamp;
+    /// use tick::fmt::UnixSecondsTimestamp;
+    ///
+    /// let unix_seconds = UnixSecondsTimestamp::from_duration(Duration::from_secs(10)).unwrap();
+    /// let timestamp: Timestamp = unix_seconds.into();
+    ///
+    /// assert_eq!(timestamp.to_string(), "1970-01-01T00:00:10Z");
+    /// ```
+    pub fn from_duration(duration: Duration) -> Result<Self, Error> {
+        let timestamp = Timestamp::UNIX_EPOCH.checked_add(duration)?;
+
+        Ok(Self::from(timestamp))
+    }
+
+    /// Creates a new `UnixSecondsTimestamp` from the given duration since the Unix epoch.
+    ///
+    /// If the timestamp is out of range, this function returns the maximum possible timestamp.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use tick::Timestamp;
+    /// use tick::fmt::UnixSecondsTimestamp;
+    ///
+    /// let unix_seconds = UnixSecondsTimestamp::saturating_from_duration(Duration::MAX);
+    ///
+    /// assert_eq!(unix_seconds.to_string(), "253402207200");
+    /// ```
+    #[must_use]
+    pub fn saturating_from_duration(duration: Duration) -> Self {
+        Self::from_duration(duration).unwrap_or(Self(Timestamp::MAX))
     }
 
     /// Returns the number of seconds since the Unix epoch.
@@ -141,6 +191,18 @@ impl From<Timestamp> for UnixSecondsTimestamp {
 impl From<UnixSecondsTimestamp> for SystemTime {
     fn from(value: UnixSecondsTimestamp) -> Self {
         Timestamp::from(value).to_system_time()
+    }
+}
+
+impl From<Rfc2822Timestamp> for UnixSecondsTimestamp {
+    fn from(value: Rfc2822Timestamp) -> Self {
+        Timestamp::from(value).into()
+    }
+}
+
+impl From<Iso8601Timestamp> for UnixSecondsTimestamp {
+    fn from(value: Iso8601Timestamp) -> Self {
+        Timestamp::from(value).into()
     }
 }
 
