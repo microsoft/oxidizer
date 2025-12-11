@@ -207,10 +207,6 @@ pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
-#[expect(
-    unused_imports,
-    reason = "The Timers symbol is flagged as unused when building docs, not sure why..."
-)]
 pub(crate) use timers::{TIMER_RESOLUTION, TimerKey, Timers};
 #[cfg(any(feature = "timestamp", test))]
 #[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
