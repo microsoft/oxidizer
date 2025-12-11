@@ -236,6 +236,10 @@ mod tests {
 
     use super::*;
 
+    fn unreachable_future() -> std::future::Pending<String> {
+        std::future::pending()
+    }
+
     #[tokio::test]
     async fn direct_call() {
         let group = UniFlight::new();
@@ -263,7 +267,7 @@ mod tests {
         }
 
         assert!(futures.all(|out| async move { out == "Result" }).await);
-        assert_eq!(call_counter.load(Acquire), 1, "future should only be executed once");
+        assert_eq!(call_counter.load(Acquire), 1);
     }
 
     #[tokio::test]
@@ -283,7 +287,7 @@ mod tests {
         for fut in futures {
             assert_eq!(fut.await, "Result");
         }
-        assert_eq!(call_counter.load(Acquire), 1, "future should only be executed once");
+        assert_eq!(call_counter.load(Acquire), 1);
     }
 
     #[tokio::test]
@@ -331,7 +335,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
             "Result".to_string()
         });
-        let fut_late = group.work("key".into(), || async { panic!("unexpected") });
+        let fut_late = group.work("key".into(), unreachable_future);
         assert_eq!(fut_early.await, "Result");
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(fut_late.await, "Result");
@@ -342,10 +346,7 @@ mod tests {
         let group = UniFlight::new();
 
         // the executer cancelled and the other awaiter will create a new future and execute.
-        let fut_cancel = group.work("key".to_string(), || async {
-            tokio::time::sleep(Duration::from_millis(2000)).await;
-            "Result1".to_string()
-        });
+        let fut_cancel = group.work("key".to_string(), unreachable_future);
         let _ = tokio::time::timeout(Duration::from_millis(10), fut_cancel).await;
         let fut_late = group.work("key".to_string(), || async { "Result2".to_string() });
         assert_eq!(fut_late.await, "Result2");
@@ -356,7 +357,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(2000)).await;
             "Result1".to_string()
         });
-        let fut_2 = group.work("key".to_string(), || async { panic!() });
+        let fut_2 = group.work("key".to_string(), unreachable_future);
         let (v1, v2) = tokio::join!(fut_1, fut_2);
         assert_eq!(v1, "Result1");
         assert_eq!(v2, "Result1");
@@ -394,11 +395,34 @@ mod tests {
 
         // Wait for the spawned task to panic
         let spawn_result = handle.await;
-        assert!(spawn_result.is_err(), "spawned task should have panicked");
+        assert!(spawn_result.is_err());
 
         // The follower should succeed - Rust's drop semantics ensure the mutex is released
         let result = fut_follower.await;
         assert_eq!(result, "Result");
-        assert_eq!(call_counter.load(Acquire), 1, "follower should have executed its work");
+        assert_eq!(call_counter.load(Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn debug_impl() {
+        let group: UniFlight<String, String> = UniFlight::new();
+
+        // Test Debug on empty group
+        let debug_str = format!("{:?}", group);
+        assert!(debug_str.contains("UniFlight"));
+
+        // Create a pending work item to populate the mapping with a BroadcastOnce
+        let fut = group.work("key".to_string(), || async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            "Result".to_string()
+        });
+
+        // Debug should still work with entries in the mapping
+        let debug_str = format!("{:?}", group);
+        assert!(debug_str.contains("UniFlight"));
+        assert!(debug_str.contains("BroadcastOnce"));
+
+        // Complete the work
+        assert_eq!(fut.await, "Result");
     }
 }
