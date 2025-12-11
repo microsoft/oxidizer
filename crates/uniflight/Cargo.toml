@@ -6,8 +6,8 @@ name = "uniflight"
 description = "Coalesces multiple ongoing tasks into a leader which does the work, and follower tasks that wait on the result, to prevent duplicate I/O or other downstream overhead."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "singleflight"]
-categories = ["Concurrency"]
+keywords = ["oxidizer", "coalescing", "stempede", "singleflight", "deduplication"]
+categories = ["concurrency"]
 
 edition.workspace = true
 rust-version.workspace = true
