@@ -2,23 +2,22 @@
 # Licensed under the MIT License.
 
 [package]
-name = "{{CRATE_NAME}}"
-description = "{{CRATE_DESCRIPTION}}"
+name = "automation"
+description = "Shared code for writing Rust scripts"
 version = "0.1.0"
-readme = "README.md"
-keywords = ["oxidizer", {{CRATE_KEYWORDS}}]
-categories = [{{CRATE_CATEGORIES}}]
-
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+publish = false
 
 [dependencies]
-
-[dev-dependencies]
+anyhow = { workspace = true, features = ["std"] }
+duct = { workspace = true }
+serde = { workspace = true, features = ["derive", "alloc"] }
+serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

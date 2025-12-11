@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::fmt::Write;
 
 /// Mode of operation for the `SimpleRedactor`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SimpleRedactorMode {
     /// Erases the original string.
     Erase,

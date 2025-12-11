@@ -197,6 +197,7 @@ impl Iterator for BytesBlockIterator {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
@@ -249,6 +250,14 @@ mod tests {
 
     #[test]
     fn test_giant_bytes_to_sequence() {
+        // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
+        // where this may not be available, so we skip this test in that environment.
+        #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
+        if crate::testing::system_memory() < 6_000_000_000 {
+            eprintln!("Skipping giant allocation test due to insufficient memory.");
+            return;
+        }
+
         let mut bytes = BytesMut::new();
 
         // This is bigger than fits into a single memory block, so will be split in two blocks.

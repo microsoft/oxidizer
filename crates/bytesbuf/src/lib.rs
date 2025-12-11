@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Manipulate sequences of bytes for efficient I/O.
 //!
 //! A [`BytesView`] is a view over a logical sequence of zero or more bytes

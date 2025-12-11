@@ -13,22 +13,8 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-license-file.workspace = true
 homepage.workspace = true
 repository.workspace = true
-
-[dependencies]
-proc-macro2.workspace = true
-quote.workspace = true
-syn = { workspace = true, features = ["derive", "full", "parsing", "printing", "proc-macro"] }
-
-[dev-dependencies]
-mutants.workspace = true
-insta = { workspace = true, features = ["yaml"] }
-prettyplease.workspace = true
-
-[lints]
-workspace = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -36,3 +22,16 @@ allowed_external_types = [
     "syn::error::Error",
     "syn::error::Result",
 ]
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["derive", "full", "parsing", "printing", "proc-macro"] }
+
+[dev-dependencies]
+insta = { workspace = true, features = ["yaml"] }
+mutants.workspace = true
+prettyplease.workspace = true
+
+[lints]
+workspace = true

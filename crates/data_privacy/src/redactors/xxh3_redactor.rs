@@ -15,7 +15,7 @@ pub const REDACTED_LEN: usize = 16;
     non_camel_case_types,
     reason = "Just following the naming conventions of xxHash, silly as they are"
 )]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct xxH3Redactor {
     secret: Box<[u8]>,
 }
@@ -48,45 +48,15 @@ impl xxH3Redactor {
 impl Redactor for xxH3Redactor {
     fn redact(&self, _: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
         let hash = xxh3_64_with_secret(value.as_bytes(), &self.secret);
-        let buffer = u64_to_hex_array(hash);
+        let buffer = crate::redactors::u64_to_hex_array::<REDACTED_LEN>(hash);
 
         // SAFETY: The buffer is guaranteed to be valid UTF-8 because it only contains hex digits.
         write!(output, "{}", unsafe { core::str::from_utf8_unchecked(&buffer) })
     }
 }
 
-#[inline]
-fn u64_to_hex_array(mut value: u64) -> [u8; 16] {
-    static HEX_LOWER_CHARS: &[u8; 16] = b"0123456789abcdef";
-
-    let mut buffer = [0u8; REDACTED_LEN];
-    for e in buffer.iter_mut().rev() {
-        *e = HEX_LOWER_CHARS[(value & 0x0f) as usize];
-        value >>= 4;
-    }
-
-    buffer
-}
-
 #[cfg(test)]
 mod tests {
-    use super::u64_to_hex_array;
-
-    #[test]
-    fn test_u64_to_hex_array() {
-        let result = u64_to_hex_array(0x1234_5678_9abc_def0);
-        let expected = b"123456789abcdef0";
-        assert_eq!(result, *expected);
-
-        let result = u64_to_hex_array(0);
-        let expected = b"0000000000000000";
-        assert_eq!(result, *expected);
-
-        let result = u64_to_hex_array(u64::MAX);
-        let expected = b"ffffffffffffffff";
-        assert_eq!(result, *expected);
-    }
-
     #[test]
     fn test_with_secret_creates_redactor_with_custom_secret() {
         let custom_secret = vec![42; 190];

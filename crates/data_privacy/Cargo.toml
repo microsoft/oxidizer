@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy"
 description = "Data annotation and redaction system providing a robust way to manipulate sensitive information."
-version = "0.7.0"
+version = "0.8.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
@@ -13,33 +13,8 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-license-file.workspace = true
 homepage.workspace = true
 repository.workspace = true
-
-[dependencies]
-data_privacy_macros.workspace = true
-serde = { workspace = true, optional = true, default-features = false, features = ["derive", "std"] }
-xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
-
-[dev-dependencies]
-derive_more = { workspace = true, features = ["constructor", "from"] }
-once_cell = { workspace = true, features = ["std"] }
-mutants.workspace = true
-serde = { workspace = true, features = ["derive", "std"] }
-serde_json = { workspace = true, features = ["std"] }
-
-[features]
-default = ["serde"]
-serde = ["dep:serde"]
-xxh3 = ["dep:xxhash-rust"]
-
-[lints]
-workspace = true
-
-[[example]]
-name = "employees"
-path = "examples/employees/main.rs"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -51,4 +26,31 @@ allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "data_privacy_macros::*",
+    "rapidhash::v3::seed::RapidSecrets",
 ]
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+xxh3 = ["dep:xxhash-rust"]
+rapidhash = ["dep:rapidhash"]
+
+[dependencies]
+data_privacy_macros.workspace = true
+rapidhash = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, default-features = false, features = ["derive", "std"] }
+xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
+
+[dev-dependencies]
+derive_more = { workspace = true, features = ["constructor", "from"] }
+mutants.workspace = true
+once_cell = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "employees"
+path = "examples/employees/main.rs"
