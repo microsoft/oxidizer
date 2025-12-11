@@ -161,7 +161,26 @@ impl ClockControl {
         Self::new_at(SystemTime::now())
     }
 
-    /// Converts the `ClockControl` to a `Clock` instance.
+    /// Converts this `ClockControl` into a `Clock` instance.
+    ///
+    /// The returned `Clock` is internally linked to this `ClockControl`. Cloning the `Clock`
+    /// preserves this link.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tick::ClockControl;
+    ///
+    /// let control = ClockControl::new();
+    /// let clock = control.to_clock();
+    /// let clock_clone = clock.clone();
+    ///
+    /// // Advance the clock by 1 second
+    /// control.advance_millis(1_000);
+    ///
+    /// // Ensure the clock and cloned clock are in sync
+    /// assert_eq!(clock.system_time(), clock_clone.system_time());
+    /// ```
     #[must_use]
     pub fn to_clock(&self) -> Clock {
         Clock::with_control(self)

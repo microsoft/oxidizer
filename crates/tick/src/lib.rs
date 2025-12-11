@@ -14,7 +14,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Provides primitives to interact with and manipulate machine time.
+//! Runtime-agnostic primitives for obtaining, working with, and mocking system
+//! time and timers, enabling faster and more robust testing.
 //!
 //! # Quick Start
 //!
