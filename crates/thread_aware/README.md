@@ -28,7 +28,7 @@ It can serve as a foundation for building components and runtimes that operate a
 memory affinities.
 
 ## Theory of Operation
-On a high level, this crate enables thread migrations via the provided [`ThreadAware`] trait:
+On a high level, this crate enables thread migrations of state via [`ThreadAware`] trait:
 - Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
 - The authors of said types can then act on this information to implement performance optimizations. Such optimizations
   might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
@@ -39,7 +39,7 @@ They might continue to share some state (e.g., a common cache) or fully detach f
 However, like `Clone`, the relocation itself should be mostly transparent and predictable to users.
 
 
-### Implementing [`ThreadAware`], and `Arc<T, PerCore>`
+### Implementing [`ThreadAware`], and `Arc<T, PerThread>`
 
 In most cases [`ThreadAware`] should be implemented via the provided derive macro.
 As thread-awareness of a type usually involves letting all contained fields know of an ongoing
@@ -48,9 +48,9 @@ so the macro should 'just work' on most compounds of built-ins.
 
 External crates might often not implement [`ThreadAware`]. In many of these cases using our
 [`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
-[`std::sync::Arc`] with a relocation [`Strategy`], and implements [`ThreadAware`] for it. For
+[`std::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and implements [`ThreadAware`] for it. For
 example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-`Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
+`Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
 
 
 ### Relation to [`Send`]
@@ -58,6 +58,15 @@ example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
 Although [`ThreadAware`] has no supertraits, any runtime invoking it will usually require the underlying type to
 be [`Send`]. In these cases, type are first sent to another thread, then the [`ThreadAware`] relocation
 notification is invoked.
+
+
+### Thread vs. Core Semantics
+
+As this library is primarily intended for use in thread-per-core runtimes,
+we use the terms 'thread' and 'core' interchangeably. The assumption is that items
+primarily relocate between different threads, where each thread is pinned to a different CPU core.
+Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
+be able to observe this fact.
 
 ### [`ThreadAware`] vs. [`Unaware`]
 
@@ -84,15 +93,6 @@ While runtimes should reduce the incidence of that through their API design, it 
 happen via [`std::thread::spawn`] and other means. In these cases types should still function
 correctly, although they might experience degraded performance through contention of now-shared
 resources.
-
-### Thread vs. Core Semantics
-
-As this library is primarily intended for use in thread-per-core runtimes,
-we use the terms 'thread' and 'core' interchangeably. The assumption is that items
-primarily relocate between different threads, where each thread is pinned to a different CPU core.
-Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
-be able to observe this fact.
-
 
 ## Feature Flags
 * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion
@@ -125,12 +125,12 @@ strategy, and wrap them in an [`Arc`] that implements the trait.
 
 
 ```rust
-use thread_aware::{ThreadAware, Arc, PerCore};
+use thread_aware::{ThreadAware, Arc, PerThread};
 
 #[derive(Debug, Clone, ThreadAware)]
 struct Service {
     name: String,
-    client: Arc<Client, PerCore>,
+    client: Arc<Client, PerThread>,
 }
 
 impl Service {
