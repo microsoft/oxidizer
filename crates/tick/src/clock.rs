@@ -66,6 +66,12 @@ use crate::timers::TimerKey;
 /// By default, the clock does not allow you to control the passage of time. However, when the `test-util` feature is enabled,
 /// this crate provides a `ClockControl` type that can be used to control time.
 ///
+/// # Cloning
+///
+/// Cloning a clock is very cheap (just an `Arc` clone) and will not cause performance bottlenecks.
+/// Cloned clocks share the same underlying state, including registered timers and, in tests, the
+/// controlled passage of time.
+///
 /// # State sharing between clocks
 ///
 /// Multiple clock instances can be linked together and share state. In production, cloned clocks share
@@ -73,7 +79,7 @@ use crate::timers::TimerKey;
 /// time control across all instances.
 ///
 /// To ensure state sharing between clocks, clone the clock. The cloning operation preserves the shared state
-/// between individual clocks. The clone operation is inexpensive in both production and test scenarios.
+/// between individual clocks.
 ///
 /// ```
 /// use tick::Clock;
