@@ -6,7 +6,7 @@ use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::timers::{TimerKey, Timers};
-use crate::{Clock, IntoSystemTime};
+use crate::Clock;
 
 /// Controls the passage of time in tests.
 ///
@@ -136,9 +136,9 @@ impl ClockControl {
     /// );
     /// ```
     #[must_use]
-    pub fn new_at(timestamp: impl IntoSystemTime) -> Self {
+    pub fn new_at(time: impl Into<SystemTime>) -> Self {
         let this = Self::new();
-        this.advance_to(timestamp.into_system_time());
+        this.advance_to(time.into());
         this
     }
 
@@ -728,15 +728,6 @@ mod tests {
         let clock = control.to_clock();
 
         assert_eq!(clock.system_time(), system_time);
-    }
-
-    #[test]
-    fn new_at_with_duration_ok() {
-        let duration = Duration::from_secs(100);
-        let control = ClockControl::new_at(duration);
-        let clock = control.to_clock();
-
-        assert_eq!(clock.system_time(), SystemTime::UNIX_EPOCH + duration);
     }
 
     #[test]

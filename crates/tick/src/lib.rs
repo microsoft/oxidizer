@@ -190,8 +190,6 @@ mod state;
 mod stopwatch;
 mod timers;
 
-#[cfg(any(feature = "test-util", test))]
-mod into_system_time;
 pub mod runtime;
 pub(crate) mod timeout;
 #[cfg(any(feature = "timestamp", test))]
@@ -205,8 +203,6 @@ pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
 #[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
-pub use into_system_time::IntoSystemTime;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
@@ -214,9 +210,3 @@ pub use timeout::Timeout;
 #[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
 #[doc(inline)]
 pub use timestamp::Timestamp;
-
-#[cfg(any(feature = "test-util", test))]
-pub(crate) mod sealed {
-    pub trait Sealed {}
-    impl<T> Sealed for T {}
-}

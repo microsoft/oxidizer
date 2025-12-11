@@ -301,7 +301,7 @@ impl Clock {
     #[cfg(any(feature = "test-util", test))]
     #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
-    pub fn new_frozen_at(time: impl crate::IntoSystemTime) -> Self {
+    pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_clock()
     }
 
