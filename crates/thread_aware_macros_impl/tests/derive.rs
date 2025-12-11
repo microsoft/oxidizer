@@ -151,7 +151,7 @@ fn union_not_supported() {
 #[test]
 fn generics_group_usage_adds_bound() {
     // Covers Type::Group case by synthetically wrapping a type in a group node.
-    use syn::{parse_quote, token, TypeGroup};
+    use syn::{TypeGroup, parse_quote, token};
 
     // Start from an ordinary parsed tuple struct.
     let mut input: syn::DeriveInput = parse_quote! {

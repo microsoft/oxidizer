@@ -6,7 +6,7 @@ use std::sync::{
     atomic::{AtomicI32, Ordering},
 };
 
-use crate::affinity::{pinned_affinities, MemoryAffinity, PinnedAffinity};
+use crate::affinity::{MemoryAffinity, PinnedAffinity, pinned_affinities};
 use crate::closure::relocate;
 use crate::{ThreadAware, Unaware};
 

@@ -4,8 +4,8 @@
 #![expect(missing_docs, reason = "This is a test module")]
 #![allow(dead_code, reason = "This is a test module")]
 
-use thread_aware::affinity::pinned_affinities;
 use thread_aware::ThreadAware;
+use thread_aware::affinity::pinned_affinities;
 
 #[derive(ThreadAware)]
 struct Inner(u32);

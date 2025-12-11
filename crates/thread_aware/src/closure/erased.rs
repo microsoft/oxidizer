@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::closure::RelocateFnOnce;
-use crate::ThreadAware;
 
 /// A closure with erased bounds.
 pub struct ErasedClosureOnce<T> {

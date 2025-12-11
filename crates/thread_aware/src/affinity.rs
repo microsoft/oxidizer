@@ -85,7 +85,6 @@ impl PinnedAffinity {
     }
 }
 
-
 /// Create pinned affinities manually when not using the `ThreadRegistry`.
 ///
 /// # Parameters
@@ -131,12 +130,8 @@ pub fn pinned_affinities(counts: &[usize]) -> Vec<PinnedAffinity> {
 /// If there are more than `u16::MAX` processors or memory regions.
 #[must_use]
 pub fn memory_affinities(counts: &[usize]) -> Vec<MemoryAffinity> {
-    pinned_affinities(counts)
-        .into_iter()
-        .map(MemoryAffinity::Pinned)
-        .collect()
+    pinned_affinities(counts).into_iter().map(MemoryAffinity::Pinned).collect()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -166,4 +161,3 @@ mod tests {
         assert!(!affinity.is_unknown());
     }
 }
-

@@ -15,7 +15,6 @@ pub trait Strategy {
     fn count(affinity: PinnedAffinity) -> usize;
 }
 
-
 /// Type used for storing data in a affinity-aware manner.
 ///
 /// This type is used to manage the data for each affinity, depending on the chosen strategy.

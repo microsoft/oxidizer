@@ -5,8 +5,8 @@
 
 mod erased;
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::ThreadAware;
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 #[doc(inline)]
 pub use erased::ErasedClosureOnce;
 

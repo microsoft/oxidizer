@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::ThreadAware;
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 

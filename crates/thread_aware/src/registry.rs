@@ -68,11 +68,11 @@ impl ThreadRegistry {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
         }
-            .expect("Not enough processors available")
-            .processors()
-            .into_iter()
-            .cloned()
-            .collect();
+        .expect("Not enough processors available")
+        .processors()
+        .into_iter()
+        .cloned()
+        .collect();
 
         let mut numa_nodes = Vec::new();
         let mut dense_index = 0;
@@ -102,7 +102,7 @@ impl ThreadRegistry {
 
     /// Get an iterator over all available memory affinities.
     #[expect(clippy::cast_possible_truncation, reason = "Checked in new()")]
-    pub fn affinities(&self) -> impl Iterator<Item=PinnedAffinity> {
+    pub fn affinities(&self) -> impl Iterator<Item = PinnedAffinity> {
         self.processors.iter().enumerate().map(|(core_index, processor)| {
             let dense_numa_index = self.numa_nodes[processor.memory_region_id() as usize];
 

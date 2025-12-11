@@ -4,20 +4,20 @@
 mod factory;
 pub mod storage;
 
+mod builtin;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests;
-mod builtin;
 
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::{self, RwLock};
 
+use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::cell::factory::Factory;
-use crate::closure::{relocate_once, ErasedClosureOnce, RelocateFnOnce};
-use crate::ThreadAware;
+use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
 pub use builtin::{PerNuma, PerProcess, PerThread};
 pub use storage::{Storage, Strategy};
 
