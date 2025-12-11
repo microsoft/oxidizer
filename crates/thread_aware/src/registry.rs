@@ -167,6 +167,7 @@ mod tests {
     use std::num::NonZero;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn test_registry() {
         let registry = ThreadRegistry::default();
         for i in registry.affinities() {
@@ -182,6 +183,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn test_registry_manual() {
         let registry = ThreadRegistry::new(&ProcessorCount::Manual(NonZero::new(1).unwrap()));
         assert_eq!(registry.num_affinities(), 1);

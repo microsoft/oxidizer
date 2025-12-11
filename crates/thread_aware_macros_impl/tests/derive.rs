@@ -17,6 +17,7 @@ fn expand(input: proc_macro2::TokenStream) -> String {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn struct_basic() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -26,6 +27,7 @@ fn struct_basic() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn struct_attr_skip() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -38,6 +40,7 @@ fn struct_attr_skip() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn tuple_struct_and_enum() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -51,6 +54,7 @@ fn tuple_struct_and_enum() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_add_bounds() {
     // Only T should gain a ThreadAware bound (U appears only inside PhantomData).
     let input = quote! {
@@ -61,6 +65,7 @@ fn generics_add_bounds() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {
@@ -71,6 +76,7 @@ fn generics_prebound_no_dup() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_prebound_fq_no_dup() {
     // Ensures no duplicate bound when already present with fully-qualified path.
     let input = quote! {
@@ -81,6 +87,7 @@ fn generics_prebound_fq_no_dup() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_ref_usage_adds_bound() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -90,6 +97,7 @@ fn generics_ref_usage_adds_bound() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_tuple_usage_adds_bound() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -99,6 +107,7 @@ fn generics_tuple_usage_adds_bound() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_array_usage_adds_bound() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -108,6 +117,7 @@ fn generics_array_usage_adds_bound() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn error_unknown_attr() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -117,6 +127,7 @@ fn error_unknown_attr() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn phantom_data_named_fields() {
     // PhantomData in named fields should be passed through without transformation.
     let input = quote! {
@@ -130,6 +141,7 @@ fn phantom_data_named_fields() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn phantom_data_unnamed_fields() {
     // PhantomData in tuple fields should be passed through without transformation.
     let input = quote! {
@@ -140,6 +152,7 @@ fn phantom_data_unnamed_fields() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn union_not_supported() {
     let input = quote! {
         #[derive(ThreadAware)]
@@ -149,6 +162,7 @@ fn union_not_supported() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_group_usage_adds_bound() {
     // Covers Type::Group case by synthetically wrapping a type in a group node.
     use syn::{TypeGroup, parse_quote, token};
@@ -186,6 +200,7 @@ fn generics_group_usage_adds_bound() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn enum_unnamed_phantom_data() {
     // PhantomData in enum unnamed fields should be passed through without transformation.
     let input = quote! {
@@ -199,6 +214,7 @@ fn enum_unnamed_phantom_data() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn enum_named_phantom_data() {
     // PhantomData in enum named fields should be passed through without transformation.
     let input = quote! {
@@ -218,6 +234,7 @@ fn enum_named_phantom_data() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn struct_unit() {
     // Unit structs should simply return self.
     let input = quote! {
@@ -228,6 +245,7 @@ fn struct_unit() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn generics_paren_adds_bound() {
     // Covers Type::Paren case: parenthesized types like `(T)` should add ThreadAware bound.
     let input = quote! {
