@@ -6,8 +6,8 @@ use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::ptr::NonNull;
 
-use bytes::buf::UninitSlice;
 use bytes::BufMut;
+use bytes::buf::UninitSlice;
 
 use crate::{BlockRef, BlockSize, Span};
 

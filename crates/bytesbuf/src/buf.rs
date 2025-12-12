@@ -1701,7 +1701,7 @@ mod tests {
     fn peek_empty_builder() {
         let builder = BytesBuf::new();
         let peeked = builder.peek();
-        
+
         assert!(peeked.is_empty());
         assert_eq!(peeked.len(), 0);
     }
@@ -1710,20 +1710,20 @@ mod tests {
     fn peek_with_frozen_spans_only() {
         let memory = FixedBlockTestMemory::new(nz!(10));
         let mut builder = BytesBuf::new();
-        
+
         builder.reserve(20, &memory);
         builder.put_u64(0x1111_1111_1111_1111);
         builder.put_u64(0x2222_2222_2222_2222);
-        
+
         // Both blocks are now frozen (filled completely)
         assert_eq!(builder.len(), 16);
-        
+
         let mut peeked = builder.peek();
-        
+
         assert_eq!(peeked.len(), 16);
         assert_eq!(peeked.get_u64(), 0x1111_1111_1111_1111);
         assert_eq!(peeked.get_u64(), 0x2222_2222_2222_2222);
-        
+
         // Original builder still has the data
         assert_eq!(builder.len(), 16);
     }
@@ -1732,20 +1732,20 @@ mod tests {
     fn peek_with_partially_filled_span_builder() {
         let memory = FixedBlockTestMemory::new(nz!(10));
         let mut builder = BytesBuf::new();
-        
+
         builder.reserve(10, &memory);
         builder.put_u64(0x3333_3333_3333_3333);
         builder.put_u16(0x4444);
-        
+
         // We have 10 bytes filled in a 10-byte block
         assert_eq!(builder.len(), 10);
-        
+
         let mut peeked = builder.peek();
-        
+
         assert_eq!(peeked.len(), 10);
         assert_eq!(peeked.get_u64(), 0x3333_3333_3333_3333);
         assert_eq!(peeked.get_u16(), 0x4444);
-        
+
         // Original builder still has the data
         assert_eq!(builder.len(), 10);
     }
@@ -1754,28 +1754,28 @@ mod tests {
     fn peek_preserves_capacity_of_partial_span_builder() {
         let memory = FixedBlockTestMemory::new(nz!(20));
         let mut builder = BytesBuf::new();
-        
+
         builder.reserve(20, &memory);
         builder.put_u64(0x5555_5555_5555_5555);
-        
+
         // We have 8 bytes filled and 12 bytes remaining capacity
         assert_eq!(builder.len(), 8);
         assert_eq!(builder.remaining_mut(), 12);
-        
+
         let mut peeked = builder.peek();
-        
+
         assert_eq!(peeked.len(), 8);
         assert_eq!(peeked.get_u64(), 0x5555_5555_5555_5555);
-        
+
         // CRITICAL TEST: Capacity should be preserved
         assert_eq!(builder.len(), 8);
         assert_eq!(builder.remaining_mut(), 12);
-        
+
         // We should still be able to write more data
         builder.put_u32(0x6666_6666);
         assert_eq!(builder.len(), 12);
         assert_eq!(builder.remaining_mut(), 8);
-        
+
         // And we can peek again to see the updated data
         let mut peeked2 = builder.peek();
         assert_eq!(peeked2.len(), 12);
@@ -1787,32 +1787,32 @@ mod tests {
     fn peek_with_mixed_frozen_and_unfrozen() {
         let memory = FixedBlockTestMemory::new(nz!(10));
         let mut builder = BytesBuf::new();
-        
+
         builder.reserve(30, &memory);
-        
+
         // Fill first block completely (10 bytes) - will be frozen
         builder.put_u64(0x1111_1111_1111_1111);
         builder.put_u16(0x2222);
-        
+
         // Fill second block completely (10 bytes) - will be frozen
         builder.put_u64(0x3333_3333_3333_3333);
         builder.put_u16(0x4444);
-        
+
         // Partially fill third block (only 4 bytes) - will remain unfrozen
         builder.put_u32(0x5555_5555);
-        
+
         assert_eq!(builder.len(), 24);
         assert_eq!(builder.remaining_mut(), 6);
-        
+
         let mut peeked = builder.peek();
-        
+
         assert_eq!(peeked.len(), 24);
         assert_eq!(peeked.get_u64(), 0x1111_1111_1111_1111);
         assert_eq!(peeked.get_u16(), 0x2222);
         assert_eq!(peeked.get_u64(), 0x3333_3333_3333_3333);
         assert_eq!(peeked.get_u16(), 0x4444);
         assert_eq!(peeked.get_u32(), 0x5555_5555);
-        
+
         // Original builder still has all the data and capacity
         assert_eq!(builder.len(), 24);
         assert_eq!(builder.remaining_mut(), 6);
@@ -1822,28 +1822,28 @@ mod tests {
     fn peek_then_consume() {
         let memory = FixedBlockTestMemory::new(nz!(20));
         let mut builder = BytesBuf::new();
-        
+
         builder.reserve(20, &memory);
         builder.put_u64(0x7777_7777_7777_7777);
         builder.put_u32(0x8888_8888);
-        
+
         assert_eq!(builder.len(), 12);
-        
+
         // Peek at the data
         let mut peeked = builder.peek();
         assert_eq!(peeked.len(), 12);
         assert_eq!(peeked.get_u64(), 0x7777_7777_7777_7777);
-        
+
         // Original builder still has the data
         assert_eq!(builder.len(), 12);
-        
+
         // Now consume some of it
         let mut consumed = builder.consume(8);
         assert_eq!(consumed.get_u64(), 0x7777_7777_7777_7777);
-        
+
         // Builder should have less data now
         assert_eq!(builder.len(), 4);
-        
+
         // Peek again should show the remaining data
         let mut peeked2 = builder.peek();
         assert_eq!(peeked2.len(), 4);
@@ -1854,17 +1854,17 @@ mod tests {
     fn peek_multiple_times() {
         let memory = FixedBlockTestMemory::new(nz!(20));
         let mut builder = BytesBuf::new();
-        
+
         builder.reserve(20, &memory);
         builder.put_u64(0xAAAA_AAAA_AAAA_AAAA);
-        
+
         // Peek multiple times - each should work independently
         let mut peeked1 = builder.peek();
         let mut peeked2 = builder.peek();
-        
+
         assert_eq!(peeked1.get_u64(), 0xAAAA_AAAA_AAAA_AAAA);
         assert_eq!(peeked2.get_u64(), 0xAAAA_AAAA_AAAA_AAAA);
-        
+
         // Original builder still intact
         assert_eq!(builder.len(), 8);
     }
