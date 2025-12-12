@@ -368,12 +368,11 @@ impl Clock {
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         match T::try_from(self.system_time()) {
             Ok(time) => time,
-            Err(err) => panic!(
+            Err(_err) => panic!(
                 "The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.
                 If the target type overflows, it indicates a problem with the target type not supporting valid system time range or
                 we are in tests where the time was moved excessively into the future. Practically, in production, this conversion will
                 always succeed.",
-                err
             ),
         }
     }
