@@ -185,14 +185,13 @@ impl TryFrom<SystemTime> for UnixSeconds {
     type Error = crate::Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let duration = value.duration_since(SystemTime::UNIX_EPOCH).map_err(|_| {
-            Error::out_of_range("the provided `SystemTime` is out of range and cannot be represented as `UnixSeconds`")
-        })?;
+        let duration = value
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| Error::out_of_range("the provided `SystemTime` is out of range and cannot be represented as `UnixSeconds`"))?;
 
         Self::from_duration(duration)
     }
 }
-
 
 // impl From<Rfc2822> for UnixSeconds {
 //     fn from(value: Rfc2822) -> Self {

@@ -685,30 +685,15 @@ mod tests {
 
         let anchor = clock.system_time();
 
-        assert_eq!(
-            clock.system_time().duration_since(anchor).unwrap(),
-            Duration::from_millis(550)
-        );
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(550));
 
-        assert_eq!(
-            clock.system_time().duration_since(anchor).unwrap(),
-            Duration::from_millis(1100)
-        );
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(1100));
 
-        assert_eq!(
-            clock.system_time().duration_since(anchor).unwrap(),
-            Duration::from_millis(1650)
-        );
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(1650));
 
-        assert_eq!(
-            clock.system_time().duration_since(anchor).unwrap(),
-            Duration::from_millis(2000)
-        );
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(2000));
 
-        assert_eq!(
-            clock.system_time().duration_since(anchor).unwrap(),
-            Duration::from_millis(2000)
-        );
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(2000));
     }
 
     // #[test]

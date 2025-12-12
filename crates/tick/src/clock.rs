@@ -340,6 +340,44 @@ impl Clock {
         }
     }
 
+    /// Retrieves the current system time converted to a target type.
+    ///
+    /// This is a convenience method that retrieves the current [`SystemTime`] via
+    /// [`system_time()`][Self::system_time] and converts it to the specified target type.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T` - The target type that implements [`TryFrom<SystemTime>`]. Common examples include
+    ///   timestamp types from external crates that can be constructed from a `SystemTime`.
+    ///
+    /// # Panics
+    ///
+    /// While this method uses [`TryFrom`] (a fallible conversion), it might panic on conversion failure.
+    ///
+    /// In practice, this conversion always succeeds because:
+    ///
+    /// - The system time returned is always within a normalized range in real environments.
+    /// - Target types that implement `TryFrom<SystemTime>` support the full valid
+    ///   range of system time values.
+    ///
+    /// The only theoretical failure case is in tests using manual time control (via the
+    /// `test-util` feature), where time could be moved excessively far into the future,
+    /// potentially exceeding the target type's representable range. This is not a concern
+    /// in production environments.
+    #[must_use]
+    pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
+        match T::try_from(self.system_time()) {
+            Ok(time) => time,
+            Err(err) => panic!(
+                "The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.
+                If the target type overflows, it indicates a problem with the target type not supporting valid system time range or
+                we are in tests where the time was moved excessively into the future. Practically, in production, this conversion will
+                always succeed.",
+                err
+            ),
+        }
+    }
+
     /// Retrieves the current [`Instant`] time.
     ///
     /// The `Instant` represents a monotonic time point guaranteed to always be increasing.

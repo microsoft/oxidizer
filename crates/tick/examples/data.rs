@@ -7,7 +7,7 @@
 use std::time::{Duration, SystemTime};
 
 use tick::fmt::UnixSeconds;
-use tick::{Clock, Delay, Timestamp};
+use tick::{Clock, Delay};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -60,7 +60,7 @@ impl CachedData {
     pub fn new(id: u32, data: String, clock: &Clock) -> Self {
         Self {
             id,
-            last_access: clock.timestamp().into(),
+            last_access: clock.system_time_as::<UnixSeconds>(),
             data,
         }
     }
@@ -74,13 +74,16 @@ impl CachedData {
     /// Updates the data and sets the last access time to the current timestamp.
     pub fn update(&mut self, data: String, clock: &Clock) {
         self.data = data;
-        self.last_access = clock.timestamp().into();
+        self.last_access = clock.system_time_as::<UnixSeconds>();
     }
 
     /// Checks if the cached data has expired based on the expiration duration.
     #[must_use]
     pub fn is_expired(&self, clock: &Clock) -> bool {
-        let diff = clock.timestamp().checked_duration_since(self.last_access).unwrap_or(Duration::ZERO);
+        let diff = clock
+            .system_time()
+            .duration_since(self.last_access.into())
+            .unwrap_or(Duration::ZERO);
 
         diff > Self::EXPIRATION
     }
