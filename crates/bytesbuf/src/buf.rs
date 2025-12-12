@@ -206,23 +206,16 @@ impl BytesBuf {
     /// filled data without consuming it from the sequence builder.
     ///
     /// This is similar to [`consume_all()`][Self::consume_all] except the data remains in the
-    /// sequence builder and can still be consumed later. The capacity of any partially filled
-    /// span builder is preserved.
-    ///
-    /// # Performance
-    ///
-    /// This operation freezes any unfrozen data in the sequence builder, which is a relatively
-    /// cheap operation but does involve creating a new span. Subsequent calls to `peek()` will
-    /// be very cheap if no new data has been added.
+    /// sequence builder and can still be consumed later.
     #[must_use]
     pub fn peek(&self) -> BytesView {
         // Build a list of all spans to include in the result, in reverse order for efficient construction.
         let mut result_spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> = SmallVec::new();
 
-        // If there is unfrozen data in the first span builder, we need to create a span for it.
-        // We do NOT consume it from the builder - we just create a new span that references the same memory.
+        // Add any filled data from the first span builder.
         if let Some(first_builder) = self.span_builders_reversed.last() {
-            if let Some(span) = first_builder.peek_filled() {
+            let span = first_builder.peek();
+            if !span.is_empty() {
                 result_spans_reversed.push(span);
             }
         }

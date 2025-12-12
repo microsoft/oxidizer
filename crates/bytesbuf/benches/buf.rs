@@ -296,8 +296,8 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
-    let allocs_op = allocs.operation("inspect_frozen_all");
-    group.bench_function("inspect_frozen_all", |b| {
+    let allocs_op = allocs.operation("peek_frozen_all");
+    group.bench_function("peek_frozen_all", |b| {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
