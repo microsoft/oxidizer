@@ -1,9 +1,10 @@
 # Changelog
 
-## [0.5.0] - 2025-12-10
+## [0.5.0] - 2025-12-11
 
 - ✔️ Tasks
 
+  - Improve documentation and clean up thread_aware crate root. ([#119](https://github.com/microsoft/oxidizer/pull/119))
   - Add missing documentation on thread_aware related crates ([#103](https://github.com/microsoft/oxidizer/pull/103))
   - Enable the missing_docs compiler lint. ([#102](https://github.com/microsoft/oxidizer/pull/102))
 
