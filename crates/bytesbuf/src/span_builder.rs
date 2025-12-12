@@ -2,14 +2,19 @@
 // Licensed under the MIT License.
 
 use core::slice;
-use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::num::NonZero;
-use std::ops::Deref;
 use std::ptr::NonNull;
 
 use bytes::buf::UninitSlice;
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
+
+#[cfg(test)]
+use std::marker::PhantomData;
+#[cfg(test)]
+use std::ops::Deref;
+#[cfg(test)]
+use bytes::Buf;
 
 use crate::{BlockRef, BlockSize, Span};
 
@@ -136,16 +141,6 @@ impl SpanBuilder {
         self.filled_bytes == 0
     }
 
-    pub(crate) const fn inspect(&self) -> InspectSpanBuilderData<'_> {
-        InspectSpanBuilderData {
-            start: self.start.cast(),
-            len: self.filled_bytes,
-
-            // Borrows the SpanBuilder for the duration of the inspection.
-            _builder: PhantomData,
-        }
-    }
-
     /// Consumes the specified number of bytes (of already filled data) from the front of the
     /// builder's memory block, returning a span with those immutable bytes.
     ///
@@ -199,6 +194,17 @@ impl SpanBuilder {
         Some(unsafe { Span::new(self.start.cast(), self.filled_bytes, self.block_ref.clone()) })
     }
 
+    #[cfg(test)]
+    pub(crate) const fn inspect(&self) -> InspectSpanBuilderData<'_> {
+        InspectSpanBuilderData {
+            start: self.start.cast(),
+            len: self.filled_bytes,
+
+            // Borrows the SpanBuilder for the duration of the inspection.
+            _builder: PhantomData,
+        }
+    }
+
     /// Allows the underlying memory block to be accessed, primarily used to extend its lifetime
     /// beyond that of the `SpanBuilder` itself.
     pub(crate) const fn block(&self) -> &BlockRef {
@@ -244,6 +250,7 @@ unsafe impl BufMut for SpanBuilder {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub struct InspectSpanBuilderData<'a> {
     start: NonNull<u8>,
@@ -253,6 +260,7 @@ pub struct InspectSpanBuilderData<'a> {
     _builder: PhantomData<&'a SpanBuilder>,
 }
 
+#[cfg(test)]
 impl Deref for InspectSpanBuilderData<'_> {
     type Target = [u8];
 
@@ -264,6 +272,7 @@ impl Deref for InspectSpanBuilderData<'_> {
     }
 }
 
+#[cfg(test)]
 impl Buf for InspectSpanBuilderData<'_> {
     fn remaining(&self) -> usize {
         self.len as usize
