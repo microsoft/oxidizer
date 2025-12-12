@@ -160,6 +160,7 @@ impl Default for ThreadRegistry {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use crate::affinity::{memory_affinities, pinned_affinities};
@@ -187,6 +188,42 @@ mod tests {
     fn test_registry_manual() {
         let registry = ThreadRegistry::new(&ProcessorCount::Manual(NonZero::new(1).unwrap()));
         assert_eq!(registry.num_affinities(), 1);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_num_affinities_matches_iterator_count() {
+        // This test ensures num_affinities() returns the actual count, not a constant like 1
+        let registry = ThreadRegistry::default();
+        let iterator_count = registry.affinities().count();
+        assert_eq!(registry.num_affinities(), iterator_count);
+
+        // Also test with manual processor count > 1 if available
+        if iterator_count > 1 {
+            let count = NonZero::new(2.min(iterator_count)).unwrap();
+            let registry_manual = ThreadRegistry::new(&ProcessorCount::Manual(count));
+            assert_eq!(registry_manual.num_affinities(), count.get());
+            assert_eq!(registry_manual.num_affinities(), registry_manual.affinities().count());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_pin_to_actually_pins() {
+        // This test ensures pin_to() actually updates the thread's affinity
+        let registry = ThreadRegistry::default();
+
+        // Before pinning, affinity should be unknown
+        assert!(registry.current_affinity().is_unknown());
+
+        // Pin to the first affinity
+        let first = registry.affinities().next().unwrap();
+        registry.pin_to(first);
+
+        // After pinning, affinity should be pinned and match what we set
+        let current = registry.current_affinity();
+        assert!(!current.is_unknown());
+        assert_eq!(current, crate::affinity::MemoryAffinity::Pinned(first));
     }
 
     #[test]
