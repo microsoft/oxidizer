@@ -9,14 +9,14 @@ use std::ptr::NonNull;
 use bytes::buf::UninitSlice;
 use bytes::BufMut;
 
+use crate::{BlockRef, BlockSize, Span};
+
 #[cfg(test)]
 use std::marker::PhantomData;
 #[cfg(test)]
 use std::ops::Deref;
 #[cfg(test)]
 use bytes::Buf;
-
-use crate::{BlockRef, BlockSize, Span};
 
 /// Owns a mutable span of memory capacity from a memory block, which can be filled with data,
 /// enabling you to detach spans of immutable bytes from the front to create views over the data.
@@ -184,6 +184,12 @@ impl SpanBuilder {
     /// The span shares the BlockRef with the span builder, keeping the memory alive.
     ///
     /// Returns `None` if there is no filled data in the builder.
+    ///
+    /// # Performance
+    ///
+    /// This operation creates a new span that shares the same memory block. The operation is
+    /// relatively cheap (just cloning a BlockRef and creating a span struct) but should not
+    /// be called in tight loops if avoidable.
     pub(crate) fn peek_filled(&self) -> Option<Span> {
         if self.filled_bytes == 0 {
             return None;

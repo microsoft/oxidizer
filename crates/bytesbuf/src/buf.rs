@@ -227,7 +227,8 @@ impl BytesBuf {
             }
         }
 
-        // Add all the frozen spans (they are already in content order in our storage).
+        // Add all the frozen spans. They are stored in content order in our storage,
+        // so we reverse them when adding to the result_spans_reversed collection.
         result_spans_reversed.extend(self.frozen_spans.iter().rev().cloned());
 
         BytesView::from_spans_reversed(result_spans_reversed)
