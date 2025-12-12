@@ -306,19 +306,19 @@ fn entrypoint(c: &mut Criterion) {
             },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                let mut inspector = sb.inspect();
+                let mut peeked = sb.peek();
 
                 // We just seek to the end, that is all.
-                while inspector.has_remaining() {
-                    inspector.advance(inspector.chunk().len());
+                while peeked.has_remaining() {
+                    peeked.advance(peeked.chunk().len());
                 }
             },
             BatchSize::SmallInput,
         );
     });
 
-    let allocs_op = allocs.operation("inspect_unfrozen_all");
-    group.bench_function("inspect_unfrozen_all", |b| {
+    let allocs_op = allocs.operation("peek_unfrozen_all");
+    group.bench_function("peek_unfrozen_all", |b| {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
@@ -328,11 +328,11 @@ fn entrypoint(c: &mut Criterion) {
             },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                let mut inspector = sb.inspect();
+                let mut peeked = sb.peek();
 
                 // We just seek to the end, that is all.
-                while inspector.has_remaining() {
-                    inspector.advance(inspector.chunk().len());
+                while peeked.has_remaining() {
+                    peeked.advance(peeked.chunk().len());
                 }
             },
             BatchSize::SmallInput,
