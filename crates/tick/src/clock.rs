@@ -305,47 +305,6 @@ impl Clock {
         crate::ClockControl::new_at(time).to_clock()
     }
 
-    /// Retrieves the current absolute time as [`Timestamp`][crate::Timestamp].
-    ///
-    /// This method provides an enhanced absolute time type with additional capabilities beyond
-    /// [`system_time()`][Self::system_time], including:
-    /// - Formatting and parsing support through the [`fmt`][crate::fmt] module
-    /// - Serialization and deserialization capabilities
-    /// - Ability to send time information across process boundaries
-    /// - Conversion to and from [`SystemTime`]
-    ///
-    /// > **Note**: The timestamp is not monotonic and can be affected by system clock changes.
-    /// > When the system clock changes, the current timestamp may be older than a previously
-    /// > retrieved one.
-    ///
-    /// For basic absolute time needs without formatting or serialization requirements, consider
-    /// using [`system_time()`][Self::system_time] instead. For relative time measurements,
-    /// use [`Stopwatch`][super::Stopwatch].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tick::Clock;
-    ///
-    /// # fn retrieve_timestamp(clock: &Clock) {
-    /// let timestamp1 = clock.timestamp();
-    /// let timestamp2 = clock.timestamp();
-    ///
-    /// assert!(timestamp2 >= timestamp1);
-    /// # }
-    /// ```
-    #[cfg(any(feature = "timestamp", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
-    #[must_use]
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "the panic can never happen because the system time is always within the supported range of the timestamp"
-    )]
-    pub fn timestamp(&self) -> crate::Timestamp {
-        crate::Timestamp::from_system_time(self.system_time())
-            .expect("the system time that we convert to a timestamp is never out of supported range of the timestamp")
-    }
-
     /// Retrieves the current absolute time as [`SystemTime`].
     ///
     /// This method provides the standard library's representation of absolute time. Use this when:
@@ -523,7 +482,6 @@ mod tests {
     #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
 
     use std::thread::sleep;
-    use std::time::Duration;
 
     use super::*;
 
@@ -543,8 +501,8 @@ mod tests {
         let now = std::time::SystemTime::now();
 
         let clock = Clock::with_frozen_timers();
-        let absolute = clock.timestamp();
-        assert!(absolute.to_system_time() >= now);
+        let absolute = clock.system_time();
+        assert!(absolute >= now);
     }
 
     #[test]
@@ -618,13 +576,13 @@ mod tests {
     fn new_frozen_ok() {
         let clock = Clock::new_frozen();
 
-        let now = clock.timestamp();
+        let now = clock.system_time();
         let instant = clock.instant();
 
         sleep(Duration::from_micros(1));
 
         // The frozen clock should return the same timestamp and instant on every call
-        assert_eq!(now, clock.timestamp());
+        assert_eq!(now, clock.system_time());
         assert_eq!(instant, clock.instant());
     }
 
@@ -633,14 +591,14 @@ mod tests {
         let specific_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let clock = Clock::new_frozen_at(specific_time);
 
-        let timestamp = clock.timestamp();
+        let timestamp = clock.system_time();
         let system_time = clock.system_time();
 
         sleep(Duration::from_micros(1));
 
         // The frozen clock should return the same timestamp and system time on every call
         assert_eq!(system_time, specific_time);
-        assert_eq!(timestamp, clock.timestamp());
+        assert_eq!(timestamp, clock.system_time());
         assert_eq!(system_time, clock.system_time());
     }
 }

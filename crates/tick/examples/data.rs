@@ -4,7 +4,7 @@
 //! This example demonstrates how to work with serializable data,
 //! especially for storing and retrieving timestamps.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tick::fmt::UnixSeconds;
 use tick::{Clock, Delay, Timestamp};
@@ -67,7 +67,7 @@ impl CachedData {
 
     /// Returns the timestamp when this data was last accessed.
     #[must_use]
-    pub fn last_access(&self) -> Timestamp {
+    pub fn last_access(&self) -> SystemTime {
         self.last_access.into()
     }
 

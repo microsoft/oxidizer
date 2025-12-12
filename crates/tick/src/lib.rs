@@ -180,8 +180,8 @@ mod clock_control;
 mod delay;
 mod error;
 
-#[cfg(any(feature = "timestamp", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
+#[cfg(any(feature = "fmt", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
 pub mod fmt;
 
 mod future_ext;
@@ -192,9 +192,6 @@ mod timers;
 
 pub mod runtime;
 pub(crate) mod timeout;
-#[cfg(any(feature = "timestamp", test))]
-mod timestamp;
-
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
@@ -206,7 +203,3 @@ pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
-#[cfg(any(feature = "timestamp", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "timestamp")))]
-#[doc(inline)]
-pub use timestamp::Timestamp;

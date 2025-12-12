@@ -6,7 +6,7 @@ name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["time", "clock", "tick", "timestamp", "stopwatch"]
+keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["data-structures"]
 edition.workspace = true
 rust-version.workspace = true
@@ -34,8 +34,8 @@ test-util = []
 serde = ["dep:serde_core"]
 # Integration with tokio runtime
 tokio = ["dep:tokio"]
-# Exposes timestamp APIs
-timestamp = ["dep:jiff"]
+# Exposes APIs for formatting of SystemTime
+fmt = ["dep:jiff"]
 
 [dependencies]
 futures-core = { workspace = true }
@@ -89,10 +89,6 @@ required-features = ["test-util"]
 
 [[example]]
 name = "interop_jiff"
-required-features = ["test-util"]
-
-[[example]]
-name = "timestamp"
 required-features = ["test-util"]
 
 [[example]]

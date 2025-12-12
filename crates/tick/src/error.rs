@@ -34,9 +34,9 @@ pub struct Error(ErrorKind);
 
 #[derive(Debug)]
 enum ErrorKind {
-    #[cfg(any(feature = "timestamp", test))]
+    #[cfg(any(feature = "fmt", test))]
     Jiff(jiff::Error),
-    #[cfg(any(feature = "timestamp", test))]
+    #[cfg(any(feature = "fmt", test))]
     OutOfRange(std::borrow::Cow<'static, str>),
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
@@ -46,12 +46,12 @@ impl Error {
         Self(kind)
     }
 
-    #[cfg(any(feature = "timestamp", test))]
+    #[cfg(any(feature = "fmt", test))]
     pub(super) fn out_of_range(message: impl Into<std::borrow::Cow<'static, str>>) -> Self {
         Self::from_kind(ErrorKind::OutOfRange(message.into()))
     }
 
-    #[cfg(any(feature = "timestamp", test))]
+    #[cfg(any(feature = "fmt", test))]
     pub(super) const fn jiff(error: jiff::Error) -> Self {
         Self::from_kind(ErrorKind::Jiff(error))
     }
@@ -69,9 +69,9 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            #[cfg(any(feature = "timestamp", test))]
+            #[cfg(any(feature = "fmt", test))]
             ErrorKind::Jiff(err) => err.fmt(f),
-            #[cfg(any(feature = "timestamp", test))]
+            #[cfg(any(feature = "fmt", test))]
             ErrorKind::OutOfRange(msg) => write!(f, "{msg}"),
             ErrorKind::Other(err) => err.fmt(f),
         }
@@ -81,9 +81,9 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
-            #[cfg(any(feature = "timestamp", test))]
+            #[cfg(any(feature = "fmt", test))]
             ErrorKind::Jiff(err) => Some(err),
-            #[cfg(any(feature = "timestamp", test))]
+            #[cfg(any(feature = "fmt", test))]
             ErrorKind::OutOfRange(_) => None,
             ErrorKind::Other(err) => Some(err.as_ref()),
         }
