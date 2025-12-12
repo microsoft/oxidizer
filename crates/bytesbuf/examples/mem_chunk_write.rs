@@ -48,22 +48,22 @@ fn emit_favorite_color(sequence_builder: &mut BytesBuf) {
         // no guarantee on how many bytes this slice covers (it could be as little as 1 byte per chunk).
         // We are required to fill all bytes before we can proceed to the next chunk (which may also
         // be as small as 1 byte in length).
-        let chunk = sequence_builder.chunk_mut();
+        let slice = sequence_builder.first_unfilled_slice();
 
         // It could be that we cannot write the entire payload to this chunk, so we write as much
         // as we can and leave the remainder to the next chunk.
-        let bytes_to_write = chunk.len().min(payload_to_write.len());
+        let bytes_to_write = slice.len().min(payload_to_write.len());
         let slice_to_write = &payload_to_write[..bytes_to_write];
 
         // Once write_copy_of_slice() is stabilized, we can replace this with a safe alternative.
         // SAFETY: Both pointers are valid for reading/writing bytes, all is well.
         unsafe {
-            ptr::copy_nonoverlapping(slice_to_write.as_ptr(), chunk.as_mut_ptr(), bytes_to_write);
+            ptr::copy_nonoverlapping(slice_to_write.as_ptr(), slice.as_mut_ptr().cast(), bytes_to_write);
         }
 
         // SAFETY: We must have actually initialized this many bytes. We did.
         unsafe {
-            sequence_builder.advance_mut(bytes_to_write);
+            sequence_builder.advance(bytes_to_write);
         }
 
         // We wrote some (or all) of the payload, so keep whatever

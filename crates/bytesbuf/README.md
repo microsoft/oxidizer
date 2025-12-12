@@ -438,7 +438,7 @@ pub fn write(&mut self, message: BytesView) {
     // ues the optimal I/O path. There is no requirement that the data passed to us contains
     // only memory with our preferred configuration.
 
-    let use_optimal_path = message.iter_chunk_metas().all(|meta| {
+    let use_optimal_path = message.iter_slice_metas().all(|meta| {
         // If there is no metadata, the memory is not I/O memory.
         meta.is_some_and(|meta| {
             // If the type of metadata does not match the metadata

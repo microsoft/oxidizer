@@ -260,8 +260,8 @@
 //! let header = header_builder.consume_all();
 //!
 //! let mut sequence_builder = memory.reserve(128);
-//! sequence_builder.append(header);
-//! sequence_builder.put(b"Hello, world!".as_slice());
+//! sequence_builder.put_view(header);
+//! sequence_builder.put_slice(b"Hello, world!".as_slice());
 //! ```
 //!
 //! Note that there is no requirement that the memory capacity of the sequence builder and the
@@ -459,7 +459,7 @@
 //!     // ues the optimal I/O path. There is no requirement that the data passed to us contains
 //!     // only memory with our preferred configuration.
 //!
-//!     let use_optimal_path = message.iter_chunk_metas().all(|meta| {
+//!     let use_optimal_path = message.iter_slice_metas().all(|meta| {
 //!         // If there is no metadata, the memory is not I/O memory.
 //!         meta.is_some_and(|meta| {
 //!             // If the type of metadata does not match the metadata
@@ -596,7 +596,8 @@
 mod block;
 mod block_ref;
 mod buf;
-mod bytes;
+mod buf_put;
+mod bytes_compat;
 mod callback_memory;
 mod constants;
 mod fixed_block;
@@ -612,6 +613,7 @@ mod span_builder;
 mod transparent;
 mod vec;
 mod view;
+mod view_get;
 mod write_adapter;
 
 pub use block::*;

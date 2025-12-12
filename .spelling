@@ -33,6 +33,7 @@ bool
 branch_name
 btree_map
 buildable
+bytesbuf
 C #-Rust
 C-BITFLAG
 C-CONV
@@ -128,8 +129,8 @@ libs
 libunwind-devel
 lifecycle
 llvm-cov
-Macros
 macros
+Macros
 Makefile
 metadata
 Metas
@@ -153,6 +154,7 @@ newtypes
 Newtypes
 Nomicon
 non-mockable
+nonoverlapping
 ns
 nuget
 ok
@@ -188,6 +190,7 @@ Sandana
 sans-io
 scopeguard
 SDKs
+seeked
 SemVer
 serde
 Serde
@@ -197,6 +200,7 @@ serializable
 setsockopt
 skimmable
 SLAs
+smallvec
 stdlib
 struct
 structs

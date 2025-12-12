@@ -5,7 +5,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-/// A reference to a block of memory capacity owned by a memory provider and leased to user code.
+/// References a block of memory capacity rented from a memory provider.
 ///
 /// While a memory provider only leases each block to one caller at a time, this caller may further
 /// share and subdivide the block between multiple co-owners. These co-owners will coordinate the

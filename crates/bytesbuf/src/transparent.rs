@@ -86,7 +86,6 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use bytes::BufMut;
     use static_assertions::assert_impl_all;
 
     use super::*;
@@ -111,7 +110,7 @@ mod tests {
         let sequence = sb.consume_all();
 
         assert_eq!(sequence.len(), 1313);
-        assert_eq!(sequence.chunk().len(), 1313);
+        assert_eq!(sequence.first_slice().len(), 1313);
     }
 
     #[test]

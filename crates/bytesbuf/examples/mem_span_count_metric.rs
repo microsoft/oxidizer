@@ -18,10 +18,10 @@ fn main() {
     let sample1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
     // Which repeated 4 times gives us a sequence made up of 4 spans.
-    let sample4 = BytesView::from_sequences([sample1.clone(), sample1.clone(), sample1.clone(), sample1]);
+    let sample4 = BytesView::from_views([sample1.clone(), sample1.clone(), sample1.clone(), sample1]);
 
     // Which repeated 4 times gives us a sequence made up of 16 spans.
-    let _sample16 = BytesView::from_sequences([sample4.clone(), sample4.clone(), sample4.clone(), sample4]);
+    let _sample16 = BytesView::from_views([sample4.clone(), sample4.clone(), sample4.clone(), sample4]);
 
     // Dump metrics to stdout.
     println!("{}", Report::collect());

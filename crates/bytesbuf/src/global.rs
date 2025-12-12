@@ -307,7 +307,6 @@ mod tests {
 
     use std::thread;
 
-    use bytes::BufMut;
     use static_assertions::assert_impl_all;
 
     use super::*;
@@ -345,32 +344,35 @@ mod tests {
     fn piece_by_piece() {
         const SEQUENCE_SIZE_BYTES: BlockSize = 1000;
 
-        // We grab a block of memory and split the single block into multiple sequences piece by piece.
+        // We grab a block of memory and split the single block into multiple views piece by piece.
         let memory = GlobalPool::new();
 
-        let mut sb = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
+        let mut buf = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
 
-        let mut sequences = Vec::new();
+        let mut views = Vec::new();
 
-        while sb.has_remaining_mut() {
+        while buf.remaining_capacity() > 0 {
             #[expect(clippy::cast_possible_truncation, reason = "intentionally truncating")]
-            let value = sequences.len() as u8;
+            let value = views.len() as u8;
 
-            sb.put_bytes(value, (SEQUENCE_SIZE_BYTES as usize).min(sb.remaining_mut()));
+            buf.put_bytes(value, (SEQUENCE_SIZE_BYTES as usize).min(buf.remaining_capacity()));
 
-            sequences.push(sb.consume_all());
+            // Sanity check against silly mutations.
+            debug_assert!(!buf.is_empty());
+
+            views.push(buf.consume_all());
         }
 
         let expected_count = BLOCK_SIZE_BYTES.get().div_ceil(SEQUENCE_SIZE_BYTES);
-        assert_eq!(sequences.len(), expected_count as usize);
+        assert_eq!(views.len(), expected_count as usize);
 
-        assert!(!sequences.is_empty());
+        assert!(!views.is_empty());
 
-        for (i, sequence) in sequences.iter().enumerate() {
+        for (i, sequence) in views.iter().enumerate() {
             #[expect(clippy::cast_possible_truncation, reason = "intentionally truncating")]
             let expected_value = i as u8;
 
-            assert_eq!(sequence.chunk()[0], expected_value);
+            assert_eq!(sequence.first_slice()[0], expected_value);
         }
     }
 
@@ -405,7 +407,7 @@ mod tests {
 
         let mut sb = memory.reserve(SIZE_10MB);
 
-        sb.put(pattern.as_slice());
+        sb.put_slice(pattern.as_slice());
 
         let sequence = sb.consume_all();
 
@@ -429,11 +431,11 @@ mod tests {
 
         // Create first sequence with ascending pattern
         let mut sb1 = memory.reserve(SIZE_10MB);
-        sb1.put(pattern1.as_slice());
+        sb1.put_slice(pattern1.as_slice());
 
         // Create second sequence with descending pattern
         let mut sb2 = memory.reserve(SIZE_10MB);
-        sb2.put(pattern2.as_slice());
+        sb2.put_slice(pattern2.as_slice());
 
         let sequence1 = sb1.consume_all();
         let sequence2 = sb2.consume_all();

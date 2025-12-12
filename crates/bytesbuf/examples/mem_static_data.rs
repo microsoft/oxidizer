@@ -6,7 +6,7 @@ use std::io::Write;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::{Buf, BufMut};
+use bytes::Buf;
 use bytesbuf::{BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 
 // We often want to write this static data to network connections.
@@ -29,13 +29,13 @@ fn main() {
         let mut response_builder = connection.memory().reserve(TIMESTAMP_MAX_LEN + 4);
 
         // Reuse the byte sequence. Cloning a BytesView is a cheap zero-copy operation.
-        response_builder.append(header_prefix.clone());
+        response_builder.put_view(header_prefix.clone());
 
         let mut stringification_buffer = [0u8; TIMESTAMP_MAX_LEN];
         let timestamp_bytes = serialize_timestamp(&mut stringification_buffer);
 
-        response_builder.put(timestamp_bytes);
-        response_builder.put(b"\r\n\r\n".as_slice());
+        response_builder.put_slice(timestamp_bytes);
+        response_builder.put_slice(b"\r\n\r\n".as_slice());
 
         connection.write(response_builder.consume_all());
     }
@@ -78,7 +78,7 @@ impl Connection {
         print!("Sent message: ");
 
         while message.has_remaining() {
-            let chunk = message.chunk();
+            let chunk = message.first_slice();
             print!("{}", String::from_utf8_lossy(chunk));
             message.advance(chunk.len());
         }

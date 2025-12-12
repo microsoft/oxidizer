@@ -54,6 +54,7 @@ mockall = { version = "0.14.0", default-features = false }
 mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }
+num-traits = { version = "0.2.19", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
@@ -87,7 +88,10 @@ unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
 # Allow cfg attributes for coverage builds and docs.rs builds
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)', 'cfg(docsrs)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(coverage,coverage_nightly)',
+    'cfg(docsrs)',
+] }
 
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }

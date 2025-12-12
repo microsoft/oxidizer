@@ -4,14 +4,14 @@
 use std::mem::{self, MaybeUninit};
 use std::num::NonZero;
 
-use bytes::buf::UninitSlice;
-use bytes::{Buf, BufMut};
 use smallvec::SmallVec;
 
 use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
 
-/// Owns some memory capacity in which it allows you to place a sequence of bytes that
-/// you can thereafter extract as one or more [`BytesView`]s.
+/// Creates byte sequences in owned memory capacity.
+///
+/// The buffer owns some memory capacity in which it allows you to place a sequence of bytes that
+/// you can thereafter extract as one or more [`BytesView`]s over immutable data.
 ///
 /// The capacity of the `BytesBuf` must be reserved in advance via [`reserve()`][3] before
 /// you can fill it with data.
@@ -35,7 +35,6 @@ use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory
 /// consuming capacity (each appended [`BytesView`] brings its own backing memory capacity).
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
-/// [1]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
 /// [3]: Self::reserve
 /// [4]: Self::peek
 /// [5]: Self::consume
@@ -120,7 +119,7 @@ impl BytesBuf {
     {
         let span_builders: SmallVec<[SpanBuilder; MAX_INLINE_SPANS]> = span_builders.into_iter().collect();
 
-        let available = span_builders.iter().map(SpanBuilder::remaining_mut).sum();
+        let available = span_builders.iter().map(SpanBuilder::remaining_capacity).sum();
 
         Self {
             frozen_spans: SmallVec::new_const(),
@@ -139,7 +138,7 @@ impl BytesBuf {
     /// The requested reserve capacity may be extended further if the memory provider considers it
     /// more efficient to use a larger block of memory than strictly required for this operation.
     pub fn reserve(&mut self, additional_bytes: usize, memory_provider: &impl Memory) {
-        let bytes_needed = additional_bytes.saturating_sub(self.remaining_mut());
+        let bytes_needed = additional_bytes.saturating_sub(self.remaining_capacity());
 
         if bytes_needed == 0 {
             return;
@@ -169,8 +168,8 @@ impl BytesBuf {
     /// This automatically extends the builder's capacity with the memory capacity used of the
     /// appended sequence, for a net zero change in remaining available capacity.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn append(&mut self, sequence: BytesView) {
-        if !sequence.has_remaining() {
+    pub(crate) fn append(&mut self, sequence: BytesView) {
+        if sequence.is_empty() {
             return;
         }
 
@@ -262,18 +261,21 @@ impl BytesBuf {
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn capacity(&self) -> usize {
         self.len()
-            .checked_add(self.remaining_mut())
+            .checked_add(self.remaining_capacity())
             .expect("usize overflow should be impossible here because the sequence builder would exceed virtual memory size")
     }
 
     /// How many more bytes can be written into the sequence builder before its memory capacity
     /// is exhausted.
     #[cfg_attr(test, mutants::skip)] // Lying about length is an easy way to infinite loops.
-    pub fn remaining_mut(&self) -> usize {
+    pub fn remaining_capacity(&self) -> usize {
         // The remaining capacity is the sum of the remaining capacity of all span builders.
         debug_assert_eq!(
             self.available,
-            self.span_builders_reversed.iter().map(bytes::BufMut::remaining_mut).sum::<usize>()
+            self.span_builders_reversed
+                .iter()
+                .map(SpanBuilder::remaining_capacity)
+                .sum::<usize>()
         );
 
         self.available
@@ -321,7 +323,9 @@ impl BytesBuf {
             let take = partially_consumed_frozen_span.slice(0..manifest.consume_partial_span_bytes);
             result_spans_reversed.push(take);
 
-            partially_consumed_frozen_span.advance(manifest.consume_partial_span_bytes as usize);
+            // SAFETY: We must guarantee that we do not try to advance out of bounds. This is guaranteed
+            // by the manifest calculation, the job of which is to determine the right in-bounds value.
+            unsafe { partially_consumed_frozen_span.advance(manifest.consume_partial_span_bytes as usize) };
         }
 
         // We extend the result spans with the (storage-order) fully detached spans.
@@ -386,7 +390,7 @@ impl BytesBuf {
         let span = span_builder.consume(len);
         self.frozen_spans.push(span);
 
-        if span_builder.remaining_mut() == 0 {
+        if span_builder.remaining_capacity() == 0 {
             // No more capacity left in this builder, so drop it.
             self.span_builders_reversed.pop();
         }
@@ -422,44 +426,45 @@ impl BytesBuf {
     /// capacity of the sequence builder.
     ///
     /// After writing data to the start of this chunk, call `advance_mut()` to indicate
-    /// how many bytes have been filled with data. The next call to `chunk_mut()` will
+    /// how many bytes have been filled with data. The next call to `first_unfilled_slice()` will
     /// return the next consecutive slice of memory you can fill.
-    pub fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+    pub fn first_unfilled_slice(&mut self) -> &mut [MaybeUninit<u8>] {
         // We are required to always return something, even if we have no span builders!
-        self.span_builders_reversed
-            .last_mut()
-            .map_or_else(|| UninitSlice::uninit(&mut []), |x| x.chunk_mut())
+        if let Some(last) = self.span_builders_reversed.last_mut() {
+            last.unfilled_slice_mut()
+        } else {
+            &mut []
+        }
     }
 
     /// Advances the write head by `count` bytes, indicating that this many bytes from the start
-    /// of [`chunk_mut()`][1] have been filled with data.
+    /// of [`first_unfilled_slice()`] have been filled with data.
     ///
-    /// After this call, the indicated number of additional bytes may be consumed from the builder.
+    /// After this call, the indicated number of additional bytes may be consumed from the buffer.
     ///
     /// # Panics
     ///
-    /// Panics if `count` is greater than the length of [`chunk_mut()`][1].
+    /// Panics if `count` is greater than the length of [`first_unfilled_slice()`].
     ///
     /// # Safety
     ///
     /// The caller must guarantee that the indicated number of bytes have been initialized with
-    /// data, sequentially starting from the beginning of the chunk returned by [`chunk_mut()`][1].
-    ///
-    /// [1]: Self::chunk_mut
-    pub unsafe fn advance_mut(&mut self, count: usize) {
+    /// data, sequentially starting from the beginning of [`first_unfilled_slice()`].
+    pub unsafe fn advance(&mut self, count: usize) {
         if count == 0 {
             return;
         }
 
         // Advancing the writer by more than a single chunk's length is an error, at least under
         // the current implementation that does not support vectored BufMut access.
+        // TODO: This should just be a safety requirement, as we are anyway unsafe.
         assert!(
             count
                 <= self
                     .span_builders_reversed
                     .last()
                     .expect("attempted to BufMut::advance_mut() when out of memory capacity - API contract violation")
-                    .remaining_mut()
+                    .remaining_capacity()
         );
 
         let span_builder = self
@@ -468,9 +473,9 @@ impl BytesBuf {
             .expect("there must be at least one span builder if we wrote nonzero bytes");
 
         // SAFETY: We simply rely on the caller's safety promises here, "forwarding" them.
-        unsafe { span_builder.advance_mut(count) };
+        unsafe { span_builder.advance(count) };
 
-        if span_builder.remaining_mut() == 0 {
+        if span_builder.remaining_capacity() == 0 {
             // The span builder is full, so we need to freeze it and move it to the frozen spans.
             let len = NonZero::new(span_builder.len())
                 .expect("there is no capacity left in the span builder so there must be at least one byte to consume unless we somehow left an empty span builder in the queue");
@@ -478,7 +483,12 @@ impl BytesBuf {
             self.freeze_from_first(len);
 
             // Debug build paranoia: no full span remains after freeze, right?
-            debug_assert!(self.span_builders_reversed.last().map_or(usize::MAX, BufMut::remaining_mut) > 0);
+            debug_assert!(
+                self.span_builders_reversed
+                    .last()
+                    .map_or(usize::MAX, SpanBuilder::remaining_capacity)
+                    > 0
+            );
         }
 
         self.len = self
@@ -521,7 +531,7 @@ impl BytesBuf {
     /// Returns `None` if `max_len` is greater than the remaining capacity of the sequence builder.
     pub fn begin_vectored_write_checked(&mut self, max_len: Option<usize>) -> Option<BytesBufVectoredWrite<'_>> {
         if let Some(max_len) = max_len
-            && max_len > self.remaining_mut()
+            && max_len > self.remaining_capacity()
         {
             return None;
         }
@@ -565,33 +575,9 @@ impl BytesBuf {
     }
 }
 
-// SAFETY: The trait documentation does not define any safety requirements we need to fulfill.
-// It is unclear why the trait is marked unsafe in the first place.
-unsafe impl BufMut for BytesBuf {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    #[inline]
-    fn remaining_mut(&self) -> usize {
-        self.remaining_mut()
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    #[inline]
-    unsafe fn advance_mut(&mut self, cnt: usize) {
-        // SAFETY: Forwarding safety requirements to the caller.
-        unsafe {
-            self.advance_mut(cnt);
-        }
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    #[inline]
-    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        self.chunk_mut()
-    }
-}
-
 impl std::fmt::Debug for BytesBuf {
     #[cfg_attr(test, mutants::skip)] // We have no API contract here.
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let frozen_spans = self.frozen_spans.iter().map(|x| x.len().to_string()).collect::<Vec<_>>().join(", ");
 
@@ -601,9 +587,9 @@ impl std::fmt::Debug for BytesBuf {
             .rev()
             .map(|x| {
                 if x.is_empty() {
-                    x.remaining_mut().to_string()
+                    x.remaining_capacity().to_string()
                 } else {
-                    format!("{} + {}", x.len(), x.remaining_mut())
+                    format!("{} + {}", x.len(), x.remaining_capacity())
                 }
             })
             .collect::<Vec<_>>()
@@ -642,7 +628,7 @@ impl ConsumeManifest {
     }
 }
 
-/// A vectored write is an operation that concurrently writes data into multiple chunks
+/// A vectored write is an operation that concurrently writes data into multiple slices
 /// of memory owned by a `BytesBuf`.
 ///
 /// The operation takes exclusive ownership of the `BytesBuf`. During the vectored write,
@@ -650,7 +636,7 @@ impl ConsumeManifest {
 /// that at the end of the operation must be filled sequentially and in order, without gaps,
 /// in any desired amount (from 0 bytes written to all slices filled).
 ///
-/// The capacity used during the operation can optionally be limited to `max_len` bytes.
+/// The capacity exposed during the operation can optionally be limited to `max_len` bytes.
 ///
 /// The operation is completed by calling `.commit()` on the instance, after which the instance is
 /// consumed and the exclusive ownership of the `BytesBuf` released.
@@ -664,14 +650,14 @@ pub struct BytesBufVectoredWrite<'a> {
 }
 
 impl BytesBufVectoredWrite<'_> {
-    /// Iterates over the chunks of available capacity in the sequence builder,
+    /// Iterates over the slices of available capacity in the buffer,
     /// allowing them to be filled with data.
-    pub fn iter_chunks_mut(&mut self) -> BytesBufAvailableIterator<'_> {
+    pub fn iter_slices_mut(&mut self) -> BytesBufAvailableIterator<'_> {
         self.builder.iter_available_capacity(self.max_len)
     }
 
     /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
-    /// backing memory capacity for this sequence builder.
+    /// backing memory capacity for this buffer.
     ///
     /// This can be useful when unsafe code is used to reference the contents of a `BytesBuf`
     /// and it is possible to reach a condition where the `BytesBuf` itself no longer exists,
@@ -681,15 +667,15 @@ impl BytesBufVectoredWrite<'_> {
     }
 
     /// Completes the vectored write operation, committing `bytes_written` bytes of data that
-    /// sequentially and completely fills chunks from the start of the provided chunks.
+    /// sequentially and completely fills slices from the start of the provided slices.
     ///
     /// # Safety
     ///
     /// The caller must ensure that `bytes_written` bytes of data have actually been written
-    /// into the chunks of memory, sequentially from the start.
+    /// into the slices of memory, sequentially from the start.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub unsafe fn commit(self, bytes_written: usize) {
-        assert!(bytes_written <= self.builder.remaining_mut());
+        assert!(bytes_written <= self.builder.remaining_capacity());
 
         if let Some(max_len) = self.max_len {
             assert!(bytes_written <= max_len);
@@ -699,7 +685,7 @@ impl BytesBufVectoredWrite<'_> {
         // with the others being spare capacity. For the duration of a vectored write, this
         // invariant is suspended (because the vectored write has an exclusive reference which makes
         // the suspension of this invariant invisible to any other caller). We must now restore this
-        // invariant. We do this by advancing the write head chunk by chunk, triggering the normal
+        // invariant. We do this by advancing the write head slice by slice, triggering the normal
         // freezing logic as we go (to avoid implementing two versions of the same logic), until we
         // have run out of written bytes to commit.
 
@@ -712,12 +698,12 @@ impl BytesBufVectoredWrite<'_> {
                 .last_mut()
                 .expect("there must be at least one span builder because we still have filled capacity remaining to freeze");
 
-            let bytes_available = span_builder.remaining_mut();
+            let bytes_available = span_builder.remaining_capacity();
             let bytes_to_commit = bytes_available.min(bytes_remaining);
 
             // SAFETY: We forward the promise from our own safety requirements to guarantee that
             // the specified number of bytes really has been written.
-            unsafe { self.builder.advance_mut(bytes_to_commit) };
+            unsafe { self.builder.advance(bytes_to_commit) };
 
             bytes_remaining = bytes_remaining
                 .checked_sub(bytes_to_commit)
@@ -726,7 +712,7 @@ impl BytesBufVectoredWrite<'_> {
     }
 }
 
-/// Iterates over the available capacity of a sequence builder as part of a vectored write
+/// Iterates over the available capacity of a `BytesBuf` as part of a vectored write
 /// operation, returning a sequence of `MaybeUninit<u8>` slices.
 #[derive(Debug)]
 pub struct BytesBufAvailableIterator<'a> {
@@ -771,10 +757,7 @@ impl<'a> Iterator for BytesBufAvailableIterator<'a> {
             .get_mut(next_span_builder_index_storage_order)
             .expect("iterator cursor referenced a span builder that does not exist");
 
-        // SAFETY: Must treat it as uninitialized. Yeah, we are, obviously.
-        // Somewhat pointless to have the callee be marked unsafe considering
-        // it returns a `MaybeUninit` already but okay whatever, we'll play along.
-        let uninit_slice_mut = unsafe { span_builder.chunk_mut().as_uninit_slice_mut() };
+        let uninit_slice_mut = span_builder.unfilled_slice_mut();
 
         // SAFETY: There is nothing Rust can do to promise the reference we return is valid for 'a
         // but we can make such a promise ourselves. In essence, returning the references with 'a
@@ -818,6 +801,7 @@ impl From<BytesView> for BytesBuf {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, reason = "Fine in test code, we prefer panic on error")]
@@ -836,624 +820,623 @@ mod tests {
     const TWO_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>();
     const THREE_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>() + size_of::<u64>();
 
+    assert_impl_all!(BytesBuf: Send, Sync);
+
     #[test]
     fn smoke_test() {
         let memory = FixedBlockTestMemory::new(nz!(1234));
 
         let min_length = 1000;
 
-        let mut builder = memory.reserve(min_length);
+        let mut buf = memory.reserve(min_length);
 
-        assert!(builder.capacity() >= min_length);
-        assert!(builder.remaining_mut() >= min_length);
-        assert!(builder.is_empty());
-        assert_eq!(builder.capacity(), builder.remaining_mut());
-        assert_eq!(builder.len(), 0);
+        assert!(buf.capacity() >= min_length);
+        assert!(buf.remaining_capacity() >= min_length);
+        assert_eq!(buf.capacity(), buf.remaining_capacity());
+        assert_eq!(buf.len(), 0);
+        assert!(buf.is_empty());
 
-        builder.put_u64(1234);
-        builder.put_u64(5678);
-        builder.put_u64(1234);
-        builder.put_u64(5678);
+        buf.put_num_ne(1234_u64);
+        buf.put_num_ne(5678_u64);
+        buf.put_num_ne(1234_u64);
+        buf.put_num_ne(5678_u64);
 
-        assert_eq!(builder.len(), 32);
-        assert!(!builder.is_empty());
+        assert_eq!(buf.len(), 32);
+        assert!(!buf.is_empty());
 
         // SAFETY: Writing 0 bytes is always valid.
         unsafe {
-            builder.advance_mut(0);
+            buf.advance(0);
         }
 
-        let mut first16 = builder.consume(TWO_U64_SIZE);
-        let mut second16 = builder.consume(TWO_U64_SIZE);
+        let mut first_two = buf.consume(TWO_U64_SIZE);
+        let mut second_two = buf.consume(TWO_U64_SIZE);
 
-        assert_eq!(first16.len(), 16);
-        assert_eq!(second16.len(), 16);
-        assert_eq!(builder.len(), 0);
+        assert_eq!(first_two.len(), 16);
+        assert_eq!(second_two.len(), 16);
+        assert_eq!(buf.len(), 0);
 
-        assert_eq!(first16.get_u64(), 1234);
-        assert_eq!(first16.get_u64(), 5678);
+        assert_eq!(first_two.get_num_ne::<u64>(), 1234);
+        assert_eq!(first_two.get_num_ne::<u64>(), 5678);
 
-        assert_eq!(second16.get_u64(), 1234);
-        assert_eq!(second16.get_u64(), 5678);
+        assert_eq!(second_two.get_num_ne::<u64>(), 1234);
+        assert_eq!(second_two.get_num_ne::<u64>(), 5678);
 
-        builder.put_u64(1111);
+        buf.put_num_ne(1111_u64);
 
-        assert_eq!(builder.len(), 8);
+        assert_eq!(buf.len(), 8);
 
-        let mut last8 = builder.consume(U64_SIZE);
+        let mut last = buf.consume(U64_SIZE);
 
-        assert_eq!(last8.len(), 8);
-        assert_eq!(builder.len(), 0);
+        assert_eq!(last.len(), 8);
+        assert_eq!(buf.len(), 0);
 
-        assert_eq!(last8.get_u64(), 1111);
+        assert_eq!(last.get_num_ne::<u64>(), 1111);
 
-        assert!(builder.consume_checked(1).is_none());
-
-        assert!(builder.consume_all().is_empty());
+        assert!(buf.consume_checked(1).is_none());
+        assert!(buf.consume_all().is_empty());
     }
 
     #[test]
-    fn extend() {
-        let mut builder = BytesBuf::new();
+    fn extend_capacity() {
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(100));
 
         // Have 0, desired 10, requesting 10, will get 100.
-        builder.reserve(10, &memory);
+        buf.reserve(10, &memory);
 
-        assert_eq!(builder.capacity(), 100);
-        assert_eq!(builder.remaining_mut(), 100);
+        assert_eq!(buf.capacity(), 100);
+        assert_eq!(buf.remaining_capacity(), 100);
 
         // Write 10 bytes of data just to verify that it does not affect "capacity" logic.
-        builder.put_u64(1234);
-        builder.put_u16(5678);
+        buf.put_num_ne(1234_u64);
+        buf.put_num_ne(5678_u16);
 
-        assert_eq!(builder.len(), 10);
-        assert_eq!(builder.remaining_mut(), 90);
-        assert_eq!(builder.capacity(), 100);
+        assert_eq!(buf.len(), 10);
+        assert_eq!(buf.remaining_capacity(), 90);
+        assert_eq!(buf.capacity(), 100);
 
         // Have 100, desired 10+140=150, requesting 50, will get another 100 for a total of 200.
-        builder.reserve(140, &memory);
+        buf.reserve(140, &memory);
 
-        assert_eq!(builder.len(), 10);
-        assert_eq!(builder.remaining_mut(), 190);
-        assert_eq!(builder.capacity(), 200);
+        assert_eq!(buf.len(), 10);
+        assert_eq!(buf.remaining_capacity(), 190);
+        assert_eq!(buf.capacity(), 200);
 
         // Have 200, desired 10+200=210, 210-200=10, will get another 100.
-        builder.reserve(200, &memory);
+        buf.reserve(200, &memory);
 
-        assert_eq!(builder.len(), 10);
-        assert_eq!(builder.remaining_mut(), 290);
-        assert_eq!(builder.capacity(), 300);
+        assert_eq!(buf.len(), 10);
+        assert_eq!(buf.remaining_capacity(), 290);
+        assert_eq!(buf.capacity(), 300);
     }
 
     #[test]
-    fn append() {
+    fn append_existing_view() {
         let memory = FixedBlockTestMemory::new(nz!(1234));
 
         let min_length = 1000;
 
-        let mut builder1 = memory.reserve(min_length);
-        let mut builder2 = memory.reserve(min_length);
+        // This one we use to prepare some data to append.
+        let mut payload_buffer = memory.reserve(min_length);
+
+        // This is where we append the data to.
+        let mut target_buffer = memory.reserve(min_length);
 
         // First we make a couple pieces to append.
-        builder1.put_u64(1111);
-        builder1.put_u64(2222);
-        builder1.put_u64(3333);
-        builder1.put_u64(4444);
+        payload_buffer.put_num_ne(1111_u64);
+        payload_buffer.put_num_ne(2222_u64);
+        payload_buffer.put_num_ne(3333_u64);
+        payload_buffer.put_num_ne(4444_u64);
 
-        let to_append1 = builder1.consume(TWO_U64_SIZE);
-        let to_append2 = builder1.consume(TWO_U64_SIZE);
+        let payload1 = payload_buffer.consume(TWO_U64_SIZE);
+        let payload2 = payload_buffer.consume(TWO_U64_SIZE);
 
         // Then we prefill some data to start us off.
-        builder2.put_u64(5555);
-        builder2.put_u64(6666);
+        target_buffer.put_num_ne(5555_u64);
+        target_buffer.put_num_ne(6666_u64);
 
         // Consume a little just for extra complexity.
-        let _ = builder2.consume(U64_SIZE);
+        let _ = target_buffer.consume(U64_SIZE);
 
-        // Append the pieces.
-        builder2.append(to_append1);
-        builder2.append(to_append2);
+        // Append the payloads.
+        target_buffer.put_view(payload1);
+        target_buffer.put_view(payload2);
 
-        // Appending an empty sequence does nothing.
-        builder2.append(BytesView::default());
+        // Appending an empty byte sequence does nothing.
+        target_buffer.put_view(BytesView::default());
 
         // Add some custom data at the end.
-        builder2.put_u64(7777);
+        target_buffer.put_num_ne(7777_u64);
 
-        assert_eq!(builder2.len(), 48);
+        assert_eq!(target_buffer.len(), 48);
 
-        let mut result = builder2.consume(48);
+        let mut result = target_buffer.consume(48);
 
-        assert_eq!(result.get_u64(), 6666);
-        assert_eq!(result.get_u64(), 1111);
-        assert_eq!(result.get_u64(), 2222);
-        assert_eq!(result.get_u64(), 3333);
-        assert_eq!(result.get_u64(), 4444);
-        assert_eq!(result.get_u64(), 7777);
+        assert_eq!(result.get_num_ne::<u64>(), 6666);
+        assert_eq!(result.get_num_ne::<u64>(), 1111);
+        assert_eq!(result.get_num_ne::<u64>(), 2222);
+        assert_eq!(result.get_num_ne::<u64>(), 3333);
+        assert_eq!(result.get_num_ne::<u64>(), 4444);
+        assert_eq!(result.get_num_ne::<u64>(), 7777);
     }
 
     #[test]
     fn consume_all_mixed() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Reserve some capacity and add initial data.
-        builder.reserve(16, &memory);
-        builder.put_u64(1111);
-        builder.put_u64(2222);
+        buf.reserve(16, &memory);
+        buf.put_num_ne(1111_u64);
+        buf.put_num_ne(2222_u64);
 
         // Consume some data (the 1111).
-        let _ = builder.consume(8);
+        let _ = buf.consume(8);
 
         // Append a sequence (the 3333).
-        let mut append_builder = BytesBuf::new();
-        append_builder.reserve(8, &memory);
-        append_builder.put_u64(3333);
-        let sequence = append_builder.consume_all();
-        builder.append(sequence);
+        let mut append_buf = BytesBuf::new();
+        append_buf.reserve(8, &memory);
+        append_buf.put_num_ne(3333_u64);
+        let reused_bytes_to_append = append_buf.consume_all();
+        buf.append(reused_bytes_to_append);
 
         // Add more data (the 4444).
-        builder.reserve(8, &memory);
-        builder.put_u64(4444);
+        buf.reserve(8, &memory);
+        buf.put_num_ne(4444_u64);
 
         // Consume all data and validate we got all the pieces.
-        let mut result = builder.consume_all();
+        let mut result = buf.consume_all();
 
         assert_eq!(result.len(), 24);
-        assert_eq!(result.get_u64(), 2222);
-        assert_eq!(result.get_u64(), 3333);
-        assert_eq!(result.get_u64(), 4444);
+        assert_eq!(result.get_num_ne::<u64>(), 2222);
+        assert_eq!(result.get_num_ne::<u64>(), 3333);
+        assert_eq!(result.get_num_ne::<u64>(), 4444);
     }
 
     #[test]
     #[expect(clippy::cognitive_complexity, reason = "test code")]
-    fn inspect_basic() {
-        let mut builder = BytesBuf::new();
+    fn peek_basic() {
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(10));
 
-        // Peeking an empty builder is fine, it is just an empty BytesView in that case.
-        let peeked = builder.peek();
-        assert_eq!(peeked.remaining(), 0);
+        // Peeking an empty buffer is fine, it is just an empty BytesView in that case.
+        let peeked = buf.peek();
+        assert_eq!(peeked.len(), 0);
 
-        builder.reserve(100, &memory);
+        buf.reserve(100, &memory);
 
-        assert_eq!(builder.capacity(), 100);
+        assert_eq!(buf.capacity(), 100);
 
-        builder.put_u64(1111);
+        buf.put_num_ne(1111_u64);
 
         // We have 0 frozen spans and 10 span builders,
         // the first of which has 8 bytes of filled content.
-        let mut peeked = builder.peek();
-        assert_eq!(peeked.chunk().len(), 8);
-        assert_eq!(peeked.get_u64(), 1111);
-        assert_eq!(peeked.remaining(), 0);
+        let mut peeked = buf.peek();
+        assert_eq!(peeked.first_slice().len(), 8);
+        assert_eq!(peeked.get_num_ne::<u64>(), 1111);
+        assert_eq!(peeked.len(), 0);
 
-        builder.put_u64(2222);
-        builder.put_u64(3333);
-        builder.put_u64(4444);
-        builder.put_u64(5555);
-        builder.put_u64(6666);
-        builder.put_u64(7777);
-        builder.put_u64(8888);
+        buf.put_num_ne(2222_u64);
+        buf.put_num_ne(3333_u64);
+        buf.put_num_ne(4444_u64);
+        buf.put_num_ne(5555_u64);
+        buf.put_num_ne(6666_u64);
+        buf.put_num_ne(7777_u64);
+        buf.put_num_ne(8888_u64);
         // These will cross a span boundary so we can also observe
         // crossing that boundary during peeking.
-        builder.put_bytes(9, 8);
+        buf.put_bytes(9, 8);
 
-        assert_eq!(builder.len(), 72);
-        assert_eq!(builder.capacity(), 100);
-        assert_eq!(builder.remaining_mut(), 28);
+        assert_eq!(buf.len(), 72);
+        assert_eq!(buf.capacity(), 100);
+        assert_eq!(buf.remaining_capacity(), 28);
 
         // We should have 7 frozen spans and 3 span builders,
         // the first of which has 2 bytes of filled content.
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
 
-        assert_eq!(peeked.remaining(), 72);
+        assert_eq!(peeked.len(), 72);
 
         // This should be the first frozen span of 10 bytes.
-        assert_eq!(peeked.chunk().len(), 10);
+        assert_eq!(peeked.first_slice().len(), 10);
 
-        assert_eq!(peeked.get_u64(), 1111);
-        assert_eq!(peeked.get_u64(), 2222);
+        assert_eq!(peeked.get_num_ne::<u64>(), 1111);
+        assert_eq!(peeked.get_num_ne::<u64>(), 2222);
 
-        // The length of the sequence builder does not change just because we peek at its data.
-        assert_eq!(builder.len(), 72);
+        // The length of the buffer does not change just because we peek at its data.
+        assert_eq!(buf.len(), 72);
 
         // We consumed 16 bytes from the peeked view, so should be looking at the remaining 4 bytes in the 2nd span.
-        assert_eq!(peeked.chunk().len(), 4);
+        assert_eq!(peeked.first_slice().len(), 4);
 
-        assert_eq!(peeked.get_u64(), 3333);
-        assert_eq!(peeked.get_u64(), 4444);
-        assert_eq!(peeked.get_u64(), 5555);
-        assert_eq!(peeked.get_u64(), 6666);
-        assert_eq!(peeked.get_u64(), 7777);
-        assert_eq!(peeked.get_u64(), 8888);
+        assert_eq!(peeked.get_num_ne::<u64>(), 3333);
+        assert_eq!(peeked.get_num_ne::<u64>(), 4444);
+        assert_eq!(peeked.get_num_ne::<u64>(), 5555);
+        assert_eq!(peeked.get_num_ne::<u64>(), 6666);
+        assert_eq!(peeked.get_num_ne::<u64>(), 7777);
+        assert_eq!(peeked.get_num_ne::<u64>(), 8888);
 
         for _ in 0..8 {
-            assert_eq!(peeked.get_u8(), 9);
+            assert_eq!(peeked.get_byte(), 9);
         }
 
-        assert_eq!(peeked.remaining(), 0);
-
-        // Reading 0 bytes is always valid.
-        peeked.advance(0);
-
-        assert_eq!(peeked.chunk().len(), 0);
+        assert_eq!(peeked.len(), 0);
+        assert_eq!(peeked.first_slice().len(), 0);
 
         // Fill up the remaining 28 bytes of data so we have a full sequence builder.
-        builder.put_bytes(88, 28);
+        buf.put_bytes(88, 28);
 
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
         peeked.advance(72);
 
-        assert_eq!(peeked.remaining(), 28);
+        assert_eq!(peeked.len(), 28);
 
         for _ in 0..28 {
-            assert_eq!(peeked.get_u8(), 88);
+            assert_eq!(peeked.get_byte(), 88);
         }
     }
 
     #[test]
     fn consume_part_of_frozen_span() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(10));
 
-        builder.reserve(100, &memory);
+        buf.reserve(100, &memory);
 
-        assert_eq!(builder.capacity(), 100);
+        assert_eq!(buf.capacity(), 100);
 
-        builder.put_u64(1111);
+        buf.put_num_ne(1111_u64);
         // This freezes the first span of 10, as we filled it all up.
-        builder.put_u64(2222);
+        buf.put_num_ne(2222_u64);
 
-        let mut first8 = builder.consume(U64_SIZE);
-        assert_eq!(first8.get_u64(), 1111);
+        let mut first8 = buf.consume(U64_SIZE);
+        assert_eq!(first8.get_num_ne::<u64>(), 1111);
         assert!(first8.is_empty());
 
-        builder.put_u64(3333);
+        buf.put_num_ne(3333_u64);
 
-        let mut second16 = builder.consume(16);
-        assert_eq!(second16.get_u64(), 2222);
-        assert_eq!(second16.get_u64(), 3333);
+        let mut second16 = buf.consume(16);
+        assert_eq!(second16.get_num_ne::<u64>(), 2222);
+        assert_eq!(second16.get_num_ne::<u64>(), 3333);
         assert!(second16.is_empty());
     }
 
     #[test]
-    fn empty_builder() {
-        let mut builder = BytesBuf::new();
-        assert!(builder.is_empty());
-        assert!(!builder.peek().has_remaining());
-        assert_eq!(0, builder.chunk_mut().len());
+    fn empty_buffer() {
+        let mut buf = BytesBuf::new();
+        assert!(buf.is_empty());
+        assert!(buf.peek().is_empty());
+        assert_eq!(0, buf.first_unfilled_slice().len());
 
-        let consumed = builder.consume(0);
+        let consumed = buf.consume(0);
         assert!(consumed.is_empty());
 
-        let consumed = builder.consume_all();
+        let consumed = buf.consume_all();
         assert!(consumed.is_empty());
-    }
-
-    #[test]
-    fn thread_safe_type() {
-        assert_impl_all!(BytesBuf: Send, Sync);
     }
 
     #[test]
     fn iter_available_empty_with_capacity() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(100));
 
         // Capacity: 0 -> 1000 (10x100)
-        builder.reserve(1000, &memory);
+        buf.reserve(1000, &memory);
 
-        assert_eq!(builder.capacity(), 1000);
-        assert_eq!(builder.remaining_mut(), 1000);
+        assert_eq!(buf.capacity(), 1000);
+        assert_eq!(buf.remaining_capacity(), 1000);
 
-        let iter = builder.iter_available_capacity(None);
+        let iter = buf.iter_available_capacity(None);
 
-        // Demonstrating that we can access chunks concurrently, not only one by one.
-        let chunks = iter.collect::<Vec<_>>();
+        // Demonstrating that we can access slices concurrently, not only one by one.
+        let slices = iter.collect::<Vec<_>>();
 
-        assert_eq!(chunks.len(), 10);
+        assert_eq!(slices.len(), 10);
 
-        for chunk in chunks {
-            assert_eq!(chunk.len(), 100);
+        for slice in slices {
+            assert_eq!(slice.len(), 100);
         }
 
-        // After we have dropped all chunk references, it is again legal to access the builder.
-        // This is blocked by the borrow checker while chunk references still exist.
-        builder.reserve(100, &memory);
+        // After we have dropped all slice references, it is again legal to access the buffer.
+        // This is blocked by the borrow checker while slice references still exist.
+        buf.reserve(100, &memory);
     }
 
     #[test]
     fn iter_available_nonempty() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
-        builder.reserve(TWO_U64_SIZE, &memory);
+        buf.reserve(TWO_U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 16);
-        assert_eq!(builder.remaining_mut(), 16);
+        assert_eq!(buf.capacity(), 16);
+        assert_eq!(buf.remaining_capacity(), 16);
 
         // We write an u64 - this fills half the capacity and should result in
         // the first span builder being frozen and the second remaining in its entirety.
-        builder.put_u64(1234);
+        buf.put_num_ne(1234_u64);
 
-        assert_eq!(builder.len(), 8);
-        assert_eq!(builder.remaining_mut(), 8);
+        assert_eq!(buf.len(), 8);
+        assert_eq!(buf.remaining_capacity(), 8);
 
-        let available_chunks = builder.iter_available_capacity(None).collect::<Vec<_>>();
-        assert_eq!(available_chunks.len(), 1);
-        assert_eq!(available_chunks[0].len(), 8);
+        let available_slices = buf.iter_available_capacity(None).collect::<Vec<_>>();
+        assert_eq!(available_slices.len(), 1);
+        assert_eq!(available_slices[0].len(), 8);
 
         // We write a u32 - this fills half the remaining capacity, which results
-        // in a half-filled span builder remaining in the sequence builder.
-        builder.put_u32(5678);
+        // in a half-filled span builder remaining in the buffer.
+        buf.put_num_ne(5678_u32);
 
-        assert_eq!(builder.len(), 12);
-        assert_eq!(builder.remaining_mut(), 4);
+        assert_eq!(buf.len(), 12);
+        assert_eq!(buf.remaining_capacity(), 4);
 
-        let available_chunks = builder.iter_available_capacity(None).collect::<Vec<_>>();
-        assert_eq!(available_chunks.len(), 1);
-        assert_eq!(available_chunks[0].len(), 4);
+        let available_slices = buf.iter_available_capacity(None).collect::<Vec<_>>();
+        assert_eq!(available_slices.len(), 1);
+        assert_eq!(available_slices[0].len(), 4);
 
         // We write a final u32 to use up all the capacity.
-        builder.put_u32(9012);
+        buf.put_num_ne(9012_u32);
 
-        assert_eq!(builder.len(), 16);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.len(), 16);
+        assert_eq!(buf.remaining_capacity(), 0);
 
-        assert_eq!(builder.iter_available_capacity(None).count(), 0);
+        assert_eq!(buf.iter_available_capacity(None).count(), 0);
     }
 
     #[test]
     fn iter_available_empty_no_capacity() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
-        assert_eq!(builder.iter_available_capacity(None).count(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(buf.iter_available_capacity(None).count(), 0);
     }
 
     #[test]
     fn vectored_write_zero() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
-        builder.reserve(TWO_U64_SIZE, &memory);
+        buf.reserve(TWO_U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 16);
-        assert_eq!(builder.remaining_mut(), 16);
+        assert_eq!(buf.capacity(), 16);
+        assert_eq!(buf.remaining_capacity(), 16);
 
-        let vectored_write = builder.begin_vectored_write(None);
+        let vectored_write = buf.begin_vectored_write(None);
 
         // SAFETY: Yes, we really wrote 0 bytes.
         unsafe {
             vectored_write.commit(0);
         }
 
-        assert_eq!(builder.capacity(), 16);
-        assert_eq!(builder.remaining_mut(), 16);
+        assert_eq!(buf.capacity(), 16);
+        assert_eq!(buf.remaining_capacity(), 16);
     }
 
     #[test]
-    fn vectored_write_one_chunk() {
-        let mut builder = BytesBuf::new();
+    fn vectored_write_one_slice() {
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 8 (1x8)
-        builder.reserve(U64_SIZE, &memory);
+        buf.reserve(U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 8);
-        assert_eq!(builder.remaining_mut(), 8);
+        assert_eq!(buf.capacity(), 8);
+        assert_eq!(buf.remaining_capacity(), 8);
 
-        let mut vectored_write = builder.begin_vectored_write(None);
+        let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut chunks = vectored_write.iter_chunks_mut().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].len(), 8);
+        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].len(), 8);
 
-        chunks[0].put_u64(0x3333_3333_3333_3333);
+        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 8 bytes.
         unsafe {
             vectored_write.commit(8);
         }
 
-        assert_eq!(builder.len(), 8);
-        assert_eq!(builder.remaining_mut(), 0);
-        assert_eq!(builder.capacity(), 8);
+        assert_eq!(buf.len(), 8);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(buf.capacity(), 8);
 
-        let mut result = builder.consume(U64_SIZE);
-        assert_eq!(result.get_u64(), 0x3333_3333_3333_3333);
+        let mut result = buf.consume(U64_SIZE);
+        assert_eq!(result.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
     }
 
     #[test]
-    fn vectored_write_multiple_chunks() {
-        let mut builder = BytesBuf::new();
+    fn vectored_write_multiple_slices() {
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
-        builder.reserve(THREE_U64_SIZE, &memory);
+        buf.reserve(THREE_U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 24);
-        assert_eq!(builder.remaining_mut(), 24);
+        assert_eq!(buf.capacity(), 24);
+        assert_eq!(buf.remaining_capacity(), 24);
 
-        let mut vectored_write = builder.begin_vectored_write(None);
+        let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut chunks = vectored_write.iter_chunks_mut().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].len(), 8);
-        assert_eq!(chunks[1].len(), 8);
-        assert_eq!(chunks[2].len(), 8);
+        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        assert_eq!(slices.len(), 3);
+        assert_eq!(slices[0].len(), 8);
+        assert_eq!(slices[1].len(), 8);
+        assert_eq!(slices[2].len(), 8);
 
         // We fill 12 bytes, leaving middle chunk split in half between filled/available.
-        chunks[0].put_u64(0x3333_3333_3333_3333);
-        chunks[1].put_u32(0x4444_4444);
+
+        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
+        write_copy_of_slice(&mut slices[1], &0x4444_4444_u32.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
             vectored_write.commit(12);
         }
 
-        assert_eq!(builder.len(), 12);
-        assert_eq!(builder.remaining_mut(), 12);
-        assert_eq!(builder.capacity(), 24);
+        assert_eq!(buf.len(), 12);
+        assert_eq!(buf.remaining_capacity(), 12);
+        assert_eq!(buf.capacity(), 24);
 
-        let mut vectored_write = builder.begin_vectored_write(None);
+        let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut chunks = vectored_write.iter_chunks_mut().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].len(), 4);
-        assert_eq!(chunks[1].len(), 8);
+        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        assert_eq!(slices.len(), 2);
+        assert_eq!(slices[0].len(), 4);
+        assert_eq!(slices[1].len(), 8);
 
-        chunks[0].put_u32(0x5555_5555);
-        chunks[1].put_u64(0x6666_6666_6666_6666);
+        // We fill the remaining 12 bytes.
+
+        write_copy_of_slice(&mut slices[0], &0x5555_5555_u32.to_ne_bytes());
+        write_copy_of_slice(&mut slices[1], &0x6666_6666_6666_6666_u64.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
             vectored_write.commit(12);
         }
 
-        assert_eq!(builder.len(), 24);
-        assert_eq!(builder.remaining_mut(), 0);
-        assert_eq!(builder.capacity(), 24);
+        assert_eq!(buf.len(), 24);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(buf.capacity(), 24);
 
-        let mut result = builder.consume(THREE_U64_SIZE);
-        assert_eq!(result.get_u64(), 0x3333_3333_3333_3333);
-        assert_eq!(result.get_u32(), 0x4444_4444);
-        assert_eq!(result.get_u32(), 0x5555_5555);
-        assert_eq!(result.get_u64(), 0x6666_6666_6666_6666);
+        let mut result = buf.consume(THREE_U64_SIZE);
+        assert_eq!(result.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
+        assert_eq!(result.get_num_ne::<u32>(), 0x4444_4444);
+        assert_eq!(result.get_num_ne::<u32>(), 0x5555_5555);
+        assert_eq!(result.get_num_ne::<u64>(), 0x6666_6666_6666_6666);
     }
 
     #[test]
     fn vectored_write_max_len() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
-        builder.reserve(THREE_U64_SIZE, &memory);
+        buf.reserve(THREE_U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 24);
-        assert_eq!(builder.remaining_mut(), 24);
+        assert_eq!(buf.capacity(), 24);
+        assert_eq!(buf.remaining_capacity(), 24);
 
         // We limit to 13 bytes of visible capacity, of which we will fill 12.
-        let mut vectored_write = builder.begin_vectored_write(Some(13));
+        let mut vectored_write = buf.begin_vectored_write(Some(13));
 
-        let mut chunks = vectored_write.iter_chunks_mut().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].len(), 8);
-        assert_eq!(chunks[1].len(), 5);
+        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        assert_eq!(slices.len(), 2);
+        assert_eq!(slices[0].len(), 8);
+        assert_eq!(slices[1].len(), 5);
 
         // We fill 12 bytes, leaving middle chunk split in half between filled/available.
-        chunks[0].put_u64(0x3333_3333_3333_3333);
-        chunks[1].put_u32(0x4444_4444);
+
+        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
+        write_copy_of_slice(&mut slices[1], &0x4444_4444_u32.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
             vectored_write.commit(12);
         }
 
-        assert_eq!(builder.len(), 12);
-        assert_eq!(builder.remaining_mut(), 12);
-        assert_eq!(builder.capacity(), 24);
+        assert_eq!(buf.len(), 12);
+        assert_eq!(buf.remaining_capacity(), 12);
+        assert_eq!(buf.capacity(), 24);
 
         // There are 12 remaining and we set max_limit to exactly cover those 12
-        let mut vectored_write = builder.begin_vectored_write(Some(12));
+        let mut vectored_write = buf.begin_vectored_write(Some(12));
 
-        let mut chunks = vectored_write.iter_chunks_mut().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].len(), 4);
-        assert_eq!(chunks[1].len(), 8);
+        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        assert_eq!(slices.len(), 2);
+        assert_eq!(slices[0].len(), 4);
+        assert_eq!(slices[1].len(), 8);
 
-        chunks[0].put_u32(0x5555_5555);
-        chunks[1].put_u64(0x6666_6666_6666_6666);
+        write_copy_of_slice(&mut slices[0], &0x5555_5555_u32.to_ne_bytes());
+        write_copy_of_slice(&mut slices[1], &0x6666_6666_6666_6666_u64.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
             vectored_write.commit(12);
         }
 
-        assert_eq!(builder.len(), 24);
-        assert_eq!(builder.remaining_mut(), 0);
-        assert_eq!(builder.capacity(), 24);
+        assert_eq!(buf.len(), 24);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(buf.capacity(), 24);
 
-        let mut result = builder.consume(THREE_U64_SIZE);
-        assert_eq!(result.get_u64(), 0x3333_3333_3333_3333);
-        assert_eq!(result.get_u32(), 0x4444_4444);
-        assert_eq!(result.get_u32(), 0x5555_5555);
-        assert_eq!(result.get_u64(), 0x6666_6666_6666_6666);
+        let mut result = buf.consume(THREE_U64_SIZE);
+        assert_eq!(result.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
+        assert_eq!(result.get_num_ne::<u32>(), 0x4444_4444);
+        assert_eq!(result.get_num_ne::<u32>(), 0x5555_5555);
+        assert_eq!(result.get_num_ne::<u64>(), 0x6666_6666_6666_6666);
     }
 
     #[test]
     fn vectored_write_max_len_overflow() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
-        builder.reserve(THREE_U64_SIZE, &memory);
+        buf.reserve(THREE_U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 24);
-        assert_eq!(builder.remaining_mut(), 24);
+        assert_eq!(buf.capacity(), 24);
+        assert_eq!(buf.remaining_capacity(), 24);
 
         // We ask for 25 bytes of capacity but there are only 24 available. Oops!
-        assert_panic!(builder.begin_vectored_write(Some(25)));
+        assert_panic!(buf.begin_vectored_write(Some(25)));
     }
 
     #[test]
     fn vectored_write_overcommit() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
-        builder.reserve(TWO_U64_SIZE, &memory);
+        buf.reserve(TWO_U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 16);
-        assert_eq!(builder.remaining_mut(), 16);
+        assert_eq!(buf.capacity(), 16);
+        assert_eq!(buf.remaining_capacity(), 16);
 
-        let vectored_write = builder.begin_vectored_write(None);
+        let vectored_write = buf.begin_vectored_write(None);
 
         assert_panic!(
             // SAFETY: Intentionally lying here to trigger a panic.
@@ -1465,34 +1448,34 @@ mod tests {
 
     #[test]
     fn vectored_write_abort() {
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        assert_eq!(builder.capacity(), 0);
-        assert_eq!(builder.remaining_mut(), 0);
+        assert_eq!(buf.capacity(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
 
         let memory = FixedBlockTestMemory::new(nz!(8));
 
         // Capacity: 0 -> 8 (1x8)
-        builder.reserve(U64_SIZE, &memory);
+        buf.reserve(U64_SIZE, &memory);
 
-        assert_eq!(builder.capacity(), 8);
-        assert_eq!(builder.remaining_mut(), 8);
+        assert_eq!(buf.capacity(), 8);
+        assert_eq!(buf.remaining_capacity(), 8);
 
-        let mut vectored_write = builder.begin_vectored_write(None);
+        let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut chunks = vectored_write.iter_chunks_mut().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].len(), 8);
+        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].len(), 8);
 
-        chunks[0].put_u64(0x3333_3333_3333_3333);
+        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
 
         // Actually never mind - we drop it here.
         #[expect(clippy::drop_non_drop, reason = "Just being explicit for illustration")]
         drop(vectored_write);
 
-        assert_eq!(builder.len(), 0);
-        assert_eq!(builder.remaining_mut(), 8);
-        assert_eq!(builder.capacity(), 8);
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.remaining_capacity(), 8);
+        assert_eq!(buf.capacity(), 8);
     }
 
     #[test]
@@ -1515,15 +1498,15 @@ mod tests {
             // SAFETY: We guarantee exclusive access to the memory capacity.
             let block2 = unsafe { block2.as_ref().to_block() };
 
-            let mut builder = BytesBuf::from_blocks([block1, block2]);
+            let mut buf = BytesBuf::from_blocks([block1, block2]);
 
             // Freezes first span of 8, retains one span builder.
-            builder.put_u64(1234);
+            buf.put_num_ne(1234_u64);
 
-            assert_eq!(builder.frozen_spans.len(), 1);
-            assert_eq!(builder.span_builders_reversed.len(), 1);
+            assert_eq!(buf.frozen_spans.len(), 1);
+            assert_eq!(buf.span_builders_reversed.len(), 1);
 
-            builder.extend_lifetime()
+            buf.extend_lifetime()
         };
 
         // The sequence builder was destroyed and all BlockRefs it was holding are gone.
@@ -1559,15 +1542,15 @@ mod tests {
             // SAFETY: We guarantee exclusive access to the memory capacity.
             let block2 = unsafe { block2.as_ref().to_block() };
 
-            let mut builder = BytesBuf::from_blocks([block1, block2]);
+            let mut buf = BytesBuf::from_blocks([block1, block2]);
 
             // Freezes first span of 8, retains one span builder.
-            builder.put_u64(1234);
+            buf.put_num_ne(1234_u64);
 
-            assert_eq!(builder.frozen_spans.len(), 1);
-            assert_eq!(builder.span_builders_reversed.len(), 1);
+            assert_eq!(buf.frozen_spans.len(), 1);
+            assert_eq!(buf.span_builders_reversed.len(), 1);
 
-            let vectored_write = builder.begin_vectored_write(None);
+            let vectored_write = buf.begin_vectored_write(None);
 
             vectored_write.extend_lifetime()
         };
@@ -1586,65 +1569,65 @@ mod tests {
     }
 
     #[test]
-    fn from_sequence() {
+    fn from_view() {
         let memory = GlobalPool::new();
 
-        let s1 = BytesView::copied_from_slice(b"bla bla bla", &memory);
+        let view1 = BytesView::copied_from_slice(b"bla bla bla", &memory);
 
-        let mut sb: BytesBuf = s1.clone().into();
+        let mut buf: BytesBuf = view1.clone().into();
 
-        let s2 = sb.consume_all();
+        let view2 = buf.consume_all();
 
-        assert_eq!(s1, s2);
+        assert_eq!(view1, view2);
     }
 
     #[test]
     fn consume_manifest_correctly_calculated() {
         let memory = FixedBlockTestMemory::new(nz!(10));
 
-        let mut builder = BytesBuf::new();
-        builder.reserve(100, &memory);
+        let mut buf = BytesBuf::new();
+        buf.reserve(100, &memory);
 
         // 32 bytes in 3 spans.
-        builder.put_u64(1111);
-        builder.put_u64(1111);
-        builder.put_u64(1111);
-        builder.put_u64(1111);
+        buf.put_num_ne(1111_u64);
+        buf.put_num_ne(1111_u64);
+        buf.put_num_ne(1111_u64);
+        buf.put_num_ne(1111_u64);
 
         // Freeze it all - a precondition to consuming is to freeze everything first.
-        builder.ensure_frozen(32);
+        buf.ensure_frozen(32);
 
-        let consume8 = builder.prepare_consume(8);
+        let consume8 = buf.prepare_consume(8);
 
         assert_eq!(consume8.detach_complete_frozen_spans, 0);
         assert_eq!(consume8.consume_partial_span_bytes, 8);
         assert_eq!(consume8.required_spans_capacity(), 1);
 
-        let consume10 = builder.prepare_consume(10);
+        let consume10 = buf.prepare_consume(10);
 
         assert_eq!(consume10.detach_complete_frozen_spans, 1);
         assert_eq!(consume10.consume_partial_span_bytes, 0);
         assert_eq!(consume10.required_spans_capacity(), 1);
 
-        let consume11 = builder.prepare_consume(11);
+        let consume11 = buf.prepare_consume(11);
 
         assert_eq!(consume11.detach_complete_frozen_spans, 1);
         assert_eq!(consume11.consume_partial_span_bytes, 1);
         assert_eq!(consume11.required_spans_capacity(), 2);
 
-        let consume30 = builder.prepare_consume(30);
+        let consume30 = buf.prepare_consume(30);
 
         assert_eq!(consume30.detach_complete_frozen_spans, 3);
         assert_eq!(consume30.consume_partial_span_bytes, 0);
         assert_eq!(consume30.required_spans_capacity(), 3);
 
-        let consume31 = builder.prepare_consume(31);
+        let consume31 = buf.prepare_consume(31);
 
         assert_eq!(consume31.detach_complete_frozen_spans, 3);
         assert_eq!(consume31.consume_partial_span_bytes, 1);
         assert_eq!(consume31.required_spans_capacity(), 4);
 
-        let consume32 = builder.prepare_consume(32);
+        let consume32 = buf.prepare_consume(32);
 
         // Note that even though our memory comes in blocks of 10, there are only 2 bytes
         // in the last frozen span, for a total frozen of 10 + 10 + 10 + 2. We consume it all.
@@ -1663,44 +1646,9 @@ mod tests {
     }
 
     #[test]
-    fn debug_fmt_mixed_state() {
-        let memory = FixedBlockTestMemory::new(nz!(8));
-
-        let mut builder = BytesBuf::new();
-
-        // Reserve 2 blocks (16 bytes).
-        // State: available=16, span_builders="8, 8"
-        builder.reserve(16, &memory);
-
-        // Write 12 bytes.
-        // State: len=12, available=4, span_builders="8 + 0, 4 + 4"
-        builder.put_u64(0xAAAA_AAAA_AAAA_AAAA);
-        builder.put_u32(0xBBBB_BBBB);
-
-        // Freeze the 12 bytes. This will create two frozen spans (8 and 4 bytes).
-        // State: len=12, frozen=12, available=4, frozen_spans="8, 4", span_builders="4"
-        builder.ensure_frozen(12);
-
-        // Write 2 more bytes into the current span builder.
-        // State: len=14, frozen=12, available=2, frozen_spans="8, 4", span_builders="2 + 2"
-        builder.put_u16(0xCCCC);
-
-        // Reserve another block.
-        // State: len=14, frozen=12, available=10, frozen_spans="8, 4", span_builders="2 + 2, 8"
-        builder.reserve(8, &memory);
-
-        let debug_string = format!("{builder:?}");
-
-        assert_eq!(
-            debug_string,
-            "BytesBuf { len: 14, frozen: 12, available: 10, frozen_spans: \"8, 4\", span_builders: \"2 + 2, 8\" }"
-        );
-    }
-
-    #[test]
     fn peek_empty_builder() {
-        let builder = BytesBuf::new();
-        let peeked = builder.peek();
+        let buf = BytesBuf::new();
+        let peeked = buf.peek();
 
         assert!(peeked.is_empty());
         assert_eq!(peeked.len(), 0);
@@ -1709,163 +1657,169 @@ mod tests {
     #[test]
     fn peek_with_frozen_spans_only() {
         let memory = FixedBlockTestMemory::new(nz!(10));
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        builder.reserve(20, &memory);
-        builder.put_u64(0x1111_1111_1111_1111);
-        builder.put_u64(0x2222_2222_2222_2222);
-
+        buf.reserve(20, &memory);
+        buf.put_num_ne(0x1111_1111_1111_1111_u64);
+        buf.put_num_ne(0x2222_2222_2222_2222_u64);
         // Both blocks are now frozen (filled completely)
-        assert_eq!(builder.len(), 16);
+        assert_eq!(buf.len(), 16);
 
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 16);
-        assert_eq!(peeked.get_u64(), 0x1111_1111_1111_1111);
-        assert_eq!(peeked.get_u64(), 0x2222_2222_2222_2222);
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x1111_1111_1111_1111);
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x2222_2222_2222_2222);
 
         // Original builder still has the data
-        assert_eq!(builder.len(), 16);
+        assert_eq!(buf.len(), 16);
     }
 
     #[test]
     fn peek_with_partially_filled_span_builder() {
         let memory = FixedBlockTestMemory::new(nz!(10));
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        builder.reserve(10, &memory);
-        builder.put_u64(0x3333_3333_3333_3333);
-        builder.put_u16(0x4444);
-
+        buf.reserve(10, &memory);
+        buf.put_num_ne(0x3333_3333_3333_3333_u64);
+        buf.put_num_ne(0x4444_u16);
         // We have 10 bytes filled in a 10-byte block
-        assert_eq!(builder.len(), 10);
+        assert_eq!(buf.len(), 10);
 
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 10);
-        assert_eq!(peeked.get_u64(), 0x3333_3333_3333_3333);
-        assert_eq!(peeked.get_u16(), 0x4444);
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
+        assert_eq!(peeked.get_num_ne::<u16>(), 0x4444);
 
         // Original builder still has the data
-        assert_eq!(builder.len(), 10);
+        assert_eq!(buf.len(), 10);
     }
 
     #[test]
     fn peek_preserves_capacity_of_partial_span_builder() {
         let memory = FixedBlockTestMemory::new(nz!(20));
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        builder.reserve(20, &memory);
-        builder.put_u64(0x5555_5555_5555_5555);
+        buf.reserve(20, &memory);
+        buf.put_num_ne(0x5555_5555_5555_5555_u64);
 
         // We have 8 bytes filled and 12 bytes remaining capacity
-        assert_eq!(builder.len(), 8);
-        assert_eq!(builder.remaining_mut(), 12);
+        assert_eq!(buf.len(), 8);
+        assert_eq!(buf.remaining_capacity(), 12);
 
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 8);
-        assert_eq!(peeked.get_u64(), 0x5555_5555_5555_5555);
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x5555_5555_5555_5555);
 
         // CRITICAL TEST: Capacity should be preserved
-        assert_eq!(builder.len(), 8);
-        assert_eq!(builder.remaining_mut(), 12);
+        assert_eq!(buf.len(), 8);
+        assert_eq!(buf.remaining_capacity(), 12);
 
         // We should still be able to write more data
-        builder.put_u32(0x6666_6666);
-        assert_eq!(builder.len(), 12);
-        assert_eq!(builder.remaining_mut(), 8);
+        buf.put_num_ne(0x6666_6666_u32);
+        assert_eq!(buf.len(), 12);
+        assert_eq!(buf.remaining_capacity(), 8);
 
         // And we can peek again to see the updated data
-        let mut peeked2 = builder.peek();
+        let mut peeked2 = buf.peek();
         assert_eq!(peeked2.len(), 12);
-        assert_eq!(peeked2.get_u64(), 0x5555_5555_5555_5555);
-        assert_eq!(peeked2.get_u32(), 0x6666_6666);
+        assert_eq!(peeked2.get_num_ne::<u64>(), 0x5555_5555_5555_5555);
+        assert_eq!(peeked2.get_num_ne::<u32>(), 0x6666_6666);
     }
 
     #[test]
     fn peek_with_mixed_frozen_and_unfrozen() {
         let memory = FixedBlockTestMemory::new(nz!(10));
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        builder.reserve(30, &memory);
+        buf.reserve(30, &memory);
 
         // Fill first block completely (10 bytes) - will be frozen
-        builder.put_u64(0x1111_1111_1111_1111);
-        builder.put_u16(0x2222);
+        buf.put_num_ne(0x1111_1111_1111_1111_u64);
+        buf.put_num_ne(0x2222_u16);
 
         // Fill second block completely (10 bytes) - will be frozen
-        builder.put_u64(0x3333_3333_3333_3333);
-        builder.put_u16(0x4444);
+        buf.put_num_ne(0x3333_3333_3333_3333_u64);
+        buf.put_num_ne(0x4444_u16);
 
         // Partially fill third block (only 4 bytes) - will remain unfrozen
-        builder.put_u32(0x5555_5555);
+        buf.put_num_ne(0x5555_5555_u32);
 
-        assert_eq!(builder.len(), 24);
-        assert_eq!(builder.remaining_mut(), 6);
+        assert_eq!(buf.len(), 24);
+        assert_eq!(buf.remaining_capacity(), 6);
 
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 24);
-        assert_eq!(peeked.get_u64(), 0x1111_1111_1111_1111);
-        assert_eq!(peeked.get_u16(), 0x2222);
-        assert_eq!(peeked.get_u64(), 0x3333_3333_3333_3333);
-        assert_eq!(peeked.get_u16(), 0x4444);
-        assert_eq!(peeked.get_u32(), 0x5555_5555);
-
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x1111_1111_1111_1111);
+        assert_eq!(peeked.get_num_ne::<u16>(), 0x2222);
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
+        assert_eq!(peeked.get_num_ne::<u16>(), 0x4444);
+        assert_eq!(peeked.get_num_ne::<u32>(), 0x5555_5555);
         // Original builder still has all the data and capacity
-        assert_eq!(builder.len(), 24);
-        assert_eq!(builder.remaining_mut(), 6);
+        assert_eq!(buf.len(), 24);
+        assert_eq!(buf.remaining_capacity(), 6);
     }
 
     #[test]
     fn peek_then_consume() {
         let memory = FixedBlockTestMemory::new(nz!(20));
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        builder.reserve(20, &memory);
-        builder.put_u64(0x7777_7777_7777_7777);
-        builder.put_u32(0x8888_8888);
-
-        assert_eq!(builder.len(), 12);
+        buf.reserve(20, &memory);
+        buf.put_num_ne(0x7777_7777_7777_7777_u64);
+        buf.put_num_ne(0x8888_8888_u32);
+        assert_eq!(buf.len(), 12);
 
         // Peek at the data
-        let mut peeked = builder.peek();
+        let mut peeked = buf.peek();
         assert_eq!(peeked.len(), 12);
-        assert_eq!(peeked.get_u64(), 0x7777_7777_7777_7777);
+        assert_eq!(peeked.get_num_ne::<u64>(), 0x7777_7777_7777_7777);
 
         // Original builder still has the data
-        assert_eq!(builder.len(), 12);
+        assert_eq!(buf.len(), 12);
 
         // Now consume some of it
-        let mut consumed = builder.consume(8);
-        assert_eq!(consumed.get_u64(), 0x7777_7777_7777_7777);
+        let mut consumed = buf.consume(8);
+        assert_eq!(consumed.get_num_ne::<u64>(), 0x7777_7777_7777_7777);
 
         // Builder should have less data now
-        assert_eq!(builder.len(), 4);
+        assert_eq!(buf.len(), 4);
 
         // Peek again should show the remaining data
-        let mut peeked2 = builder.peek();
+        let mut peeked2 = buf.peek();
         assert_eq!(peeked2.len(), 4);
-        assert_eq!(peeked2.get_u32(), 0x8888_8888);
+        assert_eq!(peeked2.get_num_ne::<u32>(), 0x8888_8888);
     }
 
     #[test]
     fn peek_multiple_times() {
         let memory = FixedBlockTestMemory::new(nz!(20));
-        let mut builder = BytesBuf::new();
+        let mut buf = BytesBuf::new();
 
-        builder.reserve(20, &memory);
-        builder.put_u64(0xAAAA_AAAA_AAAA_AAAA);
+        buf.reserve(20, &memory);
+        buf.put_num_ne(0xAAAA_AAAA_AAAA_AAAA_u64);
 
         // Peek multiple times - each should work independently
-        let mut peeked1 = builder.peek();
-        let mut peeked2 = builder.peek();
+        let mut peeked1 = buf.peek();
+        let mut peeked2 = buf.peek();
 
-        assert_eq!(peeked1.get_u64(), 0xAAAA_AAAA_AAAA_AAAA);
-        assert_eq!(peeked2.get_u64(), 0xAAAA_AAAA_AAAA_AAAA);
+        assert_eq!(peeked1.get_num_ne::<u64>(), 0xAAAA_AAAA_AAAA_AAAA);
+        assert_eq!(peeked2.get_num_ne::<u64>(), 0xAAAA_AAAA_AAAA_AAAA);
 
         // Original builder still intact
-        assert_eq!(builder.len(), 8);
+        assert_eq!(buf.len(), 8);
+    }
+
+    // To be stabilized soon: https://github.com/rust-lang/rust/issues/79995
+    fn write_copy_of_slice(dst: &mut [MaybeUninit<u8>], src: &[u8]) {
+        assert!(dst.len() >= src.len());
+
+        // SAFETY: We have verified that dst is large enough.
+        unsafe {
+            src.as_ptr().copy_to_nonoverlapping(dst.as_mut_ptr().cast(), src.len());
+        }
     }
 }
