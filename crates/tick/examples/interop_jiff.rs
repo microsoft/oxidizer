@@ -8,7 +8,7 @@
 //! - Converting Timestamp to `jiff::Zoned`
 
 use anyhow::Context;
-use jiff::Timestamp as TimestampJiff;
+use jiff::Timestamp;
 use jiff::fmt::temporal::DateTimePrinter;
 use jiff::tz::TimeZone;
 use tick::Clock;
@@ -19,13 +19,9 @@ fn main() -> anyhow::Result<()> {
     // Create a frozen clock for the current time.
     let clock = Clock::new_frozen();
 
-    // Retrieve the current time.
-    let now = clock.timestamp();
+    // Retrieve the current time as `jiff::Timestamp`.
+    let timestamp = clock.system_time_as::<Timestamp>();
 
-    // Tick's Timestamp can interoperate with other crates through SystemTime.
-    // First, we convert the timestamp to SystemTime. Once we have SystemTime,
-    // we can convert it to jiff::Timestamp.
-    let timestamp: TimestampJiff = now.to_system_time().try_into()?;
     println!("Current time (UTC): {}", timestamp.strftime(JIFF_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo.

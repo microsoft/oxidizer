@@ -18,13 +18,7 @@ fn main() -> anyhow::Result<()> {
     let clock = Clock::new_frozen();
 
     // Retrieve the current timestamp.
-    let now = clock.timestamp();
-
-    // Tick's Timestamp can interoperate with other crates through SystemTime.
-    // First, we convert the timestamp to SystemTime. Once we have SystemTime,
-    // we can convert it to chrono::DateTime<Utc>.
-    let timestamp: DateTime<Utc> = now.to_system_time().into();
-
+    let timestamp = clock.system_time_as::<DateTime<Utc>>();
     println!("Current time (UTC): {}", timestamp.format(CHRONO_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo. We need to use
