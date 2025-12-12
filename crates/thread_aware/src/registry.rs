@@ -196,7 +196,7 @@ mod tests {
         let registry = ThreadRegistry::default();
         let iterator_count = registry.affinities().count();
         assert_eq!(registry.num_affinities(), iterator_count);
-        
+
         // Also test with manual processor count > 1 if available
         if iterator_count > 1 {
             let count = NonZero::new(2.min(iterator_count)).unwrap();
@@ -211,14 +211,14 @@ mod tests {
     fn test_pin_to_actually_pins() {
         // This test ensures pin_to() actually updates the thread's affinity
         let registry = ThreadRegistry::default();
-        
+
         // Before pinning, affinity should be unknown
         assert!(registry.current_affinity().is_unknown());
-        
+
         // Pin to the first affinity
         let first = registry.affinities().next().unwrap();
         registry.pin_to(first);
-        
+
         // After pinning, affinity should be pinned and match what we set
         let current = registry.current_affinity();
         assert!(!current.is_unknown());
