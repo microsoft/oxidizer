@@ -160,6 +160,7 @@ impl Default for ThreadRegistry {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use crate::affinity::{memory_affinities, pinned_affinities};
