@@ -18,7 +18,7 @@ use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::cell::factory::Factory;
 use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
-pub use builtin::{PerNuma, PerProcess, PerThread};
+pub use builtin::{PerCore, PerNuma, PerProcess};
 pub use storage::{Storage, Strategy};
 
 /// Transferable reference counted type.
@@ -31,7 +31,7 @@ pub use storage::{Storage, Strategy};
 /// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
 ///
 /// ```rust
-/// # use thread_aware::{Arc, ThreadAware, PerThread};
+/// # use thread_aware::{Arc, ThreadAware, PerCore};
 /// # use thread_aware::affinity::*;
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # let affinities = pinned_affinities(&[2]);
@@ -68,7 +68,7 @@ pub use storage::{Storage, Strategy};
 /// #     }
 /// # }
 ///
-/// let arc_affinity1 = Arc::<_, PerThread>::new(Counter::new);
+/// let arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
 /// let arc_affinity1_clone = arc_affinity1.clone();
 ///
 /// arc_affinity1.increment_by(42);
@@ -160,7 +160,7 @@ where
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, ThreadAware, PerThread};
+    /// # use thread_aware::{Arc, ThreadAware, PerCore};
     /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
@@ -194,7 +194,7 @@ where
     /// #     }
     /// # }
     ///
-    /// let container = Arc::<_, PerThread>::new(Counter::new);
+    /// let container = Arc::<_, PerCore>::new(Counter::new);
     /// let container_clone = container.clone();
     /// container.increment_by(42);
     /// assert_eq!(container.value(), 42);
@@ -246,7 +246,7 @@ where
     ///
     /// ```rust
     /// # use std::sync::{self, Mutex};
-    /// # use thread_aware::{Arc, PerThread};
+    /// # use thread_aware::{Arc, PerCore};
     /// struct MyStruct {
     ///     inner: sync::Arc<Mutex<i32>>,
     /// }
@@ -259,14 +259,14 @@ where
     ///     }
     /// }
     ///
-    /// let container = Arc::<_, PerThread>::new_with((), |_| MyStruct::new());
+    /// let container = Arc::<_, PerCore>::new_with((), |_| MyStruct::new());
     /// ```
     ///
     /// The constructor can depend on other values that implement [`ThreadAware`] (this example uses the Counter
     /// defined in [`ThreadAware`] documentation):
     ///
     /// ```rust
-    /// # use thread_aware::{ThreadAware, Arc, PerThread};
+    /// # use thread_aware::{ThreadAware, Arc, PerCore};
     /// # use thread_aware::affinity::*;
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
@@ -310,7 +310,7 @@ where
     /// }
     ///
     /// let counter = Counter::new();
-    /// let container = Arc::<_, PerThread>::new_with(counter, |counter| MyStruct::new(counter.value()));
+    /// let container = Arc::<_, PerCore>::new_with(counter, |counter| MyStruct::new(counter.value()));
     /// ```
     pub fn new_with<D>(data: D, f: fn(D) -> T) -> Self
     where
@@ -364,7 +364,7 @@ where
     /// can be used with new:
     ///
     /// ```rust
-    /// # use thread_aware::{Arc, PerThread};
+    /// # use thread_aware::{Arc, PerCore};
     /// # use std::sync::atomic::{AtomicI32, Ordering};
     /// # use std::sync;
     /// # #[derive(Clone)]
@@ -388,7 +388,7 @@ where
     /// #     }
     /// # }
     ///
-    /// let arc = Arc::<_, PerThread>::new(Counter::new);
+    /// let arc = Arc::<_, PerCore>::new(Counter::new);
     /// let arc_clone = arc.clone();
     /// arc.increment_by(42);
     /// assert_eq!(arc.value(), 42);

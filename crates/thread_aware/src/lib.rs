@@ -22,7 +22,7 @@
 //! However, like `Clone`, the relocation itself should be mostly transparent and predictable to users.
 //!
 //!
-//! ## Implementing [`ThreadAware`], and `Arc<T, PerThread>`
+//! ## Implementing [`ThreadAware`], and `Arc<T, PerCore>`
 //!
 //! In most cases [`ThreadAware`] should be implemented via the provided derive macro.
 //! As thread-awareness of a type usually involves letting all contained fields know of an ongoing
@@ -33,7 +33,7 @@
 //! [`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
 //! [`std::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and implements [`ThreadAware`] for it. For
 //! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-//! `Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
+//! `Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
 //!
 //!
 //! ## Relation to [`Send`]
@@ -108,14 +108,14 @@
 //!
 //!
 //! ```rust
-//! use thread_aware::{ThreadAware, Arc, PerThread};
+//! use thread_aware::{ThreadAware, Arc, PerCore};
 //! # #[derive(Debug, Default)]
 //! # struct Client;
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
 //! struct Service {
 //!     name: String,
-//!     client: Arc<Client, PerThread>,
+//!     client: Arc<Client, PerCore>,
 //! }
 //!
 //! impl Service {
@@ -199,5 +199,5 @@ pub use core::ThreadAware;
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
 pub use cell::storage;
-pub use cell::{Arc, PerNuma, PerProcess, PerThread};
+pub use cell::{Arc, PerCore, PerNuma, PerProcess};
 pub use wrappers::{Unaware, unaware};
