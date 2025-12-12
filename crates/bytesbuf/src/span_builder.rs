@@ -185,6 +185,20 @@ impl SpanBuilder {
         Some(span)
     }
 
+    /// Creates a span over the filled data without consuming it from the builder.
+    /// The span shares the BlockRef with the span builder, keeping the memory alive.
+    ///
+    /// Returns `None` if there is no filled data in the builder.
+    pub(crate) fn peek_filled(&self) -> Option<Span> {
+        if self.filled_bytes == 0 {
+            return None;
+        }
+
+        // SAFETY: The data in the span builder up to `filled_bytes` is initialized.
+        // The span will share the BlockRef with the span builder, keeping the memory alive.
+        Some(unsafe { Span::new(self.start.cast(), self.filled_bytes, self.block_ref.clone()) })
+    }
+
     /// Allows the underlying memory block to be accessed, primarily used to extend its lifetime
     /// beyond that of the `SpanBuilder` itself.
     pub(crate) const fn block(&self) -> &BlockRef {
