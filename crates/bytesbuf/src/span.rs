@@ -44,8 +44,7 @@ impl Span {
     }
 
     #[must_use]
-    #[cfg(test)] // Not required elsewhere for now but if we need it, enable it.
-    pub const fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
