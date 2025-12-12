@@ -40,7 +40,7 @@ struct Args {
 // mutations if their tests reside in dependent packages.
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
-    &["data_privacy", "data_privacy_macros"],
+    &["data_privacy", "data_privacy_macros", "data_privacy_macros_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
     &["ohno", "ohno_macros"],
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
@@ -67,7 +67,10 @@ fn main() -> Result<()> {
     let initial_count = test_groups.len();
     for pkg in &filtered_packages {
         if !test_groups.iter().any(|g| g.contains(&pkg.name)) {
-            println!("this package is not listed in any test group: {}", pkg.name);
+            eprintln!(
+                "⚠️  '{}' package is not listed in any test group, it will be tested individually",
+                pkg.name
+            );
             test_groups.push(vec![pkg.name.clone()]);
         }
     }
