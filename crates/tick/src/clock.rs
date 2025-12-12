@@ -4,7 +4,7 @@
 #[cfg(any(feature = "tokio", test))]
 use std::sync::Arc;
 use std::task::Waker;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(any(feature = "test-util", test))]
 use super::clock_control::ClockControl;
@@ -414,6 +414,34 @@ impl Clock {
             ClockState::ClockControl(control) => control.instant(),
             ClockState::System(_) => Instant::now(),
         }
+    }
+
+    /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
+    ///
+    /// This is a convenience method that calls [`Delay::new`][crate::Delay::new].
+    ///
+    /// If the duration is [`Duration::ZERO`], the delay completes immediately.
+    /// If the duration is [`Duration::MAX`], the delay never completes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::{Clock, Stopwatch};
+    ///
+    /// # async fn delay_example(clock: &Clock) {
+    /// let stopwatch = Stopwatch::new(&clock);
+    ///
+    /// // Delay for 10 millis
+    /// clock.delay(Duration::from_millis(10)).await;
+    ///
+    /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn delay(&self, duration: Duration) -> crate::Delay {
+        crate::Delay::new(self, duration)
     }
 
     pub(super) fn register_timer(&self, when: Instant, waker: Waker) -> TimerKey {
