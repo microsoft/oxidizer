@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     // The Display impl for Zoned outputs RFC 9557.
-    println!("Current time in RFC 9557 format: {}", zoned.to_string());
+    println!("Current time in RFC 9557 format: {zoned}");
 
     Ok(())
 }

@@ -90,12 +90,12 @@ impl Iso8601 {
     /// The maximum representable value of `Iso8601`.
     ///
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
-    pub const MAX: Iso8601 = Iso8601(Timestamp::MAX);
+    pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The minimum representable value of `Iso8601`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Iso8601 = Iso8601(Timestamp::UNIX_EPOCH);
+    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
 
     pub(super) fn to_unix_epoch_duration(self) -> Duration {
         self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
@@ -131,7 +131,7 @@ impl TryFrom<SystemTime> for Iso8601 {
     type Error = Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let timestamp = Timestamp::try_from(value).map_err(|e| Error::jiff(e))?;
+        let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
         Ok(Self(timestamp))
     }
 }
@@ -197,7 +197,7 @@ mod tests {
     fn parse_err() {
         let err = "date".parse::<Iso8601>().unwrap_err();
 
-        assert_eq!(err.to_string().starts_with("failed to parse year in date"), true);
+        assert!(err.to_string().starts_with("failed to parse year in date"));
     }
 
     #[test]

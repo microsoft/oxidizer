@@ -88,12 +88,12 @@ impl Rfc2822 {
     /// The maximum representable value of `Rfc2822`.
     ///
     /// This represents a Unix system time at `31 December 9999 23:59:59 UTC`.
-    pub const MAX: Rfc2822 = Rfc2822(Timestamp::MAX);
+    pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The minimum representable value of `Rfc2822`.
     ///
     /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Rfc2822 = Rfc2822(Timestamp::UNIX_EPOCH);
+    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
 
     pub(super) fn to_unix_epoch_duration(self) -> Duration {
         self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
@@ -132,7 +132,7 @@ impl TryFrom<SystemTime> for Rfc2822 {
     type Error = Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let timestamp = Timestamp::try_from(value).map_err(|e| Error::jiff(e))?;
+        let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
         Ok(Self(timestamp))
     }
 }

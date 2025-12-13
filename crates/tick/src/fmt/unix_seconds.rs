@@ -56,12 +56,12 @@ impl UnixSeconds {
     ///
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
-    pub const MAX: UnixSeconds = UnixSeconds(Duration::new(253_402_207_200, 999_999_999));
+    pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
 
     /// The minimum representable value of `UnixSeconds`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: UnixSeconds = UnixSeconds(Duration::ZERO);
+    pub const MIN: Self = Self(Duration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
     ///
@@ -122,7 +122,7 @@ impl Display for UnixSeconds {
 
 impl From<UnixSeconds> for SystemTime {
     fn from(value: UnixSeconds) -> Self {
-        SystemTime::UNIX_EPOCH + value.0
+        Self::UNIX_EPOCH + value.0
     }
 }
 
@@ -144,9 +144,9 @@ impl TryFrom<SystemTime> for UnixSeconds {
     type Error = crate::Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let duration = value
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| Error::out_of_range("the provided `SystemTime` is out of range and cannot be represented as `UnixSeconds`"))?;
+        let duration = value.duration_since(SystemTime::UNIX_EPOCH).map_err(|_error| {
+            Error::out_of_range("the provided `SystemTime` is out of range and cannot be represented as `UnixSeconds`")
+        })?;
 
         Self::try_from(duration)
     }

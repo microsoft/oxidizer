@@ -93,7 +93,7 @@ impl std::error::Error for Error {
 
 impl From<SystemTimeError> for Error {
     fn from(err: SystemTimeError) -> Self {
-        Error(ErrorKind::SystemTimeError(err))
+        Self(ErrorKind::SystemTimeError(err))
     }
 }
 

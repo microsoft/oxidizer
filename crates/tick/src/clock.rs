@@ -335,6 +335,11 @@ impl Clock {
     /// `test-util` feature), where time could be moved excessively far into the future,
     /// potentially exceeding the target type's representable range. This is not a concern
     /// in production.
+    #[expect(
+        clippy::match_wild_err_arm,
+        clippy::panic,
+        reason = "the panic might only occur when system time is outside of valid range which won't ever happen in real environments"
+    )]
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         match T::try_from(self.system_time()) {
