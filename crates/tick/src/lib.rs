@@ -28,13 +28,35 @@
 //!     // Create a clock using the Tokio runtime
 //!     let clock = Clock::new_tokio();
 //!
-//!     // Get the current timestamp
-//!     let now = clock.timestamp();
-//!     println!("Current time: {now}");
+//!     // Get the current system time
+//!     let now = clock.system_time();
+//!     println!("Current time: {now:?}");
 //!
-//!     // Delay execution
-//!     Delay::new(&clock, Duration::from_secs(1)).await;
-//!     println!("1 second later: {}", clock.timestamp());
+//!     // Delay and measure the elapsed time
+//!     let stopwatch = clock.stopwatch();
+//!     let value = produce_value(&clock).await;
+//!     println!("{}ms later: {}", stopwatch.elapsed().as_millis(), value);
+//! }
+//!
+//! async fn produce_value(clock: &Clock) -> u64 {
+//!     clock.delay(Duration::from_secs(60)).await;
+//!     123
+//! }
+//!
+//! #[cfg(test)]
+//! mod tests {
+//!    use super::*;
+//!    use tick::ClockControl;
+//!
+//!    #[tokio::test]
+//!    async fn test_produce_value() {
+//!        // Use ClockControl to simulate the passage of time and
+//!        // automatically advance all timers for fast testing
+//!        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+//!
+//!        let value = produce_value(&clock).await;
+//!        assert_eq!(value, 123);
+//!    }
 //! }
 //! ```
 //!
@@ -45,8 +67,8 @@
 //! - **Abstracts async runtimes** - Works across Tokio, async-std, etc. without tight coupling
 //!   to any specific implementation.
 //! - **Enables deterministic testing** - With the `test-util` feature, `ClockControl` lets you
-//!   manipulate time passage it instantly, pause it, or jump forward. No waiting for a
-//!   1-minute periodic job in your tests.
+//!   manipulate the passage of time—advance it instantly, pause it, or jump forward. No waiting
+//!   for a 1-minute periodic job in your tests.
 //! - **Improves testability** - Time-dependent code becomes fast and reproducible to test
 //!   without relying on wall-clock time.
 //!
@@ -55,16 +77,19 @@
 //!
 //! # Overview
 //!
-//! - [`Clock`] - Interacts with and controls the passage of time. Provides absolute time
-//!   as `SystemTime` or optionally `Timestamp`, and relative time measurements via stopwatch.
-//!   Used when creating other time primitives.
-//! - [`Timestamp`] - Represents an absolute point in time with formatting, parsing, and
-//!   serialization capabilities. Available when the `timestamp` feature is enabled.
+//! - [`Clock`] - Provides an abstraction for time-related operations. Returns absolute time
+//!   as `SystemTime` and relative time measurements via stopwatch. Used when creating other
+//!   time primitives.
 //! - [`Stopwatch`] - Measures elapsed time.
-//! - [`PeriodicTimer`] - Schedules a task to run periodically.
+//! - [`PeriodicTimer`] - Schedules a task to run periodically. Available when the `test-util`
+//!   feature is enabled.
 //! - [`FutureExt`] - Extensions for the `Future` trait.
-//! - [`Error`] - Represents an error that can occur when working with time. Introspection is limited.
-//! - `ClockControl` - Provides a way to control the passage of time. Exposed only when the `test-util` feature is enabled.
+//! - [`Error`] - Represents an error that can occur when working with time. Provides limited
+//!   introspection capabilities.
+//! - [`fmt`] - Utilities for formatting `SystemTime` into various formats. Available when
+//!   the `fmt` feature is enabled.
+//! - [`ClockControl`] - Controls the passage of time. Available when the `test-util` feature
+//!   is enabled.
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!
@@ -97,8 +122,8 @@
 //!
 //! ## Use `Clock` to retrieve absolute time
 //!
-//! The clock provides absolute time in two forms. See [`Clock`] documentation for detailed
-//! information on when to use each type.
+//! The clock provides absolute time as `SystemTime`. See [`Clock`] documentation for detailed
+//! information.
 //!
 //! ```
 //! use std::time::{Duration, SystemTime};
@@ -116,22 +141,6 @@
 //! # }
 //! ```
 //!
-//! With the `timestamp` feature enabled, you can use `Timestamp` for enhanced capabilities:
-//!
-//! ```
-//! use std::time::Duration;
-//!
-//! use tick::Clock;
-//!
-//! # fn retrieve_timestamp(clock: &Clock) {
-//! // Using Timestamp for formatting, serialization, and cross-process scenarios
-//! let timestamp1 = clock.timestamp();
-//! let timestamp2 = clock.timestamp();
-//!
-//! assert!(timestamp1 <= timestamp2);
-//! # }
-//! ```
-//!
 //! ## Use `Stopwatch` for measurements
 //!
 //! ```
@@ -141,7 +150,7 @@
 //!
 //! # fn measure(clock: &Clock) -> Duration {
 //! let stopwatch = Stopwatch::new(clock);
-//! // Perform some operations...
+//! // Perform some operation...
 //! stopwatch.elapsed()
 //! # }
 //! ```
@@ -167,6 +176,29 @@
 //!     })
 //!     .await;
 //! # }
+//! ```
+//!
+//! # Features
+//!
+//! This crate provides several optional features that can be enabled in your `Cargo.toml`:
+//!
+//! - **`tokio`** - Integration with the [Tokio](https://tokio.rs/) runtime. Enables
+//!   [`Clock::new_tokio`] for creating clocks that use Tokio's time facilities.
+//! - **`test-util`** - Enables the [`ClockControl`] type for controlling the passage of time
+//!   in tests. This allows you to pause time, advance it manually, or automatically advance
+//!   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
+//! - **`serde`** - Adds serialization and deserialization support via [serde](https://serde.rs/).
+//! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
+//!   various formats (e.g., ISO 8601, RFC 2822).
+//!
+//! ## Example `Cargo.toml`
+//!
+//! ```toml
+//! [dependencies]
+//! tick = { version = "*", features = ["tokio", "fmt"] }
+//!
+//! [dev-dependencies]
+//! tick = { version = "*", features = ["test-util"] }
 //! ```
 //!
 //! # Additional Examples

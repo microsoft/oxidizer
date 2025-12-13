@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt;
+use std::{fmt, time::SystemTimeError};
 
 /// The result type for fallible operations that use the [`Error`] type in the `time` module.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -11,7 +11,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// The most common type of error results from overflow, but other errors
 /// also exist:
 ///
-/// * Parsing and formatting errors for [`Timestamp`][`super::Timestamp`].
+/// * Parsing and formatting errors.
 /// * Validation problems.
 ///
 /// # Limited introspection
@@ -22,10 +22,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// # Examples
 ///
 /// ```
-/// use std::time::Duration;
-///
 /// use tick::fmt::Iso8601;
-/// use tick::{Clock, Error, Timestamp};
+/// use tick::Error;
 ///
 /// "invalid date".parse::<Iso8601>().unwrap_err();
 /// ```
@@ -39,6 +37,7 @@ enum ErrorKind {
     #[cfg(any(feature = "fmt", test))]
     OutOfRange(std::borrow::Cow<'static, str>),
     Other(Box<dyn std::error::Error + Send + Sync + 'static>),
+    SystemTimeError(SystemTimeError),
 }
 
 impl Error {
@@ -74,6 +73,7 @@ impl fmt::Display for Error {
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::OutOfRange(msg) => write!(f, "{msg}"),
             ErrorKind::Other(err) => err.fmt(f),
+            ErrorKind::SystemTimeError(err) => err.fmt(f),
         }
     }
 }
@@ -86,7 +86,14 @@ impl std::error::Error for Error {
             #[cfg(any(feature = "fmt", test))]
             ErrorKind::OutOfRange(_) => None,
             ErrorKind::Other(err) => Some(err.as_ref()),
+            ErrorKind::SystemTimeError(err) => Some(err),
         }
+    }
+}
+
+impl From<SystemTimeError> for Error {
+    fn from(err: SystemTimeError) -> Self {
+        Error(ErrorKind::SystemTimeError(err))
     }
 }
 

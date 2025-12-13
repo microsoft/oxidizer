@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates basic interaction with the Clock API.
+//! This example demonstrates advanced usage of the `Clock` API, including
+//! `Stopwatch`, `PeriodicTimer`, and timeouts.
 
 use std::time::Duration;
 
 use futures::StreamExt;
-use tick::{Clock, Delay, FutureExt, PeriodicTimer, Stopwatch};
+use tick::{Clock, Delay, FutureExt, PeriodicTimer, Stopwatch, fmt::Iso8601};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -61,7 +62,7 @@ impl MyApi {
         println!(
             "Work done. Elapsed: {}ms, Timestamp: {}",
             watch.elapsed().as_millis(),
-            self.clock.timestamp() // Retrieve the current time using the clock.
+            self.clock.system_time_as::<Iso8601>()
         );
     }
 }

@@ -17,8 +17,8 @@
 //!
 //! ## Single-threaded Runtimes
 //!
-//! Clone the [`InactiveClock`] for each thread and activate separately to avoid
-//! lock contention:
+//! Clone the [`InactiveClock`] before moving it to each thread, then activate
+//! separately to avoid lock contention:
 //!
 //! ```rust
 //! # use tick::runtime::InactiveClock;
@@ -34,8 +34,8 @@
 //!
 //! ## Multi-threaded Runtimes
 //!
-//! Activate once and share the clock across threads, while keeping the driver
-//! on the main runtime thread for timer advancement.
+//! Activate once and share the clock across threads, keeping the driver on the
+//! main runtime thread for timer advancement.
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate

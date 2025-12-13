@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This sample demonstrates interoperability between `tick` and the "time" crate.
+//! This example demonstrates interoperability between `tick` and the `time` crate.
 //!
 //! In particular:
 //!
-//! - Converting Timestamp to `time::OffsetDateTime`
-//! - Converting Timestamp to zoned `time::OffsetDateTime`
+//! - Converting `SystemTime` to `time::OffsetDateTime`
+//! - Converting `SystemTime` to a zoned `time::OffsetDateTime`
 
 use tick::Clock;
 use time::OffsetDateTime;
@@ -20,22 +20,17 @@ fn main() -> anyhow::Result<()> {
     let time_display_format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
     // Retrieve the current time.
-    let now = clock.timestamp();
+    let now = clock.system_time_as::<OffsetDateTime>();
+    println!("Current time (UTC): {}", now.format(&time_display_format)?);
 
-    // Tick's timestamp can interop with other crates through SystemTime.
-    // First, we convert the timestamp to system time. Once we have system time,
-    // we can convert it to time::OffsetDateTime.
-    let timestamp: OffsetDateTime = now.to_system_time().into();
-    println!("Current time (UTC): {}", timestamp.format(&time_display_format)?);
-
-    // Convert the timestamp to date time in Asia/Tokyo. We need to use
-    // the time_tz crate for timezone support.
-    let zoned = timestamp.to_timezone(db::asia::TOKYO);
+    // Convert the timestamp to date-time in Asia/Tokyo. We need to use
+    // the time_tz crate for time zone support.
+    let zoned = now.to_timezone(db::asia::TOKYO);
     println!("Current time (Asia/Tokyo): {}", zoned.format(&time_display_format)?);
 
-    // Convert the timestamp to date time in the current timezone.
+    // Convert the timestamp to date-time in the current time zone.
     let system_tz = time_tz::system::get_timezone()?;
-    let zoned = timestamp.to_timezone(system_tz);
+    let zoned = now.to_timezone(system_tz);
     println!("Current time ({}): {}", system_tz.name(), zoned.format(&time_display_format)?);
 
     Ok(())

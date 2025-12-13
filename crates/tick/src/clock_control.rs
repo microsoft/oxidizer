@@ -24,13 +24,13 @@ use crate::timers::{TimerKey, Timers};
 /// let control = ClockControl::new();
 /// let clock = control.to_clock();
 ///
-/// let now = clock.timestamp();
+/// let now = clock.system_time();
 ///
 /// // Advance the time by one second
 /// control.advance(Duration::from_secs(1));
 ///
 /// assert_eq!(
-///     clock.timestamp().checked_duration_since(now)?,
+///     clock.system_time().duration_since(now)?,
 ///     Duration::from_secs(1)
 /// );
 ///
@@ -45,10 +45,10 @@ use crate::timers::{TimerKey, Timers};
 ///     .auto_advance(Duration::from_secs(1))
 ///     .to_clock();
 ///
-/// let now = clock.timestamp();
+/// let now = clock.system_time();
 ///
 /// assert_eq!(
-///     clock.timestamp().checked_duration_since(now)?,
+///     clock.system_time().duration_since(now)?,
 ///     Duration::from_secs(1)
 /// );
 ///
@@ -77,24 +77,24 @@ pub struct ClockControl {
 impl ClockControl {
     /// Creates a new `ClockControl` instance.
     ///
-    /// By default, the clock control has no auto-advance set and the initial time is set to the UNIX epoch.
+    /// By default, auto-advance is disabled and the initial time is set to the UNIX epoch.
     ///
     /// # Examples
     /// ```
-    /// use std::time::SystemTime;
+    /// use std::time::{Duration, SystemTime};
     ///
-    /// use tick::{ClockControl, Timestamp};
+    /// use tick::ClockControl;
     ///
     /// let clock = ClockControl::new()
-    ///     .auto_advance(std::time::Duration::from_secs(1))
+    ///     .auto_advance(Duration::from_secs(1))
     ///     .to_clock();
     ///
-    /// let timestamp1 = clock.timestamp();
-    /// let timestamp2 = clock.timestamp();
+    /// let time1 = clock.system_time();
+    /// let time2 = clock.system_time();
     ///
     /// assert_eq!(
-    ///     timestamp2.checked_duration_since(timestamp1)?,
-    ///     std::time::Duration::from_secs(1)
+    ///     time2.duration_since(time1)?,
+    ///     Duration::from_secs(1)
     /// );
     ///
     /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -106,13 +106,7 @@ impl ClockControl {
         }
     }
 
-    /// Creates a new `ClockControl` instance at the specified timestamp.
-    ///
-    /// This method accepts any type that implements [`IntoSystemTime`]:
-    ///
-    /// - `SystemTime`: Sets the clock to an absolute system time
-    /// - `Timestamp`: Sets the clock to a specific timestamp (requires `timestamp` feature)
-    /// - `Duration`: Advances the clock by the specified duration from `UNIX_EPOCH`
+    /// Creates a new `ClockControl` instance at the specified time.
     ///
     /// # Examples
     ///
@@ -126,14 +120,6 @@ impl ClockControl {
     /// let control = ClockControl::new_at(system_time);
     /// let clock = control.to_clock();
     /// assert_eq!(clock.system_time(), system_time);
-    ///
-    /// // Create clock advanced by a duration
-    /// let control = ClockControl::new_at(Duration::from_secs(100));
-    /// let clock = control.to_clock();
-    /// assert_eq!(
-    ///     clock.system_time(),
-    ///     SystemTime::UNIX_EPOCH + Duration::from_secs(100)
-    /// );
     /// ```
     #[must_use]
     pub fn new_at(time: impl Into<SystemTime>) -> Self {
@@ -199,10 +185,10 @@ impl ClockControl {
     ///     .auto_advance(Duration::from_secs(1))
     ///     .to_clock();
     ///
-    /// let now = clock.timestamp();
-    /// let later = clock.timestamp(); // Automatically advances by 1 second
+    /// let now = clock.system_time();
+    /// let later = clock.system_time(); // Automatically advances by 1 second
     ///
-    /// assert_eq!(later.checked_duration_since(now)?, Duration::from_secs(1));
+    /// assert_eq!(later.duration_since(now)?, Duration::from_secs(1));
     ///
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -257,10 +243,14 @@ impl ClockControl {
         self
     }
 
-    /// Determines whether the clock control should automatically auto-advance all upcoming timers.
+    /// Configures whether the `ClockControl` should automatically advance to fire upcoming timers.
     ///
-    /// Note that when [`Self::auto_advance_limit`] is used, the maximum total auto-advance duration is respected.
-    /// This means that when the total of all auto-advances exceeds the maximum, the auto-advance will stop and such timers won't be fired.
+    /// When enabled, the clock will automatically advance to the next scheduled timer whenever
+    /// the current time is accessed, firing timers in sequence.
+    ///
+    /// > **Note:** When [`Self::auto_advance_limit`] is set, the maximum total auto-advance
+    /// > duration is respected. Once the limit is reached, no further timers will be fired
+    /// > automatically.
     #[must_use]
     pub fn auto_advance_timers(self, enabled: bool) -> Self {
         self.with_state(|v| v.auto_advance_timers = enabled);
@@ -269,8 +259,8 @@ impl ClockControl {
 
     /// Manually advances the clock by the specified number of milliseconds.
     ///
-    /// In addition to advancing the current time, this method also advances the timers that
-    /// are registered and are scheduled to be fired.
+    /// In addition to advancing the current time, this method fires any registered timers
+    /// that are scheduled to expire within the advanced period.
     ///
     /// # Examples
     ///
@@ -282,10 +272,10 @@ impl ClockControl {
     /// let control = ClockControl::new();
     /// let clock = control.to_clock();
     ///
-    /// let now = clock.timestamp();
+    /// let now = clock.system_time();
     /// control.advance_millis(100);
     /// assert_eq!(
-    ///     clock.timestamp().checked_duration_since(now)?,
+    ///     clock.system_time().duration_since(now)?,
     ///     Duration::from_millis(100)
     /// );
     ///
@@ -297,8 +287,8 @@ impl ClockControl {
 
     /// Manually advances the clock by the specified duration.
     ///
-    /// In addition to advancing the current time, this method also advances the timers that
-    /// are registered and are scheduled to be fired.
+    /// In addition to advancing the current time, this method fires any registered timers
+    /// that are scheduled to expire within the advanced period.
     ///
     /// # Examples
     ///
@@ -310,10 +300,10 @@ impl ClockControl {
     /// let control = ClockControl::new();
     /// let clock = control.to_clock();
     ///
-    /// let now = clock.timestamp();
+    /// let now = clock.system_time();
     /// control.advance(Duration::from_secs(1));
     /// assert_eq!(
-    ///     clock.timestamp().checked_duration_since(now)?,
+    ///     clock.system_time().duration_since(now)?,
     ///     Duration::from_secs(1)
     /// );
     ///
@@ -325,8 +315,24 @@ impl ClockControl {
 
     /// Advances the clock to the specified system time.
     ///
-    /// The clock can be advanced to the future or to the past. Advancing the clock forward
-    /// fires all timers that are scheduled to be fired before or at the target time.
+    /// The clock can be advanced forward or backward. Advancing the clock forward fires all
+    /// timers that are scheduled before or at the target time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::{Duration, SystemTime};
+    ///
+    /// use tick::ClockControl;
+    ///
+    /// let control = ClockControl::new();
+    /// let clock = control.to_clock();
+    ///
+    /// let target = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+    /// control.advance_to(target);
+    ///
+    /// assert_eq!(clock.system_time(), target);
+    /// ```
     #[expect(
         clippy::missing_panics_doc,
         reason = "we are handling cases where the timestamp is either in future or past and the resulting duration is always positive"

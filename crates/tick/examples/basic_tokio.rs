@@ -31,11 +31,11 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     // Retrieve the current time.
-    let time = clock.timestamp();
+    let time = clock.system_time();
 
     // Convert the time to various formats.
-    let iso: Iso8601 = time.into();
-    let rfc: Rfc2822 = time.into();
+    let iso: Iso8601 = time.try_into()?;
+    let rfc: Rfc2822 = time.try_into()?;
 
     // Print the current time in various formats.
     println!("Current time (ISO 8601): {iso}");
@@ -44,10 +44,10 @@ async fn main() -> anyhow::Result<()> {
     // Calculate the duration between two timestamps.
     Delay::new(&clock, Duration::from_secs(1)).await;
 
-    let new_time = clock.timestamp();
+    let new_time = clock.system_time();
 
-    // Checked duration can return an error if the first timestamp is earlier than the second timestamp.
-    let diff = new_time.checked_duration_since(time)?;
+    // This returns an error if the new time is earlier than the original time.
+    let diff = new_time.duration_since(time)?;
 
     // Print the difference in milliseconds.
     println!("Time difference: {}ms", diff.as_millis());

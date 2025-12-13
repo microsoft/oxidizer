@@ -5,11 +5,11 @@ use std::time::Instant;
 
 use crate::state::ClockState;
 
-/// Drives timer advancement for the clock system.
+/// Drives timer advancement for the clock.
 ///
 /// The `ClockDriver` is responsible for advancing and firing timers associated with
-/// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically
-/// to ensure timers are processed correctly.
+/// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
+/// ensure timers fire at the correct time.
 #[derive(Debug)]
 pub struct ClockDriver(pub(super) ClockState);
 
@@ -18,10 +18,10 @@ impl ClockDriver {
         Self(state)
     }
 
-    /// Advances and fires timers that should execute by the given time.
+    /// Advances and fires all timers scheduled to execute by the given time.
     ///
-    /// This method processes all timers that are scheduled to fire at or before
-    /// the specified `now` time, executing their associated wakers.
+    /// This method processes all timers scheduled to fire at or before the
+    /// specified `now` time, waking their associated tasks.
     ///
     /// # Arguments
     ///

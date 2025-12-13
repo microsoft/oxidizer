@@ -24,7 +24,7 @@ use super::timers::TimerKey;
 /// precision of the timer other than that it will eventually tick. When the thread is healthy,
 /// the timer's period should be close to the specified one.
 ///
-/// > **Note**: The perdiodic timer is not affected by adjustements to the system clock.
+/// > **Note**: The periodic timer is not affected by adjustments to the system clock.
 ///
 /// # Examples
 ///

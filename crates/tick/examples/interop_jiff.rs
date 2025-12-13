@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This sample demonstrates interoperability between `tick` time and `jiff` time.
+//! This example demonstrates interoperability between `tick` and the `jiff` crate.
+//!
 //! In particular:
 //!
-//! - Converting Timestamp to `jiff::Timestamp`
-//! - Converting Timestamp to `jiff::Zoned`
+//! - Converting `SystemTime` to `jiff::Timestamp`
+//! - Converting `SystemTime` to `jiff::Zoned`
 
 use anyhow::Context;
 use jiff::Timestamp;
-use jiff::fmt::temporal::DateTimePrinter;
 use jiff::tz::TimeZone;
 use tick::Clock;
 
@@ -21,7 +21,6 @@ fn main() -> anyhow::Result<()> {
 
     // Retrieve the current time as `jiff::Timestamp`.
     let timestamp = clock.system_time_as::<Timestamp>();
-
     println!("Current time (UTC): {}", timestamp.strftime(JIFF_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo.
@@ -36,12 +35,8 @@ fn main() -> anyhow::Result<()> {
         zoned.strftime(JIFF_DISPLAY_FORMAT)
     );
 
-    // Temporal is a new pending standard that preserves time zone information.
-    // https://tc39.es/proposal-temporal/docs/index.html
-    let mut buff = String::new();
-    DateTimePrinter::new().print_zoned(&zoned, &mut buff)?;
-
-    println!("Current time in Temporal format: {buff}");
+    // The Display impl for Zoned outputs RFC 9557.
+    println!("Current time in RFC 9557 format: {}", zoned.to_string());
 
     Ok(())
 }

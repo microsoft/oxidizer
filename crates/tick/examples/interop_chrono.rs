@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This sample demonstrates interoperability between `tick` time and `chrono` time.
+//! This example demonstrates interoperability between `tick` and the `chrono` crate.
+//!
 //! In particular:
 //!
-//! - Conversion of Timestamp to `chrono::DateTime`<Utc>
-//! - Conversion of Timestamp to `chrono::DateTime`<Local>
+//! - Converting `SystemTime` to `chrono::DateTime<Utc>`
+//! - Converting `SystemTime` to `chrono::DateTime<Local>`
 
 use chrono::{DateTime, Local, Utc};
 use tick::Clock;
@@ -22,15 +23,14 @@ fn main() -> anyhow::Result<()> {
     println!("Current time (UTC): {}", timestamp.format(CHRONO_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo. We need to use
-    // the chrono_tz crate for timezone support.
+    // the chrono_tz crate for time zone support.
     let zoned = timestamp.with_timezone(&chrono_tz::Asia::Tokyo);
     println!("Current time (Asia/Tokyo): {}", zoned.format(CHRONO_DISPLAY_FORMAT));
 
-    // Convert the timestamp to date time in the current timezone.
-
+    // Convert the timestamp to date time in the current time zone.
     let zoned = timestamp.with_timezone(&Local);
 
-    // Retrieving the timezone name is not supported in chrono.
+    // Retrieving the time zone name is not supported in chrono.
     let tz = time_tz::system::get_timezone()?;
     println!("Current time ({}): {}", tz.name(), zoned.format(CHRONO_DISPLAY_FORMAT));
 

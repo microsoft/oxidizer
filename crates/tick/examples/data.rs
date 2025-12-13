@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to work with serializable data,
-//! especially for storing and retrieving timestamps.
+//! This example demonstrates how to integrate `SystemTime` with serializable data
+//! structures for storage and retrieval.
 
 use std::time::{Duration, SystemTime};
 
@@ -24,13 +24,13 @@ async fn main() -> anyhow::Result<()> {
     let mut cached_data: CachedData = serde_json::from_str(json)?;
 
     cached_data.update(String::from("Hello, Rust!"), &clock);
-    println!("Last access: {}", cached_data.last_access());
+    println!("Last access: {:?}", cached_data.last_access());
 
     Delay::new(&clock, Duration::from_secs(1)).await;
 
     cached_data.update(String::from("Hello again, Rust!"), &clock);
 
-    println!("Last access: {}", cached_data.last_access());
+    println!("Last access: {:?}", cached_data.last_access());
 
     let json = serde_json::to_string_pretty(&cached_data)?;
     println!("JSON:");
@@ -41,8 +41,8 @@ async fn main() -> anyhow::Result<()> {
 
 /// A data structure that caches information with timestamp tracking.
 ///
-/// This struct demonstrates how to work with serializable timestamps
-/// using the timestamp related types provided by the `tick` crate.
+/// This struct demonstrates how to work with serializable `SystemTime` values
+/// using the formatting types provided by the `tick` crate.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct CachedData {
     id: u32,

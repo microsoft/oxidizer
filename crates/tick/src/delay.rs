@@ -29,7 +29,7 @@ use super::timers::TimerKey;
 /// # async fn delay_example(clock: &Clock) {
 /// let stopwatch = Stopwatch::new(&clock);
 ///
-/// // Delay for 10 millis
+/// // Delay for 10 milliseconds
 /// Delay::new(&clock, Duration::from_millis(10)).await;
 ///
 /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
@@ -60,7 +60,7 @@ impl Delay {
     /// # async fn delay_example(clock: &Clock) {
     /// let stopwatch = Stopwatch::new(&clock);
     ///
-    /// // Delay for 10 millis
+    /// // Delay for 10 milliseconds
     /// Delay::new(&clock, Duration::from_millis(10)).await;
     ///
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));

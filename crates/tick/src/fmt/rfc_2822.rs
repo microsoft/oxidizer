@@ -3,19 +3,18 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
+use jiff::Timestamp;
 use jiff::fmt::rfc2822;
 
-use super::utils::from_jiff;
-use crate::fmt::Iso8601;
-use crate::fmt::utils::to_jiff;
-use crate::{Error, Timestamp};
+use crate::Error;
+use crate::fmt::{Iso8601, UnixSeconds};
 
 static RFC2822_PARSER: rfc2822::DateTimeParser = rfc2822::DateTimeParser::new();
 static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new();
 
-/// Parser and formatter for RFC 2822 timestamps, typically used in HTTP headers.
+/// Parser and formatter for system time in RFC 2822 format, typically used in HTTP headers.
 ///
 /// Examples:
 ///
@@ -27,13 +26,15 @@ static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new
 ///
 /// # UTC and time zones
 ///
-/// While RFC 2822 can include a UTC offset, the resulting [`Timestamp`] is always represented in the
+/// While RFC 2822 can include a UTC offset, the resulting [`Rfc2822`] is always represented in the
 /// UTC time zone with an offset of `GMT` (zero).
 ///
 /// # Serialization and deserialization
 ///
 /// `Rfc2822` implements the `Serialize` and `Deserialize` traits from the `serde` crate.
-/// The timestamp is serialized as a string using RFC 2822 format.
+/// The system time is serialized as a string using RFC 2822 format.
+///
+/// The serialization support is available when `serde` feature is enabled.
 ///
 /// # Leap seconds
 ///
@@ -42,52 +43,68 @@ static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new
 /// ```
 /// use tick::fmt::Rfc2822;
 ///
-/// let iso = "Mon, 31 Dec 1990 23:59:60 GMT".parse::<Rfc2822>()?;
-/// assert_eq!(iso.to_string(), "Mon, 31 Dec 1990 23:59:59 GMT");
+/// let rfc = "Mon, 31 Dec 1990 23:59:60 GMT".parse::<Rfc2822>()?;
+/// assert_eq!(rfc.to_string(), "Mon, 31 Dec 1990 23:59:59 GMT");
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
 /// # Examples
 ///
-/// ### Formatting and parsing - UTC
+/// ## Formatting and parsing - UTC
 /// ```
-/// use tick::Timestamp;
+/// use std::time::SystemTime;
+///
 /// use tick::fmt::Rfc2822;
 ///
 /// let rfc = "Tue, 06 Aug 2024 21:30:00 GMT".parse::<Rfc2822>()?;
 /// assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT");
 ///
-/// let timestamp: Timestamp = rfc.into();
-/// assert_eq!(Rfc2822::from(timestamp), rfc);
+/// let system_time: SystemTime = rfc.into();
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
 /// ### Formatting and parsing - With UTC offset
 ///
-/// This example demonstrates that the UTC offset is applied to the resulting [`Timestamp`].
+/// This example demonstrates that the UTC offset is applied to the resulting [`Rfc2822`].
 /// Note that when formatting the absolute time, the UTC offset is not included in the formatted string.
 /// ```
-/// use tick::Timestamp;
+/// use std::time::SystemTime;
+///
 /// use tick::fmt::Rfc2822;
 ///
 /// let rfc  = "Tue, 06 Aug 2024 14:30:00 -0700".parse::<Rfc2822>()?;
 /// assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT"); // Note that the UTC offset is applied
 ///
-/// let timestamp: Timestamp = rfc.into();
-/// assert_eq!(Rfc2822::from(timestamp), rfc);
+/// let system_time: SystemTime = rfc.into();
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Rfc2822(Timestamp);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Rfc2822(pub(super) Timestamp);
+
+impl Rfc2822 {
+    /// The maximum representable value of `Rfc2822`.
+    ///
+    /// This represents a Unix system time at `31 December 9999 23:59:59 UTC`.
+    pub const MAX: Rfc2822 = Rfc2822(Timestamp::MAX);
+
+    /// The minimum representable value of `Rfc2822`.
+    ///
+    /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
+    pub const MIN: Rfc2822 = Rfc2822(Timestamp::UNIX_EPOCH);
+
+    pub(super) fn to_unix_epoch_duration(self) -> Duration {
+        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
+    }
+}
 
 impl FromStr for Rfc2822 {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let timestamp = from_jiff(RFC2822_PARSER.parse_timestamp(s).map_err(Error::jiff)?)?;
+        let timestamp = RFC2822_PARSER.parse_timestamp(s).map_err(Error::jiff)?;
 
         Ok(Self(timestamp))
     }
@@ -100,36 +117,39 @@ impl FromStr for Rfc2822 {
 impl Display for Rfc2822 {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         RFC2822_PRINTER
-            .print_timestamp_rfc9110(&to_jiff(self.0), jiff::fmt::StdFmtWrite(f))
+            .print_timestamp_rfc9110(&self.0, jiff::fmt::StdFmtWrite(f))
             .map_err(|_| fmt::Error)
-    }
-}
-
-impl From<Rfc2822> for Timestamp {
-    fn from(value: Rfc2822) -> Self {
-        value.0
-    }
-}
-
-impl From<Timestamp> for Rfc2822 {
-    fn from(value: Timestamp) -> Self {
-        Self(value)
     }
 }
 
 impl From<Rfc2822> for SystemTime {
     fn from(value: Rfc2822) -> Self {
-        Timestamp::from(value).to_system_time()
+        value.0.into()
+    }
+}
+
+impl TryFrom<SystemTime> for Rfc2822 {
+    type Error = Error;
+
+    fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
+        let timestamp = Timestamp::try_from(value).map_err(|e| Error::jiff(e))?;
+        Ok(Self(timestamp))
     }
 }
 
 impl From<Iso8601> for Rfc2822 {
     fn from(value: Iso8601) -> Self {
-        Timestamp::from(value).into()
+        Self(value.0)
     }
 }
 
-#[cfg(feature = "serde")]
+impl From<UnixSeconds> for Rfc2822 {
+    fn from(value: UnixSeconds) -> Self {
+        Self(Timestamp::UNIX_EPOCH + value.0)
+    }
+}
+
+#[cfg(any(feature = "serde", test))]
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde_core::Serialize for Rfc2822 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -140,7 +160,7 @@ impl serde_core::Serialize for Rfc2822 {
     }
 }
 
-#[cfg(feature = "serde")]
+#[cfg(any(feature = "serde", test))]
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde_core::Deserialize<'de> for Rfc2822 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -156,8 +176,6 @@ impl<'de> serde_core::Deserialize<'de> for Rfc2822 {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
 
     #[test]
@@ -168,19 +186,19 @@ mod tests {
     #[test]
     fn parse_min() {
         let stamp: Rfc2822 = "Thu, 1 Jan 1970 00:00:00 GMT".parse().unwrap();
-        assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH);
+        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH);
     }
 
     #[test]
     fn to_system_time() {
         let stamp: Rfc2822 = "Thu, 1 Jan 1970 00:00:01 GMT".parse().unwrap();
-        assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
+        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
     }
 
     #[test]
     fn to_system_time_alternative_format() {
         let stamp: Rfc2822 = "Thu, 1 Jan 1970 00:00:01 -0000".parse().unwrap();
-        assert_eq!(stamp.0.to_system_time(), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
+        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
     }
 
     #[test]
@@ -189,10 +207,7 @@ mod tests {
 
         // Display should return the timestamp in the RFC 2822 format
         assert_eq!(stamp.to_string(), "Thu, 01 Jan 1970 01:00:00 GMT");
-        assert_eq!(
-            Timestamp::from(stamp),
-            Timestamp::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(3600)).unwrap()
-        );
+        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_secs(3600));
     }
 
     #[test]
@@ -200,11 +215,7 @@ mod tests {
         let stamp: Rfc2822 = "Tue, 29 Feb 2000 01:00:00 GMT".parse().unwrap();
         assert_eq!(stamp.to_string(), "Tue, 29 Feb 2000 01:00:00 GMT");
 
-        let secs = Timestamp::from(stamp)
-            .to_system_time()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let secs = SystemTime::from(stamp).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
         assert_eq!(secs, 951_786_000);
     }
 
@@ -217,16 +228,6 @@ mod tests {
     #[test]
     fn parse_max_overflow() {
         "Thu, 30 Dec 10000 22:00:00 GMT".parse::<Rfc2822>().unwrap_err();
-    }
-
-    #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.
-    #[test]
-    fn from_to() {
-        let now = crate::Clock::with_frozen_timers().timestamp();
-        let iso: Rfc2822 = now.into();
-        let timestamp: Timestamp = iso.into();
-
-        assert_eq!(timestamp, now);
     }
 
     #[test]

@@ -53,9 +53,10 @@ criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
 jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
-serde = { workspace = true, features = ["std"], default-features = false }
+serde_core = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true }
-static_assertions = { workspace = true }
+static_assertions.workspace = true
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 time-tz = { workspace = true, features = ["system"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }

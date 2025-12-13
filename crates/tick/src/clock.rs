@@ -14,7 +14,7 @@ use crate::timers::TimerKey;
 /// Provides an abstraction for time-related operations.
 ///
 /// Working with time is notoriously difficult to test and control. The clock enables time control in tests
-/// while providing zero cost overhead in production. When running with the `test-util` feature enabled, the clock
+/// while providing zero-cost overhead in production. When the `test-util` feature is enabled, the clock
 /// provides additional functionality to control the passage of time. This makes tests faster and more reliable.
 /// See the [Testing](#testing) section for more information.
 ///
@@ -29,20 +29,16 @@ use crate::timers::TimerKey;
 ///
 /// The clock provides two types of time representation:
 ///
-/// - [`Stopwatch`][super::Stopwatch]: Representation of relative time that is monotonic. This is useful for measuring
-///   elapsed time. The use of relative time is recommended when a point in time does not cross process boundaries.
-/// - Absolute time: Represents an absolute point in time in UTC. The clock provides absolute time through two types:
-///   - [`SystemTime`]: The standard library type for absolute time. Use this when you need
-///     basic absolute time support or need to interoperate with other crates using `SystemTime`.
-///   - [`Timestamp`][crate::Timestamp] (optional, requires `timestamp` feature): An enhanced absolute time type that provides additional
-///     formatting and parsing capabilities, serialization support, and the ability to send time information across
-///     process boundaries. It can be converted to and from `SystemTime` as needed.
+/// - [`Stopwatch`][super::Stopwatch]: Represents relative time that is monotonic. Useful for measuring
+///   elapsed time. Prefer relative time when a point in time does not cross process boundaries.
+/// - Absolute time: Represents an absolute point in time in UTC via [`SystemTime`]. Use this when you need
+///   absolute time support or need to interoperate with other crates using `SystemTime`. With the `fmt` feature
+///   enabled, you can format `SystemTime` into different formats.
 ///
-/// Both absolute time representations are not monotonic and can be affected by system clock changes.
+/// Absolute time is not monotonic and can be affected by system clock changes.
 ///
 /// When possible, always prefer [`Stopwatch`][super::Stopwatch] over absolute time due to its monotonic properties.
-/// For scenarios where you need absolute time, use [`system_time()`][Self::system_time] for basic needs, or
-/// [`timestamp()`][Self::timestamp] when you need formatting, serialization, or cross-process capabilities.
+/// For scenarios where you need absolute time, use [`system_time()`][Self::system_time].
 ///
 /// # Clock construction
 ///
@@ -68,7 +64,7 @@ use crate::timers::TimerKey;
 ///
 /// # Cloning
 ///
-/// Cloning a clock is very cheap (just an `Arc` clone) and will not cause performance bottlenecks.
+/// Cloning a clock is inexpensive (just an `Arc` clone) and will not cause performance bottlenecks.
 /// Cloned clocks share the same underlying state, including registered timers and, in tests, the
 /// controlled passage of time.
 ///
@@ -110,20 +106,6 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 ///
-/// With the `timestamp` feature enabled:
-///
-/// ```
-/// use tick::Clock;
-///
-/// # fn retrieve_timestamp(clock: &Clock) {
-/// // Using Timestamp for formatting, serialization, and cross-process scenarios
-/// let timestamp1 = clock.timestamp();
-/// let timestamp2 = clock.timestamp();
-///
-/// assert!(timestamp2 >= timestamp1);
-/// # }
-/// ```
-///
 /// ### Measure elapsed time
 ///
 /// ```
@@ -148,7 +130,7 @@ use crate::timers::TimerKey;
 /// # async fn delay_example(clock: &Clock) {
 /// let stopwatch = Stopwatch::new(&clock);
 ///
-/// // Delay for 10 millis
+/// // Delay for 10 milliseconds
 /// Delay::new(&clock, Duration::from_millis(10)).await;
 ///
 /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
@@ -191,8 +173,6 @@ impl Clock {
     #[cfg(any(feature = "tokio", test))]
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     fn tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
-        use std::time::Duration;
-
         use crate::runtime::InactiveClock;
 
         /// How often the Tokio clock driver advances timers.
@@ -245,11 +225,11 @@ impl Clock {
 
     /// Creates a new frozen clock.
     ///
-    /// This is a convenience function for creating a clock that's equivalent to calling `ClockControl::new().to_clock()`.
+    /// This is a convenience method equivalent to calling `ClockControl::new().to_clock()`.
     ///
     /// > **Note**: The returned clock will not advance time; all time and timers are frozen.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use std::thread::sleep;
@@ -260,12 +240,12 @@ impl Clock {
     /// let clock = Clock::new_frozen();
     ///
     /// // The clock will always return the same timestamp and instant.
-    /// let timestamp = clock.timestamp();
+    /// let system_time = clock.system_time();
     /// let instance = clock.instant();
     ///
     /// sleep(Duration::from_micros(1));
     ///
-    /// assert_eq!(timestamp, clock.timestamp());
+    /// assert_eq!(system_time, clock.system_time());
     /// assert_eq!(instance, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
@@ -277,11 +257,11 @@ impl Clock {
 
     /// Creates a new frozen clock at the specified timestamp.
     ///
-    /// This is a convenience function for creating a clock that's equivalent to calling `ClockControl::new_at(time).to_clock()`.
+    /// This is a convenience method equivalent to calling `ClockControl::new_at(time).to_clock()`.
     ///
     /// > **Note**: The returned clock will not advance time; all time and timers are frozen at the specified timestamp.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use std::time::{Duration, SystemTime};
@@ -292,11 +272,10 @@ impl Clock {
     /// let clock = Clock::new_frozen_at(specific_time);
     ///
     /// // The clock will always return the same timestamp and instant.
-    /// let timestamp = clock.timestamp();
     /// let system_time = clock.system_time();
     ///
     /// assert_eq!(system_time, specific_time);
-    /// assert_eq!(timestamp, clock.timestamp());
+    /// assert_eq!(system_time, clock.system_time());
     /// ```
     #[cfg(any(feature = "test-util", test))]
     #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
@@ -305,15 +284,7 @@ impl Clock {
         crate::ClockControl::new_at(time).to_clock()
     }
 
-    /// Retrieves the current absolute time as [`SystemTime`].
-    ///
-    /// This method provides the standard library's representation of absolute time. Use this when:
-    /// - You need basic absolute time functionality
-    /// - You need to interoperate with other crates using `SystemTime`
-    /// - You don't need formatting, parsing, or serialization capabilities
-    ///
-    /// For enhanced absolute time capabilities including formatting, parsing, and serialization support,
-    /// use [`timestamp()`][Self::timestamp] instead (requires the `timestamp` feature).
+    /// Retrieves the current system time as [`SystemTime`].
     ///
     /// > **Note**: The system time is not monotonic and can be affected by system clock changes.
     /// > When the system clock changes, the current time may be older than a previously retrieved one.
@@ -352,18 +323,18 @@ impl Clock {
     ///
     /// # Panics
     ///
-    /// While this method uses [`TryFrom`] (a fallible conversion), it might panic on conversion failure.
+    /// While this method uses [`TryFrom`] (a fallible conversion), it may panic on conversion failure.
     ///
     /// In practice, this conversion always succeeds because:
     ///
     /// - The system time returned is always within a normalized range in real environments.
-    /// - Target types that implement `TryFrom<SystemTime>` support the full valid
+    /// - Target types that implement `TryFrom<SystemTime>` typically support the full valid
     ///   range of system time values.
     ///
     /// The only theoretical failure case is in tests using manual time control (via the
     /// `test-util` feature), where time could be moved excessively far into the future,
     /// potentially exceeding the target type's representable range. This is not a concern
-    /// in production environments.
+    /// in production.
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         match T::try_from(self.system_time()) {
@@ -379,7 +350,7 @@ impl Clock {
 
     /// Retrieves the current [`Instant`] time.
     ///
-    /// The `Instant` represents a monotonic time point guaranteed to always be increasing.
+    /// An `Instant` represents a monotonic time point guaranteed to always increase.
     /// Unlike [`system_time`][Self::system_time], the instant is not affected by system clock
     /// changes and provides a stable reference point for measuring elapsed time.
     ///
@@ -429,7 +400,7 @@ impl Clock {
     /// # async fn delay_example(clock: &Clock) {
     /// let stopwatch = Stopwatch::new(&clock);
     ///
-    /// // Delay for 10 millis
+    /// // Delay for 10 milliseconds
     /// clock.delay(Duration::from_millis(10)).await;
     ///
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
@@ -438,6 +409,31 @@ impl Clock {
     #[must_use]
     pub fn delay(&self, duration: Duration) -> crate::Delay {
         crate::Delay::new(self, duration)
+    }
+
+    /// Creates a new [`Stopwatch`][crate::Stopwatch] that starts measuring elapsed time.
+    ///
+    /// This is a convenience method that calls [`Stopwatch::new`][crate::Stopwatch::new].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::Clock;
+    ///
+    /// # async fn stopwatch_example(clock: &Clock) {
+    /// let stopwatch = clock.stopwatch();
+    ///
+    /// // Perform some operation...
+    /// clock.delay(Duration::from_millis(10)).await;
+    ///
+    /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn stopwatch(&self) -> crate::Stopwatch {
+        crate::Stopwatch::new(self)
     }
 
     pub(super) fn register_timer(&self, when: Instant, waker: Waker) -> TimerKey {

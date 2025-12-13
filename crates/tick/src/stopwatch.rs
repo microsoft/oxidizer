@@ -19,7 +19,7 @@ use super::Clock;
 ///
 /// # fn measure(clock: &Clock) -> Duration {
 /// let stopwatch = Stopwatch::new(clock);
-/// // Perform some operations ...
+/// // Perform some operation...
 /// stopwatch.elapsed()
 /// # }
 /// ```

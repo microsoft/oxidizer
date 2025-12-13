@@ -5,7 +5,7 @@ use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::{ClockState, GlobalState};
 
-/// Inactive clock that must be activated before time operations.
+/// An inactive clock that must be activated before time operations can be performed.
 ///
 /// This type represents a clock in an inactive state that cannot perform any time-related
 /// operations until activated. It can be safely cloned and moved across threads, making it
@@ -13,7 +13,7 @@ use crate::state::{ClockState, GlobalState};
 ///
 /// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
 /// its associated [`ClockDriver`]. The driver is responsible for advancing timers and must
-/// be polled periodically by the caller.
+/// be called periodically by the runtime.
 ///
 /// # Examples
 ///
@@ -30,11 +30,11 @@ use crate::state::{ClockState, GlobalState};
 /// // driver.advance_timers();
 /// ```
 ///
-/// # Single-threaded runtimes
+/// # Thread-per-core runtimes
 ///
-/// Single-threaded runtimes can activate separate clock instances per thread by cloning
+/// Thread-per-core runtimes can activate separate clock instances per thread by cloning
 /// the [`InactiveClock`] before activation. This eliminates lock contention and improves
-/// performance in thread-per-core scenarios.
+/// performance.
 #[derive(Debug, Clone, Default)]
 pub struct InactiveClock(GlobalState);
 
@@ -42,7 +42,7 @@ impl InactiveClock {
     /// Activates the clock for time operations.
     ///
     /// Consumes this inactive clock and returns a working [`Clock`] instance along with
-    /// its [`ClockDriver`]. The driver must be polled periodically to advance timers.
+    /// its [`ClockDriver`]. The driver must be called periodically to advance timers.
     ///
     /// # Returns
     ///
