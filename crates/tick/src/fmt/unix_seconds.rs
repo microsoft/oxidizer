@@ -87,15 +87,9 @@ impl UnixSeconds {
     /// assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(10));
     /// ```
     pub fn from_secs(seconds: u64) -> Result<Self, Error> {
-        let duration = Duration::from_secs(seconds);
-
-        if duration > Self::MAX.0 {
-            return Err(Error::out_of_range(
-                "the `seconds` is greater than the maximum value that can be represented by `UnixSeconds`",
-            ));
-        }
-
-        Ok(Self(Duration::from_secs(seconds)))
+        Self::try_from(Duration::from_secs(seconds)).map_err(|_error| {
+            Error::out_of_range("the `seconds` is greater than the maximum value that can be represented by `UnixSeconds`")
+        })
     }
 
     /// Returns the number of whole seconds since the Unix epoch.
@@ -144,11 +138,7 @@ impl TryFrom<SystemTime> for UnixSeconds {
     type Error = crate::Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let duration = value.duration_since(SystemTime::UNIX_EPOCH).map_err(|_error| {
-            Error::out_of_range("the provided `SystemTime` is out of range and cannot be represented as `UnixSeconds`")
-        })?;
-
-        Self::try_from(duration)
+        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO))
     }
 }
 
@@ -304,5 +294,11 @@ mod tests {
 
         let iso: Iso8601 = UnixSeconds::MIN.into();
         assert_eq!(iso, Iso8601::MIN);
+    }
+
+    #[test]
+    fn try_from_max_ensure_accepted() {
+        let unix_seconds = UnixSeconds::try_from(UnixSeconds::MAX.0).unwrap();
+        assert_eq!(unix_seconds, UnixSeconds::MAX);
     }
 }
