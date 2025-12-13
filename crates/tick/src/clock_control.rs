@@ -11,7 +11,7 @@ use crate::timers::{TimerKey, Timers};
 /// Controls the passage of time in tests.
 ///
 /// This is useful for testing time-sensitive code without having to wait for real time to pass.
-/// `ClockControl` is available when the `test-util` feature is enabled.
+/// [`ClockControl`] is available when the `test-util` feature is enabled.
 ///
 /// To create a [`Clock`] from `ClockControl`, use the [`ClockControl::to_clock`] method.
 ///
@@ -57,7 +57,7 @@ use crate::timers::{TimerKey, Timers};
 ///
 /// # Production code and `ClockControl`
 ///
-/// You should never enable the `test-util` feature or use `ClockControl` in production code.
+/// You should **never** enable the `test-util` feature or use [`ClockControl`] in production code.
 /// When the `test-util` feature is enabled, extra code is compiled into the binary to support
 /// testing scenarios. This extra code hampers performance when running in production.
 ///

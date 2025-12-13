@@ -60,7 +60,7 @@ use crate::timers::TimerKey;
 ///
 /// The ability to jump forward in time makes tests faster, more reliable and gives you complete control over the passage of time.
 /// By default, the clock does not allow you to control the passage of time. However, when the `test-util` feature is enabled,
-/// this crate provides a `ClockControl` type that can be used to control time.
+/// this crate provides a [`ClockControl`] type that can be used to control time.
 ///
 /// # Cloning
 ///
