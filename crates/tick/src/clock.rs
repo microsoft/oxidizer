@@ -595,7 +595,7 @@ mod tests {
     #[tokio::test]
     async fn tokio_ensure_timers_advancing() {
         let clock = Clock::new_tokio();
-        crate::Delay::new(&clock, Duration::from_millis(15)).await;
+        clock.delay(Duration::from_millis(15)).await;
     }
 
     #[cfg(not(miri))] // The logic we call talks to the real OS, which Miri cannot do.
@@ -603,7 +603,7 @@ mod tests {
     async fn tokio_ensure_future_finished_when_clock_dropped() {
         let (clock, handle) = Clock::tokio_core();
 
-        crate::Delay::new(&clock, Duration::from_millis(15)).await;
+        clock.delay(Duration::from_millis(15)).await;
 
         drop(clock);
 

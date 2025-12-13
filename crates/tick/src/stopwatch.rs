@@ -7,18 +7,18 @@ use super::Clock;
 
 /// A stopwatch that facilitates the measurement of elapsed time.
 ///
-/// An instance of `Stopwatch` is created by passing a [`Clock`] to the [`Stopwatch::new`]
-/// constructor.
+/// An instance of `Stopwatch` is created by calling [`Clock::stopwatch`] or by passing
+/// a [`Clock`] to the [`Stopwatch::new`] constructor.
 ///
 /// # Examples
 ///
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, Stopwatch};
+/// use tick::Clock;
 ///
 /// # fn measure(clock: &Clock) -> Duration {
-/// let stopwatch = Stopwatch::new(clock);
+/// let stopwatch = clock.stopwatch();
 /// // Perform some operation...
 /// stopwatch.elapsed()
 /// # }
@@ -36,6 +36,22 @@ enum StopwatchRepr {
 
 impl Stopwatch {
     /// Creates a high-accuracy stopwatch that measures elapsed time.
+    ///
+    /// > **Note**: Consider using [`Clock::stopwatch`] as a shortcut for creating stopwatches.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::{Clock, Stopwatch};
+    ///
+    /// # fn measure(clock: &Clock) -> Duration {
+    /// let stopwatch = Stopwatch::new(clock);
+    /// // Perform some operation...
+    /// stopwatch.elapsed()
+    /// # }
+    /// ```
     #[cfg_attr(
         not(any(feature = "test-util", test)),
         expect(unused_variables, reason = "intentionally not using self-references if test-util is disabled")
@@ -97,7 +113,7 @@ mod test {
     #[test]
     fn test_stopwatch() {
         let clock = Clock::with_frozen_timers();
-        let watch = Stopwatch::new(&clock);
+        let watch = clock.stopwatch();
 
         sleep(Duration::from_millis(1));
 
@@ -110,7 +126,7 @@ mod test {
         let control = ClockControl::new();
         let clock = control.to_clock();
 
-        let watch = Stopwatch::new(&clock);
+        let watch = clock.stopwatch();
         sleep(Duration::from_millis(1));
         assert_eq!(watch.elapsed(), Duration::ZERO);
 
@@ -121,7 +137,7 @@ mod test {
     #[test]
     fn test_stopwatch_into_instance() {
         let clock = Clock::new_frozen();
-        let watch = Stopwatch::new(&clock);
+        let watch = clock.stopwatch();
 
         let instant: Instant = watch.into();
         assert_eq!(instant, clock.instant());
@@ -131,7 +147,7 @@ mod test {
     fn test_stopwatch_into_duration() {
         let control = ClockControl::new();
         let clock = control.to_clock();
-        let watch = Stopwatch::new(&clock);
+        let watch = clock.stopwatch();
         control.advance(Duration::from_secs(1));
 
         let duration: Duration = watch.into();

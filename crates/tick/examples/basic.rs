@@ -5,8 +5,8 @@
 
 use std::time::Duration;
 
+use tick::Clock;
 use tick::fmt::{Iso8601, Rfc2822};
-use tick::{Clock, Delay, Stopwatch};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,10 +14,10 @@ async fn main() -> anyhow::Result<()> {
     let clock = Clock::new_tokio();
 
     // Use a stopwatch to measure elapsed time.
-    let stopwatch = Stopwatch::new(&clock);
+    let stopwatch = clock.stopwatch();
 
     // Delay for 2 seconds.
-    Delay::new(&clock, Duration::from_secs(2)).await;
+    clock.delay(Duration::from_secs(2)).await;
     println!("Elapsed time: {}ms", stopwatch.elapsed().as_millis());
 
     // Retrieve the current time.
@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Current time (RFC 2822): {rfc}");
 
     // Calculate the duration between two times.
-    Delay::new(&clock, Duration::from_secs(1)).await;
+    clock.delay(Duration::from_secs(1)).await;
 
     let new_time = clock.system_time();
 

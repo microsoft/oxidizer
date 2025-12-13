@@ -54,11 +54,11 @@ use super::timers::TimerKey;
 /// use std::time::Duration;
 ///
 /// use futures::StreamExt;
-/// use tick::{Clock, Delay, PeriodicTimer, Stopwatch};
+/// use tick::{Clock, PeriodicTimer};
 ///
 /// # async fn periodic_timer_example(clock: &Clock) {
 /// // Delay for 10ms before the timer starts ticking
-/// Delay::new(clock, Duration::from_millis(10)).await;
+/// clock.delay(Duration::from_millis(10)).await;
 ///
 /// let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 ///

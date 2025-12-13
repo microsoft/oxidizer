@@ -212,7 +212,7 @@ impl ClockControl {
     /// ```
     /// use std::time::Duration;
     ///
-    /// use tick::{Clock, ClockControl, Delay, FutureExt};
+    /// use tick::{ClockControl, FutureExt};
     ///
     /// # async fn auto_advance_limit_example() {
     /// // Limit the max auto-advance to 500ms. The 700ms delay never completes because
@@ -222,11 +222,9 @@ impl ClockControl {
     ///     .auto_advance_limit(Duration::from_millis(500))
     ///     .to_clock();
     ///
-    /// // Create a long-running future
-    /// let future = Delay::new(&clock, Duration::from_millis(700));
-    ///
-    /// // Apply a timeout to the future and await it
-    /// let timeout_error = future
+    /// // Create a long-running future and apply a timeout
+    /// let timeout_error = clock
+    ///     .delay(Duration::from_millis(700))
     ///     .timeout(&clock, Duration::from_millis(200))
     ///     .await
     ///     .unwrap_err();
@@ -523,7 +521,6 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Stopwatch;
     use crate::fmt::UnixSeconds;
 
     #[test]
@@ -551,7 +548,7 @@ mod tests {
         let now = clock.system_time();
         assert_eq!(clock.system_time().duration_since(now).unwrap(), duration);
 
-        let watch = Stopwatch::new(&clock);
+        let watch = clock.stopwatch();
         assert_eq!(watch.elapsed(), duration);
     }
 

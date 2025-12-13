@@ -213,16 +213,6 @@
 //! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
 //!   various formats (e.g., ISO 8601, RFC 2822).
 //!
-//! ## Example `Cargo.toml`
-//!
-//! ```toml
-//! [dependencies]
-//! tick = { version = "*", features = ["tokio", "fmt"] }
-//!
-//! [dev-dependencies]
-//! tick = { version = "*", features = ["test-util"] }
-//! ```
-//!
 //! # Additional Examples
 //!
 //! The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)

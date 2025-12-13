@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use futures::executor::block_on;
-use tick::{ClockControl, Delay, Stopwatch};
+use tick::ClockControl;
 
 fn main() {
     let control = ClockControl::new().auto_advance_timers(true);
@@ -30,7 +30,7 @@ fn main() {
     assert_eq!(clock.system_time().duration_since(later).unwrap(), Duration::from_secs(1));
 
     // Create a stopwatch.
-    let stopwatch = Stopwatch::new(&clock);
+    let stopwatch = clock.stopwatch();
 
     // Notice that time does not move on its own.
     assert_eq!(stopwatch.elapsed(), Duration::from_secs(0));
@@ -41,8 +41,6 @@ fn main() {
 
     // Delay for 1000 seconds. The clock automatically advances to complete this timer
     // because `auto_advance_timers` is set to true.
-    let delay = Delay::new(&clock, Duration::from_secs(1000));
-
     // The delay finishes immediately.
-    block_on(delay);
+    block_on(clock.delay(Duration::from_secs(1000)));
 }

@@ -6,8 +6,8 @@
 
 use std::time::{Duration, SystemTime};
 
+use tick::Clock;
 use tick::fmt::UnixSeconds;
-use tick::{Clock, Delay};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     cached_data.update(String::from("Hello, Rust!"), &clock);
     println!("Last access: {:?}", cached_data.last_access());
 
-    Delay::new(&clock, Duration::from_secs(1)).await;
+    clock.delay(Duration::from_secs(1)).await;
 
     cached_data.update(String::from("Hello again, Rust!"), &clock);
 

@@ -17,14 +17,12 @@ pub trait FutureExt: Future {
     /// ```
     /// use std::time::Duration;
     ///
-    /// use tick::{Clock, Delay, FutureExt};
+    /// use tick::{Clock, FutureExt};
     ///
     /// # async fn timeout_example(clock: &Clock) {
-    /// // Create a long-running future
-    /// let future = Delay::new(&clock, Duration::from_millis(700));
-    ///
-    /// // Apply a timeout to the future and await it
-    /// let timeout_error = future
+    /// // Create a long-running future and apply a timeout
+    /// let timeout_error = clock
+    ///     .delay(Duration::from_millis(700))
     ///     .timeout(&clock, Duration::from_millis(200))
     ///     .await
     ///     .unwrap_err();
@@ -60,8 +58,7 @@ mod tests {
 
         let clock = control.to_clock();
 
-        let future = Delay::new(&clock, Duration::from_secs(10));
-        let mut future = future.timeout(&clock, Duration::from_secs(1));
+        let mut future = clock.delay(Duration::from_secs(10)).timeout(&clock, Duration::from_secs(1));
 
         // First poll at 0 seconds - no timeout yet.
         let mut cx = task::Context::from_waker(task::Waker::noop());
@@ -84,7 +81,7 @@ mod tests {
         let clock = Clock::new_tokio();
 
         let future = async {
-            Delay::new(&clock, Duration::from_secs(10)).await;
+            clock.delay(Duration::from_secs(10)).await;
         };
 
         let error = future.timeout(&clock, Duration::from_millis(10)).await.unwrap_err();
@@ -98,7 +95,7 @@ mod tests {
         let clock = Clock::new_tokio();
 
         let future = async {
-            Delay::new(&clock, Duration::from_millis(1)).await;
+            clock.delay(Duration::from_millis(1)).await;
             10
         };
 

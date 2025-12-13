@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use tick::{Clock, Delay, FutureExt, PeriodicTimer, Stopwatch, fmt::Iso8601};
+use tick::{Clock, FutureExt, PeriodicTimer, fmt::Iso8601};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,10 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .await;
 
     // Apply a timeout to long operations.
-    match Delay::new(&clock, Duration::from_secs(30))
-        .timeout(&clock, Duration::from_secs(2))
-        .await
-    {
+    match clock.delay(Duration::from_secs(30)).timeout(&clock, Duration::from_secs(2)).await {
         Ok(()) => println!("Background job completed within the timeout."),
         Err(error) => println!("Background job timed out. Error: {error}"),
     }
@@ -54,10 +51,10 @@ impl MyApi {
 
     pub async fn do_something(&self) {
         // Start the measurement.
-        let watch = Stopwatch::new(&self.clock);
+        let watch = self.clock.stopwatch();
 
         // Simulate some work with a delay.
-        Delay::new(&self.clock, Duration::from_millis(10)).await;
+        self.clock.delay(Duration::from_millis(10)).await;
 
         println!(
             "Work done. Elapsed: {}ms, Timestamp: {}",

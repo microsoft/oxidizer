@@ -24,13 +24,13 @@ use super::timers::TimerKey;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, Delay, Stopwatch};
+/// use tick::{Clock, Delay};
 ///
 /// # async fn delay_example(clock: &Clock) {
-/// let stopwatch = Stopwatch::new(&clock);
+/// let stopwatch = clock.stopwatch();
 ///
 /// // Delay for 10 milliseconds
-/// Delay::new(&clock, Duration::from_millis(10)).await;
+/// clock.delay(Duration::from_millis(10)).await;
 ///
 /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
 /// # }
@@ -50,18 +50,20 @@ impl Delay {
     /// If the duration is [`Duration::ZERO`], the delay completes immediately.
     /// If the duration is [`Duration::MAX`], the delay never completes.
     ///
+    /// > **Note**: Consider using [`Clock::delay`] as a shortcut for creating delays.
+    ///
     /// # Examples
     ///
     /// ```
     /// use std::time::Duration;
     ///
-    /// use tick::{Clock, Delay, Stopwatch};
+    /// use tick::{Clock, Delay};
     ///
     /// # async fn delay_example(clock: &Clock) {
-    /// let stopwatch = Stopwatch::new(&clock);
+    /// let stopwatch = clock.stopwatch();
     ///
     /// // Delay for 10 milliseconds
-    /// Delay::new(&clock, Duration::from_millis(10)).await;
+    /// Delay::new(clock, Duration::from_millis(10)).await;
     ///
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
     /// # }
