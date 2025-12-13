@@ -119,4 +119,43 @@ mod tests {
         rfc: Rfc2822,
         unix: UnixSeconds,
     }
+
+    #[test]
+    fn min_values_are_aligned() {
+        // All MIN values should represent Unix epoch (1 January 1970 00:00:00 UTC)
+        let iso_min: SystemTime = Iso8601::MIN.into();
+        let rfc_min: SystemTime = Rfc2822::MIN.into();
+        let unix_min: SystemTime = UnixSeconds::MIN.into();
+
+        assert_eq!(iso_min, SystemTime::UNIX_EPOCH, "Iso8601::MIN should be Unix epoch");
+        assert_eq!(rfc_min, SystemTime::UNIX_EPOCH, "Rfc2822::MIN should be Unix epoch");
+        assert_eq!(unix_min, SystemTime::UNIX_EPOCH, "UnixSeconds::MIN should be Unix epoch");
+
+        // Cross-format conversions at MIN should preserve the value
+        assert_eq!(Iso8601::from(Rfc2822::MIN), Iso8601::MIN);
+        assert_eq!(Iso8601::from(UnixSeconds::MIN), Iso8601::MIN);
+        assert_eq!(Rfc2822::from(Iso8601::MIN), Rfc2822::MIN);
+        assert_eq!(Rfc2822::from(UnixSeconds::MIN), Rfc2822::MIN);
+        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
+        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
+    }
+
+    #[test]
+    fn max_values_are_aligned() {
+        // All MAX values should represent 31 December 9999 23:59:59 UTC
+        let iso_max: SystemTime = Iso8601::MAX.into();
+        let rfc_max: SystemTime = Rfc2822::MAX.into();
+        let unix_max: SystemTime = UnixSeconds::MAX.into();
+
+        assert_eq!(iso_max, rfc_max, "Iso8601::MAX and Rfc2822::MAX should be equal");
+        assert_eq!(iso_max, unix_max, "Iso8601::MAX and UnixSeconds::MAX should be equal");
+
+        // Cross-format conversions at MAX should preserve the value
+        assert_eq!(Iso8601::from(Rfc2822::MAX), Iso8601::MAX);
+        assert_eq!(Iso8601::from(UnixSeconds::MAX), Iso8601::MAX);
+        assert_eq!(Rfc2822::from(Iso8601::MAX), Rfc2822::MAX);
+        assert_eq!(Rfc2822::from(UnixSeconds::MAX), Rfc2822::MAX);
+        assert_eq!(UnixSeconds::from(Iso8601::MAX), UnixSeconds::MAX);
+        assert_eq!(UnixSeconds::from(Rfc2822::MAX), UnixSeconds::MAX);
+    }
 }

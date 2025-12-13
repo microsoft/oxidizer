@@ -3,7 +3,6 @@
 These examples demonstrate the features and capabilities of `tick` primitives:
 
 - [Basic](basic.rs): Quick introduction to time primitives.
-- [Basic Tokio](basic_tokio.rs): Basic usage of `Clock` with the Tokio runtime.
 - [Clock](clock.rs): More examples of how to use the `Clock` type, `Stopwatch`, and `Timer`.
 - [Data](data.rs): Demonstrates how to integrate `SystemTime` with serializable data.
 - [Interop Jiff](interop_jiff.rs): Showcases interoperability with the [jiff](https://docs.rs/jiff) crate, including formatting timestamps into time-zone-aware date-times.
