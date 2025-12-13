@@ -111,10 +111,10 @@ use crate::timers::TimerKey;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, Stopwatch};
+/// use tick::Clock;
 ///
 /// # fn measure(clock: &Clock) {
-/// let stopwatch = Stopwatch::new(&clock);
+/// let stopwatch = clock.stopwatch();
 /// // Perform some operation...
 /// let elapsed: Duration = stopwatch.elapsed();
 /// # }
@@ -125,13 +125,13 @@ use crate::timers::TimerKey;
 /// ```
 /// use std::time::Duration;
 ///
-/// use tick::{Clock, Delay, Stopwatch};
+/// use tick::Clock;
 ///
 /// # async fn delay_example(clock: &Clock) {
-/// let stopwatch = Stopwatch::new(&clock);
+/// let stopwatch = clock.stopwatch();
 ///
 /// // Delay for 10 milliseconds
-/// Delay::new(&clock, Duration::from_millis(10)).await;
+/// clock.delay(Duration::from_millis(10)).await;
 ///
 /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
 /// # }
@@ -400,10 +400,10 @@ impl Clock {
     /// ```
     /// use std::time::Duration;
     ///
-    /// use tick::{Clock, Stopwatch};
+    /// use tick::Clock;
     ///
     /// # async fn delay_example(clock: &Clock) {
-    /// let stopwatch = Stopwatch::new(&clock);
+    /// let stopwatch = clock.stopwatch();
     ///
     /// // Delay for 10 milliseconds
     /// clock.delay(Duration::from_millis(10)).await;

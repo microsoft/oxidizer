@@ -141,15 +141,37 @@
 //! # }
 //! ```
 //!
+//! ## Use `Clock` to retrieve relative time
+//!
+//! The clock provides relative time via [`Clock::instant`] and [`Stopwatch`].
+//!
+//! ```
+//! use std::time::{Duration, Instant};
+//!
+//! use tick::Clock;
+//!
+//! # fn retrieve_relative_time(clock: &Clock) {
+//! // Using clock.stopwatch() for convenient elapsed time measurement
+//! let stopwatch = clock.stopwatch();
+//! // Perform some operation...
+//! let elapsed: Duration = stopwatch.elapsed();
+//!
+//! // Using Clock::instant for lower-level access to monotonic time
+//! let start: Instant = clock.instant();
+//! // Perform some operation...
+//! let end: Instant = clock.instant();
+//! # }
+//! ```
+//!
 //! ## Use `Stopwatch` for measurements
 //!
 //! ```
 //! use std::time::Duration;
 //!
-//! use tick::{Clock, Stopwatch};
+//! use tick::Clock;
 //!
 //! # fn measure(clock: &Clock) -> Duration {
-//! let stopwatch = Stopwatch::new(clock);
+//! let stopwatch = clock.stopwatch();
 //! // Perform some operation...
 //! stopwatch.elapsed()
 //! # }
@@ -161,11 +183,11 @@
 //! use std::time::Duration;
 //!
 //! use futures::StreamExt;
-//! use tick::{Clock, Delay, PeriodicTimer, Stopwatch};
+//! use tick::{Clock, PeriodicTimer};
 //!
 //! # async fn periodic_timer_example(clock: &Clock) {
 //! // Delay for 10ms before the timer starts ticking
-//! Delay::new(clock, Duration::from_millis(10)).await;
+//! clock.delay(Duration::from_millis(10)).await;
 //!
 //! let timer = PeriodicTimer::new(clock, Duration::from_millis(1));
 //!
