@@ -14,3 +14,4 @@ Please see each crate's change log below:
 - [`thread_aware`](./crates/thread_aware/CHANGELOG.md)
 - [`thread_aware_macros`](./crates/thread_aware_macros/CHANGELOG.md)
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/CHANGELOG.md)
+- [`tick`](./crates/tick/CHANGELOG.md)
