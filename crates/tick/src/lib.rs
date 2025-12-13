@@ -7,7 +7,7 @@
     test,
     allow(
         clippy::arithmetic_side_effects,
-        clippy::unchecked_time_subtraction,
+        clippy::unchecked_duration_subtraction,
         reason = "allow these lints in tests to improve the readability of the tests"
     )
 )]
@@ -231,7 +231,6 @@ pub use clock_control::ClockControl;
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
-#[cfg(any(feature = "test-util", test))]
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
