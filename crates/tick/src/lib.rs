@@ -23,40 +23,31 @@
 //! use std::time::Duration;
 //! use tick::{Clock, Delay};
 //!
-//! #[tokio::main]
-//! async fn main() {
-//!     // Create a clock using the Tokio runtime
-//!     let clock = Clock::new_tokio();
-//!
-//!     // Get the current system time
-//!     let now = clock.system_time();
-//!     println!("Current time: {now:?}");
-//!
-//!     // Delay and measure the elapsed time
+//! async fn produce_value(clock: &Clock) -> u64 {
 //!     let stopwatch = clock.stopwatch();
-//!     let value = produce_value(&clock).await;
-//!     println!("{}ms later: {}", stopwatch.elapsed().as_millis(), value);
+//!     clock.delay(Duration::from_secs(60)).await;
+//!     println!("elapsed time: {}ms", stopwatch.elapsed().as_millis());
+//!     123
 //! }
 //!
-//! async fn produce_value(clock: &Clock) -> u64 {
-//!     clock.delay(Duration::from_secs(60)).await;
-//!     123
+//! #[tokio::main]
+//! async fn main() {
+//!     let clock = Clock::new_tokio();
+//!     let value = produce_value(&clock).await;
+//!     assert_eq!(value, 123);
 //! }
 //!
 //! #[cfg(test)]
 //! mod tests {
-//!    use super::*;
-//!    use tick::ClockControl;
+//!     use super::*;
+//!     use tick::ClockControl;
 //!
-//!    #[tokio::test]
-//!    async fn test_produce_value() {
-//!        // Use ClockControl to simulate the passage of time and
-//!        // automatically advance all timers for fast testing
-//!        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-//!
-//!        let value = produce_value(&clock).await;
-//!        assert_eq!(value, 123);
-//!    }
+//!     #[tokio::test]
+//!     async fn test_produce_value() {
+//!         // Automatically advance timers for instant, deterministic testing
+//!         let clock: Clock = ClockControl::new().auto_advance_timers(true).to_clock();
+//!         assert_eq!(produce_value(&clock).await, 123);
+//!     }
 //! }
 //! ```
 //!
@@ -80,6 +71,8 @@
 //! - [`Clock`] - Provides an abstraction for time-related operations. Returns absolute time
 //!   as `SystemTime` and relative time measurements via stopwatch. Used when creating other
 //!   time primitives.
+//! - [`ClockControl`] - Controls the passage of time. Available when the `test-util` feature
+//!   is enabled.
 //! - [`Stopwatch`] - Measures elapsed time.
 //! - [`Delay`] - Delays the execution for a specified duration.
 //! - [`PeriodicTimer`] - Schedules a task to run periodically.
@@ -88,8 +81,7 @@
 //!   introspection capabilities.
 //! - [`fmt`] - Utilities for formatting `SystemTime` into various formats. Available when
 //!   the `fmt` feature is enabled.
-//! - [`ClockControl`] - Controls the passage of time. Available when the `test-util` feature
-//!   is enabled.
+//! - [`runtime`] - Infrastructure for integrating time primitives into async runtimes.
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!

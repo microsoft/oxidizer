@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     // Use the clock in your APIs. We recommend passing it into the constructor of your API.
     // When the API requires the clock, you can clone it. This preserves the internal link
     // between the clocks.
-    let api = MyApi::new(clock.clone());
+    let api = MyApi::new(&clock);
 
     // Execute some operation that uses the clock.
     api.do_something().await;
@@ -45,8 +45,8 @@ struct MyApi {
 }
 
 impl MyApi {
-    const fn new(clock: Clock) -> Self {
-        Self { clock }
+    fn new(clock: &Clock) -> Self {
+        Self { clock: clock.clone() }
     }
 
     pub async fn do_something(&self) {

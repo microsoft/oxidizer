@@ -17,7 +17,7 @@ const JIFF_DISPLAY_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
 fn main() -> anyhow::Result<()> {
     // Create a frozen clock for the current time.
-    let clock = Clock::new_tokio();
+    let clock = Clock::new_frozen();
 
     // Retrieve the current time as `jiff::Timestamp`.
     let timestamp = clock.system_time_as::<Timestamp>();
