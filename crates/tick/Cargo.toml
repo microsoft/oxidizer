@@ -1,0 +1,97 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "tick"
+description = "Provides primitives to interact with and manipulate machine time."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["time", "clock", "tick", "stopwatch"]
+categories = ["data-structures"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "serde_core::de::*",
+    "serde_core::ser::*",
+    "futures_core::stream::Stream",
+]
+
+[features]
+default = []
+# Enables additional test-specific APIs
+test-util = []
+# Serialization support for serde
+serde = ["dep:serde_core"]
+# Integration with tokio runtime
+tokio = ["dep:tokio"]
+# Exposes APIs for formatting of SystemTime
+fmt = ["dep:jiff"]
+
+[dependencies]
+futures-core = { workspace = true }
+jiff = { workspace = true, features = ["std"], optional = true }
+pin-project-lite = { workspace = true }
+serde_core = { workspace = true, features = ["std"], optional = true }
+tokio = { workspace = true, optional = true, features = ["time", "rt"] }
+
+[dev-dependencies]
+#external
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+chrono-tz = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
+jiff = { workspace = true, default-features = true }
+mutants = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_core = { workspace = true, features = ["std"] }
+serde_json = { workspace = true }
+static_assertions.workspace = true
+time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
+time-tz = { workspace = true, features = ["system"] }
+tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "basic"
+required-features = ["tokio"]
+
+[[example]]
+name = "clock"
+required-features = ["tokio"]
+
+[[example]]
+name = "clock_control"
+required-features = ["test-util"]
+
+[[example]]
+name = "data"
+required-features = ["test-util", "serde", "tokio"]
+
+[[example]]
+name = "interop_chrono"
+required-features = ["test-util"]
+
+[[example]]
+name = "interop_time"
+required-features = ["test-util"]
+
+[[example]]
+name = "interop_jiff"
+required-features = ["test-util"]
+
+[[bench]]
+name = "clock_bench"
+harness = false
