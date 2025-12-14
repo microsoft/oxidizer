@@ -101,6 +101,7 @@ impl From<SystemTimeError> for Error {
 #[cfg(test)]
 mod tests {
     use std::error::Error as StdError;
+    use std::time::{Duration, UNIX_EPOCH};
 
     use jiff::SignedDuration;
 
@@ -138,5 +139,18 @@ mod tests {
         assert!(matches!(error.kind(), ErrorKind::Other(_)));
         assert_eq!(error.to_string(), "dummy");
         assert_eq!(error.source().unwrap().to_string(), "dummy");
+    }
+
+    #[test]
+    fn from_system_time_error() {
+        let later = UNIX_EPOCH + Duration::from_secs(1);
+        let system_time_error = UNIX_EPOCH.duration_since(later).unwrap_err();
+        let expected_message = system_time_error.to_string();
+
+        let error = Error::from(system_time_error);
+
+        assert!(matches!(error.kind(), ErrorKind::SystemTimeError(_)));
+        assert_eq!(error.to_string(), expected_message);
+        assert!(error.source().is_some());
     }
 }

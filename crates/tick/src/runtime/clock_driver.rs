@@ -49,6 +49,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::clock_control::ClockControl;
     use crate::state::SynchronizedTimers;
 
     #[test]
@@ -73,5 +74,24 @@ mod tests {
 
         _ = driver.advance_timers(Instant::now() + Duration::from_secs(1));
         timers.with_timers(|timers| assert_eq!(timers.len(), 0));
+    }
+
+    #[test]
+    fn advance_timers_with_clock_control_does_not_advance() {
+        let control = ClockControl::new();
+        let clock_state = ClockState::ClockControl(control.clone());
+        let when = control.instant() + Duration::from_secs(1);
+
+        control.register_timer(when, Waker::noop().clone());
+
+        let driver = ClockDriver::new(clock_state);
+
+        // Calling advance_timers should not advance timers when using ClockControl
+        let next = driver.advance_timers(control.instant() + Duration::from_secs(2));
+
+        // Verify timers are not advanced (still registered)
+        assert_eq!(control.timers_len(), 1);
+        // Verify next timer time is returned
+        assert_eq!(next, Some(when));
     }
 }

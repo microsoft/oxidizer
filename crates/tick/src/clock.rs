@@ -639,4 +639,22 @@ mod tests {
         assert_eq!(timestamp, clock.system_time());
         assert_eq!(system_time, clock.system_time());
     }
+
+    #[test]
+    #[should_panic(expected = "The SystemTime returned by the clock is always in normalized range")]
+    fn system_time_as_panics_on_conversion_failure() {
+        /// A newtype that always fails conversion from `SystemTime`.
+        struct AlwaysFailsConversion;
+
+        impl TryFrom<SystemTime> for AlwaysFailsConversion {
+            type Error = &'static str;
+
+            fn try_from(_: SystemTime) -> Result<Self, Self::Error> {
+                Err("conversion always fails")
+            }
+        }
+
+        let clock = Clock::new_frozen();
+        let _: AlwaysFailsConversion = clock.system_time_as();
+    }
 }

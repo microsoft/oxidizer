@@ -102,7 +102,7 @@ impl ClockControl {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(State::new())),
+            state: Arc::new(Mutex::new(State::default())),
         }
     }
 
@@ -411,12 +411,6 @@ struct State {
 
 impl Default for State {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl State {
-    fn new() -> Self {
         Self {
             instant: Instant::now(),
             system_time: SystemTime::UNIX_EPOCH,
@@ -427,7 +421,9 @@ impl State {
             auto_advance_total_max: None,
         }
     }
+}
 
+impl State {
     fn auto_advance(&mut self, duration: Option<Duration>) {
         let auto_advance = self.get_next_auto_advance_duration(duration.unwrap_or(self.auto_advance));
         self.auto_advance_total = self.auto_advance_total.saturating_add(auto_advance);
@@ -783,5 +779,17 @@ mod tests {
 
         // Time should have advanced at least to the last timer
         assert!(clock.instant().saturating_duration_since(start_instant) >= Duration::from_millis(1));
+    }
+
+    #[test]
+    fn from_clock_control_ok() {
+        let control = ClockControl::default();
+        control.advance_millis(12345);
+
+        let clock_1 = Clock::from(control.clone());
+        let clock_2 = Clock::from(&control);
+
+        assert_eq!(clock_1.system_time(), SystemTime::UNIX_EPOCH + Duration::from_millis(12345));
+        assert_eq!(clock_1.system_time(), clock_2.system_time());
     }
 }
