@@ -4,14 +4,14 @@
 use crate::affinity::PinnedAffinity;
 use crate::cell::Strategy;
 
-/// A strategy that stores data per processor thread.
+/// A strategy that stores data per processor core / thread.
 ///
 /// This strategy uses the processor index and count from the `PinnedAffinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PerThread;
+pub struct PerCore;
 
-impl Strategy for PerThread {
+impl Strategy for PerCore {
     fn index(affinity: PinnedAffinity) -> usize {
         affinity.processor_index()
     }

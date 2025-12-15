@@ -1,9 +1,16 @@
 # Changelog
 
-## [0.5.0] - 2025-12-10
+## [0.6.0] - 2025-12-12
+
+- 🧩 Miscellaneous
+
+  - Shouldn't have been renamed due to stuttering in re-exports.
+
+## [0.5.0] - 2025-12-11
 
 - ✔️ Tasks
 
+  - Improve documentation and clean up thread_aware crate root. ([#119](https://github.com/microsoft/oxidizer/pull/119))
   - Add missing documentation on thread_aware related crates ([#103](https://github.com/microsoft/oxidizer/pull/103))
   - Enable the missing_docs compiler lint. ([#102](https://github.com/microsoft/oxidizer/pull/102))
   - enable docs.rs documentation for feature-gated code ([#99](https://github.com/microsoft/oxidizer/pull/99))
@@ -15,17 +22,6 @@
 
 - 🧩 Miscellaneous
 
-  - Also test manual count.
-  - Fix coverage issue.
-  - How?!
-  - Update README.
-  - Fix license header.
-  - Clippy & fmt.
-  - Fix more tests and feature gates.
-  - Fix tests.
-  - Add theory of operation, more documentation and make it more user focused.
-  - More module alignment, and improve documentation.
-  - Move niche items to modules.
   - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
 
 ## [0.4.0] - 2025-12-03
