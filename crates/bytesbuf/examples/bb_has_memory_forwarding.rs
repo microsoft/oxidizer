@@ -4,7 +4,6 @@
 //! Showcases how to implement the `HasMemory` trait using the forwarding
 //! implementation strategy, whereby the memory provider of a dependency is used.
 
-use bytes::{Buf, BufMut};
 use bytesbuf::{BytesBuf, BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 
 const PAYLOAD_LEN: usize = 12345;
@@ -21,20 +20,20 @@ fn main() {
 }
 
 fn create_payload(memory: &impl Memory) -> BytesView {
-    let mut sequence_builder = memory.reserve(PAYLOAD_LEN);
+    let mut buf = memory.reserve(PAYLOAD_LEN);
 
     // We write PAYLOAD_LEN bytes, incrementing the value
     // by 1 each time, so we get [0, 1, 2, 3, ...].
     for i in 0..PAYLOAD_LEN {
         #[expect(clippy::cast_possible_truncation, reason = "intentional")]
-        sequence_builder.put_u8(i as u8);
+        buf.put_byte(i as u8);
     }
 
-    sequence_builder.consume_all()
+    buf.consume_all()
 }
 
-/// Counts the number of 0x00 bytes in a sequence before
-/// writing that sequence to a network connection.
+/// Counts the number of 0x00 bytes in a byte sequence before
+/// writing that byte sequence to a network connection.
 ///
 /// # Implementation strategy for `HasMemory`
 ///
@@ -56,16 +55,16 @@ impl ConnectionZeroCounter {
         Self { connection, zero_count: 0 }
     }
 
-    pub fn write(&mut self, sequence: BytesView) {
+    pub fn write(&mut self, message: BytesView) {
         // Cloning a BytesView is a cheap zero-copy operation,
-        self.count_zeros(sequence.clone());
+        self.count_zeros(message.clone());
 
-        self.connection.write(sequence);
+        self.connection.write(message);
     }
 
-    fn count_zeros(&mut self, mut sequence: BytesView) {
-        while sequence.has_remaining() {
-            if sequence.get_u8() == 0 {
+    fn count_zeros(&mut self, mut message: BytesView) {
+        while !message.is_empty() {
+            if message.get_byte() == 0 {
                 self.zero_count = self.zero_count.wrapping_add(1);
             }
         }

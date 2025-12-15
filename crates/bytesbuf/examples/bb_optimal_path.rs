@@ -18,7 +18,7 @@ use std::num::NonZero;
 use bytesbuf::{BlockSize, BytesBuf, BytesView, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
 
 fn main() {
-    // In a real application, both of these would be provided by the framework.
+    // In real-world code, both of these would be provided by the application framework.
     let global_memory_pool = GlobalPool::new();
     let io_context = IoContext::new();
 

@@ -168,12 +168,12 @@ impl BytesBuf {
     /// This automatically extends the builder's capacity with the memory capacity used of the
     /// appended sequence, for a net zero change in remaining available capacity.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub(crate) fn append(&mut self, sequence: BytesView) {
-        if sequence.is_empty() {
+    pub(crate) fn append(&mut self, bytes: BytesView) {
+        if bytes.is_empty() {
             return;
         }
 
-        let sequence_len = sequence.len();
+        let bytes_len = bytes.len();
 
         // Only the first span builder may hold unfrozen data (the rest are for spare capacity).
         let total_unfrozen_bytes = NonZero::new(self.span_builders_reversed.last().map_or(0, SpanBuilder::len));
@@ -187,17 +187,17 @@ impl BytesBuf {
             debug_assert!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len) == 0);
         }
 
-        self.frozen_spans.extend(sequence.into_spans_reversed().into_iter().rev());
+        self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
 
         self.len = self
             .len
-            .checked_add(sequence_len)
+            .checked_add(bytes_len)
             .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
 
         // Any appended BytesView is frozen by definition, as contents of a BytesView are immutable.
         self.frozen = self
             .frozen
-            .checked_add(sequence_len)
+            .checked_add(bytes_len)
             .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
     }
 
