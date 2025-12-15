@@ -124,7 +124,7 @@ impl ClockControl {
     #[must_use]
     pub fn new_at(time: impl Into<SystemTime>) -> Self {
         let this = Self::new();
-        this.advance_to(time.into());
+        this.set_time(time.into());
         this
     }
 
@@ -311,10 +311,7 @@ impl ClockControl {
         self.with_state(|v| v.advance(duration, TimeFlow::Forward));
     }
 
-    /// Advances the clock to the specified system time.
-    ///
-    /// The clock can be advanced forward or backward. Advancing the clock forward fires all
-    /// timers that are scheduled before or at the target time.
+    /// Sets the clock to the specified system time.
     ///
     /// # Examples
     ///
@@ -327,7 +324,7 @@ impl ClockControl {
     /// let clock = control.to_clock();
     ///
     /// let target = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
-    /// control.advance_to(target);
+    /// control.set_time(target);
     ///
     /// assert_eq!(clock.system_time(), target);
     /// ```
@@ -335,7 +332,7 @@ impl ClockControl {
         clippy::missing_panics_doc,
         reason = "we are handling cases where the timestamp is either in future or past and the resulting duration is always positive"
     )]
-    pub fn advance_to(&self, timestamp: impl Into<SystemTime>) {
+    pub fn set_time(&self, timestamp: impl Into<SystemTime>) {
         let now = self.system_time();
         let timestamp = timestamp.into();
 
@@ -564,32 +561,32 @@ mod tests {
     }
 
     #[test]
-    fn advance_to_ok() {
+    fn set_time_ok() {
         // arrange
         let control = ClockControl::new();
         let clock = control.to_clock();
         let now = clock.system_time();
 
         // act
-        control.advance_to(now.checked_add(Duration::from_secs(1)).unwrap());
+        control.set_time(now.checked_add(Duration::from_secs(1)).unwrap());
 
         // assert
         assert_eq!(clock.system_time().duration_since(now).unwrap(), Duration::from_secs(1));
     }
 
     #[test]
-    fn advance_to_past_ok() {
+    fn set_time_past_ok() {
         // arrange
         let control = ClockControl::new();
         let clock = control.to_clock();
         let now = clock.system_time();
 
         // act
-        control.advance_to(now.checked_add(Duration::from_secs(10)).unwrap());
+        control.set_time(now.checked_add(Duration::from_secs(10)).unwrap());
         let now1 = clock.system_time();
         let instant_now1 = clock.instant();
 
-        () = control.advance_to(now1.checked_sub(Duration::from_secs(5)).unwrap());
+        () = control.set_time(now1.checked_sub(Duration::from_secs(5)).unwrap());
         let now2 = clock.system_time();
         let instant_now2 = clock.instant();
 
