@@ -22,7 +22,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "serde::*",
     "serde_core::de::*",
     "serde_core::ser::*",
     "data_privacy_macros::*",
@@ -31,14 +30,14 @@ allowed_external_types = [
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
+serde = ["dep:serde_core"]
 xxh3 = ["dep:xxhash-rust"]
 rapidhash = ["dep:rapidhash"]
 
 [dependencies]
 data_privacy_macros.workspace = true
 rapidhash = { workspace = true, optional = true }
-serde = { workspace = true, optional = true, default-features = false, features = ["derive", "std"] }
+serde_core = { workspace = true, optional = true, default-features = false, features = ["std"] }
 xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
 
 [dev-dependencies]

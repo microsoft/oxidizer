@@ -218,6 +218,7 @@ dependencies = [
  "once_cell",
  "rapidhash",
  "serde",
+ "serde_core",
  "serde_json",
  "xxhash-rust",
 ]
