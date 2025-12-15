@@ -11,7 +11,7 @@ use crate::closure::relocate;
 use crate::{ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
-type PerCore<T> = crate::Arc<T, crate::PerThread>;
+type PerCore<T> = crate::Arc<T, crate::PerCore>;
 
 #[derive(Clone, Debug)]
 struct Counter {

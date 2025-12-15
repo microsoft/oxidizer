@@ -73,12 +73,12 @@ where
 mod tests {
     use crate::affinity::pinned_affinities;
     use crate::storage::{Storage, Strategy};
-    use crate::{PerNuma, PerProcess, PerThread};
+    use crate::{PerCore, PerNuma, PerProcess};
 
     #[test]
     fn replace_returns_previous_value() {
         let affinities = pinned_affinities(&[1]);
-        let mut storage = Storage::<String, PerThread>::default();
+        let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // First replace should return None (no previous value)
@@ -98,7 +98,7 @@ mod tests {
     fn get_clone() {
         let affinities = pinned_affinities(&[1]);
 
-        let mut storage = Storage::<String, PerThread>::default();
+        let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         assert!(storage.get_clone(affinity).is_none());
@@ -134,8 +134,8 @@ mod tests {
         let affinities = pinned_affinities(&[1, 1]);
 
         for affinity in affinities {
-            let index = PerThread::index(affinity);
-            let count = PerThread::count(affinity);
+            let index = PerCore::index(affinity);
+            let count = PerCore::count(affinity);
             assert_eq!(index, affinity.processor_index());
             assert_eq!(count, affinity.processor_count());
         }
@@ -147,7 +147,7 @@ mod tests {
         let affinities = pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
-        let mut storage = Storage::<String, PerThread>::default();
+        let mut storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // Verify the default storage is empty (no data for any affinity)

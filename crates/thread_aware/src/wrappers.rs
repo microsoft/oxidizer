@@ -22,7 +22,7 @@ use std::sync::Arc;
 ///
 /// In addition, if the wrapped value contains an Arc with interior mutability
 /// somewhere inside, this wrapper should not be used, and an [`Arc`](crate::Arc) with a
-/// [`PerThread`](crate::PerThread) or [`PerNuma`](crate::PerNuma)
+/// [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma)
 /// with independent initialization per affinity is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
