@@ -508,20 +508,16 @@ impl TokioClockState {
     }
 }
 
-impl From<&Self> for Clock {
-    fn from(clock: &Self) -> Self {
-        clock.clone()
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
 
-    use std::thread::sleep;
+    use std::{fmt::Debug, thread::sleep};
 
     use super::*;
+
+    static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
 
     #[test]
     fn assert_types() {
@@ -656,5 +652,11 @@ mod tests {
 
         let clock = Clock::new_frozen();
         let _: AlwaysFailsConversion = clock.system_time_as();
+    }
+
+    #[test]
+    fn as_ref_ok() {
+        let clock = Clock::new_frozen();
+        let _: &Clock = clock.as_ref();
     }
 }

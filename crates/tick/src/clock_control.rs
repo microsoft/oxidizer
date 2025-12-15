@@ -466,6 +466,7 @@ impl State {
             }
 
             self.advance(advance, TimeFlow::Forward);
+            self.auto_advance_total = self.auto_advance_total.saturating_add(advance);
         }
     }
 
@@ -791,5 +792,28 @@ mod tests {
 
         assert_eq!(clock_1.system_time(), SystemTime::UNIX_EPOCH + Duration::from_millis(12345));
         assert_eq!(clock_1.system_time(), clock_2.system_time());
+    }
+
+    #[test]
+    fn auto_advance_timers_stops_at_limit() {
+        let control = ClockControl::new()
+            .auto_advance_timers(true)
+            .auto_advance(Duration::from_secs(1))
+            .auto_advance_limit(Duration::from_secs(1));
+        let clock = control.to_clock();
+        let start_instant = clock.instant();
+
+        control.register_timer(start_instant + Duration::from_secs(2), Waker::noop().clone());
+
+        // Access the clock to trigger auto-advance with timer evaluation
+        // The first auto_advance consumes the entire 1 second limit.
+        // Then evaluate_timers finds the timer, but get_next_auto_advance_duration
+        // returns Duration::ZERO because the limit is exhausted, hitting the break.
+        let current_instant = clock.instant();
+
+        assert_eq!(current_instant.saturating_duration_since(start_instant), Duration::from_secs(1));
+
+        // The timer should still be registered since we couldn't advance further to reach it
+        assert_eq!(control.timers_len(), 1);
     }
 }

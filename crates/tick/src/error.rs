@@ -122,6 +122,7 @@ mod tests {
             error.to_string(),
             "parameter 'second' with value 9223372036854775807 is not in the required range of -377705023201..=253402207200"
         );
+        assert!(error.source().is_some());
     }
 
     #[test]
@@ -130,6 +131,7 @@ mod tests {
 
         assert!(matches!(error.kind(), ErrorKind::OutOfRange(_)));
         assert_eq!(error.to_string(), "test");
+        assert!(error.source().is_none());
     }
 
     #[test]
