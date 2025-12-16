@@ -110,7 +110,7 @@
 //! 1. If you are creating byte sequences for the purpose of submitting them to a specific
 //!    object of a known type (e.g. writing them to a network connection), the target type will
 //!    typically implement the [`HasMemory`] trait, which gives you a suitable memory
-//!    provider instance via [`HasMemory::memory()`][25]. Use it - this memory provider will
+//!    provider instance via [`HasMemory::memory`]. Use it - this memory provider will
 //!    give you memory with the configuration that is optimal for delivering bytes to that
 //!    specific instance.
 //! 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
@@ -119,7 +119,7 @@
 //!    with no framework), you can create your own instance via `GlobalPool::new()`.
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
-//! [`Memory::reserve()`][14] on it. This returns a [`BytesBuf`] with the requested
+//! [`Memory::reserve`] on it. This returns a [`BytesBuf`] with the requested
 //! memory capacity.
 //!
 //! ```
@@ -171,7 +171,7 @@
 //! See `examples/mem_chunk_write.rs` for an example of how to use these methods.
 //!
 //! If you do not know exactly how much memory you need in advance, you can extend the sequence
-//! builder capacity on demand if you run out by calling [`BytesBuf::reserve()`][13],
+//! builder capacity on demand if you run out by calling [`BytesBuf::reserve`],
 //! which will reserve more memory capacity. You can use [`bytes::buf::BufMut::remaining_mut()`][26]
 //! on the sequence builder to identify how much unused memory capacity is available for writing.
 //!
@@ -497,7 +497,7 @@
 //! represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
 //! type, this crate offers conversion methods to translate between [`BytesView`] and [`Bytes`][18]:
 //!
-//! * [`BytesView::into_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
+//! * [`BytesView::into_bytes`] converts a [`BytesView`] into a [`Bytes`][18] instance. This
 //!   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
 //!   You are discouraged from using this method in any performance-relevant logic path.
 //! * `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][18] instance
@@ -576,9 +576,6 @@
 //!   you want to ensure that your code works well even if a byte sequence consists of
 //!   non-consecutive memory. You can go down to as low as 1 byte per block!
 //!
-//! [13]: BytesBuf::reserve
-//! [14]: Memory::reserve
-//! [16]: BytesView::into_bytes
 //! [17]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
 //! [18]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [20]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
@@ -586,7 +583,6 @@
 //! [22]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html#method.advance
 //! [23]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html#method.chunks_vectored
 //! [24]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html#method.chunk_mut
-//! [25]: HasMemory::memory
 //! [26]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html#method.remaining_mut
 //! [27]: std::sync::OnceLock
 
@@ -614,23 +610,23 @@ mod vec;
 mod view;
 mod write_adapter;
 
-pub use block::*;
-pub use block_ref::*;
-pub use buf::*;
-pub use callback_memory::*;
-pub use constants::*;
-pub use fixed_block::*;
-pub use global::*;
-pub use has_memory::*;
-pub use memory::*;
-pub use memory_guard::*;
-pub use memory_shared::*;
-pub use opaque_memory::*;
-pub(crate) use span::*;
-pub(crate) use span_builder::*;
-pub use transparent::*;
-pub use view::*;
-pub(crate) use write_adapter::*;
+pub use block::{Block, BlockSize};
+pub use block_ref::{BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable};
+pub use buf::{BytesBuf, BytesBufAvailableIterator, BytesBufVectoredWrite};
+pub use callback_memory::CallbackMemory;
+pub use constants::MAX_INLINE_SPANS;
+pub use fixed_block::FixedBlockTestMemory;
+pub use global::GlobalPool;
+pub use has_memory::HasMemory;
+pub use memory::Memory;
+pub use memory_guard::MemoryGuard;
+pub use memory_shared::MemoryShared;
+pub use opaque_memory::OpaqueMemory;
+pub(crate) use span::Span;
+pub(crate) use span_builder::SpanBuilder;
+pub use transparent::TransparentTestMemory;
+pub use view::{BytesView, BytesViewChunkMetasIterator};
+pub(crate) use write_adapter::BytesBufWrite;
 
 #[cfg(test)]
 mod testing;

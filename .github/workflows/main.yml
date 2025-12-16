@@ -111,12 +111,12 @@ jobs:
       CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
       CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
       CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_DOC2README_VERSION: ${{ needs.constants.outputs.CARGO_DOC2README_VERSION }}
       CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
       CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
       CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
       CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
       CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
-      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
       CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
       CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
       CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
@@ -150,7 +150,7 @@ jobs:
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.62
         with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-doc2readme@${{ env.CARGO_DOC2README_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}
 
       # execute
       - name: Clippy
@@ -173,10 +173,10 @@ jobs:
         id: docs
         continue-on-error: true
         run: cargo doc --no-deps --workspace --all-features
-      - name: Rdme
-        id: rdme
+      - name: Readmes
+        id: readmes
         continue-on-error: true
-        run: cargo workspaces exec cargo rdme --check
+        run: cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
       - name: Default Features
         id: default-features
         continue-on-error: true
@@ -192,7 +192,7 @@ jobs:
 
         # validate
       - name: Check for Step Failures
-        if: steps.clippy.outcome != 'success' || steps.audit.outcome != 'success' || steps.format.outcome != 'success' || steps.cargo-toml-format.outcome != 'success' || steps.docs.outcome != 'success' || steps.rdme.outcome != 'success' || steps.default-features.outcome != 'success' || steps.cyclic-deps.outcome != 'success' || steps.dependency-validation.outcome != 'success'
+        if: steps.clippy.outcome != 'success' || steps.audit.outcome != 'success' || steps.format.outcome != 'success' || steps.cargo-toml-format.outcome != 'success' || steps.docs.outcome != 'success' || steps.readmes.outcome != 'success' || steps.default-features.outcome != 'success' || steps.cyclic-deps.outcome != 'success' || steps.dependency-validation.outcome != 'success'
         run: exit 1
 
   semver:

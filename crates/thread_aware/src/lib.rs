@@ -11,13 +11,14 @@
 //! memory affinities.
 //!
 //! # Theory of Operation
-//! On a high level, this crate enables thread migrations of state via [`ThreadAware`] trait:
+//!
+//! At a high level, this crate enables thread migrations of state via the [`ThreadAware`] trait:
 //! - Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
 //! - The authors of said types can then act on this information to implement performance optimizations. Such optimizations
 //!   might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
 //!   or detaching from shared, possibly contended memory with the previous thread.
 //!
-//! Similar to `Clone`, there are no exact semantic prescriptions of how types should behave on relocation.
+//! Similar to [`Clone`], there are no exact semantic prescriptions of how types should behave on relocation.
 //! They might continue to share some state (e.g., a common cache) or fully detach from it for performance reasons.
 //! The primary goal is performance, so types should aim to minimize contention on synchronization primitives
 //! and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
