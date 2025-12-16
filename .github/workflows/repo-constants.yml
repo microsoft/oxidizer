@@ -1,5 +1,7 @@
 # Exposes values defined in constants.toml to other workflows.
 name: repo-constants
+permissions:
+  contents: read
 
 on:
   workflow_call:
