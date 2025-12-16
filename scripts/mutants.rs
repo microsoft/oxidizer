@@ -127,7 +127,7 @@ fn main() {
     } else {
         eprintln!("❌ {} test group(s) failed:", failed_groups.len());
         for (group, error) in &failed_groups {
-            eprintln!("  - [{}]: {}", group.join(", "), error);
+            eprintln!("  - [{}]: {error}", group.join(", "));
         }
         eprintln!();
         std::process::exit(1);

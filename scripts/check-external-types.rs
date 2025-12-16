@@ -82,7 +82,7 @@ fn main() {
         eprintln!();
         eprintln!("❌ {} crate(s) failed:", failed_crates.len());
         for (name, error) in &failed_crates {
-            eprintln!("  - {}: {}", name, error);
+            eprintln!("  - {name}: {error}");
         }
         std::process::exit(1);
     }
