@@ -283,7 +283,6 @@ jobs:
         run: cargo +nightly -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
-    if: github.event_name == 'pull_request'
     needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
