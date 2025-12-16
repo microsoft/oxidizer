@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Showcases how to write to a BytesBuf by directly writing into slices of mutable memory.
+//! Showcases how to write to a `BytesBuf` by directly writing into slices of mutable memory.
 //!
 //! Compared to the helper methods showcased in `bb_basic.rs`, writing via mutable slices is a more
 //! advanced technique that gives you greater control over the writing process at the expense of
