@@ -15,13 +15,13 @@ use crate::{BlockSize, MAX_INLINE_SPANS, Memory, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
 ///
-/// Note that only the contents are immutable - the view itself can be mutated in terms of progressively
+/// Only the contents are immutable - the view itself can be mutated in terms of progressively
 /// marking the byte sequence as consumed until the view becomes empty.
 ///
-/// To create a `BytesView`, use a [`BytesBuf`][3] or clone/slice an existing `BytesView`.
+/// To create a `BytesView`, use a [`BytesBuf`] or clone/slice an existing `BytesView`.
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
-/// [3]: crate::BytesBuf
+/// [`BytesBuf`]: crate::BytesBuf
 #[derive(Clone, Debug)]
 pub struct BytesView {
     /// The spans of the byte sequence, stored in reverse order for efficient consumption
@@ -33,11 +33,11 @@ pub struct BytesView {
 }
 
 impl BytesView {
-    /// Returns a view over a zero-sized byte sequence.
+    /// Creates a view over a zero-sized byte sequence.
     ///
-    /// Use a [`BytesBuf`][1] to create a view over some actual data.
+    /// Use a [`BytesBuf`] to create a view over some actual data.
     ///
-    /// [1]: crate::BytesBuf
+    /// [`BytesBuf`]: crate::BytesBuf
     #[cfg_attr(test, mutants::skip)] // Generates no-op mutations, not useful.
     #[must_use]
     pub const fn new() -> Self {
@@ -59,7 +59,7 @@ impl BytesView {
         Self { spans_reversed, len }
     }
 
-    /// Concatenates a number of spans, yielding a view that combines the spans.
+    /// (For testing) Concatenates a number of spans, yielding a view that combines the spans.
     ///
     /// Later changes made to the input spans will not be reflected in the resulting view.
     #[cfg(test)]
@@ -105,16 +105,21 @@ impl BytesView {
 
     /// Creates a `BytesView` by copying the contents of a `&[u8]`.
     ///
+    /// # Reusing existing data
+    ///
     /// There is intentionally no mechanism in `bytesbuf` to reference an existing `&[u8]`
     /// without copying, even if `'static`, because high-performance I/O requires all data
     /// to exist in memory owned by the I/O subsystem. Reusing arbitrary byte slices is
     /// not supported in order to discourage design practices that would work against this
-    /// goal. To reuse memory allocations, reuse the `BytesView` itself.
+    /// efficiency goal.
+    ///
+    /// To reuse memory allocations, reuse the `BytesView` itself. See the `bb_reuse.rs`
+    /// example in the `bytesbuf` source code for an example of how to do this efficiently.
     #[must_use]
     pub fn copied_from_slice(bytes: &[u8], memory_provider: &impl Memory) -> Self {
-        let mut buffer = memory_provider.reserve(bytes.len());
-        buffer.put_slice(bytes);
-        buffer.consume_all()
+        let mut buf = memory_provider.reserve(bytes.len());
+        buf.put_slice(bytes);
+        buf.consume_all()
     }
 
     pub(crate) fn into_spans_reversed(self) -> SmallVec<[Span; MAX_INLINE_SPANS]> {
@@ -147,7 +152,7 @@ impl BytesView {
         MemoryGuard::new(self.spans_reversed.iter().map(Span::block_ref).map(Clone::clone))
     }
 
-    /// Returns a sub-view over a range of the byte sequence.
+    /// Returns a range of the byte sequence.
     ///
     /// The bounds logic only considers data currently present in the view.
     /// Any data already consumed is not considered part of the view.
@@ -163,7 +168,7 @@ impl BytesView {
         self.range_checked(range).expect("provided range out of view bounds")
     }
 
-    /// Returns a sub-view over a range of the byte sequence or `None` if out of bounds.
+    /// Returns a range of the byte sequence or `None` if out of bounds.
     ///
     /// The bounds logic only considers data currently present in the view.
     /// Any data already consumed is not considered part of the view.
@@ -377,23 +382,23 @@ impl BytesView {
 
     /// References the first slice of bytes in the byte sequence.
     ///
-    /// There are no guarantees on the length of each slice. In a view over a non-empty
-    /// byte sequence, each slice may contain anywhere between 1 byte and all bytes of
-    /// the sequence.
-    ///
     /// Returns an empty slice if the view is over a zero-sized byte sequence.
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn first_slice(&self) -> &[u8] {
         self.spans_reversed.last().map_or::<&[u8], _>(&[], |span| span)
     }
 
-    /// Fills an array with `IoSlice`s representing this view.
+    /// Fills an array with [`IoSlice`]s representing this view.
     ///
     /// Returns the number of elements written into `dst`. If there is not enough space in `dst`
     /// to represent the entire view, only as many slices as fit will be written.
     ///
-    /// See also [`slices()`] for a version that fills an array of regular slices instead of `IoSlice`s.
+    /// See also [`slices()`] for a version that fills an array of regular slices instead of [`IoSlice`]s.
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// [`slices()`]: Self::slices
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn io_slices<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
         if dst.is_empty() {
@@ -417,7 +422,10 @@ impl BytesView {
     /// Returns the number of elements written into `dst`. If there is not enough space in `dst`
     /// to represent the entire view, only as many slices as fit will be written.
     ///
-    /// See also [`io_slices()`] for a version that fills an array of `IoSlice`s instead of regular byte slices.
+    /// See also [`io_slices()`] for a version that fills an array of [`IoSlice`]s instead of regular byte slices.
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// [`io_slices()`]: Self::io_slices
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn slices<'a>(&'a self, dst: &mut [&'a [u8]]) -> usize {
         if dst.is_empty() {
@@ -434,10 +442,12 @@ impl BytesView {
         slice_count
     }
 
-    /// Inspects the metadata of the `first_slice()`.
+    /// Inspects the metadata of the [`first_slice()`].
     ///
     /// `None` if there is no metadata associated with the first slice or
     /// if the view is over a zero-sized byte sequence.
+    ///
+    /// [`first_slice()`]: Self::first_slice
     #[must_use]
     pub fn first_slice_meta(&self) -> Option<&dyn Any> {
         self.spans_reversed.last().and_then(|span| span.block_ref().meta())
@@ -445,12 +455,14 @@ impl BytesView {
 
     /// Iterates over the metadata of all the slices that make up the view.
     ///
-    /// Each slice iterated over is a slice that would be returned by `first_slice()`
-    /// at some point during the complete consumption of the data covered by a [`BytesView`].
+    /// Each slice iterated over is a slice that would be returned by [`first_slice()]`
+    /// at some point during the complete consumption of the data covered by a `BytesView`.
     ///
     /// You may wish to iterate over the metadata to determine in advance which implementation
     /// strategy to use for a function, depending on what the metadata indicates about the
     /// configuration of the memory blocks backing the byte sequence.
+    ///
+    /// [`first_slice()`]: Self::first_slice
     pub fn iter_slice_metas(&self) -> BytesViewSliceMetasIterator<'_> {
         BytesViewSliceMetasIterator::new(self)
     }

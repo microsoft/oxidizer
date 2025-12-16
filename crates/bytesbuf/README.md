@@ -472,7 +472,7 @@ The popular [`Bytes`][18] type from the `bytes` crate is often used in the Rust 
 represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
 type, this crate offers conversion methods to translate between [`BytesView`] and [`Bytes`][18]:
 
-* [`BytesView::into_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
+* [`BytesView::to_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
   You are discouraged from using this method in any performance-relevant logic path.
 * `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][18] instance
@@ -547,7 +547,7 @@ processing in your code:
 
 [13]: BytesBuf::reserve
 [14]: Memory::reserve
-[16]: BytesView::into_bytes
+[16]: BytesView::to_bytes
 [17]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
 [18]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 [20]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html

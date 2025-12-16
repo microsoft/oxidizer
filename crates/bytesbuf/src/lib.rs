@@ -578,7 +578,7 @@
 //!
 //! [13]: BytesBuf::reserve
 //! [14]: Memory::reserve
-//! [16]: BytesView::into_bytes
+//! [16]: BytesView::to_bytes
 //! [17]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
 //! [18]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [20]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html

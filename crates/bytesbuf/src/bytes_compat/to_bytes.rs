@@ -16,21 +16,23 @@ impl BytesView {
     /// # Performance
     ///
     /// This operation is zero-copy if the sequence is backed by a single consecutive
-    /// span of memory. It does cost a small dynamic memory allocation, however, so avoiding
-    /// conversions remains valuable even if zero-copy.
+    /// slice of memory capacity.
     ///
-    /// If the sequence is backed by multiple spans of memory, the data will be copied
-    /// to a new `Bytes` instance backed by memory capacity from the Rust global allocator.
+    /// If the sequence is backed by multiple slices of memory capacity, the data will be copied
+    /// to a new `Bytes` instance backed by new memory capacity from the Rust global allocator.
+    ///
+    /// This conversion requires a small dynamic memory allocation for
+    /// metadata, so avoiding conversions is valuable even if zero-copy.
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn to_bytes(&self) -> Bytes {
         if self.spans_reversed.is_empty() {
-            INTO_BYTES_SHARED.with(|x| x.observe(0));
+            TO_BYTES_SHARED.with(|x| x.observe(0));
 
             Bytes::new()
         } else if self.spans_reversed.len() == 1 {
-            // We are a single-span sequence, which can always be zero-copy represented.
-            INTO_BYTES_SHARED.with(|x| x.observe(self.len()));
+            // We are a single-span view, which can always be zero-copy represented.
+            TO_BYTES_SHARED.with(|x| x.observe(self.len()));
 
             Bytes::from_owner(self.spans_reversed.first().expect("we verified there is one span").clone())
         } else {
@@ -43,7 +45,7 @@ impl BytesView {
 
             debug_assert_eq!(self.len(), bytes.len());
 
-            INTO_BYTES_COPIED.with(|x| x.observe(self.len()));
+            TO_BYTES_COPIED.with(|x| x.observe(self.len()));
 
             bytes.freeze()
         }
@@ -51,11 +53,11 @@ impl BytesView {
 }
 
 thread_local! {
-    static INTO_BYTES_SHARED: Event = Event::builder()
+    static TO_BYTES_SHARED: Event = Event::builder()
         .name("bytesbuf_view_to_bytes_shared")
         .build();
 
-    static INTO_BYTES_COPIED: Event = Event::builder()
+    static TO_BYTES_COPIED: Event = Event::builder()
         .name("bytesbuf_view_to_bytes_copied")
         .build();
 }
