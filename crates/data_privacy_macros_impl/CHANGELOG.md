@@ -1,27 +1,19 @@
 # Changelog
 
-## [0.7.0] - 2025-12-05
+## [0.8.0] - 2025-12-16
+
+- 🔄 Continuous Integration
+
+  - Linting for Cargo.toml files ([#110](https://github.com/microsoft/oxidizer/pull/110))
+  - Add license check for dependencies ([#105](https://github.com/microsoft/oxidizer/pull/105))
 
 - 🧩 Miscellaneous
 
-  - Address missing documentation.
-  - Format.
-  - Reduce branching.
-  - Don't make std types redacted, annotate fields with `#[unredacted]` instead.
-  - Disable various tests for miri.
-  - More CI complaints.
-  - Fix CI complaints.
-  - Remove outdated snapshot tests.
-  - Format again.
-  - Remove `RedactedToString` derive, since it was replaced by blanket trait impl.
-  - Also allow for compile error tests.
-  - Condense derive tests.
-  - Increase coverage.
-  - Format.
-  - Fix clippy
-  - Fix documentation.
-  - Fix more tests and warnings.
-  - Rename wrapper and improve UX working with DataClasses
-  - Also align data privacy with Rust Guidelines and clean up module structure.
-  - Align macro crate with existing structure.
+  - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
+
+## [0.7.0] - 2025-12-05
+
+- ✨ Features
+
+  - Improve data_privacy UX ([#89](https://github.com/microsoft/oxidizer/pull/89))
 
