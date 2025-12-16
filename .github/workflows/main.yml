@@ -266,21 +266,12 @@ jobs:
 
       # execute
       - name: Generate PR diff
-        id: pr-diff
-        continue-on-error: true
         run: git diff origin/main...HEAD >diff.txt
       - name: Mutate Diff
-        id: mutate-diff
-        continue-on-error: true
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
         run: cargo +nightly -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
-
-      # validate
-      - name: Check for Step Failures
-        if: steps.pr-diff.outcome != 'success' || steps.mutate-diff.outcome != 'success'
-        run: exit 1
 
   coverage:
     if: github.event_name == 'pull_request'
@@ -321,26 +312,15 @@ jobs:
 
       # execute
       - name: Generate Coverage (all-features)
-        id: coverage-all
-        continue-on-error: true
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --all-features --workspace --lcov --output-path lcov-all.info
       - name: Generate Coverage (no-default-features)
-        id: coverage-no-def
-        continue-on-error: true
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
-        id: upload-coverage
-        continue-on-error: true
         uses: codecov/codecov-action@v5.5.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-all.info,lcov-no-def.info
           fail_ci_if_error: true
-
-      # validate
-      - name: Check for Step Failures
-        if: steps.coverage-all.outcome != 'success' || steps.coverage-no-def.outcome != 'success' || steps.upload-coverage.outcome != 'success'
-        run: exit 1
 
   pr-title:
     runs-on: ubuntu-latest
