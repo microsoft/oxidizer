@@ -42,7 +42,7 @@ jobs:
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     env:
-      <<: &repo-constants ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     permissions:

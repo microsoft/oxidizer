@@ -25,7 +25,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: &repo-constants ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -74,7 +74,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: *repo-constants
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -137,7 +137,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: *repo-constants
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
     steps:
       # prep
       - name: Checkout
@@ -172,7 +172,7 @@ jobs:
     needs: [constants, testing]
     runs-on: ubuntu-latest
     env:
-      <<: *repo-constants
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -223,7 +223,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: *repo-constants
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -306,7 +306,7 @@ jobs:
     needs: constants
     runs-on: ubuntu-latest
     env:
-      <<: *repo-constants
+      <<: ${{ fromJSON(needs.constants.outputs.repo_constants_json) }}
     steps:
       # prep
       - name: Checkout
