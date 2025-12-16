@@ -390,7 +390,6 @@ mod tests {
 
     #[test]
     #[should_panic]
-
     fn copy_to_uninit_bigger_slice_panics() {
         let memory = TransparentTestMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
@@ -454,7 +453,7 @@ mod tests {
         let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
-        assert_eq!(view_combined.get_num_le::<u32>(), 0x12345678);
+        assert_eq!(view_combined.get_num_le::<u32>(), 0x1234_5678);
 
         assert!(view_combined.is_empty());
     }
@@ -479,7 +478,7 @@ mod tests {
         let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
-        assert_eq!(view_combined.get_num_be::<u32>(), 0x12345678);
+        assert_eq!(view_combined.get_num_be::<u32>(), 0x1234_5678);
 
         assert!(view_combined.is_empty());
     }
@@ -510,9 +509,9 @@ mod tests {
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
         if cfg!(target_endian = "big") {
-            assert_eq!(view_combined.get_num_ne::<u32>(), 0x78563412);
+            assert_eq!(view_combined.get_num_ne::<u32>(), 0x7856_3412);
         } else {
-            assert_eq!(view_combined.get_num_ne::<u32>(), 0x12345678);
+            assert_eq!(view_combined.get_num_ne::<u32>(), 0x1234_5678);
         }
 
         assert!(view_combined.is_empty());

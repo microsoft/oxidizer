@@ -129,6 +129,7 @@ impl Span {
 
     /// Testing helper for easily consuming a fixed number of bytes from the front.
     #[cfg(test)]
+    #[expect(clippy::cast_possible_truncation, reason = "test code, relax")]
     pub(crate) fn get_array<const N: usize>(&mut self) -> [u8; N] {
         assert!(self.len() >= N as BlockSize, "out of bounds read");
 

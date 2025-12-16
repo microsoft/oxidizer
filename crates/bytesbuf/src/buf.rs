@@ -1308,7 +1308,7 @@ mod tests {
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].len(), 8);
 
-        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
+        write_copy_of_slice(slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 8 bytes.
         unsafe {
@@ -1348,8 +1348,8 @@ mod tests {
 
         // We fill 12 bytes, leaving middle chunk split in half between filled/available.
 
-        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
-        write_copy_of_slice(&mut slices[1], &0x4444_4444_u32.to_ne_bytes());
+        write_copy_of_slice(slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
+        write_copy_of_slice(slices[1], &0x4444_4444_u32.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
@@ -1369,8 +1369,8 @@ mod tests {
 
         // We fill the remaining 12 bytes.
 
-        write_copy_of_slice(&mut slices[0], &0x5555_5555_u32.to_ne_bytes());
-        write_copy_of_slice(&mut slices[1], &0x6666_6666_6666_6666_u64.to_ne_bytes());
+        write_copy_of_slice(slices[0], &0x5555_5555_u32.to_ne_bytes());
+        write_copy_of_slice(slices[1], &0x6666_6666_6666_6666_u64.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
@@ -1413,8 +1413,8 @@ mod tests {
 
         // We fill 12 bytes, leaving middle chunk split in half between filled/available.
 
-        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
-        write_copy_of_slice(&mut slices[1], &0x4444_4444_u32.to_ne_bytes());
+        write_copy_of_slice(slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
+        write_copy_of_slice(slices[1], &0x4444_4444_u32.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
@@ -1433,8 +1433,8 @@ mod tests {
         assert_eq!(slices[0].len(), 4);
         assert_eq!(slices[1].len(), 8);
 
-        write_copy_of_slice(&mut slices[0], &0x5555_5555_u32.to_ne_bytes());
-        write_copy_of_slice(&mut slices[1], &0x6666_6666_6666_6666_u64.to_ne_bytes());
+        write_copy_of_slice(slices[0], &0x5555_5555_u32.to_ne_bytes());
+        write_copy_of_slice(slices[1], &0x6666_6666_6666_6666_u64.to_ne_bytes());
 
         // SAFETY: Yes, we really wrote 12 bytes.
         unsafe {
@@ -1514,7 +1514,7 @@ mod tests {
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].len(), 8);
 
-        write_copy_of_slice(&mut slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
+        write_copy_of_slice(slices[0], &0x3333_3333_3333_3333_u64.to_ne_bytes());
 
         // Actually never mind - we drop it here.
         #[expect(clippy::drop_non_drop, reason = "Just being explicit for illustration")]

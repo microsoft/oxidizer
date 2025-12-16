@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Showcases how you can easily and cheaply reuse BytesView in part or whole.
+//! Showcases how you can easily and cheaply reuse `BytesView` in part or whole.
 
 use bytesbuf::{BytesView, GlobalPool};
 

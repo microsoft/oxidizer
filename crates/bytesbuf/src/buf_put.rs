@@ -309,8 +309,8 @@ mod tests {
         let memory = TransparentTestMemory::new();
         let mut buf = memory.reserve(16);
 
-        buf.put_num_le(0x12345678_u32);
-        buf.put_num_be(0x9ABCDEF0_u32);
+        buf.put_num_le(0x1234_5678_u32);
+        buf.put_num_be(0x9ABC_DEF0_u32);
         buf.put_num_ne(0x1122_3344_5566_7788_u64);
 
         assert_eq!(buf.len(), 16);
@@ -329,7 +329,6 @@ mod tests {
                     0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 // Native-endian 0x1122334455667788
                 ]
             );
-            return;
         } else {
             assert_eq!(
                 bytes,

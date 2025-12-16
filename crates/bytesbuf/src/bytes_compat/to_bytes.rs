@@ -83,7 +83,7 @@ mod tests {
         let sequence_single_span = BytesView::from_spans(vec![span1.clone()]);
         let sequence_multi_span = BytesView::from_spans(vec![span1, span2]);
 
-        let mut bytes = sequence_single_span.clone().to_bytes();
+        let mut bytes = sequence_single_span.to_bytes();
         assert_eq!(8, bytes.len());
         assert_eq!(1234, bytes.get_u64_ne());
 

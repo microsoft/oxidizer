@@ -32,8 +32,6 @@ impl Buf for BytesView {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-
     use new_zealand::nz;
 
     use super::*;
@@ -76,8 +74,8 @@ mod tests {
         // but the remaining 70 should still be here for us as 20 + 25 + 25.
         assert_eq!(n, 3);
 
-        assert_eq!(io_slices[0].deref(), &[0x44; 20]);
-        assert_eq!(io_slices[1].deref(), &[0x44; 25]);
-        assert_eq!(io_slices[2].deref(), &[0x44; 25]);
+        assert_eq!(&*io_slices[0], &[0x44; 20]);
+        assert_eq!(&*io_slices[1], &[0x44; 25]);
+        assert_eq!(&*io_slices[2], &[0x44; 25]);
     }
 }
