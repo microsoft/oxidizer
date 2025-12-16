@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [toolchain]
 # This needs to match RUST_LATEST in constants.toml.
 channel = "1.92"
