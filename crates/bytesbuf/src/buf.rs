@@ -944,11 +944,11 @@ mod tests {
         let _ = target_buffer.consume(U64_SIZE);
 
         // Append the payloads.
-        target_buffer.put_view(payload1);
-        target_buffer.put_view(payload2);
+        target_buffer.put_bytes(payload1);
+        target_buffer.put_bytes(payload2);
 
         // Appending an empty byte sequence does nothing.
-        target_buffer.put_view(BytesView::default());
+        target_buffer.put_bytes(BytesView::default());
 
         // Add some custom data at the end.
         target_buffer.put_num_ne(7777_u64);
@@ -1034,7 +1034,7 @@ mod tests {
         buf.put_num_ne(8888_u64);
         // These will cross a span boundary so we can also observe
         // crossing that boundary during peeking.
-        buf.put_bytes(9, 8);
+        buf.put_byte_repeated(9, 8);
 
         assert_eq!(buf.len(), 72);
         assert_eq!(buf.capacity(), 100);
@@ -1073,7 +1073,7 @@ mod tests {
         assert_eq!(peeked.first_slice().len(), 0);
 
         // Fill up the remaining 28 bytes of data so we have a full sequence builder.
-        buf.put_bytes(88, 28);
+        buf.put_byte_repeated(88, 28);
 
         let mut peeked = buf.peek();
         peeked.advance(72);

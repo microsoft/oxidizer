@@ -32,7 +32,7 @@ fn main() {
         let mut response_buf = connection.memory().reserve(TIMESTAMP_MAX_LEN);
 
         // Insert the static prefix. Cloning a BytesView is a cheap zero-copy operation.
-        response_buf.put_view(header_prefix.clone());
+        response_buf.put_bytes(header_prefix.clone());
 
         // We cannot assume that a `BytesBuf` contains consecutive memory,
         // so any fixed-length processing must be done using temporary buffers.
@@ -42,7 +42,7 @@ fn main() {
         response_buf.put_slice(timestamp_bytes);
 
         // Insert the static suffix. Cloning a BytesView is a cheap zero-copy operation.
-        response_buf.put_view(two_newlines.clone());
+        response_buf.put_bytes(two_newlines.clone());
 
         connection.write(response_buf.consume_all());
     }

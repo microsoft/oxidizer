@@ -105,7 +105,7 @@ mod tests {
 
         assert_eq!(sb.capacity(), 1313);
 
-        sb.put_bytes(3, 1313);
+        sb.put_byte_repeated(3, 1313);
 
         let sequence = sb.consume_all();
 

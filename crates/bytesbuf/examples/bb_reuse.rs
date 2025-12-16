@@ -29,7 +29,7 @@ fn main() {
     let mut buf = memory.reserve(1024);
 
     buf.put_slice(b"The quick brown fox says \"".as_slice());
-    buf.put_view(hello_world_reconstructed);
+    buf.put_bytes(hello_world_reconstructed);
     buf.put_slice(b"\" and jumps over the lazy dog.".as_slice());
 
     let fox_story = buf.consume_all();

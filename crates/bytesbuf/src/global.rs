@@ -355,7 +355,7 @@ mod tests {
             #[expect(clippy::cast_possible_truncation, reason = "intentionally truncating")]
             let value = views.len() as u8;
 
-            buf.put_bytes(value, (SEQUENCE_SIZE_BYTES as usize).min(buf.remaining_capacity()));
+            buf.put_byte_repeated(value, (SEQUENCE_SIZE_BYTES as usize).min(buf.remaining_capacity()));
 
             // Sanity check against silly mutations.
             debug_assert!(!buf.is_empty());
@@ -381,7 +381,7 @@ mod tests {
         let memory = GlobalPool::new();
 
         let mut sb = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
-        sb.put_bytes(42, BLOCK_SIZE_BYTES.get() as usize);
+        sb.put_byte_repeated(42, BLOCK_SIZE_BYTES.get() as usize);
 
         let sequence = sb.consume_all();
 

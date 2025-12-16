@@ -1013,7 +1013,7 @@ mod tests {
         let span_builder = std_alloc_block::allocate(nz!(1000)).into_span_builder();
 
         let mut buf = BytesBuf::from_span_builders([span_builder]);
-        buf.put_bytes(0, 100);
+        buf.put_byte_repeated(0, 100);
 
         let view = buf.consume_all();
 
@@ -1031,7 +1031,7 @@ mod tests {
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
         let mut buf = BytesBuf::from_span_builders([span_builder]);
-        buf.put_bytes(0, 100);
+        buf.put_byte_repeated(0, 100);
 
         let view = buf.consume_all();
 
@@ -1293,7 +1293,7 @@ mod tests {
         let mut buf = BytesBuf::from_blocks([block1, block2]);
 
         // Add enough bytes to make use of both blocks.
-        buf.put_bytes(123, 166);
+        buf.put_byte_repeated(123, 166);
 
         let view = buf.consume_all();
 

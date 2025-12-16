@@ -62,7 +62,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| sb.len(),
@@ -78,7 +78,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| sb.is_empty(),
@@ -94,7 +94,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| sb.capacity(),
@@ -196,7 +196,7 @@ fn entrypoint(c: &mut Criterion) {
             },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                sb.put_bytes(0xCD, PUT_BYTES_LEN);
+                sb.put_byte_repeated(0xCD, PUT_BYTES_LEN);
             },
             BatchSize::SmallInput,
         );
@@ -212,7 +212,7 @@ fn entrypoint(c: &mut Criterion) {
             },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                sb.put_view(test_data_as_seq.clone());
+                sb.put_bytes(test_data_as_seq.clone());
             },
             BatchSize::SmallInput,
         );
@@ -224,7 +224,7 @@ fn entrypoint(c: &mut Criterion) {
             BytesBuf::new,
             |sb| {
                 let _span = allocs_op.measure_thread();
-                sb.put_view(test_data_as_seq.clone());
+                sb.put_bytes(test_data_as_seq.clone());
             },
             BatchSize::SmallInput,
         );
@@ -241,7 +241,7 @@ fn entrypoint(c: &mut Criterion) {
             },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                sb.put_view(test_data_as_seq.clone());
+                sb.put_bytes(test_data_as_seq.clone());
             },
             BatchSize::SmallInput,
         );
@@ -252,7 +252,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| {
@@ -268,7 +268,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(max_inline_as_seq.clone());
+                sb.put_bytes(max_inline_as_seq.clone());
                 sb
             },
             |sb| {
@@ -284,7 +284,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| {
@@ -300,7 +300,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(test_data_as_seq.clone());
+                sb.put_bytes(test_data_as_seq.clone());
                 sb
             },
             |sb| {
@@ -414,7 +414,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.put_view(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| {

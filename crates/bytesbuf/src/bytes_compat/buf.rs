@@ -30,3 +30,52 @@ unsafe impl BufMut for BytesBuf {
         UninitSlice::uninit(self.first_unfilled_slice())
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TransparentTestMemory;
+
+    #[test]
+    fn buf_mut_compat() {
+        let memory = TransparentTestMemory::new();
+        let mut buf = memory.reserve(100);
+
+        assert_eq!(buf.remaining_mut(), 100);
+
+        // 100 + 100
+        buf.reserve(200, &memory);
+
+        assert_eq!(buf.remaining_mut(), 200);
+
+        let chunk = buf.chunk_mut();
+        assert_eq!(chunk.len(), 100);
+
+        // SAFETY: Lies - we did not write anything. But we will also
+        // not touch the data - we are only inspecting the bookkeeping.
+        // Good enough for test code.
+        unsafe {
+            buf.advance_mut(50);
+        }
+
+        let chunk = buf.chunk_mut();
+        assert_eq!(chunk.len(), 50);
+
+        // SAFETY: See above.
+        unsafe {
+            buf.advance_mut(50);
+        }
+
+        let chunk = buf.chunk_mut();
+        assert_eq!(chunk.len(), 100);
+
+        // SAFETY: See above.
+        unsafe {
+            buf.advance_mut(100);
+        }
+
+        let chunk = buf.chunk_mut();
+        assert_eq!(chunk.len(), 0);
+    }
+}

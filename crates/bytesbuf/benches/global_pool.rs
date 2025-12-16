@@ -33,7 +33,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter(|| {
             let _span = allocs_op.measure_thread();
             let mut sb = warm_memory.reserve(ONE_MB);
-            sb.put_bytes(66, ONE_MB);
+            sb.put_byte_repeated(66, ONE_MB);
         });
     });
 
@@ -44,7 +44,7 @@ fn entrypoint(c: &mut Criterion) {
             |memory| {
                 let _span = allocs_op.measure_thread();
                 let mut sb = memory.reserve(ONE_MB);
-                sb.put_bytes(66, ONE_MB);
+                sb.put_byte_repeated(66, ONE_MB);
             },
             BatchSize::LargeInput,
         );

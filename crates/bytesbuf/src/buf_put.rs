@@ -56,7 +56,7 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
-    pub fn put_view(&mut self, view: BytesView) {
+    pub fn put_bytes(&mut self, view: BytesView) {
         self.append(view);
     }
 
@@ -74,7 +74,7 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
-    pub fn put_bytes(&mut self, value: u8, mut count: usize) {
+    pub fn put_byte_repeated(&mut self, value: u8, mut count: usize) {
         assert!(self.remaining_capacity() >= count);
 
         while count > 0 {
@@ -176,7 +176,7 @@ mod tests {
         let data = [10_u8, 20, 30, 40, 50];
         let view = BytesView::copied_from_slice(&data, &memory);
 
-        buf.put_view(view);
+        buf.put_bytes(view);
 
         assert_eq!(buf.len(), 5);
         // Appending a view brings along its existing memory capacity, consuming none.
@@ -199,7 +199,7 @@ mod tests {
         let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
         let view_combined = BytesView::from_views([view_part1, view_part2]);
 
-        buf.put_view(view_combined);
+        buf.put_bytes(view_combined);
 
         assert_eq!(buf.len(), 5);
         // Appending a view brings along its existing memory capacity, consuming none.
@@ -218,7 +218,7 @@ mod tests {
 
         let view = BytesView::new();
 
-        buf.put_view(view);
+        buf.put_bytes(view);
 
         assert_eq!(buf.len(), 0);
         assert_eq!(buf.remaining_capacity(), 100);
@@ -235,7 +235,7 @@ mod tests {
         let peeked = buf.peek();
         assert_eq!(peeked.len(), 5);
 
-        buf.put_view(peeked);
+        buf.put_bytes(peeked);
 
         assert_eq!(buf.len(), 10);
         // The peeked view brings along its existing memory capacity, consuming none.
@@ -269,7 +269,7 @@ mod tests {
         let memory = TransparentTestMemory::new();
         let mut buf = memory.reserve(10);
 
-        buf.put_bytes(0xFF, 5);
+        buf.put_byte_repeated(0xFF, 5);
 
         assert_eq!(buf.len(), 5);
         assert_eq!(buf.remaining_capacity(), 5);
@@ -290,7 +290,7 @@ mod tests {
         // Result: 5 + 5
         buf.reserve(10, &memory);
 
-        buf.put_bytes(0xAA, 10);
+        buf.put_byte_repeated(0xAA, 10);
 
         assert_eq!(buf.len(), 10);
         assert_eq!(buf.remaining_capacity(), 0);
