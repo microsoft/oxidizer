@@ -43,11 +43,11 @@ pub trait RedactedDisplay {
 /// Converts a type implementing [`RedactedDisplay`] to a redacted string representation.
 pub trait RedactedToString {
     /// Converts the value to a redacted string representation.
-    fn to_string(&self, engine: &RedactionEngine) -> String;
+    fn to_redacted_string(&self, engine: &RedactionEngine) -> String;
 }
 
 impl<T: RedactedDisplay + ?Sized> RedactedToString for T {
-    fn to_string(&self, engine: &RedactionEngine) -> String {
+    fn to_redacted_string(&self, engine: &RedactionEngine) -> String {
         struct Adapter<'a, T: ?Sized> {
             inner: &'a T,
             engine: &'a RedactionEngine,
