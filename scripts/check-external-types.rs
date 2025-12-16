@@ -79,10 +79,10 @@ fn main() {
     println!("  Total:   {}", checked + skipped);
 
     if !failed_crates.is_empty() {
-        println!();
-        println!("❌ {} crate(s) failed:", failed_crates.len());
+        eprintln!();
+        eprintln!("❌ {} crate(s) failed:", failed_crates.len());
         for (name, error) in &failed_crates {
-            println!("  - {}: {}", name, error);
+            eprintln!("  - {}: {}", name, error);
         }
         std::process::exit(1);
     }

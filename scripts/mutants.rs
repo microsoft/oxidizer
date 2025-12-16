@@ -125,11 +125,11 @@ fn main() {
     if failed_groups.is_empty() {
         println!("✅ All test groups passed!");
     } else {
-        println!("❌ {} test group(s) failed:", failed_groups.len());
+        eprintln!("❌ {} test group(s) failed:", failed_groups.len());
         for (group, error) in &failed_groups {
-            println!("  - [{}]: {}", group.join(", "), error);
+            eprintln!("  - [{}]: {}", group.join(", "), error);
         }
-        println!();
+        eprintln!();
         std::process::exit(1);
     }
 }
