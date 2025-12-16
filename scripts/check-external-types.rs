@@ -29,11 +29,11 @@ struct Args {
     toolchain: String,
 }
 
-fn main() -> Result<()> {
+fn main() {
     let args: Args = argh::from_env();
 
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let all_packages = automation::list_packages(workspace_root)?;
+    let all_packages = automation::list_packages(workspace_root).expect("failed to list workspace packages");
 
     let filtered_packages: Vec<_> = all_packages
         .into_iter()
@@ -57,7 +57,10 @@ fn main() -> Result<()> {
 
         if has_lib {
             println!("Checking external types in {}", pkg.name);
-            check_external_types(&pkg.manifest_path, &args.toolchain)?;
+            if let Err(e) = check_external_types(&pkg.manifest_path, &args.toolchain) {
+                eprintln!("✗ Failed: {}: {e}", pkg.name);
+                std::process::exit(1);
+            }
             println!("✓ Passed: {}", pkg.name);
             checked += 1;
         } else {
@@ -72,8 +75,6 @@ fn main() -> Result<()> {
     println!("  Checked: {}", checked);
     println!("  Skipped: {}", skipped);
     println!("  Total:   {}", checked + skipped);
-
-    Ok(())
 }
 
 fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<()> {
