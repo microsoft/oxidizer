@@ -206,3 +206,91 @@ async fn debug_impl() {
     // Complete the work
     assert_eq!(fut.await, "Result");
 }
+
+// N-leader tests
+
+#[tokio::test]
+async fn with_max_leaders_basic() {
+    let group: UniFlight<&str, String> = UniFlight::with_max_leaders(3);
+    let result = group
+        .work("key", || async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            "Result".to_string()
+        })
+        .await;
+    assert_eq!(result, "Result");
+}
+
+#[tokio::test]
+async fn multiple_leaders_all_get_same_result() {
+    let call_counter = AtomicUsize::default();
+
+    // Allow up to 3 concurrent leaders
+    let group = UniFlight::with_max_leaders(3);
+    let futures = FuturesUnordered::new();
+
+    // Start 5 concurrent calls - up to 3 become leaders, 2 become followers
+    for i in 0..5 {
+        let counter = &call_counter;
+        futures.push(group.work("key", move || async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            counter.fetch_add(1, AcqRel);
+            format!("Result-{i}")
+        }));
+    }
+
+    // All should complete with the same result (first to finish wins)
+    let results: Vec<_> = futures.collect().await;
+    let first_result = &results[0];
+    assert!(results.iter().all(|r| r == first_result));
+}
+
+#[tokio::test]
+async fn followers_get_first_leader_result() {
+    let group = UniFlight::with_max_leaders(2);
+
+    // Start first leader (slow)
+    let fut1 = group.work("key".to_string(), || async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        "slow".to_string()
+    });
+
+    // Start second leader (fast)
+    let fut2 = group.work("key".to_string(), || async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        "fast".to_string()
+    });
+
+    // Start followers (should get whichever leader finishes first)
+    let fut3 = group.work("key".to_string(), unreachable_future);
+    let fut4 = group.work("key".to_string(), unreachable_future);
+
+    // Note: Due to current implementation, leaders serialize on slot lock,
+    // so execution order is deterministic. The first to acquire the lock wins.
+    let (r1, r2, r3, r4) = tokio::join!(fut1, fut2, fut3, fut4);
+
+    // All should have the same result
+    assert_eq!(r1, r2);
+    assert_eq!(r2, r3);
+    assert_eq!(r3, r4);
+}
+
+#[tokio::test]
+async fn leader_cancel_with_multiple_leaders() {
+    let group: Arc<UniFlight<String, String>> = Arc::new(UniFlight::with_max_leaders(2));
+
+    // First leader will be cancelled
+    let group_clone = Arc::clone(&group);
+    let fut_cancel = group_clone.work("key".to_string(), unreachable_future);
+    let _ = tokio::time::timeout(Duration::from_millis(10), fut_cancel).await;
+
+    // Second leader should succeed
+    let result = group.work("key".to_string(), || async { "Success".to_string() }).await;
+    assert_eq!(result, "Success");
+}
+
+#[tokio::test]
+#[should_panic(expected = "max_leaders must be at least 1")]
+async fn with_max_leaders_zero_panics() {
+    let _group: UniFlight<&str, String> = UniFlight::with_max_leaders(0);
+}

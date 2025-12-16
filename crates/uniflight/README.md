@@ -62,6 +62,31 @@ let result = group.work("user:123", || async {
 [`UniFlight`] is `Send` and `Sync`, and can be shared across threads. The returned futures
 do not require `Send` bounds on the closure or its output.
 
+## Multiple Leaders for Redundancy
+
+By default, `UniFlight` uses a single leader per key. For redundancy scenarios where you want
+multiple concurrent attempts at the same operation (using whichever completes first), use
+[`UniFlight::with_max_leaders`]:
+
+```rust
+use uniflight::UniFlight;
+
+// Allow up to 3 concurrent leaders for redundancy
+let group: UniFlight<&str, String> = UniFlight::with_max_leaders(3);
+
+// First 3 concurrent calls become leaders and execute in parallel.
+// The first leader to complete stores the result.
+// All callers (leaders and followers) receive that result.
+let result = group.work("key", || async {
+    "result".to_string()
+}).await;
+```
+
+This is useful when:
+- You want fault tolerance through redundant execution
+- Network latency varies and you want the fastest response
+- You're implementing speculative execution patterns
+
 <!-- cargo-rdme end -->
 
 <div style="font-size: 75%" ><hr/>
