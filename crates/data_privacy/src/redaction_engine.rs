@@ -136,7 +136,7 @@ impl RedactionEngine {
 
     /// Redacts a value implementing [`RedactedToString`] and returns the redacted string.
     pub fn redacted_to_string(&self, value: &impl RedactedToString) -> String {
-        value.to_string(self)
+        value.to_redacted_string(self)
     }
 
     /// Redacts a string with an explicit data classification, sending the results to the output sink.
