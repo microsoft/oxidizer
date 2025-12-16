@@ -13,36 +13,37 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-  # Rust toolchain versions
-  RUST_MSRV: "1.88"                                  # used for testing (ensures the MSRV promise is kept)
-  RUST_LATEST: "1.92"                                # used for static analysis & mutation testing
-  RUST_NIGHTLY: "nightly-2025-11-20"                 # used for coverage and extended analysis
-  RUST_NIGHTLY_EXTERNAL_TYPES: "nightly-2025-08-06"  # used for external type exposure checks
-
-  # Tool versions
-  CARGO_AUDIT_VERSION: "0.22.0"
-  CARGO_CHECK_EXTERNAL_TYPES_VERSION: "0.3.0"
-  CARGO_DENY_VERSION: "0.18.8"
-  CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: "0.2.0"
-  CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: "0.2.0"
-  CARGO_HACK_VERSION: "0.6.39"
-  CARGO_LLVM_COV_VERSION: "0.6.21"
-  CARGO_MUTANTS_VERSION: "25.3.1"
-  CARGO_RDME_VERSION: "1.5.0"
-  CARGO_SEMVER_CHECKS_VERSION: "0.45.0"
-  CARGO_SORT_VERSION: "2.0.2"
-  CARGO_UDEPS_VERSION: "0.1.60"
-  CARGO_WORKSPACES_VERSION: "0.4.1"
-  SCCACHE_VERSION: "v0.12.0"
-
 jobs:
+  constants:
+    uses: ./.github/workflows/repo-constants.yml
+
   testing:
+    needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
+      <<: &repo-constants
+        RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+        RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+        RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+        RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+        CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+        CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+        CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+        CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+        CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+        CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+        CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+        CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+        CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+        CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+        CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+        CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+        CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+        SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -84,12 +85,14 @@ jobs:
         run: cargo test --doc --verbose --workspace --all-features
 
   static-analysis:
+    needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
+      <<: *repo-constants
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -145,12 +148,14 @@ jobs:
 
   extended-analysis:
     if: github.event_name == 'pull_request'
+    needs: [constants, testing, static-analysis]
     runs-on: ${{ matrix.os }}
-    needs: [testing, static-analysis]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    env:
+      <<: *repo-constants
     steps:
       # prep
       - name: Checkout
@@ -182,9 +187,10 @@ jobs:
 
   mutation-testing:
     if: github.event_name == 'pull_request'
+    needs: [constants, testing]
     runs-on: ubuntu-latest
-    needs: testing
     env:
+      <<: *repo-constants
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -228,12 +234,14 @@ jobs:
 
   coverage:
     if: github.event_name == 'pull_request'
+    needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
+      <<: *repo-constants
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -313,7 +321,10 @@ jobs:
           strict: true
 
   external-type-exposure:
+    needs: constants
     runs-on: ubuntu-latest
+    env:
+      <<: *repo-constants
     steps:
       # prep
       - name: Checkout
