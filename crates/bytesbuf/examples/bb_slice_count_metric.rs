@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates how to manually extract the "how many slices in a BytesView" metric from an app.
+//! Demonstrates how to manually extract the "how many slices in a `BytesView`" metric from an app.
 //!
 //! This is for internal use only, to help fine-tune the internal memory layout of `BytesView`.
 //!
