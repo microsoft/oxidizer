@@ -110,7 +110,7 @@ fn main() {
 
     for group in &test_groups {
         if let Err(e) = mutate_group(&group[..], &args) {
-            eprintln!("❌ mutation testing failed for [{}]: {}", group.join(", "), e);
+            eprintln!("❌ mutation testing failed for [{}]: {}", group.join(" "), e);
             std::process::exit(1);
         }
     }
