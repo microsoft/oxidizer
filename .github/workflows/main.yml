@@ -15,7 +15,7 @@ env:
 
   # Rust toolchain versions
   RUST_MSRV: "1.88"                                  # used for testing (ensures the MSRV promise is kept)
-  RUST_LATEST: "1.91"                                # used for static analysis & mutation testing
+  RUST_LATEST: "1.92"                                # used for static analysis & mutation testing
   RUST_NIGHTLY: "nightly-2025-11-20"                 # used for coverage and extended analysis
   RUST_NIGHTLY_EXTERNAL_TYPES: "nightly-2025-08-06"  # used for external type exposure checks
 
