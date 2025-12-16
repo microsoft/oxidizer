@@ -41,7 +41,9 @@
 //! [`InactiveClock::activate`]: InactiveClock::activate
 
 mod clock_driver;
+mod clock_gone;
 mod inactive_clock;
 
 pub use clock_driver::ClockDriver;
+pub use clock_gone::ClockGone;
 pub use inactive_clock::InactiveClock;

@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync::Arc;
+
 use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
-use crate::state::{ClockState, GlobalState};
+use crate::state::GlobalState;
 
 /// An inactive clock that must be activated before time operations can be performed.
 ///
@@ -51,14 +53,12 @@ impl InactiveClock {
     /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
     #[must_use]
     pub fn activate(self) -> (Clock, ClockDriver) {
-        let (state, driver) = self.activate_with_state();
+        let state = self.0.into_clock_state();
 
-        (Clock::with_state(state), driver)
-    }
+        let clock = Clock(Arc::clone(&state));
+        let driver = ClockDriver::new(state);
 
-    pub(crate) fn activate_with_state(self) -> (ClockState, ClockDriver) {
-        let state = ClockState::from(self.0);
-        (state.clone(), ClockDriver::new(state))
+        (clock, driver)
     }
 }
 
@@ -74,7 +74,7 @@ impl From<crate::ClockControl> for InactiveClock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ClockControl;
+    use crate::{ClockControl, state::ClockState};
 
     #[test]
     fn assert_types() {
@@ -86,7 +86,7 @@ mod tests {
         let inactive_clock = InactiveClock::default();
         let (clock, driver) = inactive_clock.activate();
         assert!(matches!(clock.clock_state(), ClockState::System(_)));
-        assert!(matches!(driver.0, ClockState::System(_)));
+        assert!(matches!(driver.0.as_ref(), &ClockState::System(_)));
     }
 
     #[test]
@@ -94,6 +94,6 @@ mod tests {
         let inactive_clock = InactiveClock::from(ClockControl::new());
         let (clock, driver) = inactive_clock.activate();
         assert!(matches!(clock.clock_state(), ClockState::ClockControl(_)));
-        assert!(matches!(driver.0, ClockState::ClockControl(_)));
+        assert!(matches!(driver.0.as_ref(), &ClockState::ClockControl(_)));
     }
 }

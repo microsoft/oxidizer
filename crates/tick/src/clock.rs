@@ -1,13 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(any(feature = "tokio", test))]
 use std::sync::Arc;
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(any(feature = "test-util", test))]
-use super::clock_control::ClockControl;
 use crate::state::ClockState;
 use crate::timers::TimerKey;
 
@@ -155,7 +152,7 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Clock(ClockInner);
+pub struct Clock(pub(crate) Arc<ClockState>);
 
 impl Clock {
     /// Creates a new clock driven by the Tokio runtime.
@@ -166,61 +163,37 @@ impl Clock {
     #[cfg(any(feature = "tokio", test))]
     #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn new_tokio() -> Self {
-        Self::tokio_core().0
+        Self::new_tokio_core().0
     }
 
-    #[cfg(any(feature = "tokio", test))]
-    #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    fn tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
-        use crate::runtime::InactiveClock;
-
+    fn new_tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
         /// How often the Tokio clock driver advances timers.
         ///
         /// A 10ms resolution balances precision with runtime overhead for the
         /// background task that drives timer advancement in Tokio.
         const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
 
-        let (state, driver) = InactiveClock::default().activate_with_state();
-        let tokio_state = TokioClockState::new(state);
+        let (clock, mut driver) = crate::runtime::InactiveClock::default().activate();
 
-        // Spawn a task that advances the timers.
-        let cancelation = Arc::clone(&tokio_state.cancellation);
         let join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(TIMER_RESOLUTION).await;
 
-                // Stop the loop when there are no more timers and the clock is gone
-                //
-                // Cancellation flag:
-                // - Each `TokioClockState` holds a clone of the cancellation token
-                // - This background task also holds one clone
-                // - When all Clock instances are dropped, only one instance of the cancellation token remains,
-                //   which is this background task
-                // - When there are no timers and no clocks left, it's a signal to drop this routine
-                if driver.advance_timers(Instant::now()).is_none() && Arc::strong_count(&cancelation) == 1 {
+                if driver.advance_timers(Instant::now()).is_err() {
                     break;
                 }
             }
         });
 
-        (Self(ClockInner::Tokio(tokio_state)), join_handle)
+        (clock, join_handle)
     }
 
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
-    pub(super) fn with_frozen_timers() -> Self {
-        Self::with_state(crate::state::GlobalState::System.into())
-    }
-
-    pub(super) fn with_state(state: ClockState) -> Self {
-        Self(ClockInner::State(state))
-    }
-
-    #[cfg(any(feature = "test-util", test))]
-    #[must_use]
-    pub(crate) fn with_control(clock_control: &ClockControl) -> Self {
-        Self::with_state(ClockState::ClockControl(clock_control.clone()))
+    pub(super) fn new_system_frozen() -> Self {
+        Self(crate::state::GlobalState::System.into_clock_state())
     }
 
     /// Creates a new frozen clock.
@@ -458,53 +431,13 @@ impl Clock {
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {
-        self.0.local_state()
+        self.0.as_ref()
     }
 }
 
 impl AsRef<Self> for Clock {
     fn as_ref(&self) -> &Self {
         self
-    }
-}
-
-#[derive(Debug, Clone)]
-enum ClockInner {
-    State(ClockState),
-
-    #[cfg(any(feature = "tokio", test))]
-    Tokio(TokioClockState),
-}
-
-impl ClockInner {
-    fn local_state(&self) -> &ClockState {
-        match self {
-            Self::State(state) => state,
-            #[cfg(any(feature = "tokio", test))]
-            Self::Tokio(tokio_state) => tokio_state.clock_state(),
-        }
-    }
-}
-
-#[cfg(any(feature = "tokio", test))]
-#[derive(Debug, Clone)]
-struct TokioClockState {
-    state: ClockState,
-    cancellation: Arc<()>,
-}
-
-#[cfg(any(feature = "tokio", test))]
-impl TokioClockState {
-    fn new(state: ClockState) -> Self {
-        Self {
-            state,
-            cancellation: Arc::new(()),
-        }
-    }
-
-    /// Returns a reference to the inner clock state.
-    fn clock_state(&self) -> &ClockState {
-        &self.state
     }
 }
 
@@ -515,6 +448,8 @@ mod tests {
 
     use std::{fmt::Debug, thread::sleep};
 
+    use crate::ClockControl;
+
     use super::*;
 
     static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
@@ -522,11 +457,6 @@ mod tests {
     #[test]
     fn assert_types() {
         static_assertions::assert_impl_all!(Clock: Send, Sync, AsRef<Clock>);
-
-        // test-util and tokio features are always enabled in tests
-        static_assertions::const_assert!(std::mem::size_of::<ClockState>() == 16);
-        static_assertions::const_assert!(std::mem::size_of::<ClockInner>() == 24);
-        static_assertions::const_assert!(std::mem::size_of::<Clock>() == 24);
     }
 
     #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.
@@ -534,7 +464,7 @@ mod tests {
     fn test_now() {
         let now = std::time::SystemTime::now();
 
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let absolute = clock.system_time();
         assert!(absolute >= now);
     }
@@ -554,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_instant_now() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let clock_instant = clock.instant();
         let system_instant = Instant::now();
 
@@ -569,7 +499,7 @@ mod tests {
     fn test_system_time() {
         let now = std::time::SystemTime::now();
 
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let system_time = clock.system_time();
         assert!(system_time >= now);
     }
@@ -597,7 +527,7 @@ mod tests {
     #[cfg(not(miri))] // The logic we call talks to the real OS, which Miri cannot do.
     #[tokio::test]
     async fn tokio_ensure_future_finished_when_clock_dropped() {
-        let (clock, handle) = Clock::tokio_core();
+        let (clock, handle) = Clock::new_tokio_core();
 
         clock.delay(Duration::from_millis(15)).await;
 

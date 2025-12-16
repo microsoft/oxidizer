@@ -31,12 +31,12 @@ fn criterion_benchmark(c: &mut Criterion) {
 fn clock(c: &mut Criterion) {
     let mut group = c.benchmark_group("clock_operations");
 
-    let (clock, driver) = InactiveClock::default().activate();
+    let (clock, mut driver) = InactiveClock::default().activate();
 
     group.bench_function("clock_operations", |b| {
         b.iter(|| {
             let mut cx = Context::from_waker(Waker::noop());
-            clock_operations(&clock, &driver, &mut cx);
+            clock_operations(&clock, &mut driver, &mut cx);
         });
     });
 
@@ -52,7 +52,7 @@ criterion_group! {
 criterion_main!(benches);
 
 #[expect(clippy::arithmetic_side_effects, reason = "reduces clarity")]
-fn clock_operations(clock: &Clock, driver: &ClockDriver, cx: &mut Context<'_>) {
+fn clock_operations(clock: &Clock, driver: &mut ClockDriver, cx: &mut Context<'_>) {
     let now = Instant::now();
 
     let mut delay_1 = pin!(Delay::new(clock, Duration::from_secs(1)));

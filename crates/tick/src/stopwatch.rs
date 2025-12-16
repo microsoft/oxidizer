@@ -112,7 +112,7 @@ mod test {
 
     #[test]
     fn test_stopwatch() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let watch = clock.stopwatch();
 
         sleep(Duration::from_millis(1));

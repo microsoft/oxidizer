@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn register_timer_with_clock() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let id = clock.register_timer(Instant::now(), Waker::noop().clone());
 
         match clock.clock_state() {
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn unregister_timer_with_clock() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let id = clock.register_timer(Instant::now(), Waker::noop().clone());
         clock.unregister_timer(id);
         assert_eq!(clock.clock_state().timers_len(), 0);

@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crate::timers::Timers;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum ClockState {
     #[cfg(any(feature = "test-util", test))]
     ClockControl(crate::ClockControl),
@@ -23,7 +23,7 @@ impl ClockState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct SynchronizedTimers {
     // The mutex here is not accessed on a hot path. Timers are accessed only when:
     //
@@ -38,7 +38,7 @@ pub(crate) struct SynchronizedTimers {
     // with `RefCell`. The `RefCell` variant is around 7% faster. In practice, in real applications,
     // the difference is negligible. The real performance improvement comes from isolating the `Clock` to each thread.
     // This reduces lock contention and provides linear scalability.
-    timers: Arc<Mutex<Timers>>,
+    timers: Mutex<Timers>,
 }
 
 impl SynchronizedTimers {
@@ -64,13 +64,13 @@ pub(crate) enum GlobalState {
     ClockControl(crate::ClockControl),
 }
 
-impl From<GlobalState> for ClockState {
-    fn from(state: GlobalState) -> Self {
-        match state {
+impl GlobalState {
+    pub fn into_clock_state(self) -> Arc<ClockState> {
+        Arc::new(match self {
             #[cfg(any(feature = "test-util", test))]
-            GlobalState::ClockControl(control) => Self::ClockControl(control),
-            GlobalState::System => Self::System(SynchronizedTimers::default()),
-        }
+            GlobalState::ClockControl(control) => ClockState::ClockControl(control),
+            GlobalState::System => ClockState::System(SynchronizedTimers::default()),
+        })
     }
 }
 

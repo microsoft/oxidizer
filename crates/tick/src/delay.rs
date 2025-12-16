@@ -165,14 +165,14 @@ mod tests {
 
     #[test]
     fn delay_zero() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let mut delay = Delay::new(&clock, Duration::ZERO);
         assert_eq!(poll_delay(&mut delay), Poll::Ready(()));
     }
 
     #[test]
     fn delay_max() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
 
         let result = poll_delay(&mut Delay::new(&clock, Duration::MAX));
 
@@ -181,19 +181,19 @@ mod tests {
 
     #[test]
     fn delay_zero_ensure_timer_not_registered() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         assert!(Delay::new(&clock, Duration::ZERO).current_timer.is_none());
     }
 
     #[test]
     fn delay_max_ensure_timer_not_registered() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         assert!(Delay::new(&clock, Duration::MAX).current_timer.is_none());
     }
 
     #[test]
     fn delay_close_to_max_ensure_timer_not_registered() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let mut delay = Delay::new(&clock, Duration::MAX.saturating_sub(Duration::from_millis(1)));
 
         assert_eq!(poll_delay(&mut delay), Poll::Pending);
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn ready_without_advancing_timers_ensure_timer_unregistered() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let period = Duration::from_millis(1);
         let mut delay = Delay::new(&clock, period);
 
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn drop_delay_unregisters_timer() {
-        let clock = Clock::with_frozen_timers();
+        let clock = Clock::new_system_frozen();
         let period = Duration::from_millis(1);
 
         // Create and poll the delay to register a timer.

@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
-use crate::state::ClockState;
+use crate::{runtime::ClockGone, state::ClockState};
 
 /// Drives timer advancement for the clock.
 ///
@@ -11,10 +11,10 @@ use crate::state::ClockState;
 /// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
 /// ensure timers fire at the correct time.
 #[derive(Debug)]
-pub struct ClockDriver(pub(super) ClockState);
+pub struct ClockDriver(pub(super) Arc<ClockState>);
 
 impl ClockDriver {
-    pub(super) const fn new(state: ClockState) -> Self {
+    pub(super) const fn new(state: Arc<ClockState>) -> Self {
         Self(state)
     }
 
@@ -23,21 +23,24 @@ impl ClockDriver {
     /// This method processes all timers scheduled to fire at or before the
     /// specified `now` time, waking their associated tasks.
     ///
-    /// # Arguments
+    /// # Errors
     ///
-    /// * `now` - The current time to advance timers to
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(instant)` with the next scheduled timer time if any timers
-    /// are registered, or `None` if no timers are pending.
+    /// Returns `Err(ClockGone)` if the all clocks are gone, all timers are fired and
+    /// advancing the clock is no longer necessary.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     #[must_use]
-    pub fn advance_timers(&self, now: Instant) -> Option<Instant> {
-        match self.0 {
-            ClockState::System(ref timers) => timers.try_advance_timers(now),
+    pub fn advance_timers(&mut self, now: Instant) -> Result<Option<Instant>, ClockGone> {
+        let next_timer = match self.0.as_ref() {
+            ClockState::System(timers) => timers.try_advance_timers(now),
             #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(ref c) => c.next_timer(),
+            ClockState::ClockControl(control) => control.next_timer(),
+        };
+
+        match next_timer {
+            Some(next) => Ok(Some(next)),
+            // Check if this is the last reference to the clock state
+            None if Arc::strong_count(&self.0) == 1 => Err(ClockGone::new()),
+            None => Ok(None),
         }
     }
 }
@@ -45,11 +48,14 @@ impl ClockDriver {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::task::Waker;
+    use std::task::{Context, Waker};
     use std::time::Duration;
+
+    use futures::FutureExt;
 
     use super::*;
     use crate::clock_control::ClockControl;
+    use crate::runtime::InactiveClock;
     use crate::state::SynchronizedTimers;
 
     #[test]
@@ -60,34 +66,67 @@ mod tests {
     #[test]
     fn advance_timers_ok() {
         let timers = SynchronizedTimers::default();
-        let clock_state = ClockState::System(timers.clone());
         let when = Instant::now();
-
         timers.with_timers(|timers| {
             timers.register(when, Waker::noop().clone());
         });
 
-        let driver = ClockDriver::new(clock_state);
+        let clock_state = Arc::new(ClockState::System(timers));
+        let mut driver = ClockDriver::new(Arc::clone(&clock_state));
 
         _ = driver.advance_timers(Instant::now() - Duration::from_secs(1));
-        timers.with_timers(|timers| assert_eq!(timers.len(), 1));
+        assert_eq!(clock_state.timers_len(), 1);
 
         _ = driver.advance_timers(Instant::now() + Duration::from_secs(1));
-        timers.with_timers(|timers| assert_eq!(timers.len(), 0));
+        assert_eq!(clock_state.timers_len(), 0);
+    }
+
+    #[test]
+    fn clock_gone_error_reported() {
+        let (clock, mut driver) = InactiveClock::default().activate();
+
+        driver.advance_timers(Instant::now()).unwrap();
+        drop(clock);
+        let error = driver.advance_timers(Instant::now()).unwrap_err();
+
+        assert_eq!(error.to_string(), "all clock owners have been dropped");
+    }
+
+    #[test]
+    fn clock_gone_but_timers_left_not_dropped() {
+        let now = Instant::now();
+        let (clock, mut driver) = InactiveClock::default().activate();
+        driver.advance_timers(now).unwrap();
+        let mut future = Box::pin(clock.delay(Duration::from_secs(1)));
+        let mut context = Context::from_waker(Waker::noop());
+        _ = future.poll_unpin(&mut context);
+
+        drop(clock);
+
+        // still timers left
+        driver.advance_timers(now).unwrap();
+
+        // advance pending timers
+        driver.advance_timers(now + Duration::from_secs(123)).unwrap();
+        _ = future.poll_unpin(&mut context);
+        drop(future);
+
+        // no more timers left
+        driver.advance_timers(now + Duration::from_secs(123)).unwrap_err();
     }
 
     #[test]
     fn advance_timers_with_clock_control_does_not_advance() {
         let control = ClockControl::new();
-        let clock_state = ClockState::ClockControl(control.clone());
+        let clock_state = Arc::new(ClockState::ClockControl(control.clone()));
         let when = control.instant() + Duration::from_secs(1);
 
         control.register_timer(when, Waker::noop().clone());
 
-        let driver = ClockDriver::new(clock_state);
+        let mut driver = ClockDriver::new(clock_state);
 
         // Calling advance_timers should not advance timers when using ClockControl
-        let next = driver.advance_timers(control.instant() + Duration::from_secs(2));
+        let next = driver.advance_timers(control.instant() + Duration::from_secs(2)).unwrap();
 
         // Verify timers are not advanced (still registered)
         assert_eq!(control.timers_len(), 1);
