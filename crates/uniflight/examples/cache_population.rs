@@ -15,6 +15,7 @@ use std::{
     time::Duration,
 };
 
+use tick::Clock;
 use uniflight::UniFlight;
 
 #[tokio::main]
@@ -33,7 +34,8 @@ async fn main() {
         let group = Arc::clone(&cache_group);
         let counter = Arc::clone(&execution_count);
         let handle = tokio::spawn(async move {
-            let start = tokio::time::Instant::now();
+            let clock = Clock::new_tokio();
+            let start = clock.instant();
 
             let result = group
                 .work("user:123".to_string(), || async {
@@ -41,7 +43,7 @@ async fn main() {
                     println!("  [Request {i}] I'm the leader! Fetching from database... (execution #{count})");
 
                     // Simulate expensive database query
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    clock.delay(Duration::from_millis(500)).await;
 
                     "UserData(name: Alice, age: 30)".to_string()
                 })
