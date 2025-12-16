@@ -500,7 +500,6 @@
 //! * [`BytesView::into_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
 //!   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
 //!   You are discouraged from using this method in any performance-relevant logic path.
-//! * See `Work Item 5861368: BytesView::into_bytes_iter()`
 //! * `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][18] instance
 //!   into a [`BytesView`]. This is an efficient zero-copy operation that reuses the memory of the
 //!   `Bytes` instance.

@@ -1,10 +1,16 @@
 # Changelog
 
+## [0.9.0] - 2025-12-16
+
+- 🧩 Miscellaneous
+
+  - Make it to_redacted_string to avoid annoying downstream conflicts.
+
 ## [0.8.0] - 2025-12-10
 
 - ✨ Features
 
-  - Add a redactor that uses RapidHash
+  - Add a redactor that uses RapidHash ([#114](https://github.com/microsoft/oxidizer/pull/114))
 
 - 🔄 Continuous Integration
 

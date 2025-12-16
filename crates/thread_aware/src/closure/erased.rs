@@ -12,7 +12,7 @@ pub struct ErasedClosureOnce<T> {
 
 //TODO Refactor and call debug on the inner closure
 impl<T> std::fmt::Debug for ErasedClosureOnce<T> {
-    #[mutants::skip]
+    #[cfg_attr(test, mutants::skip)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ErasedClosure")
             .field("return_type", &std::any::type_name::<T>())

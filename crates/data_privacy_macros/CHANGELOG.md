@@ -1,22 +1,21 @@
 # Changelog
 
-## [0.7.0] - 2025-12-05
+## [0.8.0] - 2025-12-16
+
+- 🔄 Continuous Integration
+
+  - Linting for Cargo.toml files ([#110](https://github.com/microsoft/oxidizer/pull/110))
+  - Add license check for dependencies ([#105](https://github.com/microsoft/oxidizer/pull/105))
 
 - 🧩 Miscellaneous
 
-  - Don't make std types redacted, annotate fields with `#[unredacted]` instead.
-  - Fix CI complaints.
-  - Format again.
-  - Remove `RedactedToString` derive, since it was replaced by blanket trait impl.
-  - Fix documentation.
-  - Also align data privacy with Rust Guidelines and clean up module structure.
-  - Align macro crate with existing structure.
-  - Re-enable tests.
-  - Update main app example and also log entire type.
-  - Fix impl issues and make it work with std.
-  - Implement derives.
-  - More design work.
-  - Change #[classified] macro to implement its own derives.
+  - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
+
+## [0.7.0] - 2025-12-05
+
+- ✨ Features
+
+  - Improve data_privacy UX ([#89](https://github.com/microsoft/oxidizer/pull/89))
 
 ## [0.4.0] - 2025-11-27
 

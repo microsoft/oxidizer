@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use core::panic;
 use std::mem::{self, MaybeUninit};
 use std::num::NonZero;
 
@@ -9,7 +8,7 @@ use bytes::buf::UninitSlice;
 use bytes::{Buf, BufMut};
 use smallvec::SmallVec;
 
-use crate::{Block, BlockSize, BytesBufWrite, BytesView, InspectSpanBuilderData, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
+use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
 
 /// Owns some memory capacity in which it allows you to place a sequence of bytes that
 /// you can thereafter extract as one or more [`BytesView`]s.
@@ -28,7 +27,7 @@ use crate::{Block, BlockSize, BytesBufWrite, BytesView, InspectSpanBuilderData, 
 /// The memory owned by a `BytesBuf` (its capacity) can be viewed as two regions:
 ///
 /// * Filled memory - these bytes have been written to but have not yet been consumed as a
-///   [`BytesView`]. They may be inspected (via [`inspect()`][4]) or consumed (via [`consume()`][5]).
+///   [`BytesView`]. They may be peeked at (via [`peek()`][4]) or consumed (via [`consume()`][5]).
 /// * Available memory - these bytes have not yet been written to and are available for writing via
 ///   [`bytes::buf::BufMut`][1] or [`begin_vectored_write()`][Self::begin_vectored_write].
 ///
@@ -38,7 +37,7 @@ use crate::{Block, BlockSize, BytesBufWrite, BytesView, InspectSpanBuilderData, 
 ///
 /// [1]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
 /// [3]: Self::reserve
-/// [4]: Self::inspect
+/// [4]: Self::peek
 /// [5]: Self::consume
 /// [6]: Self::append
 /// [7]: crate::Memory
@@ -203,29 +202,29 @@ impl BytesBuf {
             .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
     }
 
-    /// Inspects the contents of the filled bytes region of the sequence builder.
-    /// Typically used to identify whether and which contents may be consumed.
+    /// Peeks at the contents of the filled bytes region, returning a [`BytesView`] over all
+    /// filled data without consuming it from the sequence builder.
+    ///
+    /// This is similar to [`consume_all()`][Self::consume_all] except the data remains in the
+    /// sequence builder and can still be consumed later.
     #[must_use]
-    pub fn inspect(&self) -> BytesBufInspector<'_, '_> {
-        let cursor = if !self.frozen_spans.is_empty() {
-            InspectCursor::FrozenSpan {
-                span_index: 0,
-                offset_in_span: 0,
-            }
-        } else if let Some(first_builder) = self.span_builders_reversed.last() {
-            // Logically first but stored last.
-            InspectCursor::FirstSpanBuilder {
-                inspector: first_builder.inspect(),
-            }
-        } else {
-            InspectCursor::End
-        };
+    pub fn peek(&self) -> BytesView {
+        // Build a list of all spans to include in the result, in reverse order for efficient construction.
+        let mut result_spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> = SmallVec::new();
 
-        BytesBufInspector {
-            builder: self,
-            cursor,
-            remaining: self.len(),
+        // Add any filled data from the first span builder.
+        if let Some(first_builder) = self.span_builders_reversed.last() {
+            let span = first_builder.peek();
+            if !span.is_empty() {
+                result_spans_reversed.push(span);
+            }
         }
+
+        // Add all the frozen spans. They are stored in content order in our storage,
+        // so we reverse them when adding to the result_spans_reversed collection.
+        result_spans_reversed.extend(self.frozen_spans.iter().rev().cloned());
+
+        BytesView::from_spans_reversed(result_spans_reversed)
     }
 
     /// Length of the filled bytes region, ready to be consumed.
@@ -643,139 +642,6 @@ impl ConsumeManifest {
     }
 }
 
-/// Allows a sequence in the middle of being built to be inspected, typically to identify whether
-/// it contains the expected data that allows it (or a part of it) to be consumed.
-#[derive(Debug)]
-pub struct BytesBufInspector<'b, 'i>
-where
-    'b: 'i,
-{
-    builder: &'b BytesBuf,
-    cursor: InspectCursor<'i>,
-    remaining: usize,
-}
-
-#[derive(Debug)]
-enum InspectCursor<'i> {
-    FrozenSpan { span_index: usize, offset_in_span: usize },
-    // Note that only the first span builder can have contents (the rest are spare capacity).
-    FirstSpanBuilder { inspector: InspectSpanBuilderData<'i> },
-    End,
-}
-
-impl Buf for BytesBufInspector<'_, '_> {
-    fn remaining(&self) -> usize {
-        self.remaining
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
-    fn chunk(&self) -> &[u8] {
-        match &self.cursor {
-            InspectCursor::FrozenSpan {
-                span_index,
-                offset_in_span,
-            } => self
-                .builder
-                .frozen_spans
-                .get(*span_index)
-                .expect("cursor referenced a frozen span that does not exist")
-                .chunk()
-                .get(*offset_in_span..)
-                .expect("cursor referenced a frozen span offset that was out of bounds"),
-            InspectCursor::FirstSpanBuilder { inspector } => inspector.chunk(),
-            InspectCursor::End => &[],
-        }
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
-    #[expect(clippy::panic, reason = "Constrained by trait API contract")]
-    fn advance(&mut self, mut cnt: usize) {
-        while cnt > 0 {
-            //            assert!(cnt <= self.remaining);
-
-            match &mut self.cursor {
-                InspectCursor::FrozenSpan {
-                    span_index,
-                    offset_in_span,
-                } => {
-                    let span = self
-                        .builder
-                        .frozen_spans
-                        .get(*span_index)
-                        .expect("cursor referenced a frozen span that does not exist");
-
-                    let remaining_in_span = span
-                        .remaining()
-                        .checked_sub(*offset_in_span)
-                        .expect("cursor referenced a frozen span offset that was out of bounds");
-
-                    let Some(next_cnt) = cnt.checked_sub(remaining_in_span) else {
-                        // We are just advancing within this span but do not go beyond it.
-                        *offset_in_span = offset_in_span.checked_add(cnt).expect("usize overflow is inconceivable here");
-
-                        self.remaining = self
-                            .remaining
-                            .checked_sub(cnt)
-                            .expect("inspection window exceeded inspected content size before running out of content");
-                        return;
-                    };
-
-                    // We are advancing past the end of this span (and potentially even further).
-                    cnt = next_cnt;
-                    self.remaining = self
-                        .remaining
-                        .checked_sub(remaining_in_span)
-                        .expect("inspection window exceeded inspected content size before running out of content");
-
-                    // The only question now is what comes next.
-                    let next_frozen_span_index = span_index.checked_add(1).expect("inconceivable to overflow usize here");
-
-                    if self.builder.frozen_spans.len() > next_frozen_span_index {
-                        // There is another frozen span for us to process. Do so.
-                        *span_index = next_frozen_span_index;
-                        *offset_in_span = 0;
-                    } else if let Some(first_builder) = self.builder.span_builders_reversed.last() {
-                        // First in content order, last in storage order.
-                        //
-                        // No more frozen spans but we do have span builders, the first of which
-                        // may have some contents to inspect (the rest are only for spare capacity).
-                        self.cursor = InspectCursor::FirstSpanBuilder {
-                            inspector: first_builder.inspect(),
-                        };
-                    } else {
-                        // No more data?! This is going to be a problem once we loop...
-                        self.cursor = InspectCursor::End;
-                    }
-                }
-                InspectCursor::FirstSpanBuilder { inspector } => {
-                    // The first span builder is the last thing we can inspect, as any successive
-                    // span builders only exist for spare capacity and cannot contain contents.
-                    let remaining_in_span_builder = inspector.remaining();
-
-                    assert!(cnt <= remaining_in_span_builder);
-
-                    self.remaining = self
-                        .remaining
-                        .checked_sub(cnt)
-                        .expect("inspection window exceeded inspected content size before running out of content");
-
-                    if cnt == remaining_in_span_builder {
-                        self.cursor = InspectCursor::End;
-                    } else {
-                        inspector.advance(cnt);
-                    }
-
-                    // We asserted that this span builder satisfies the command, so we are done.
-                    return;
-                }
-                InspectCursor::End => {
-                    panic!("attempted to advance past the end of the inspection window")
-                }
-            }
-        }
-    }
-}
-
 /// A vectored write is an operation that concurrently writes data into multiple chunks
 /// of memory owned by a `BytesBuf`.
 ///
@@ -1154,9 +1020,9 @@ mod tests {
 
         let memory = FixedBlockTestMemory::new(nz!(10));
 
-        // Inspecting an empty builder is fine, it is just an empty inspector in that case.
-        let inspector = builder.inspect();
-        assert_eq!(inspector.remaining(), 0);
+        // Peeking an empty builder is fine, it is just an empty BytesView in that case.
+        let peeked = builder.peek();
+        assert_eq!(peeked.remaining(), 0);
 
         builder.reserve(100, &memory);
 
@@ -1166,10 +1032,10 @@ mod tests {
 
         // We have 0 frozen spans and 10 span builders,
         // the first of which has 8 bytes of filled content.
-        let mut inspector = builder.inspect();
-        assert_eq!(inspector.chunk().len(), 8);
-        assert_eq!(inspector.get_u64(), 1111);
-        assert_eq!(inspector.remaining(), 0);
+        let mut peeked = builder.peek();
+        assert_eq!(peeked.chunk().len(), 8);
+        assert_eq!(peeked.get_u64(), 1111);
+        assert_eq!(peeked.remaining(), 0);
 
         builder.put_u64(2222);
         builder.put_u64(3333);
@@ -1179,7 +1045,7 @@ mod tests {
         builder.put_u64(7777);
         builder.put_u64(8888);
         // These will cross a span boundary so we can also observe
-        // crossing that boundary during inspection.
+        // crossing that boundary during peeking.
         builder.put_bytes(9, 8);
 
         assert_eq!(builder.len(), 72);
@@ -1188,50 +1054,50 @@ mod tests {
 
         // We should have 7 frozen spans and 3 span builders,
         // the first of which has 2 bytes of filled content.
-        let mut inspector = builder.inspect();
+        let mut peeked = builder.peek();
 
-        assert_eq!(inspector.remaining(), 72);
+        assert_eq!(peeked.remaining(), 72);
 
         // This should be the first frozen span of 10 bytes.
-        assert_eq!(inspector.chunk().len(), 10);
+        assert_eq!(peeked.chunk().len(), 10);
 
-        assert_eq!(inspector.get_u64(), 1111);
-        assert_eq!(inspector.get_u64(), 2222);
+        assert_eq!(peeked.get_u64(), 1111);
+        assert_eq!(peeked.get_u64(), 2222);
 
-        // The length of the sequence builder does not change just because we inspect its data.
+        // The length of the sequence builder does not change just because we peek at its data.
         assert_eq!(builder.len(), 72);
 
-        // We consumed 16 bytes, so should be looking at the remaining 4 bytes in the 2nd span.
-        assert_eq!(inspector.chunk().len(), 4);
+        // We consumed 16 bytes from the peeked view, so should be looking at the remaining 4 bytes in the 2nd span.
+        assert_eq!(peeked.chunk().len(), 4);
 
-        assert_eq!(inspector.get_u64(), 3333);
-        assert_eq!(inspector.get_u64(), 4444);
-        assert_eq!(inspector.get_u64(), 5555);
-        assert_eq!(inspector.get_u64(), 6666);
-        assert_eq!(inspector.get_u64(), 7777);
-        assert_eq!(inspector.get_u64(), 8888);
+        assert_eq!(peeked.get_u64(), 3333);
+        assert_eq!(peeked.get_u64(), 4444);
+        assert_eq!(peeked.get_u64(), 5555);
+        assert_eq!(peeked.get_u64(), 6666);
+        assert_eq!(peeked.get_u64(), 7777);
+        assert_eq!(peeked.get_u64(), 8888);
 
         for _ in 0..8 {
-            assert_eq!(inspector.get_u8(), 9);
+            assert_eq!(peeked.get_u8(), 9);
         }
 
-        assert_eq!(inspector.remaining(), 0);
+        assert_eq!(peeked.remaining(), 0);
 
         // Reading 0 bytes is always valid.
-        inspector.advance(0);
+        peeked.advance(0);
 
-        assert_eq!(inspector.chunk().len(), 0);
+        assert_eq!(peeked.chunk().len(), 0);
 
         // Fill up the remaining 28 bytes of data so we have a full sequence builder.
         builder.put_bytes(88, 28);
 
-        let mut inspector = builder.inspect();
-        inspector.advance(72);
+        let mut peeked = builder.peek();
+        peeked.advance(72);
 
-        assert_eq!(inspector.remaining(), 28);
+        assert_eq!(peeked.remaining(), 28);
 
         for _ in 0..28 {
-            assert_eq!(inspector.get_u8(), 88);
+            assert_eq!(peeked.get_u8(), 88);
         }
     }
 
@@ -1268,7 +1134,7 @@ mod tests {
     fn empty_builder() {
         let mut builder = BytesBuf::new();
         assert!(builder.is_empty());
-        assert!(!builder.inspect().has_remaining());
+        assert!(!builder.peek().has_remaining());
         assert_eq!(0, builder.chunk_mut().len());
 
         let consumed = builder.consume(0);
@@ -1832,28 +1698,174 @@ mod tests {
     }
 
     #[test]
-    fn inspect_advance_past_end_panics() {
-        let memory = FixedBlockTestMemory::new(nz!(16));
+    fn peek_empty_builder() {
+        let builder = BytesBuf::new();
+        let peeked = builder.peek();
 
+        assert!(peeked.is_empty());
+        assert_eq!(peeked.len(), 0);
+    }
+
+    #[test]
+    fn peek_with_frozen_spans_only() {
+        let memory = FixedBlockTestMemory::new(nz!(10));
         let mut builder = BytesBuf::new();
-        builder.reserve(16, &memory);
 
-        // Write some data.
+        builder.reserve(20, &memory);
+        builder.put_u64(0x1111_1111_1111_1111);
+        builder.put_u64(0x2222_2222_2222_2222);
+
+        // Both blocks are now frozen (filled completely)
+        assert_eq!(builder.len(), 16);
+
+        let mut peeked = builder.peek();
+
+        assert_eq!(peeked.len(), 16);
+        assert_eq!(peeked.get_u64(), 0x1111_1111_1111_1111);
+        assert_eq!(peeked.get_u64(), 0x2222_2222_2222_2222);
+
+        // Original builder still has the data
+        assert_eq!(builder.len(), 16);
+    }
+
+    #[test]
+    fn peek_with_partially_filled_span_builder() {
+        let memory = FixedBlockTestMemory::new(nz!(10));
+        let mut builder = BytesBuf::new();
+
+        builder.reserve(10, &memory);
+        builder.put_u64(0x3333_3333_3333_3333);
+        builder.put_u16(0x4444);
+
+        // We have 10 bytes filled in a 10-byte block
+        assert_eq!(builder.len(), 10);
+
+        let mut peeked = builder.peek();
+
+        assert_eq!(peeked.len(), 10);
+        assert_eq!(peeked.get_u64(), 0x3333_3333_3333_3333);
+        assert_eq!(peeked.get_u16(), 0x4444);
+
+        // Original builder still has the data
+        assert_eq!(builder.len(), 10);
+    }
+
+    #[test]
+    fn peek_preserves_capacity_of_partial_span_builder() {
+        let memory = FixedBlockTestMemory::new(nz!(20));
+        let mut builder = BytesBuf::new();
+
+        builder.reserve(20, &memory);
+        builder.put_u64(0x5555_5555_5555_5555);
+
+        // We have 8 bytes filled and 12 bytes remaining capacity
+        assert_eq!(builder.len(), 8);
+        assert_eq!(builder.remaining_mut(), 12);
+
+        let mut peeked = builder.peek();
+
+        assert_eq!(peeked.len(), 8);
+        assert_eq!(peeked.get_u64(), 0x5555_5555_5555_5555);
+
+        // CRITICAL TEST: Capacity should be preserved
+        assert_eq!(builder.len(), 8);
+        assert_eq!(builder.remaining_mut(), 12);
+
+        // We should still be able to write more data
+        builder.put_u32(0x6666_6666);
+        assert_eq!(builder.len(), 12);
+        assert_eq!(builder.remaining_mut(), 8);
+
+        // And we can peek again to see the updated data
+        let mut peeked2 = builder.peek();
+        assert_eq!(peeked2.len(), 12);
+        assert_eq!(peeked2.get_u64(), 0x5555_5555_5555_5555);
+        assert_eq!(peeked2.get_u32(), 0x6666_6666);
+    }
+
+    #[test]
+    fn peek_with_mixed_frozen_and_unfrozen() {
+        let memory = FixedBlockTestMemory::new(nz!(10));
+        let mut builder = BytesBuf::new();
+
+        builder.reserve(30, &memory);
+
+        // Fill first block completely (10 bytes) - will be frozen
+        builder.put_u64(0x1111_1111_1111_1111);
+        builder.put_u16(0x2222);
+
+        // Fill second block completely (10 bytes) - will be frozen
+        builder.put_u64(0x3333_3333_3333_3333);
+        builder.put_u16(0x4444);
+
+        // Partially fill third block (only 4 bytes) - will remain unfrozen
+        builder.put_u32(0x5555_5555);
+
+        assert_eq!(builder.len(), 24);
+        assert_eq!(builder.remaining_mut(), 6);
+
+        let mut peeked = builder.peek();
+
+        assert_eq!(peeked.len(), 24);
+        assert_eq!(peeked.get_u64(), 0x1111_1111_1111_1111);
+        assert_eq!(peeked.get_u16(), 0x2222);
+        assert_eq!(peeked.get_u64(), 0x3333_3333_3333_3333);
+        assert_eq!(peeked.get_u16(), 0x4444);
+        assert_eq!(peeked.get_u32(), 0x5555_5555);
+
+        // Original builder still has all the data and capacity
+        assert_eq!(builder.len(), 24);
+        assert_eq!(builder.remaining_mut(), 6);
+    }
+
+    #[test]
+    fn peek_then_consume() {
+        let memory = FixedBlockTestMemory::new(nz!(20));
+        let mut builder = BytesBuf::new();
+
+        builder.reserve(20, &memory);
+        builder.put_u64(0x7777_7777_7777_7777);
+        builder.put_u32(0x8888_8888);
+
+        assert_eq!(builder.len(), 12);
+
+        // Peek at the data
+        let mut peeked = builder.peek();
+        assert_eq!(peeked.len(), 12);
+        assert_eq!(peeked.get_u64(), 0x7777_7777_7777_7777);
+
+        // Original builder still has the data
+        assert_eq!(builder.len(), 12);
+
+        // Now consume some of it
+        let mut consumed = builder.consume(8);
+        assert_eq!(consumed.get_u64(), 0x7777_7777_7777_7777);
+
+        // Builder should have less data now
+        assert_eq!(builder.len(), 4);
+
+        // Peek again should show the remaining data
+        let mut peeked2 = builder.peek();
+        assert_eq!(peeked2.len(), 4);
+        assert_eq!(peeked2.get_u32(), 0x8888_8888);
+    }
+
+    #[test]
+    fn peek_multiple_times() {
+        let memory = FixedBlockTestMemory::new(nz!(20));
+        let mut builder = BytesBuf::new();
+
+        builder.reserve(20, &memory);
         builder.put_u64(0xAAAA_AAAA_AAAA_AAAA);
-        builder.put_u32(0xBBBB_BBBB);
 
-        // Freeze the data.
-        builder.ensure_frozen(12);
+        // Peek multiple times - each should work independently
+        let mut peeked1 = builder.peek();
+        let mut peeked2 = builder.peek();
 
-        // Create an inspector.
-        let mut inspector = builder.inspect();
+        assert_eq!(peeked1.get_u64(), 0xAAAA_AAAA_AAAA_AAAA);
+        assert_eq!(peeked2.get_u64(), 0xAAAA_AAAA_AAAA_AAAA);
 
-        // Advance to the end of the data.
-        Buf::advance(&mut inspector, 12);
-
-        inspector.cursor = InspectCursor::End;
-
-        // Attempting to advance past the end should panic.
-        assert_panic!(Buf::advance(&mut inspector, 1));
+        // Original builder still intact
+        assert_eq!(builder.len(), 8);
     }
 }

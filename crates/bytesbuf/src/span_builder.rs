@@ -2,16 +2,17 @@
 // Licensed under the MIT License.
 
 use core::slice;
-use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::num::NonZero;
-use std::ops::Deref;
 use std::ptr::NonNull;
 
+use bytes::BufMut;
 use bytes::buf::UninitSlice;
-use bytes::{Buf, BufMut};
 
 use crate::{BlockRef, BlockSize, Span};
+
+#[cfg(test)]
+use bytes::Buf;
 
 /// Owns a mutable span of memory capacity from a memory block, which can be filled with data,
 /// enabling you to detach spans of immutable bytes from the front to create views over the data.
@@ -136,16 +137,6 @@ impl SpanBuilder {
         self.filled_bytes == 0
     }
 
-    pub(crate) const fn inspect(&self) -> InspectSpanBuilderData<'_> {
-        InspectSpanBuilderData {
-            start: self.start.cast(),
-            len: self.filled_bytes,
-
-            // Borrows the SpanBuilder for the duration of the inspection.
-            _builder: PhantomData,
-        }
-    }
-
     /// Consumes the specified number of bytes (of already filled data) from the front of the
     /// builder's memory block, returning a span with those immutable bytes.
     ///
@@ -183,6 +174,12 @@ impl SpanBuilder {
         self.start = unsafe { self.start.add(len.get() as usize) };
 
         Some(span)
+    }
+
+    /// Creates a span over the filled data without consuming it from the builder.
+    pub(crate) fn peek(&self) -> Span {
+        // SAFETY: The data in the span builder up to `filled_bytes` is initialized.
+        unsafe { Span::new(self.start.cast(), self.filled_bytes, self.block_ref.clone()) }
     }
 
     /// Allows the underlying memory block to be accessed, primarily used to extend its lifetime
@@ -227,50 +224,6 @@ unsafe impl BufMut for SpanBuilder {
         let available_slice = unsafe { slice::from_raw_parts_mut(available_start.as_ptr(), self.available_bytes as usize) };
 
         UninitSlice::uninit(available_slice)
-    }
-}
-
-#[derive(Debug)]
-pub struct InspectSpanBuilderData<'a> {
-    start: NonNull<u8>,
-    len: BlockSize,
-
-    // This is just to ensure we borrow the span builder, so it does not get modified concurrently.
-    _builder: PhantomData<&'a SpanBuilder>,
-}
-
-impl Deref for InspectSpanBuilderData<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: We are responsible for the pointer pointing to a valid storage of the given type
-        // (guaranteed by memory block) and for there not being any mutation of the memory for the
-        // duration of the slice's lifetime (guaranteed by borrowing from the SpanBuilder).
-        unsafe { slice::from_raw_parts(self.start.as_ptr(), self.len as usize) }
-    }
-}
-
-impl Buf for InspectSpanBuilderData<'_> {
-    fn remaining(&self) -> usize {
-        self.len as usize
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Mutations can cause infinite loops in tests.
-    fn chunk(&self) -> &[u8] {
-        self
-    }
-
-    fn advance(&mut self, cnt: usize) {
-        let count = BlockSize::try_from(cnt).expect("attempted to advance inspection window past end of span builder");
-
-        // Length before pointer, so even if we panic below we continue to point in-range.
-        self.len = self
-            .len
-            .checked_sub(count)
-            .expect("attempted to advance inspection window past end of span builder");
-
-        // SAFETY: Guaranteed to be in-range via `len` subtraction guard above.
-        self.start = unsafe { self.start.add(count as usize) };
     }
 }
 
@@ -336,17 +289,17 @@ mod tests {
         assert_eq!(builder.len(), 10);
         assert_eq!(builder.remaining_mut(), 0);
 
-        let mut inspector = builder.inspect();
+        let mut peeked = builder.peek();
 
-        assert_eq!(inspector.remaining(), 10);
-        assert_eq!(inspector.chunk().len(), 10);
+        assert_eq!(peeked.remaining(), 10);
+        assert_eq!(peeked.chunk().len(), 10);
 
-        assert_eq!(inspector.get_u32(), 1234);
-        assert_eq!(inspector.get_u32(), 5678);
-        assert_eq!(inspector.get_u16(), 90);
+        assert_eq!(peeked.get_u32(), 1234);
+        assert_eq!(peeked.get_u32(), 5678);
+        assert_eq!(peeked.get_u16(), 90);
 
-        assert_eq!(inspector.remaining(), 0);
-        assert_eq!(inspector.chunk().len(), 0);
+        assert_eq!(peeked.remaining(), 0);
+        assert_eq!(peeked.chunk().len(), 0);
 
         assert_eq!(builder.len(), 10);
         assert_eq!(builder.remaining_mut(), 0);
@@ -374,10 +327,10 @@ mod tests {
         builder.put_u32(5678);
         builder.put_u16(90);
 
-        let mut inspector = builder.inspect();
-        assert_eq!(inspector.get_u32(), 1234);
-        assert_eq!(inspector.get_u32(), 5678);
-        assert_panic!(_ = inspector.get_u32()); // Tries to read 4 when only 2 bytes remaining.
+        let mut peeked = builder.peek();
+        assert_eq!(peeked.get_u32(), 1234);
+        assert_eq!(peeked.get_u32(), 5678);
+        assert_panic!(_ = peeked.get_u32()); // Tries to read 4 when only 2 bytes remaining.
     }
 
     #[test]

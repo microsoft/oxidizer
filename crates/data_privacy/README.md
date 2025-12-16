@@ -64,7 +64,7 @@ to tell over time that an operation is attributed to the same piece of state wit
 
 This crate is built around two primary traits:
 
-* The [`Classified`](https://docs.rs/data_privacy/latest/data_privacy/classified/trait.Classified.html) trait is used to mark types that hold sensitive data. The trait exposes
+* The `Classified` trait is used to mark types that hold sensitive data. The trait exposes
   explicit mechanisms to access the data in a safe and auditable way.
 
 * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
@@ -85,7 +85,7 @@ This crate also exposes additional traits which are usually, but not necessarily
 A taxonomy is defined using the [`taxonomy`] attribute macro. The macro is applied to an enum
 declaration. Each variant of the enum represents a data class within the taxonomy.
 
-[`DataClass`](https://docs.rs/data_privacy/latest/data_privacy/data_class/struct.DataClass.html) is a struct that represents a single data class within a taxonomy. The struct
+`DataClass` is a struct that represents a single data class within a taxonomy. The struct
 contains the name of the taxonomy and the name of the data class. You can get a `DataClass` instance for a given data class
 by calling the associated `data_class` method on the taxonomy enum.
 
@@ -109,7 +109,7 @@ assert_eq!(dc.name(), "customer_identifier");
 
 Types that implement the [`Classified`] trait are said to be classified containers. They encapsulate
 an instance of another type. Although containers can be created by hand, they are most commonly created
-using the [`classified`](https://docs.rs/data_privacy/latest/data_privacy/classified/) attribute. See the documentation for the attribute to learn how you define your own
+using the `classified` attribute. See the documentation for the attribute to learn how you define your own
 classified type.
 
 Applications use the classified container types around application

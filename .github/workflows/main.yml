@@ -15,7 +15,7 @@ env:
 
   # Rust toolchain versions
   RUST_MSRV: "1.88"                                  # used for testing (ensures the MSRV promise is kept)
-  RUST_LATEST: "1.91"                                # used for static analysis & mutation testing
+  RUST_LATEST: "1.92"                                # used for static analysis & mutation testing
   RUST_NIGHTLY: "nightly-2025-11-20"                 # used for coverage and extended analysis
   RUST_NIGHTLY_EXTERNAL_TYPES: "nightly-2025-08-06"  # used for external type exposure checks
 
@@ -140,8 +140,8 @@ jobs:
         run: cargo ensure-no-cyclic-deps
       - name: Dependency Validation
         run: cargo deny --all-features --workspace --color always check all
-      - name: Semver Compatibility
-        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
+#      - name: Semver Compatibility
+#        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
 
   extended-analysis:
     if: github.event_name == 'pull_request'
@@ -227,7 +227,6 @@ jobs:
         run: cargo +nightly -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
-    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

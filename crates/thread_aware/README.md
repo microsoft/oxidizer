@@ -39,7 +39,7 @@ They might continue to share some state (e.g., a common cache) or fully detach f
 However, like `Clone`, the relocation itself should be mostly transparent and predictable to users.
 
 
-### Implementing [`ThreadAware`], and `Arc<T, PerThread>`
+### Implementing [`ThreadAware`], and `Arc<T, PerCore>`
 
 In most cases [`ThreadAware`] should be implemented via the provided derive macro.
 As thread-awareness of a type usually involves letting all contained fields know of an ongoing
@@ -50,7 +50,7 @@ External crates might often not implement [`ThreadAware`]. In many of these case
 [`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
 [`std::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and implements [`ThreadAware`] for it. For
 example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
-`Arc<Foo, PerThread>` ensures a separate `Foo` is available any time the types moves a core boundary.
+`Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
 
 
 ### Relation to [`Send`]
@@ -125,12 +125,12 @@ strategy, and wrap them in an [`Arc`] that implements the trait.
 
 
 ```rust
-use thread_aware::{ThreadAware, Arc, PerThread};
+use thread_aware::{ThreadAware, Arc, PerCore};
 
 #[derive(Debug, Clone, ThreadAware)]
 struct Service {
     name: String,
-    client: Arc<Client, PerThread>,
+    client: Arc<Client, PerCore>,
 }
 
 impl Service {
