@@ -129,25 +129,6 @@ impl ClockControl {
         this
     }
 
-    /// Creates a new `ClockControl` instance with the current system time.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::time::SystemTime;
-    ///
-    /// use tick::ClockControl;
-    ///
-    /// let control = ClockControl::now();
-    /// let clock = control.to_clock();
-    ///
-    /// assert!(SystemTime::now() >= clock.system_time());
-    /// ```
-    #[must_use]
-    pub fn now() -> Self {
-        Self::new_at(SystemTime::now())
-    }
-
     /// Converts this `ClockControl` into a `Clock` instance.
     ///
     /// The returned `Clock` is internally linked to this `ClockControl`. Cloning the `Clock`
@@ -720,15 +701,6 @@ mod tests {
         let clock = control.to_clock();
 
         assert_eq!(clock.system_time(), timestamp);
-    }
-
-    #[cfg(not(miri))]
-    #[test]
-    fn now_ok() {
-        let now_1 = SystemTime::now();
-        let now_2 = ClockControl::now().to_clock().system_time();
-
-        assert!(now_2 >= now_1);
     }
 
     #[test]

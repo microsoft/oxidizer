@@ -39,14 +39,13 @@ use crate::timers::TimerKey;
 ///
 /// # Clock construction
 ///
-/// The clock requires a runtime to drive the registered timers. For this reason, clock construction is non-trivial
-/// and clock access is provided by the runtime.
+/// The clock requires a runtime to drive the registered timers. This crate provides built-in support
+/// for Tokio via [`Clock::new_tokio`] (available with the `tokio` feature). For other async runtimes,
+/// you can use types in the [`runtime`][crate::runtime] module to drive the clock.
 ///
-/// In production, the clock is typically obtained from your async runtime. Different runtimes
-/// provide different mechanisms for clock access. Consult your runtime's documentation for details.
+/// In tests, the clock can be constructed directly using [`ClockControl`][crate::ClockControl] or via [`Clock::new_frozen`][crate::Clock::new_frozen]
+/// (available with the `test-util` feature) because the passage of time is controlled manually.
 ///
-/// In tests, the clock can be constructed directly using `new_frozen()` or
-/// `new_frozen_at()` (available with the `test-util` feature) because the passage of time is controlled manually.
 /// See the [Testing](#testing) section for more information.
 ///
 /// # Testing
@@ -57,37 +56,28 @@ use crate::timers::TimerKey;
 ///
 /// The ability to jump forward in time makes tests faster, more reliable and gives you complete control over the passage of time.
 /// By default, the clock does not allow you to control the passage of time. However, when the `test-util` feature is enabled,
-/// this crate provides a [`ClockControl`] type that can be used to control time.
+/// this crate provides a [`ClockControl`][crate::ClockControl] type that can be used to control time.
 ///
-/// # Cloning
+/// # Cloning and shared state
 ///
-/// Cloning a clock is inexpensive (just an `Arc` clone) and will not cause performance bottlenecks.
-/// Cloned clocks share the same underlying state, including registered timers and, in tests, the
-/// controlled passage of time.
-///
-/// # State sharing between clocks
-///
-/// Multiple clock instances can be linked together and share state. In production, cloned clocks share
-/// registered timers. In tests, cloned clocks additionally share the passage of time, allowing coordinated
-/// time control across all instances.
-///
-/// To ensure state sharing between clocks, clone the clock. The cloning operation preserves the shared state
-/// between individual clocks.
+/// Cloning a clock is inexpensive (just an `Arc` clone) and every clone shares the same underlying state,
+/// including registered timers and—when the `test-util` feature is enabled—the controlled passage of time.
+/// Any timers you register or time adjustments you perform through one clone are visible to every other clone
+/// created from the same clock.
 ///
 /// ```
 /// use tick::Clock;
 ///
 /// # fn use_clock(clock: &Clock) {
-/// // Cloned clocks; all these instances are linked
-/// // together and share the same state.
 /// let clock_clone1 = clock.clone();
 /// let clock_clone2 = clock.clone();
+/// // All clones remain linked and observe the same timers and time control.
 /// # }
 /// ```
 ///
 /// # Examples
 ///
-/// ### Retrieve absolute time
+/// ## Retrieve absolute time
 ///
 /// ```
 /// use std::time::SystemTime;
@@ -103,7 +93,7 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 ///
-/// ### Measure elapsed time
+/// ## Measure elapsed time
 ///
 /// ```
 /// use std::time::Duration;
@@ -117,7 +107,7 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 ///
-/// ### Delay operations
+/// ## Delay operations
 ///
 /// ```
 /// use std::time::Duration;
@@ -134,7 +124,7 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 ///
-/// ### Create periodic timers
+/// ## Create periodic timers
 ///
 /// ```
 /// use std::time::Duration;

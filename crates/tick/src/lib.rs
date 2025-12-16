@@ -14,7 +14,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Runtime-agnostic primitives for obtaining, working with, and mocking system
+//! Primitives for obtaining, working with, and mocking system
 //! time and timers, enabling faster and more robust testing.
 //!
 //! # Quick Start
@@ -55,8 +55,8 @@
 //!
 //! This crate provides a unified API for working with time that:
 //!
-//! - **Abstracts async runtimes** - Works across Tokio, async-std, etc. without tight coupling
-//!   to any specific implementation.
+//! - **Easy async runtime integration** - Provides built-in support for Tokio and can be extended
+//!   to work with other runtimes without tight coupling to any specific implementation.
 //! - **Enables deterministic testing** - With the `test-util` feature, [`ClockControl`] lets you
 //!   manipulate the passage of time—advance it instantly, pause it, or jump forward. No waiting
 //!   for a 1-minute periodic job in your tests.
@@ -108,7 +108,7 @@
 //! This crate provides a way to control the passage of time in tests via the `ClockControl`
 //! type, which is exposed when the `test-util` feature is enabled.
 //!
-//! **Important:** Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
+//! > **Important:** Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
 //!
 //! # Examples
 //!

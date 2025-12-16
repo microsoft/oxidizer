@@ -6,7 +6,7 @@ use std::{fmt, time::SystemTimeError};
 /// The result type for fallible operations that use the [`Error`] type in the `time` module.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// An error that can occur in the `time` module.
+/// An error that can occur in the `tick` crate.
 ///
 /// The most common type of error results from overflow, but other errors
 /// also exist:
