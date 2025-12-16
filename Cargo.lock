@@ -262,21 +262,23 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "data_privacy"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "data_privacy_macros",
  "derive_more",
  "mutants",
  "once_cell",
  "rapidhash",
+ "rustc-hash",
  "serde",
+ "serde_core",
  "serde_json",
  "xxhash-rust",
 ]
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "data_privacy_macros_impl",
  "mutants",
@@ -284,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros_impl"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "insta",
  "mutants",
@@ -1186,6 +1188,12 @@ name = "regex-syntax"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "rustc_version"

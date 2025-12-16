@@ -11,8 +11,9 @@ struct ClassifiedExample {
 }
 
 impl Classified for ClassifiedExample {
-    fn data_class(&self) -> DataClass {
-        DataClass::new("example", "classified_example")
+    fn data_class(&self) -> &DataClass {
+        static DATA_CLASS: DataClass = DataClass::new("example", "classified_example");
+        &DATA_CLASS
     }
 }
 

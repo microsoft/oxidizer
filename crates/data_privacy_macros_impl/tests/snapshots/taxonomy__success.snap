@@ -1,6 +1,5 @@
 ---
 source: crates/data_privacy_macros_impl/tests/taxonomy.rs
-assertion_line: 159
 expression: pretty
 ---
 enum GovTaxonomy {
@@ -43,9 +42,19 @@ impl ::core::cmp::PartialEq<::data_privacy::DataClass> for GovTaxonomy {
         self.data_class() == *other
     }
 }
+impl ::core::cmp::PartialEq<&::data_privacy::DataClass> for GovTaxonomy {
+    fn eq(&self, other: &&::data_privacy::DataClass) -> core::primitive::bool {
+        self.data_class() == **other
+    }
+}
 impl ::core::cmp::PartialEq<GovTaxonomy> for ::data_privacy::DataClass {
     fn eq(&self, other: &GovTaxonomy) -> core::primitive::bool {
         other == self
+    }
+}
+impl ::core::cmp::PartialEq<GovTaxonomy> for &::data_privacy::DataClass {
+    fn eq(&self, other: &GovTaxonomy) -> core::primitive::bool {
+        *other == **self
     }
 }
 #[doc("Really secret data")]

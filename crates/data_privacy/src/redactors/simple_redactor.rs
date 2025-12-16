@@ -67,7 +67,8 @@ impl SimpleRedactor {
 impl Redactor for SimpleRedactor {
     #[cfg_attr(test, mutants::skip)]
     fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
-        static ASTERISKS: &str = "********************************";
+        const ASTERISKS: &str =
+            "************************************************************************************************************************";
 
         match &self.mode {
             SimpleRedactorMode::Erase => {
@@ -93,7 +94,10 @@ impl Redactor for SimpleRedactor {
                 if *c == '*' && len < ASTERISKS.len() {
                     write!(output, "{}", &ASTERISKS[0..len])
                 } else {
-                    write!(output, "{}", c.to_string().repeat(len))
+                    for _ in 0..len {
+                        output.write_char(*c)?;
+                    }
+                    Ok(())
                 }
             }
 
@@ -103,7 +107,11 @@ impl Redactor for SimpleRedactor {
                 if *c == '*' && len < ASTERISKS.len() {
                     write!(output, "<{data_class}:{}>", &ASTERISKS[0..len])
                 } else {
-                    write!(output, "<{data_class}:{}>", (*c.to_string()).repeat(len))
+                    write!(output, "<{data_class}:")?;
+                    for _ in 0..len {
+                        output.write_char(*c)?;
+                    }
+                    output.write_char('>')
                 }
             }
 
