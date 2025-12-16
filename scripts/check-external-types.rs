@@ -50,6 +50,7 @@ fn main() {
 
     let mut checked = 0;
     let mut skipped = 0;
+    let mut failed_crates = Vec::new();
 
     for pkg in &filtered_packages {
         // Check if this is a library crate by looking at the targets
@@ -59,9 +60,10 @@ fn main() {
             println!("Checking external types in {}", pkg.name);
             if let Err(e) = check_external_types(&pkg.manifest_path, &args.toolchain) {
                 eprintln!("✗ Failed: {}: {e}", pkg.name);
-                std::process::exit(1);
+                failed_crates.push((pkg.name.clone(), e));
+            } else {
+                println!("✓ Passed: {}", pkg.name);
             }
-            println!("✓ Passed: {}", pkg.name);
             checked += 1;
         } else {
             println!("⊘ Skipping {} (not a library crate)", pkg.name);
@@ -75,6 +77,15 @@ fn main() {
     println!("  Checked: {}", checked);
     println!("  Skipped: {}", skipped);
     println!("  Total:   {}", checked + skipped);
+
+    if !failed_crates.is_empty() {
+        println!();
+        println!("❌ {} crate(s) failed:", failed_crates.len());
+        for (name, error) in &failed_crates {
+            println!("  - {}: {}", name, error);
+        }
+        std::process::exit(1);
+    }
 }
 
 fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<()> {
