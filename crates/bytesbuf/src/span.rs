@@ -117,7 +117,7 @@ impl Span {
     ///
     /// The caller must ensure that `len` is less than or equal to the current length of the span.
     pub(crate) unsafe fn advance(&mut self, len: usize) {
-        // Conversion validity guaranteed by safety requirements.
+        #[expect(clippy::cast_possible_truncation, reason = "guaranteed by safety requirements")]
         let len_bs = len as BlockSize;
 
         // Will never wrap - guaranteed by safety requirements.

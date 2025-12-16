@@ -14,6 +14,13 @@ const TWO_NEWLINES: &[u8] = b"\r\n\r\n";
 
 fn main() {
     // We transform the static data into a BytesView on first use, via OnceLock.
+    //
+    // You are expected to reuse this variable as long as the context does not change.
+    // For example, it is typically fine to share this across multiple network connections
+    // because they all likely use the same memory configuration. However, writing to files
+    // may require a different memory configuration for optimality, so you would need a different
+    // `BytesView` for that. Such details will typically be documented in the API documentation
+    // of the type that consumes the `BytesView` (e.g. a network connection or a file writer).
     let header_prefix = OnceLock::<BytesView>::new();
     let two_newlines = OnceLock::<BytesView>::new();
 

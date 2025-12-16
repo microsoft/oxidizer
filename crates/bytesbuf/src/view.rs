@@ -11,6 +11,7 @@ use std::{iter, mem};
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
+use crate::read_adapter::BytesViewReader;
 use crate::{BlockSize, MAX_INLINE_SPANS, Memory, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
@@ -54,7 +55,10 @@ impl BytesView {
         // We can use this to fine-tune the inline span count once we have real-world data.
         VIEW_CREATED_SPANS.with(|x| x.observe(spans_reversed.len()));
 
-        let len = spans_reversed.iter().map(|x| x.len() as usize).sum();
+        let len = spans_reversed.iter().fold(0_usize, |acc, span: &Span| {
+            acc.checked_add(span.len() as usize)
+                .expect("attempted to create a BytesView larger than usize::MAX bytes")
+        });
 
         Self { spans_reversed, len }
     }
@@ -76,6 +80,10 @@ impl BytesView {
     /// Concatenates a number of existing byte sequences, yielding a combined view.
     ///
     /// Later changes made to the input views will not be reflected in the resulting view.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting view would be larger than `usize::MAX` bytes.
     pub fn from_views<I>(views: I) -> Self
     where
         I: IntoIterator<Item = Self>,
@@ -95,12 +103,7 @@ impl BytesView {
             // Which become our final SmallVec of spans. Great success!
             .collect();
 
-        // We can use this to fine-tune the inline span count once we have real-world data.
-        VIEW_CREATED_SPANS.with(|x| x.observe(spans_reversed.len()));
-
-        let len = spans_reversed.iter().map(|x: &Span| x.len() as usize).sum();
-
-        Self { spans_reversed, len }
+        Self::from_spans_reversed(spans_reversed)
     }
 
     /// Creates a `BytesView` by copying the contents of a `&[u8]`.
@@ -527,6 +530,12 @@ impl BytesView {
         let mut new_view = self.clone();
         new_view.append(other);
         new_view
+    }
+
+    /// Exposes the instance through the [`Read`][std::io::Read] trait.
+    #[must_use]
+    pub fn as_read(&mut self) -> impl std::io::Read {
+        BytesViewReader::new(self)
     }
 }
 

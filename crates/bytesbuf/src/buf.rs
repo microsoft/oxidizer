@@ -290,7 +290,6 @@ impl BytesBuf {
     ///
     /// This is the total length of the filled bytes and the available bytes regions.
     #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn capacity(&self) -> usize {
         // Will not overflow - `capacity <= usize::MAX` is a type invariant.
         self.len().wrapping_add(self.remaining_capacity())
@@ -498,6 +497,7 @@ impl BytesBuf {
     /// have been initialized.
     ///
     /// [`first_unfilled_slice()`]: Self::first_unfilled_slice
+    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub unsafe fn advance(&mut self, count: usize) {
         if count == 0 {
             return;
@@ -505,7 +505,7 @@ impl BytesBuf {
 
         // The write head can only be advanced (via this method) up to the end of the first slice, no further.
         // This is guaranteed by our safety requirements, so we only assert this in debug builds for extra validation.
-        debug_assert!(count <= self.span_builders_reversed.last().map_or(0, |x| x.remaining_capacity()));
+        debug_assert!(count <= self.span_builders_reversed.last().map_or(0, SpanBuilder::remaining_capacity));
 
         let span_builder = self
             .span_builders_reversed

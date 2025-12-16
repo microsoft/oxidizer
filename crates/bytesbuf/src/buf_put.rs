@@ -66,7 +66,7 @@ impl BytesBuf {
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
     pub fn put_byte(&mut self, value: u8) {
-        self.put_num_ne(value)
+        self.put_num_ne(value);
     }
 
     /// Appends multiple repetitions of a `u8` to the buffer.
@@ -108,6 +108,7 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
+    #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_le<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_le_bytes();
         self.put_slice(bytes);
@@ -118,6 +119,7 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
+    #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_be<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_be_bytes();
         self.put_slice(bytes);
@@ -128,6 +130,7 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
+    #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_ne<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_ne_bytes();
         self.put_slice(bytes);

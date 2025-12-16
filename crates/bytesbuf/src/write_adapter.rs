@@ -14,14 +14,14 @@ use crate::{BytesBuf, Memory};
 ///
 /// [1]: crate::BytesBuf::as_write
 #[derive(Debug)]
-pub(crate) struct BytesBufWrite<'sb, 'm, M: Memory> {
-    inner: &'sb mut BytesBuf,
+pub(crate) struct BytesBufWrite<'b, 'm, M: Memory> {
+    inner: &'b mut BytesBuf,
     memory: &'m M,
 }
 
-impl<'sb, 'm, M: Memory> BytesBufWrite<'sb, 'm, M> {
+impl<'b, 'm, M: Memory> BytesBufWrite<'b, 'm, M> {
     #[must_use]
-    pub(crate) const fn new(inner: &'sb mut BytesBuf, memory: &'m M) -> Self {
+    pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
         Self { inner, memory }
     }
 }
@@ -41,6 +41,7 @@ impl<M: Memory> Write for BytesBufWrite<'_, '_, M> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use new_zealand::nz;

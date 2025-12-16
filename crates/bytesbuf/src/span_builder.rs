@@ -209,7 +209,7 @@ impl SpanBuilder {
     ///
     /// The caller must guarantee that `len` is less than or equal to `remaining_capacity()`.
     pub(crate) unsafe fn advance(&mut self, len: usize) {
-        // Cast validity is guaranteed by safety requirements.
+        #[expect(clippy::cast_possible_truncation, reason = "guaranteed by safety requirements")]
         let count = len as BlockSize;
 
         // Cannot overflow - guaranteed by safety requirements.

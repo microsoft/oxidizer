@@ -36,9 +36,9 @@ impl BytesView {
     ///
     /// # Panics
     ///
-    /// Panics if the view and destination slice have different lengths.
+    /// Panics if the destination is larger than the view.
     pub fn copy_to_slice(&mut self, mut dst: &mut [u8]) {
-        assert!(self.len() == dst.len());
+        assert!(self.len() >= dst.len());
 
         while !dst.is_empty() {
             let src = self.first_slice();
@@ -57,9 +57,9 @@ impl BytesView {
     ///
     /// # Panics
     ///
-    /// Panics if the view and destination slice have different lengths.
+    /// Panics if the destination is larger than the view.
     pub fn copy_to_uninit_slice(&mut self, mut dst: &mut [MaybeUninit<u8>]) {
-        assert!(self.len() == dst.len());
+        assert!(self.len() >= dst.len());
 
         while !dst.is_empty() {
             let src = self.first_slice();
@@ -337,13 +337,15 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn copy_to_smaller_slice_panics() {
+    fn copy_to_smaller_slice_copies_partially() {
         let memory = TransparentTestMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [0u8; 3];
         view.copy_to_slice(&mut dst);
+
+        assert_eq!(dst, [1, 2, 3]);
+        assert_eq!(view.len(), 1);
     }
 
     #[test]
@@ -372,13 +374,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn copy_to_uninit_smaller_slice_panics() {
+    fn copy_to_uninit_smaller_slice_copies_partially() {
         let memory = TransparentTestMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [MaybeUninit::<u8>::uninit(); 3];
         view.copy_to_uninit_slice(&mut dst);
+
+        // SAFETY: It has now been initialized.
+        let dst = unsafe { std::mem::transmute::<[MaybeUninit<u8>; 3], [u8; 3]>(dst) };
+
+        assert_eq!(dst, [1, 2, 3]);
+        assert_eq!(view.len(), 1);
     }
 
     #[test]
