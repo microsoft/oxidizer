@@ -2,3 +2,9 @@
 # README.  If this is not set the crate’s documentation will be inserted with its sections
 # belonging to the README section where the insertion happens.
 heading-base-level = 1
+
+[intralinks]
+# The cargo-rdme link parsing functionality is extremely limited and it complains about
+# entirely legitimate links. As it anyway misses a ton of intralinks, let's just remove
+# the links. If someone wants to read the proper linked-up API docs, they can go to docs.rs.
+strip-links = true
