@@ -25,25 +25,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: &repo-constants
-        RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-        RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-        RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-        RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
-        CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
-        CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
-        CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
-        CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
-        CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
-        CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
-        CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
-        CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
-        CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
-        CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
-        CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
-        CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
-        CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
-        SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -92,7 +91,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: *repo-constants
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -155,7 +171,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: *repo-constants
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
     steps:
       # prep
       - name: Checkout
@@ -190,7 +223,24 @@ jobs:
     needs: [constants, testing]
     runs-on: ubuntu-latest
     env:
-      <<: *repo-constants
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -241,7 +291,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      <<: *repo-constants
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
@@ -324,7 +391,24 @@ jobs:
     needs: constants
     runs-on: ubuntu-latest
     env:
-      <<: *repo-constants
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
     steps:
       # prep
       - name: Checkout
