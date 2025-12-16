@@ -22,6 +22,8 @@ allowed_external_types = [
     "bytes::buf::buf_impl::Buf",
     "bytes::buf::uninit_slice::UninitSlice",
     "bytes::buf::buf_mut::BufMut",
+    "num_traits::ops::bytes::FromBytes",
+    "num_traits::ops::bytes::ToBytes",
 ]
 
 [features]
