@@ -17,7 +17,7 @@ pub struct ClockGone;
 
 impl ClockGone {
     pub(crate) fn new() -> Self {
-        ClockGone
+        Self
     }
 }
 

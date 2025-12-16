@@ -158,6 +158,7 @@ impl Clock {
         Self::new_tokio_core().0
     }
 
+    #[cfg(any(feature = "tokio", test))]
     fn new_tokio_core() -> (Self, tokio::task::JoinHandle<()>) {
         /// How often the Tokio clock driver advances timers.
         ///

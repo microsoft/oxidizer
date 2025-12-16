@@ -28,7 +28,7 @@ impl ClockDriver {
     /// Returns `Err(ClockGone)` if the all clocks are gone, all timers are fired and
     /// advancing the clock is no longer necessary.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    #[must_use]
+    #[expect(clippy::needless_pass_by_ref_mut, reason = "the mut forces exclusive ownership of the driver")]
     pub fn advance_timers(&mut self, now: Instant) -> Result<Option<Instant>, ClockGone> {
         let next_timer = match self.0.as_ref() {
             ClockState::System(timers) => timers.try_advance_timers(now),
@@ -61,6 +61,7 @@ mod tests {
     #[test]
     fn assert_types() {
         static_assertions::assert_impl_all!(ClockDriver: Send, Sync);
+        static_assertions::assert_not_impl_all!(ClockDriver: Clone);
     }
 
     #[test]

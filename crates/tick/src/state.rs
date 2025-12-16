@@ -68,8 +68,8 @@ impl GlobalState {
     pub fn into_clock_state(self) -> Arc<ClockState> {
         Arc::new(match self {
             #[cfg(any(feature = "test-util", test))]
-            GlobalState::ClockControl(control) => ClockState::ClockControl(control),
-            GlobalState::System => ClockState::System(SynchronizedTimers::default()),
+            Self::ClockControl(control) => ClockState::ClockControl(control),
+            Self::System => ClockState::System(SynchronizedTimers::default()),
         })
     }
 }
