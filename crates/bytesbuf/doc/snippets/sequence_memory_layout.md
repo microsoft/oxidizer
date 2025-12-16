@@ -12,3 +12,6 @@ Examples of legal memory layouts for the byte sequence `b'Hello'`:
 * `['H', 'e', 'l', 'l', 'o']`
 * `['H', 'e'], ['l', 'l', 'o']`
 * `['H'], ['e'], ['l'], ['l'], ['o']`
+
+Code using these APIs is required to work with any memory layout, as there are
+no guarantees on which layout will be used for which byte sequences.

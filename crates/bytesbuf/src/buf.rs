@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::type_name;
 use std::mem::{self, MaybeUninit};
 use std::num::NonZero;
 
@@ -8,38 +9,48 @@ use smallvec::SmallVec;
 
 use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
 
-/// Creates byte sequences in owned memory capacity.
+/// Assembles byte sequences in reserved memory, exposing them as [`BytesView`]s.
 ///
-/// The buffer owns some memory capacity in which it allows you to place a sequence of bytes that
-/// you can thereafter extract as one or more [`BytesView`]s over immutable data.
+/// The buffer owns some memory capacity into which it allows you to write a sequence of bytes that
+/// you can thereafter extract as one or more [`BytesView`]s over immutable data. Mutation of the
+/// buffer contents is append-only - once data has been written into the buffer, it cannot be modified.
 ///
-/// The capacity of the `BytesBuf` must be reserved in advance via [`reserve()`][3] before
-/// you can fill it with data.
+/// Capacity must be reserved in advance (e.g. via [`reserve()`]) before you can write data into the buffer.
+/// The exception to this is when appending an existing [`BytesView`] via [`put_bytes()`] because
+/// appending a [`BytesView`] is a zero-copy operation that reuses the view's existing memory capacity.
 ///
 /// # Memory capacity
 ///
-/// A single `BytesBuf` can use memory capacity from any [memory provider][7], including a
-/// mix of different memory providers for the same `BytesBuf` instance. All methods that
-/// extend the memory capacity require the caller to provide a reference to the memory provider.
+/// A single `BytesBuf` can use memory capacity from any [memory provider], including a
+/// mix of different memory providers. All methods that extend the memory capacity require the caller
+/// to provide a reference to the memory provider to use.
+///
+/// When data is extracted from the buffer by consuming it (via [`consume()`] or [`consume_all()`]),
+/// ownership of the used memory capacity is transferred to the returned [`BytesView`]. Any leftover
+/// memory capacity remains in the buffer, ready to receive further writes.
 ///
 /// # Conceptual design
 ///
-/// The memory owned by a `BytesBuf` (its capacity) can be viewed as two regions:
+/// The memory capacity owned by a `BytesBuf` can be viewed as two regions:
 ///
-/// * Filled memory - these bytes have been written to but have not yet been consumed as a
-///   [`BytesView`]. They may be peeked at (via [`peek()`][4]) or consumed (via [`consume()`][5]).
-/// * Available memory - these bytes have not yet been written to and are available for writing via
-///   [`bytes::buf::BufMut`][1] or [`begin_vectored_write()`][Self::begin_vectored_write].
+/// * Filled memory - data has been written into this memory but this data has not yet been consumed as a
+///   [`BytesView`]. Nevertheless, this data may already be in use because it may have been exposed via
+///   [`peek()`], which does not consume it from the buffer. Memory capacity is removed from this region
+///   when bytes are consumed from the buffer.
+/// * Available memory - no data has been written into this memory. Calling any of the write methods on
+///   `BytesBuf` will write data to the start of this region and transfer the affected capacity to the
+///   filled memory region.
 ///
-/// Existing [`BytesView`]s can be appended to the [`BytesBuf`] via [`append()`][6] without
-/// consuming capacity (each appended [`BytesView`] brings its own backing memory capacity).
+/// Existing [`BytesView`]s can be appended to the `BytesBuf` via [`put_bytes()`] without
+/// consuming capacity as each appended [`BytesView`] brings its own backing memory capacity.
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
-/// [3]: Self::reserve
-/// [4]: Self::peek
-/// [5]: Self::consume
-/// [6]: Self::append
-/// [7]: crate::Memory
+/// [memory provider]: crate::Memory
+/// [`reserve()`]: Self::reserve
+/// [`put_bytes()`]: Self::put_bytes
+/// [`consume()`]: Self::consume
+/// [`consume_all()`]: Self::consume_all
+/// [`peek()`]: Self::peek
 #[derive(Default)]
 pub struct BytesBuf {
     // The frozen spans are at the front of the sequence being built and have already become
@@ -91,21 +102,26 @@ pub struct BytesBuf {
 }
 
 impl BytesBuf {
-    /// Creates an instance with 0 bytes of capacity.
+    /// Creates an instance without any memory capacity.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Creates an instance that takes exclusive ownership of the capacity in the
-    /// provided memory blocks.
+    /// Creates an instance that owns the provided memory blocks.
     ///
-    /// This is used by implementations of memory providers. To obtain a `BytesBuf` with
-    /// available memory capacity, you need to use an implementation of [`Memory`] that
-    /// provides you instances of `BytesBuf`.
+    /// This is the API used by memory providers to issue rented memory capacity to callers.
+    /// Unless you are implementing a memory provider, you will not need to call this function.
+    /// Instead, use either [`Memory::reserve()`] or [`BytesBuf::reserve()`].
+    ///
+    /// # Blocks are unordered
     ///
     /// There is no guarantee that the `BytesBuf` uses the blocks in the order provided to
     /// this function. Blocks may be used in any order.
+    ///
+    /// [`Memory::reserve()`]: Memory::reserve
+    /// [`BytesBuf::reserve()`]: Self::reserve
+    #[must_use]
     pub fn from_blocks<I>(blocks: I) -> Self
     where
         I: IntoIterator<Item = Block>,
@@ -132,42 +148,54 @@ impl BytesBuf {
         }
     }
 
-    /// Adds memory capacity to the sequence builder, ensuring there is enough capacity to
-    /// accommodate `additional_bytes` of content in addition to existing content already present.
+    /// Adds enough memory capacity to accommodate at least `additional_bytes` of content.
     ///
-    /// The requested reserve capacity may be extended further if the memory provider considers it
-    /// more efficient to use a larger block of memory than strictly required for this operation.
+    /// After this call, [`remaining_capacity()`] will be at least `additional_bytes`.
+    ///
+    /// The memory provider may provide more capacity than requested - `additional_bytes` is only a lower bound.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting total buffer capacity would be greater than `usize::MAX`.
+    ///
+    /// [`remaining_capacity()`]: Self::remaining_capacity
     pub fn reserve(&mut self, additional_bytes: usize, memory_provider: &impl Memory) {
         let bytes_needed = additional_bytes.saturating_sub(self.remaining_capacity());
 
-        if bytes_needed == 0 {
+        let Some(bytes_needed) = NonZero::new(bytes_needed) else {
             return;
-        }
+        };
 
         self.extend_capacity_by_at_least(bytes_needed, memory_provider);
     }
 
-    fn extend_capacity_by_at_least(&mut self, bytes: usize, memory_provider: &impl Memory) {
-        let additional_memory = memory_provider.reserve(bytes);
+    fn extend_capacity_by_at_least(&mut self, bytes: NonZero<usize>, memory_provider: &impl Memory) {
+        let additional_memory = memory_provider.reserve(bytes.get());
 
-        // For extra paranoia. We expect a memory provider to return an empty sequence builder.
-        debug_assert!(additional_memory.capacity() >= bytes);
+        // For extra paranoia. We expect a memory provider to return an empty buffer.
+        debug_assert!(additional_memory.capacity() >= bytes.get());
         debug_assert!(additional_memory.is_empty());
 
         self.available = self
             .available
             .checked_add(additional_memory.capacity())
-            .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
+            .expect("buffer capacity cannot exceed usize::MAX");
 
         // We put the new ones in front (existing content needs to stay at the end).
         self.span_builders_reversed.insert_many(0, additional_memory.span_builders_reversed);
     }
 
-    /// Appends the given sequence to the end of the sequence builder's filled bytes region.
+    /// Appends the contents of an existing [`BytesView`] to the end of the buffer.
     ///
-    /// This automatically extends the builder's capacity with the memory capacity used of the
-    /// appended sequence, for a net zero change in remaining available capacity.
-    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
+    /// Memory capacity of the existing [`BytesView`] is reused without copying.
+    ///
+    /// This is a private API to keep the nitty-gritty of span bookkeeping contained in this file
+    /// while the public API lives in another file for ease of maintenance. The equivalent
+    /// public API is `put_bytes()`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting total buffer capacity would be greater than `usize::MAX`.
     pub(crate) fn append(&mut self, bytes: BytesView) {
         if bytes.is_empty() {
             return;
@@ -187,33 +215,38 @@ impl BytesBuf {
             debug_assert!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len) == 0);
         }
 
-        self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
-
-        self.len = self
-            .len
-            .checked_add(bytes_len)
-            .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
+        // We do this first so if we do panic, we have not performed any incomplete operations.
+        // The freezing above is safe even if we panic here - freezing is an atomic operation.
+        self.len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
 
         // Any appended BytesView is frozen by definition, as contents of a BytesView are immutable.
-        self.frozen = self
-            .frozen
-            .checked_add(bytes_len)
-            .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
+        // This cannot wrap because we verified `len` is in-bounds and `frozen <= len` is a type invariant.
+        self.frozen = self.frozen.wrapping_add(bytes_len);
+
+        self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
     }
 
-    /// Peeks at the contents of the filled bytes region, returning a [`BytesView`] over all
-    /// filled data without consuming it from the sequence builder.
+    /// Peeks at the contents of the filled bytes region.
     ///
-    /// This is similar to [`consume_all()`][Self::consume_all] except the data remains in the
-    /// sequence builder and can still be consumed later.
+    /// The returned [`BytesView`] covers all data in the buffer but does not consume any of the data.
+    ///
+    /// Functionally similar to [`consume_all()`] except all the data remains in the
+    /// buffer and can still be consumed later.
+    ///
+    /// [`consume_all()`]: Self::consume_all
     #[must_use]
     pub fn peek(&self) -> BytesView {
         // Build a list of all spans to include in the result, in reverse order for efficient construction.
         let mut result_spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> = SmallVec::new();
 
-        // Add any filled data from the first span builder.
+        // Add any filled data from the first (potentially partially filled) span builder.
         if let Some(first_builder) = self.span_builders_reversed.last() {
+            // We only peek the span builder, as well. This is to avoid freezing it because freezing
+            // has security/performance implications and the motivating idea behind peeking is to
+            // verify the contents are ready for processing before we commit to freezing them.
             let span = first_builder.peek();
+
+            // It might just be empty - that's also fine.
             if !span.is_empty() {
                 result_spans_reversed.push(span);
             }
@@ -226,7 +259,7 @@ impl BytesBuf {
         BytesView::from_spans_reversed(result_spans_reversed)
     }
 
-    /// Length of the filled bytes region, ready to be consumed.
+    /// How many bytes of data are in the buffer, ready to be consumed.
     #[must_use]
     #[cfg_attr(debug_assertions, expect(clippy::missing_panics_doc, reason = "only unreachable panics"))]
     pub fn len(&self) -> usize {
@@ -241,33 +274,31 @@ impl BytesBuf {
         let frozen_len = self.frozen_spans.iter().map(|x| x.len() as usize).sum::<usize>();
         let unfrozen_len = self.span_builders_reversed.last().map_or(0, SpanBuilder::len) as usize;
 
-        frozen_len
-            .checked_add(unfrozen_len)
-            .expect("usize overflow should be impossible here because the sequence builder would exceed virtual memory size")
+        // Will not overflow - `capacity <= usize::MAX` is a type invariant and obviously `len < capacity`.
+        frozen_len.wrapping_add(unfrozen_len)
     }
 
-    /// Whether the filled bytes region is empty, i.e. contains no bytes that can be consumed.
+    /// Whether the buffer is empty (contains no data).
     ///
-    /// This does not imply that the sequence builder has no remaining capacity.
+    /// This does not imply that the buffer has no remaining memory capacity.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// The total capacity of the sequence builder.
+    /// The total capacity of the buffer.
     ///
-    /// This is the sum of the length of the filled bytes and the available bytes regions.
+    /// This is the total length of the filled bytes and the available bytes regions.
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn capacity(&self) -> usize {
-        self.len()
-            .checked_add(self.remaining_capacity())
-            .expect("usize overflow should be impossible here because the sequence builder would exceed virtual memory size")
+        // Will not overflow - `capacity <= usize::MAX` is a type invariant.
+        self.len().wrapping_add(self.remaining_capacity())
     }
 
-    /// How many more bytes can be written into the sequence builder before its memory capacity
-    /// is exhausted.
-    #[cfg_attr(test, mutants::skip)] // Lying about length is an easy way to infinite loops.
+    /// How many more bytes can be written into the buffer
+    /// before its memory capacity is exhausted.
+    #[cfg_attr(test, mutants::skip)] // Lying about buffer sizes is an easy way to infinite loops.
     pub fn remaining_capacity(&self) -> usize {
         // The remaining capacity is the sum of the remaining capacity of all span builders.
         debug_assert_eq!(
@@ -281,21 +312,23 @@ impl BytesBuf {
         self.available
     }
 
-    /// Consumes `len` bytes from the beginning of the filled bytes region,
-    /// returning a [`BytesView`] with those bytes.
+    /// Consumes `len` bytes from the beginning of the buffer.
+    ///
+    /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
     ///
     /// # Panics
     ///
-    /// Panics if the filled bytes region does not contain at least `len` bytes.
+    /// Panics if the buffer does not contain at least `len` bytes.
     pub fn consume(&mut self, len: usize) -> BytesView {
         self.consume_checked(len)
-            .expect("attempted to consume more bytes than available in builder")
+            .expect("attempted to consume more bytes than available in buffer")
     }
 
-    /// Consumes `len` bytes from the beginning of the filled bytes region,
-    /// returning a [`BytesView`] with those bytes.
+    /// Consumes `len` bytes from the beginning of the buffer.
     ///
-    /// Returns `None` if the filled bytes region does not contain at least `len` bytes.
+    /// Returns `None` if the buffer does not contain at least `len` bytes.
+    ///
+    /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn consume_checked(&mut self, len: usize) -> Option<BytesView> {
         if len > self.len() {
@@ -332,9 +365,12 @@ impl BytesBuf {
         // BytesBuf stores the frozen spans in content order, so we must reverse.
         result_spans_reversed.extend(self.frozen_spans.drain(..manifest.detach_complete_frozen_spans).rev());
 
-        self.len = self.len.checked_sub(len).expect("guarded by if-block above");
+        // Will not wrap because we verified bounds above.
+        self.len = self.len.wrapping_sub(len);
 
-        self.frozen = self.frozen.checked_sub(len).expect("any data consumed must have first been frozen");
+        // Will not wrap because all consumed data must first have been frozen,
+        // which we guarantee via ensure_frozen() above.
+        self.frozen = self.frozen.wrapping_sub(len);
 
         Some(BytesView::from_spans_reversed(result_spans_reversed))
     }
@@ -348,9 +384,9 @@ impl BytesBuf {
             let span_len = span.len();
 
             if span_len as usize <= len {
-                detach_complete_frozen_spans = detach_complete_frozen_spans
-                    .checked_add(1)
-                    .expect("span count can never exceed virtual memory size");
+                // Will not wrap because a type invariant is `capacity <= usize::MAX`, so if
+                // capacity is in-bounds, the number of spans could not possibly be greater.
+                detach_complete_frozen_spans = detach_complete_frozen_spans.wrapping_add(1);
 
                 len = len
                     .checked_sub(span_len as usize)
@@ -369,13 +405,16 @@ impl BytesBuf {
         ConsumeManifest {
             detach_complete_frozen_spans,
             // If any `len` was left, it was not a full span.
-            consume_partial_span_bytes: len.try_into().expect("we are supposed to have less than one span of data remaining but its length does not fit into a single memory block - algorithm defect"),
+            consume_partial_span_bytes: len.try_into().expect("we are supposed to have less than one memory block worth of data remaining but its length does not fit into a single memory block - algorithm defect"),
         }
     }
 
-    /// Consumes all filled bytes (if any), returning a [`BytesView`] with those bytes.
+    /// Consumes all bytes in the buffer.
+    ///
+    /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
     pub fn consume_all(&mut self) -> BytesView {
-        self.consume_checked(self.len()).unwrap_or_default()
+        // SAFETY: Consuming len() bytes from self cannot possibly be out of bounds.
+        unsafe { self.consume_checked(self.len()).unwrap_unchecked() }
     }
 
     /// Consumes `len` bytes from the first span builder and moves it to the frozen spans list.
@@ -422,50 +461,51 @@ impl BytesBuf {
         self.freeze_from_first(must_freeze_bytes);
     }
 
-    /// The first consecutive slice of memory that makes up the remaining
-    /// capacity of the sequence builder.
+    /// The first slice of memory in the remaining capacity of the buffer.
     ///
-    /// After writing data to the start of this chunk, call `advance_mut()` to indicate
-    /// how many bytes have been filled with data. The next call to `first_unfilled_slice()` will
-    /// return the next consecutive slice of memory you can fill.
+    /// This allows you to manually write into the buffer instead of using the various
+    /// provided convenience methods. Only the first slice of the remaining capacity is
+    /// exposed at any given time by this API.
+    ///
+    /// After writing data to the start of this slice, call [`advance()`] to indicate
+    /// how many bytes have been filled with data. The next call to `first_unfilled_slice()`
+    /// will return the next slice of memory you can write into. This slice must be
+    /// completely filled before the next slice is exposed (a partial fill will simply
+    /// return the remaining range from the same slice in the next call).
+    ///
+    /// To write to multiple slices concurrently, use [`begin_vectored_write()`].
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// [`advance()`]: Self::advance
+    /// [`begin_vectored_write()`]: Self::begin_vectored_write
     pub fn first_unfilled_slice(&mut self) -> &mut [MaybeUninit<u8>] {
-        // We are required to always return something, even if we have no span builders!
         if let Some(last) = self.span_builders_reversed.last_mut() {
             last.unfilled_slice_mut()
         } else {
+            // We are required to always return something, even if we have no span builders!
             &mut []
         }
     }
 
-    /// Advances the write head by `count` bytes, indicating that this many bytes from the start
-    /// of [`first_unfilled_slice()`] have been filled with data.
+    /// Signals that `count` bytes have been written to the start of [`first_unfilled_slice()`].
     ///
-    /// After this call, the indicated number of additional bytes may be consumed from the buffer.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `count` is greater than the length of [`first_unfilled_slice()`].
+    /// The next call to [`first_unfilled_slice()`] will return the next slice of memory that
+    /// can be filled with data.
     ///
     /// # Safety
     ///
-    /// The caller must guarantee that the indicated number of bytes have been initialized with
-    /// data, sequentially starting from the beginning of [`first_unfilled_slice()`].
+    /// The caller must guarantee that `count` bytes from the beginning of [`first_unfilled_slice()`]
+    /// have been initialized.
+    ///
+    /// [`first_unfilled_slice()`]: Self::first_unfilled_slice
     pub unsafe fn advance(&mut self, count: usize) {
         if count == 0 {
             return;
         }
 
-        // Advancing the writer by more than a single chunk's length is an error, at least under
-        // the current implementation that does not support vectored BufMut access.
-        // TODO: This should just be a safety requirement, as we are anyway unsafe.
-        assert!(
-            count
-                <= self
-                    .span_builders_reversed
-                    .last()
-                    .expect("attempted to BufMut::advance_mut() when out of memory capacity - API contract violation")
-                    .remaining_capacity()
-        );
+        // The write head can only be advanced (via this method) up to the end of the first slice, no further.
+        // This is guaranteed by our safety requirements, so we only assert this in debug builds for extra validation.
+        debug_assert!(count <= self.span_builders_reversed.last().map_or(0, |x| x.remaining_capacity()));
 
         let span_builder = self
             .span_builders_reversed
@@ -502,33 +542,37 @@ impl BytesBuf {
             .expect("guarded by assertion above - we must have at least this much capacity still available");
     }
 
-    /// Begins a vectored write operation that takes exclusive ownership of the sequence builder
-    /// for the duration of the operation and allows individual slices of available capacity to be
-    /// filled concurrently, up to an optional limit of `max_len` bytes.
+    /// Concurrently writes data into all the byte slices that make up the buffer.
+    ///
+    /// The vectored write takes exclusive ownership of the buffer for the duration of the operation
+    /// and allows individual slices of the remaining capacity to be filled concurrently, up to an
+    /// optional limit of `max_len` bytes.
     ///
     /// Some I/O operations are naturally limited to a maximum number of bytes that can be
-    /// transferred, so the length limit here allows us to project a restricted view of the
-    /// available capacity to the caller without having to limit the true capacity of the builder.
+    /// transferred, so the length limit here allows you to project a restricted view of the
+    /// available capacity without having to limit the true capacity of the buffer.
     ///
     /// # Panics
     ///
-    /// Panics if `max_len` is greater than the remaining capacity of the sequence builder.
+    /// Panics if `max_len` is greater than the remaining capacity of the buffer.
     pub fn begin_vectored_write(&mut self, max_len: Option<usize>) -> BytesBufVectoredWrite<'_> {
         self.begin_vectored_write_checked(max_len)
             .expect("attempted to begin a vectored write with a max_len that was greater than the remaining capacity")
     }
 
-    /// Begins a vectored write operation that takes exclusive ownership of the sequence builder
-    /// for the duration of the operation and allows individual slices of available capacity to be
-    /// filled concurrently, up to an optional limit of `max_len` bytes.
+    /// Concurrently writes data into all the byte slices that make up the buffer.
+    ///
+    /// The vectored write takes exclusive ownership of the buffer for the duration of the operation
+    /// and allows individual slices of the remaining capacity to be filled concurrently, up to an
+    /// optional limit of `max_len` bytes.
     ///
     /// Some I/O operations are naturally limited to a maximum number of bytes that can be
-    /// transferred, so the length limit here allows us to project a restricted view of the
-    /// available capacity to the caller without having to limit the true capacity of the builder.
+    /// transferred, so the length limit here allows you to project a restricted view of the
+    /// available capacity without having to limit the true capacity of the buffer.
     ///
     /// # Returns
     ///
-    /// Returns `None` if `max_len` is greater than the remaining capacity of the sequence builder.
+    /// Returns `None` if `max_len` is greater than the remaining capacity of the buffer.
     pub fn begin_vectored_write_checked(&mut self, max_len: Option<usize>) -> Option<BytesBufVectoredWrite<'_>> {
         if let Some(max_len) = max_len
             && max_len > self.remaining_capacity()
@@ -536,25 +580,24 @@ impl BytesBuf {
             return None;
         }
 
-        Some(BytesBufVectoredWrite { builder: self, max_len })
+        Some(BytesBufVectoredWrite { buf: self, max_len })
     }
 
     fn iter_available_capacity(&mut self, max_len: Option<usize>) -> BytesBufAvailableIterator<'_> {
         let next_span_builder_index = if self.span_builders_reversed.is_empty() { None } else { Some(0) };
 
         BytesBufAvailableIterator {
-            builder: self,
+            buf: self,
             next_span_builder_index,
             max_len,
         }
     }
 
-    /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
-    /// backing memory capacity for this sequence builder.
+    /// Extends the lifetime of the memory capacity backing this buffer.
     ///
-    /// This can be useful when unsafe code is used to reference the contents of a `BytesBuf`
-    /// and it is possible to reach a condition where the `BytesBuf` itself no longer exists,
-    /// even though the contents are referenced (e.g. because this is happening in non-Rust code).
+    /// This can be useful when unsafe code is used to reference the contents of a `BytesBuf` and it
+    /// is possible to reach a condition where the `BytesBuf` itself no longer exists, even though
+    /// the contents are referenced (e.g. because the remaining references are in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
         MemoryGuard::new(
             self.span_builders_reversed
@@ -595,7 +638,7 @@ impl std::fmt::Debug for BytesBuf {
             .collect::<Vec<_>>()
             .join(", ");
 
-        f.debug_struct("BytesBuf")
+        f.debug_struct(type_name::<Self>())
             .field("len", &self.len)
             .field("frozen", &self.frozen)
             .field("available", &self.available)
@@ -619,17 +662,16 @@ struct ConsumeManifest {
 impl ConsumeManifest {
     const fn required_spans_capacity(&self) -> usize {
         if self.consume_partial_span_bytes != 0 {
-            self.detach_complete_frozen_spans
-                .checked_add(1)
-                .expect("span count cannot exceed virtual memory size")
+            // This will not wrap because a type invariant is `capacity <= usize::MAX`, so if
+            // capacity is already in-bounds, the count of spans certainly is not a greater number.
+            self.detach_complete_frozen_spans.wrapping_add(1)
         } else {
             self.detach_complete_frozen_spans
         }
     }
 }
 
-/// A vectored write is an operation that concurrently writes data into multiple slices
-/// of memory owned by a `BytesBuf`.
+/// Concurrently writes data into multiple slices of buffer memory capacity.
 ///
 /// The operation takes exclusive ownership of the `BytesBuf`. During the vectored write,
 /// the remaining capacity of the `BytesBuf` is exposed as `MaybeUninit<u8>` slices
@@ -638,32 +680,34 @@ impl ConsumeManifest {
 ///
 /// The capacity exposed during the operation can optionally be limited to `max_len` bytes.
 ///
-/// The operation is completed by calling `.commit()` on the instance, after which the instance is
+/// The operation is completed by calling `.commit()` on the instance, after which the operation is
 /// consumed and the exclusive ownership of the `BytesBuf` released.
 ///
-/// If the type is dropped without committing, the operation is aborted and all remaining capacity
+/// If the instance is dropped without committing, the operation is aborted and all remaining capacity
 /// is left in a potentially uninitialized state.
 #[derive(Debug)]
 pub struct BytesBufVectoredWrite<'a> {
-    builder: &'a mut BytesBuf,
+    buf: &'a mut BytesBuf,
     max_len: Option<usize>,
 }
 
 impl BytesBufVectoredWrite<'_> {
-    /// Iterates over the slices of available capacity in the buffer,
+    /// Iterates over the slices of available capacity of the buffer,
     /// allowing them to be filled with data.
+    ///
+    /// The slices returned from this iterator have the lifetime of the vectored
+    /// write operation itself, allowing them to be mutated concurrently.
     pub fn iter_slices_mut(&mut self) -> BytesBufAvailableIterator<'_> {
-        self.builder.iter_available_capacity(self.max_len)
+        self.buf.iter_available_capacity(self.max_len)
     }
 
-    /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
-    /// backing memory capacity for this buffer.
+    /// Extends the lifetime of the memory capacity backing this buffer.
     ///
-    /// This can be useful when unsafe code is used to reference the contents of a `BytesBuf`
-    /// and it is possible to reach a condition where the `BytesBuf` itself no longer exists,
-    /// even though the contents are referenced (e.g. because this is happening in non-Rust code).
+    /// This can be useful when unsafe code is used to reference the contents of a `BytesBuf` and it
+    /// is possible to reach a condition where the `BytesBuf` itself no longer exists, even though
+    /// the contents are referenced (e.g. because the remaining references are in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
-        self.builder.extend_lifetime()
+        self.buf.extend_lifetime()
     }
 
     /// Completes the vectored write operation, committing `bytes_written` bytes of data that
@@ -672,13 +716,13 @@ impl BytesBufVectoredWrite<'_> {
     /// # Safety
     ///
     /// The caller must ensure that `bytes_written` bytes of data have actually been written
-    /// into the slices of memory, sequentially from the start.
+    /// into the slices of memory returned from `iter_slices_mut()`, sequentially from the start.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub unsafe fn commit(self, bytes_written: usize) {
-        assert!(bytes_written <= self.builder.remaining_capacity());
+        debug_assert!(bytes_written <= self.buf.remaining_capacity());
 
         if let Some(max_len) = self.max_len {
-            assert!(bytes_written <= max_len);
+            debug_assert!(bytes_written <= max_len);
         }
 
         // Ordinarily, we have a type invariant that only the first span builder may contain data,
@@ -693,7 +737,7 @@ impl BytesBufVectoredWrite<'_> {
 
         while bytes_remaining > 0 {
             let span_builder = self
-                .builder
+                .buf
                 .span_builders_reversed
                 .last_mut()
                 .expect("there must be at least one span builder because we still have filled capacity remaining to freeze");
@@ -703,7 +747,7 @@ impl BytesBufVectoredWrite<'_> {
 
             // SAFETY: We forward the promise from our own safety requirements to guarantee that
             // the specified number of bytes really has been written.
-            unsafe { self.builder.advance(bytes_to_commit) };
+            unsafe { self.buf.advance(bytes_to_commit) };
 
             bytes_remaining = bytes_remaining
                 .checked_sub(bytes_to_commit)
@@ -714,9 +758,11 @@ impl BytesBufVectoredWrite<'_> {
 
 /// Iterates over the available capacity of a `BytesBuf` as part of a vectored write
 /// operation, returning a sequence of `MaybeUninit<u8>` slices.
+///
+/// The slices may be mutated for as long as the vectored write operation exists.
 #[derive(Debug)]
 pub struct BytesBufAvailableIterator<'a> {
-    builder: &'a mut BytesBuf,
+    buf: &'a mut BytesBuf,
     next_span_builder_index: Option<usize>,
 
     // Self-imposed constraint on how much of the available capacity is made visible through
@@ -734,25 +780,26 @@ impl<'a> Iterator for BytesBufAvailableIterator<'a> {
         let next_span_builder_index = self.next_span_builder_index?;
 
         self.next_span_builder_index = Some(
-            next_span_builder_index
-                .checked_add(1)
-                .expect("usize overflow is inconceivable here"),
+            // Will not overflow because `capacity <= usize::MAX` is a type invariant,
+            // so the count of span builders certainly cannot be greater.
+            next_span_builder_index.wrapping_add(1),
         );
-        if self.next_span_builder_index == Some(self.builder.span_builders_reversed.len()) {
+        if self.next_span_builder_index == Some(self.buf.span_builders_reversed.len()) {
             self.next_span_builder_index = None;
         }
 
         // The iterator iterates through things in content order but we need to access
         // the span builders in storage order.
         let next_span_builder_index_storage_order = self
-            .builder
+            .buf
             .span_builders_reversed
             .len()
-            .checked_sub(next_span_builder_index + 1)
-            .expect("usize overflow is inconceivable here");
+            // Will not overflow because `capacity <= usize::MAX` is a type invariant,
+            // so the count of span builders certainly cannot be greater.
+            .wrapping_sub(next_span_builder_index + 1);
 
         let span_builder = self
-            .builder
+            .buf
             .span_builders_reversed
             .get_mut(next_span_builder_index_storage_order)
             .expect("iterator cursor referenced a span builder that does not exist");
@@ -765,7 +812,6 @@ impl<'a> Iterator for BytesBufAvailableIterator<'a> {
         // references are dropped, even if the iterator itself is dropped earlier. We can do this
         // because we know that to access the chunks requires a reference to the `BytesBuf`,
         // so as long as a chunk reference exists, access via the `BytesBuf` is blocked.
-        // TODO: It would be good to have a (ui) test to verify this.
         let uninit_slice_mut = unsafe { mem::transmute::<&mut [MaybeUninit<u8>], &'a mut [MaybeUninit<u8>]>(&mut *uninit_slice_mut) };
 
         let uninit_slice_mut = if let Some(max_len) = self.max_len {
@@ -776,7 +822,8 @@ impl<'a> Iterator for BytesBufAvailableIterator<'a> {
 
             let adjusted_slice = uninit_slice_mut.get_mut(..constrained_len).expect("guarded by min() above");
 
-            self.max_len = Some(max_len.checked_sub(constrained_len).expect("guarded by min() above"));
+            // Will not wrap because it is guarded by min() above.
+            self.max_len = Some(max_len.wrapping_sub(constrained_len));
 
             if self.max_len == Some(0) {
                 // Even if there are more span builders, we have returned all the capacity
@@ -795,9 +842,9 @@ impl<'a> Iterator for BytesBufAvailableIterator<'a> {
 
 impl From<BytesView> for BytesBuf {
     fn from(value: BytesView) -> Self {
-        let mut sb = Self::new();
-        sb.append(value);
-        sb
+        let mut buf = Self::new();
+        buf.append(value);
+        buf
     }
 }
 

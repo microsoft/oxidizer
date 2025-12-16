@@ -497,7 +497,7 @@
 //! represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
 //! type, this crate offers conversion methods to translate between [`BytesView`] and [`Bytes`][18]:
 //!
-//! * [`BytesView::into_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
+//! * [`BytesView::to_bytes()`][16] converts a [`BytesView`] into a [`Bytes`][18] instance. This
 //!   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
 //!   You are discouraged from using this method in any performance-relevant logic path.
 //! * `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][18] instance
