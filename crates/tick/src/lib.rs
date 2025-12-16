@@ -7,7 +7,7 @@
     test,
     allow(
         clippy::arithmetic_side_effects,
-        clippy::unchecked_time_subtraction,
+        clippy::unchecked_duration_subtraction,
         reason = "allow these lints in tests to improve the readability of the tests"
     )
 )]
