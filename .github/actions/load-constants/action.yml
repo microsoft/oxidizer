@@ -1,0 +1,20 @@
+name: Load repo constants
+runs:
+  using: composite
+  steps:
+    - name: Export constants
+      shell: pwsh
+      run: |
+        $constantsPath = Join-Path '${{ github.workspace }}' 'constants.toml'
+        if (-not (Test-Path $constantsPath)) {
+          Write-Error "constants.toml not found at $constantsPath"
+        }
+
+        $pattern = '^[\s]*([A-Z0-9_]+)[\s]*=[\s]*"([^"\\]*(?:\\.[^"\\]*)*)"'
+        Get-Content -Path $constantsPath | ForEach-Object {
+          if ($_ -match $pattern) {
+            $key = $matches[1]
+            $value = $matches[2]
+            Add-Content -Path $env:GITHUB_ENV -Value "$key=$value"
+          }
+        }
