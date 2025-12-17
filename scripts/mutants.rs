@@ -108,11 +108,29 @@ fn main() {
     println!("=====================================");
     println!();
 
+    let mut failed_groups = Vec::new();
+
     for group in &test_groups {
         if let Err(e) = mutate_group(&group[..], &args) {
             eprintln!("❌ mutation testing failed for [{}]: {}", group.join(" "), e);
-            std::process::exit(1);
+            failed_groups.push((group.clone(), e));
         }
+    }
+
+    println!();
+    println!("=====================================");
+    println!("Mutation Testing Complete");
+    println!("=====================================");
+
+    if failed_groups.is_empty() {
+        println!("✅ All test groups passed!");
+    } else {
+        eprintln!("❌ {} test group(s) failed:", failed_groups.len());
+        for (group, error) in &failed_groups {
+            eprintln!("  - [{}]: {error}", group.join(", "));
+        }
+        eprintln!();
+        std::process::exit(1);
     }
 }
 
