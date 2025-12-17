@@ -85,13 +85,13 @@ use std::{
     collections::HashMap,
     hash::Hash,
     sync::{
-        Arc, Weak,
+        Arc, OnceLock, Weak,
         atomic::{AtomicUsize, Ordering},
     },
 };
 
+use event_listener::Event;
 use parking_lot::Mutex as SyncMutex;
-use xutex::AsyncMutex;
 
 type SharedMapping<K, T> = Arc<SyncMutex<HashMap<K, BroadcastOnce<T>>>>;
 
@@ -113,15 +113,21 @@ impl<K, T> Default for UniFlight<K, T> {
 }
 
 struct Shared<T> {
-    slot: AsyncMutex<Option<T>>,
+    /// Result storage - written once by the winning leader, then lock-free reads.
+    result: OnceLock<T>,
+    /// Event for notifying waiters when result is ready or all leaders failed.
+    ready: Event,
+    /// Number of leaders currently executing.
     leader_count: AtomicUsize,
+    /// Maximum concurrent leaders.
     max_leaders: usize,
 }
 
 impl<T> Shared<T> {
     fn new(max_leaders: usize) -> Self {
         Self {
-            slot: AsyncMutex::new(None),
+            result: OnceLock::new(),
+            ready: Event::new(),
             leader_count: AtomicUsize::new(0),
             max_leaders,
         }
@@ -159,7 +165,11 @@ impl<T> LeaderGuard<T> {
 impl<T> Drop for LeaderGuard<T> {
     fn drop(&mut self) {
         if let Some(shared) = &self.shared {
-            shared.leader_count.fetch_sub(1, Ordering::AcqRel);
+            let prev = shared.leader_count.fetch_sub(1, Ordering::AcqRel);
+            // If we were the last leader and no result was stored, wake one follower for promotion.
+            if prev == 1 && shared.result.get().is_none() {
+                shared.ready.notify(1);
+            }
         }
     }
 }
@@ -280,45 +290,56 @@ where
     }
 
     async fn wait_as_leader(shared: Arc<Shared<T>>, key: K, mapping: SharedMapping<K, T>, func: F, guard: LeaderGuard<T>) -> T {
-        // Lock the slot first - this ensures followers wait while we execute
-        let mut slot = shared.slot.lock().await;
-
-        // Check if another leader already stored a result
-        if let Some(value) = slot.as_ref() {
-            let result = value.clone();
-            drop(slot);
+        // Check if another leader already stored a result (lock-free read).
+        if let Some(result) = shared.result.get() {
             guard.disarm();
-            return result;
+            return result.clone();
         }
 
-        // Execute the work while holding the lock
-        // This ensures followers block on lock().await until we're done
+        // Execute the work.
         let value = func().await;
-        *slot = Some(value.clone());
-        drop(slot);
 
-        // Clean up the mapping entry
-        mapping.lock().remove(&key);
+        // Try to store the result. First writer wins via OnceLock.
+        if shared.result.set(value.clone()).is_ok() {
+            // We stored the result - clean up the mapping entry.
+            mapping.lock().remove(&key);
+        }
 
-        // Disarm the guard (result is stored, count doesn't matter)
+        // Notify ALL waiting followers simultaneously.
+        shared.ready.notify(usize::MAX);
+
+        // Disarm the guard (result is stored, count doesn't matter).
         guard.disarm();
-        value
+
+        // Return our computed value, or the winning value if we lost the race.
+        shared.result.get().cloned().unwrap_or(value)
     }
 
     async fn wait_as_follower(shared: Arc<Shared<T>>, key: K, mapping: SharedMapping<K, T>, func: F) -> T {
-        // Wait for a result by acquiring the slot lock
-        // Leaders hold this lock during execution, so we'll block until one finishes
-        let slot = shared.slot.lock().await;
-        if let Some(value) = slot.as_ref() {
-            return value.clone();
-        }
-        drop(slot);
+        loop {
+            // Fast path: result already available (lock-free read).
+            if let Some(result) = shared.result.get() {
+                return result.clone();
+            }
 
-        // No result and we acquired the lock - all leaders must have failed
-        // Promote ourselves to leader and execute
-        // Safe to unwrap: if we got here, leader_count == 0, and max_leaders >= 1
-        let guard = LeaderGuard::try_claim(&shared).expect("follower promotion should always succeed");
-        Self::wait_as_leader(shared, key, mapping, func, guard).await
+            // Register listener BEFORE checking state to avoid missed notifications.
+            let listener = shared.ready.listen();
+
+            // Double-check after registering.
+            if let Some(result) = shared.result.get() {
+                return result.clone();
+            }
+
+            // Check if all leaders have failed and we need promotion.
+            if shared.leader_count.load(Ordering::Acquire) == 0 {
+                // All leaders failed - promote ourselves.
+                let guard = LeaderGuard::try_claim(&shared).expect("follower promotion should always succeed");
+                return Self::wait_as_leader(shared, key, mapping, func, guard).await;
+            }
+
+            // Wait for notification (in parallel with other followers).
+            listener.await;
+        }
     }
 }
 

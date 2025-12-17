@@ -17,8 +17,8 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+event-listener.workspace = true
 parking_lot.workspace = true
-xutex.workspace = true
 
 [dev-dependencies]
 futures-util = { workspace = true, features = ["alloc", "std"] }
