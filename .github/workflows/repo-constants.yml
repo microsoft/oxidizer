@@ -1,0 +1,85 @@
+# Exposes values defined in constants.toml to other workflows.
+name: repo-constants
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    outputs:
+      RUST_MSRV:
+        value: ${{ jobs.export.outputs.RUST_MSRV }}
+      RUST_LATEST:
+        value: ${{ jobs.export.outputs.RUST_LATEST }}
+      RUST_NIGHTLY:
+        value: ${{ jobs.export.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES:
+        value: ${{ jobs.export.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION:
+        value: ${{ jobs.export.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION:
+        value: ${{ jobs.export.outputs.SCCACHE_VERSION }}
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    outputs:
+      RUST_MSRV: ${{ steps.set.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ steps.set.outputs.RUST_LATEST }}
+      RUST_NIGHTLY: ${{ steps.set.outputs.RUST_NIGHTLY }}
+      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ steps.set.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
+      CARGO_AUDIT_VERSION: ${{ steps.set.outputs.CARGO_AUDIT_VERSION }}
+      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ steps.set.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+      CARGO_DENY_VERSION: ${{ steps.set.outputs.CARGO_DENY_VERSION }}
+      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ steps.set.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
+      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ steps.set.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
+      CARGO_HACK_VERSION: ${{ steps.set.outputs.CARGO_HACK_VERSION }}
+      CARGO_LLVM_COV_VERSION: ${{ steps.set.outputs.CARGO_LLVM_COV_VERSION }}
+      CARGO_MUTANTS_VERSION: ${{ steps.set.outputs.CARGO_MUTANTS_VERSION }}
+      CARGO_RDME_VERSION: ${{ steps.set.outputs.CARGO_RDME_VERSION }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ steps.set.outputs.CARGO_SEMVER_CHECKS_VERSION }}
+      CARGO_SORT_VERSION: ${{ steps.set.outputs.CARGO_SORT_VERSION }}
+      CARGO_UDEPS_VERSION: ${{ steps.set.outputs.CARGO_UDEPS_VERSION }}
+      CARGO_WORKSPACES_VERSION: ${{ steps.set.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ steps.set.outputs.SCCACHE_VERSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.0
+        with:
+          fetch-depth: 1
+      - id: set
+        shell: pwsh
+        run: |
+          $constantsPath = Join-Path $PWD 'constants.toml'
+          $pattern = '^[\s]*([A-Z0-9_]+)[\s]*=[\s]*"([^"\\]*(?:\\.[^"\\]*)*)"'
+
+          Get-Content -Path $constantsPath | ForEach-Object {
+            if ($_ -match $pattern) {
+              $key = $matches[1]
+              $value = $matches[2]
+              Add-Content -Path $env:GITHUB_OUTPUT -Value "$key=$value"
+            }
+          }

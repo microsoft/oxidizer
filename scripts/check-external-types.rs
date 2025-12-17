@@ -29,11 +29,11 @@ struct Args {
     toolchain: String,
 }
 
-fn main() -> Result<()> {
+fn main() {
     let args: Args = argh::from_env();
 
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let all_packages = automation::list_packages(workspace_root)?;
+    let all_packages = automation::list_packages(workspace_root).expect("failed to list workspace packages");
 
     let filtered_packages: Vec<_> = all_packages
         .into_iter()
@@ -50,6 +50,7 @@ fn main() -> Result<()> {
 
     let mut checked = 0;
     let mut skipped = 0;
+    let mut failed_crates = Vec::new();
 
     for pkg in &filtered_packages {
         // Check if this is a library crate by looking at the targets
@@ -57,8 +58,12 @@ fn main() -> Result<()> {
 
         if has_lib {
             println!("Checking external types in {}", pkg.name);
-            check_external_types(&pkg.manifest_path, &args.toolchain)?;
-            println!("✓ Passed: {}", pkg.name);
+            if let Err(e) = check_external_types(&pkg.manifest_path, &args.toolchain) {
+                eprintln!("✗ Failed: {}: {e}", pkg.name);
+                failed_crates.push((pkg.name.clone(), e));
+            } else {
+                println!("✓ Passed: {}", pkg.name);
+            }
             checked += 1;
         } else {
             println!("⊘ Skipping {} (not a library crate)", pkg.name);
@@ -73,7 +78,14 @@ fn main() -> Result<()> {
     println!("  Skipped: {}", skipped);
     println!("  Total:   {}", checked + skipped);
 
-    Ok(())
+    if !failed_crates.is_empty() {
+        eprintln!();
+        eprintln!("❌ {} crate(s) failed:", failed_crates.len());
+        for (name, error) in &failed_crates {
+            eprintln!("  - {name}: {error}");
+        }
+        std::process::exit(1);
+    }
 }
 
 fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<()> {

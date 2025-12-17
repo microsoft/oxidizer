@@ -128,8 +128,8 @@ libs
 libunwind-devel
 lifecycle
 llvm-cov
-Macros
 macros
+Macros
 Makefile
 metadata
 Metas
@@ -145,6 +145,8 @@ mockall
 monomorphized
 msrc
 MSRustup
+MSRV
+msvc
 Namespace
 NeutralMemoryPool
 NewRelic
@@ -172,6 +174,7 @@ proc
 Proc
 profiler
 PullRequest
+RDME
 Redis
 reentrancy
 repo
@@ -186,6 +189,7 @@ Rustdoc
 rustfmt
 Sandana
 sans-io
+SCCACHE
 scopeguard
 SDKs
 SemVer
@@ -218,6 +222,7 @@ toolchain
 toolchains
 trait
 typesafe
+UDEPS
 uncontended
 unhandleable
 unicode

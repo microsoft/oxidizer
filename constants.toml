@@ -1,0 +1,26 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Shared constants for GitHub workflows and repository automation.
+
+# Rust toolchain versions
+RUST_MSRV = "1.88"                                  # used for testing (ensures the MSRV promise is kept)
+RUST_LATEST = "1.92"                                # used for static analysis & mutation testing; must match rust-toolchain.toml
+RUST_NIGHTLY = "nightly-2025-11-20"                 # used for coverage and extended analysis
+RUST_NIGHTLY_EXTERNAL_TYPES = "nightly-2025-08-06"  # used for external type exposure checks
+
+# Tool versions
+CARGO_AUDIT_VERSION = "0.22.0"
+CARGO_CHECK_EXTERNAL_TYPES_VERSION = "0.3.0"
+CARGO_DENY_VERSION = "0.18.8"
+CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION = "0.2.0"
+CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION = "0.2.0"
+CARGO_HACK_VERSION = "0.6.39"
+CARGO_LLVM_COV_VERSION = "0.6.21"
+CARGO_MUTANTS_VERSION = "25.3.1"
+CARGO_RDME_VERSION = "1.5.0"
+CARGO_SEMVER_CHECKS_VERSION = "0.45.0"
+CARGO_SORT_VERSION = "2.0.2"
+CARGO_UDEPS_VERSION = "0.1.60"
+CARGO_WORKSPACES_VERSION = "0.4.1"
+SCCACHE_VERSION = "v0.12.0"
