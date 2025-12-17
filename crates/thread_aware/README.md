@@ -36,8 +36,9 @@ On a high level, this crate enables thread migrations of state via [`ThreadAware
 
 Similar to `Clone`, there are no exact semantic prescriptions of how types should behave on relocation.
 They might continue to share some state (e.g., a common cache) or fully detach from it for performance reasons.
-However, like `Clone`, the relocation itself should be mostly transparent and predictable to users.
-
+The primary goal is performance, so types should aim to minimize contention on synchronization primitives
+and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
+to users.
 
 ### Implementing [`ThreadAware`], and `Arc<T, PerCore>`
 
@@ -93,6 +94,13 @@ While runtimes should reduce the incidence of that through their API design, it 
 happen via [`std::thread::spawn`] and other means. In these cases types should still function
 correctly, although they might experience degraded performance through contention of now-shared
 resources.
+
+### Provided Implementations
+
+[`ThreadAware`] is implemented for many standard library types, including primitive types, Vec,
+String, Option, Result, tuples, etc. However, it's explicitly not implemented for [`std::sync::Arc`]
+as that type implies some level of cross-thread sharing and thus needs special attention when used
+from types that implement [`ThreadAware`].
 
 ## Feature Flags
 * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion

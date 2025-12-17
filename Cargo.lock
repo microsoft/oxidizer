@@ -1450,6 +1450,7 @@ version = "0.6.0"
 dependencies = [
  "many_cpus",
  "mutants",
+ "static_assertions",
  "thread_aware_macros",
 ]
 

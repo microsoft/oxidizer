@@ -36,6 +36,7 @@ thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
 mutants.workspace = true
+static_assertions.workspace = true
 thread_aware_macros = { workspace = true }
 
 [lints]
