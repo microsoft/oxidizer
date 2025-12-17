@@ -1,25 +1,17 @@
 <div align="center">
- <img src="./logo.png" alt="Thread Aware Logo" width="128">
+ <img src="./logo.png" alt="Thread_Aware Logo" width="96">
 
-# Thread Aware
+# thread_aware
 
 [![crate.io](https://img.shields.io/crates/v/thread_aware.svg)](https://crates.io/crates/thread_aware)
 [![docs.rs](https://docs.rs/thread_aware/badge.svg)](https://docs.rs/thread_aware)
 [![MSRV](https://img.shields.io/crates/msrv/thread_aware)](https://crates.io/crates/thread_aware)
 [![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
-
-* [Summary](#summary)
-* [Feature Flags](#feature-flags)
-* [Example](#example)
-* [Derive Macro Example](#derive-macro-example)
-
-## Summary
-
-<!-- cargo-rdme start -->
 
 Essential building blocks for thread-per-core libraries.
 
@@ -28,81 +20,82 @@ It can serve as a foundation for building components and runtimes that operate a
 memory affinities.
 
 ## Theory of Operation
-On a high level, this crate enables thread migrations of state via [`ThreadAware`] trait:
-- Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
-- The authors of said types can then act on this information to implement performance optimizations. Such optimizations
+
+At a high level, this crate enables thread migrations of state via the [`ThreadAware`][__link0] trait:
+
+* Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
+* The authors of said types can then act on this information to implement performance optimizations. Such optimizations
   might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
   or detaching from shared, possibly contended memory with the previous thread.
 
-Similar to `Clone`, there are no exact semantic prescriptions of how types should behave on relocation.
+Similar to [`Clone`][__link1], there are no exact semantic prescriptions of how types should behave on relocation.
 They might continue to share some state (e.g., a common cache) or fully detach from it for performance reasons.
 The primary goal is performance, so types should aim to minimize contention on synchronization primitives
 and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
 to users.
 
-### Implementing [`ThreadAware`], and `Arc<T, PerCore>`
+### Implementing [`ThreadAware`][__link2], and `Arc<T, PerCore>`
 
-In most cases [`ThreadAware`] should be implemented via the provided derive macro.
+In most cases [`ThreadAware`][__link3] should be implemented via the provided derive macro.
 As thread-awareness of a type usually involves letting all contained fields know of an ongoing
 relocation, the derive macro does just that. A default impl is provided for many `std` types,
-so the macro should 'just work' on most compounds of built-ins.
+so the macro should ‘just work’ on most compounds of built-ins.
 
-External crates might often not implement [`ThreadAware`]. In many of these cases using our
-[`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
-[`std::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and implements [`ThreadAware`] for it. For
+External crates might often not implement [`ThreadAware`][__link4]. In many of these cases using our
+[`thread_aware::Arc`][__link5] offers a convenient solution: It combines an upstream
+[`std::sync::Arc`][__link6] with a relocation [`Strategy`][__link7], and implements [`ThreadAware`][__link8] for it. For
 example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
 `Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
 
+### Relation to [`Send`][__link9]
 
-### Relation to [`Send`]
-
-Although [`ThreadAware`] has no supertraits, any runtime invoking it will usually require the underlying type to
-be [`Send`]. In these cases, type are first sent to another thread, then the [`ThreadAware`] relocation
+Although [`ThreadAware`][__link10] has no supertraits, any runtime invoking it will usually require the underlying type to
+be [`Send`][__link11]. In these cases, type are first sent to another thread, then the [`ThreadAware`][__link12] relocation
 notification is invoked.
-
 
 ### Thread vs. Core Semantics
 
 As this library is primarily intended for use in thread-per-core runtimes,
-we use the terms 'thread' and 'core' interchangeably. The assumption is that items
+we use the terms ‘thread’ and ‘core’ interchangeably. The assumption is that items
 primarily relocate between different threads, where each thread is pinned to a different CPU core.
 Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
 be able to observe this fact.
 
-### [`ThreadAware`] vs. [`Unaware`]
+### [`ThreadAware`][__link13] vs. [`Unaware`][__link14]
 
 Sometimes you might need to move inert types as-is, essentially bypassing all
 thread-aware handling. These might be foreign types that carry no allocation, do
 no I/O, or otherwise do not require any thread-specific handling.
 
-[`Unaware`] can be used to encapsulate such types, a wrapper that itself implements [`ThreadAware`], but
+[`Unaware`][__link15] can be used to encapsulate such types, a wrapper that itself implements [`ThreadAware`][__link16], but
 otherwise does not react to it. You can think of it as a `MoveAsIs<T>`. However, it was
 deliberately named `Unaware` to signal that only types which are genuinely unware of their
-thread relocations (i.e., don't impl [`ThreadAware`]) should be wrapped in such.
+thread relocations (i.e., don’t impl [`ThreadAware`][__link17]) should be wrapped in such.
 
 Wrapping types that implement the trait is discouraged, as it will prevent them from properly
 relocating and might have an impact on their performance, but not correctness, see below.
 
 ### Performance vs. Correctness
 
-It is important to note that [`ThreadAware`] is a cooperative performance optimization and contention avoidance
+It is important to note that [`ThreadAware`][__link18] is a cooperative performance optimization and contention avoidance
 primitive, not a guarantee of behavior for either the caller or callee. In other words, callers and runtimes must
 continue to operate correctly if the trait is invoked incorrectly.
 
-In particular, [`ThreadAware`] may not always be invoked when a type leaves the current thread.
+In particular, [`ThreadAware`][__link19] may not always be invoked when a type leaves the current thread.
 While runtimes should reduce the incidence of that through their API design, it may nonetheless
-happen via [`std::thread::spawn`] and other means. In these cases types should still function
+happen via [`std::thread::spawn`][__link20] and other means. In these cases types should still function
 correctly, although they might experience degraded performance through contention of now-shared
 resources.
 
 ### Provided Implementations
 
-[`ThreadAware`] is implemented for many standard library types, including primitive types, Vec,
-String, Option, Result, tuples, etc. However, it's explicitly not implemented for [`std::sync::Arc`]
+[`ThreadAware`][__link21] is implemented for many standard library types, including primitive types, Vec,
+String, Option, Result, tuples, etc. However, it’s explicitly not implemented for [`std::sync::Arc`][__link22]
 as that type implies some level of cross-thread sharing and thus needs special attention when used
-from types that implement [`ThreadAware`].
+from types that implement [`ThreadAware`][__link23].
 
 ## Feature Flags
+
 * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion
   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
   environments: `default-features = false`.
@@ -111,10 +104,10 @@ from types that implement [`ThreadAware`].
 
 ## Examples
 
-### Deriving [`ThreadAware`]
+### Deriving [`ThreadAware`][__link24]
 
 When the `derive` feature (enabled by default) is active you can simply
-derive [`ThreadAware`] instead of writing the implementation manually.
+derive [`ThreadAware`][__link25] instead of writing the implementation manually.
 
 ```rust
 use thread_aware::ThreadAware;
@@ -126,11 +119,10 @@ struct Point {
 }
 ```
 
-### Enabling [`ThreadAware`] via `Arc<T, S>`
+### Enabling [`ThreadAware`][__link26] via `Arc<T, S>`
 
-For types containing fields not [`ThreadAware`], you can use [`Arc`] to specify a
-strategy, and wrap them in an [`Arc`] that implements the trait.
-
+For types containing fields not [`ThreadAware`][__link27], you can use [`Arc`][__link28] to specify a
+strategy, and wrap them in an [`Arc`][__link29] that implements the trait.
 
 ```rust
 use thread_aware::{ThreadAware, Arc, PerCore};
@@ -151,10 +143,40 @@ impl Service {
 }
 ```
 
-<!-- cargo-rdme end -->
 
-<div style="font-size: 75%" ><hr/>
+<hr/>
+<sub>
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+</sub>
 
-This crate was developed as part of [The Oxidizer Project](https://github.com/microsoft/oxidizer).
-
-</div>
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG-dp_C9D4-jCG9tBl5F7M1bDG3mj9J-QdGxQGyUWhRYQiuECYXKEGxWHjFPHVfBQG3G58H2zodoBG5x8pW8Bc5imG8o5LL8tl2DqYWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjA
+ [__link0]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
+ [__link10]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link11]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link12]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link13]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link14]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=Unaware
+ [__link15]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=Unaware
+ [__link16]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link17]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link18]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link19]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link2]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link20]: https://doc.rust-lang.org/stable/std/?search=thread::spawn
+ [__link21]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link22]: https://doc.rust-lang.org/stable/std/?search=sync::Arc
+ [__link23]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link24]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link25]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link26]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link27]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link28]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=Arc
+ [__link29]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=Arc
+ [__link3]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link4]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link5]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=Arc
+ [__link6]: https://doc.rust-lang.org/stable/std/?search=sync::Arc
+ [__link7]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=storage::Strategy
+ [__link8]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
+ [__link9]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
