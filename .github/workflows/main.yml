@@ -73,15 +73,28 @@ jobs:
 
       # execute
       - name: Build
+        id: build
+        continue-on-error: true
         run: cargo hack build --each-feature --workspace --verbose --locked --color always
       - name: Tests
+        id: tests
+        continue-on-error: true
         run: cargo test --verbose --workspace --all-features
       - name: Docs
+        id: docs
+        continue-on-error: true
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --verbose --workspace --all-features
       - name: Doc Tests
+        id: doc-tests
+        continue-on-error: true
         run: cargo test --doc --verbose --workspace --all-features
+
+      # validate
+      - name: Check for Step Failures
+        if: steps.build.outcome != 'success' || steps.tests.outcome != 'success' || steps.docs.outcome != 'success' || steps.doc-tests.outcome != 'success'
+        run: exit 1
 
   static-analysis:
     needs: constants
@@ -104,10 +117,95 @@ jobs:
       CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
       CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
       CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
-      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
       CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
       CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
       CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
+      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.0
+        with:
+          fetch-depth: 1
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
+      - name: Start sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: ${{ env.SCCACHE_VERSION }}
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        with:
+          toolchain: ${{ env.RUST_LATEST }}
+          components: clippy, rustfmt
+      - name: Install Cargo Tools
+        uses: taiki-e/install-action@v2.62.62
+        with:
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}
+
+      # execute
+      - name: Clippy
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Audit
+        id: audit
+        continue-on-error: true
+        run: cargo audit
+      - name: Format
+        id: format
+        continue-on-error: true
+        run: cargo fmt -- --check
+      - name: Cargo.toml Format
+        id: cargo-toml-format
+        continue-on-error: true
+        run: cargo sort --check --grouped --workspace
+      - name: Docs
+        id: docs
+        continue-on-error: true
+        run: cargo doc --no-deps --workspace --all-features
+      - name: Rdme
+        id: rdme
+        continue-on-error: true
+        run: cargo workspaces exec cargo rdme --check
+      - name: Default Features
+        id: default-features
+        continue-on-error: true
+        run: cargo ensure-no-default-features
+      - name: Cyclic Dependencies
+        id: cyclic-deps
+        continue-on-error: true
+        run: cargo ensure-no-cyclic-deps
+      - name: Dependency Validation
+        id: dependency-validation
+        continue-on-error: true
+        run: cargo deny --all-features --workspace --color always check all
+
+        # validate
+      - name: Check for Step Failures
+        if: steps.clippy.outcome != 'success' || steps.audit.outcome != 'success' || steps.format.outcome != 'success' || steps.cargo-toml-format.outcome != 'success' || steps.docs.outcome != 'success' || steps.rdme.outcome != 'success' || steps.default-features.outcome != 'success' || steps.cyclic-deps.outcome != 'success' || steps.dependency-validation.outcome != 'success'
+        run: exit 1
+
+  semver:
+    needs: constants
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
+      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
+      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
       SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
@@ -134,33 +232,14 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
         with:
           toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
       - name: Install Cargo Tools
         uses: taiki-e/install-action@v2.62.62
         with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}, cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
+          tool: cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
 
       # execute
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Audit
-        run: cargo audit
-      - name: Format
-        run: cargo fmt -- --check
-      - name: Cargo.toml Format
-        run: cargo sort --check --grouped --workspace
-      - name: Docs
-        run: cargo doc --no-deps --workspace --all-features
-      - name: Rdme
-        run: cargo workspaces exec cargo rdme --check
-      - name: Default Features
-        run: cargo ensure-no-default-features
-      - name: Cyclic Dependencies
-        run: cargo ensure-no-cyclic-deps
-      - name: Dependency Validation
-        run: cargo deny --all-features --workspace --color always check all
-#      - name: Semver Compatibility
-#        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
+      - name: Semver Compatibility
+        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
 
   extended-analysis:
     if: github.event_name == 'pull_request'
@@ -214,9 +293,18 @@ jobs:
 
       # execute
       - name: Udeps
+        id: udeps
+        continue-on-error: true
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
       - name: Miri
+        id: miri
+        continue-on-error: true
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
+
+      # validate
+      - name: Check for Step Failures
+        if: steps.udeps.outcome != 'success' || steps.miri.outcome != 'success'
+        run: exit 1
 
   mutation-testing:
     if: github.event_name == 'pull_request'

@@ -4,7 +4,7 @@
 use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use crate::{DataClass, IntoDataClass};
 use core::fmt::Debug;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::Write;
 
 pub mod simple_redactor;
@@ -28,7 +28,7 @@ pub trait Redactor {
 }
 
 pub(crate) struct Redactors {
-    redactors: HashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
+    redactors: FxHashMap<DataClass, Box<dyn Redactor + Send + Sync>>,
     fallback: Box<dyn Redactor + Send + Sync>,
 }
 
@@ -71,7 +71,7 @@ impl Redactors {
 impl Default for Redactors {
     fn default() -> Self {
         Self {
-            redactors: HashMap::new(),
+            redactors: FxHashMap::default(),
             fallback: Box::new(SimpleRedactor::with_mode(SimpleRedactorMode::Insert("*".into()))),
         }
     }
@@ -86,7 +86,7 @@ impl Debug for Redactors {
 #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
 #[inline]
 pub fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
-    static HEX_LOWER_CHARS: &[u8; 16] = b"0123456789abcdef";
+    const HEX_LOWER_CHARS: &[u8; 16] = b"0123456789abcdef";
 
     let mut buffer = [0u8; N];
     for e in buffer.iter_mut().rev() {
@@ -101,6 +101,7 @@ pub fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
 mod tests {
     use super::*;
     use data_privacy_macros::taxonomy;
+    use rustc_hash::FxBuildHasher;
 
     #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
     #[test]
@@ -135,7 +136,7 @@ mod tests {
     #[test]
     fn test_redactor_shrink() {
         let mut redactors = Redactors {
-            redactors: HashMap::with_capacity(42),
+            redactors: FxHashMap::with_capacity_and_hasher(42, FxBuildHasher),
             ..Default::default()
         };
 

@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.8.0] - 2025-12-16
+## [0.9.0] - 2025-12-16
+
+- ✨ Features
+
+  - Better serialization and perf.
 
 - 🔄 Continuous Integration
 
@@ -9,6 +13,7 @@
 
 - 🧩 Miscellaneous
 
+  - Make it to_redacted_string to avoid annoying downstream conflicts. ([#143](https://github.com/microsoft/oxidizer/pull/143))
   - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
 
 ## [0.7.0] - 2025-12-05

@@ -39,7 +39,8 @@ impl Parse for MacroArgs {
 #[expect(
     missing_docs,
     clippy::missing_errors_doc,
-    reason = "this is documented in the data_privacy reexport"
+    clippy::too_many_lines,
+    reason = "this is documented in the data_privacy reexport; function length is acceptable for macro code generation"
 )]
 pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStream> {
     let macro_args = MacroArgs::parse(attr_args)?;
@@ -146,9 +147,21 @@ pub fn taxonomy(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenStr
             }
         }
 
+        impl ::core::cmp::PartialEq<&#data_privacy_path::DataClass> for #enum_name {
+            fn eq(&self, other: &&#data_privacy_path::DataClass) -> core::primitive::bool {
+                self.data_class() == **other
+            }
+        }
+
         impl ::core::cmp::PartialEq<#enum_name> for #data_privacy_path::DataClass {
             fn eq(&self, other: &#enum_name) -> core::primitive::bool {
                 other == self
+            }
+        }
+
+        impl ::core::cmp::PartialEq<#enum_name> for &#data_privacy_path::DataClass {
+            fn eq(&self, other: &#enum_name) -> core::primitive::bool {
+                *other == **self
             }
         }
 
