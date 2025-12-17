@@ -51,8 +51,9 @@ use crate::DataClass;
 /// }
 ///
 /// impl Classified for ClassifiedPerson {
-///     fn data_class(&self) -> DataClass {
-///         DataClass::new("example_taxonomy", "classified_person")
+///     fn data_class(&self) -> &DataClass {
+///         static DATA_CLASS: DataClass = DataClass::new("example_taxonomy", "classified_person");
+///         &DATA_CLASS
 ///     }
 /// }
 ///
@@ -64,5 +65,5 @@ use crate::DataClass;
 pub trait Classified {
     /// Returns the data class of the classified data.
     #[must_use]
-    fn data_class(&self) -> DataClass;
+    fn data_class(&self) -> &DataClass;
 }

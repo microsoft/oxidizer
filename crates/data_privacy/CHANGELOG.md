@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.9.0] - 2025-12-16
+## [0.10.0] - 2025-12-16
+
+- ✨ Features
+
+  - Better serialization and perf.
 
 - 🧩 Miscellaneous
 
-  - Make it to_redacted_string to avoid annoying downstream conflicts.
+  - Make it to_redacted_string to avoid annoying downstream conflicts. ([#143](https://github.com/microsoft/oxidizer/pull/143))
 
 ## [0.8.0] - 2025-12-10
 
