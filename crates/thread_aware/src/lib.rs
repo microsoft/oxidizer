@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 //! Essential building blocks for thread-per-core libraries.
 //!
@@ -148,7 +148,6 @@ mod wrappers;
 pub mod closure;
 
 #[cfg(feature = "threads")]
-#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
 pub mod registry;
 
 pub mod affinity;
@@ -205,7 +204,6 @@ pub use core::ThreadAware;
 /// }
 /// ```
 #[cfg(feature = "derive")]
-#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
 pub use cell::storage;
 pub use cell::{Arc, PerCore, PerNuma, PerProcess};

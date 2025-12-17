@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
 #![cfg_attr(
@@ -11,8 +13,6 @@
         reason = "allow these lints in tests to improve the readability of the tests"
     )
 )]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Primitives for obtaining, working with, and mocking system
 //! time and timers, enabling faster and more robust testing.
@@ -217,7 +217,6 @@ mod delay;
 mod error;
 
 #[cfg(any(feature = "fmt", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
 pub mod fmt;
 
 mod future_ext;
@@ -230,7 +229,6 @@ pub mod runtime;
 pub(crate) mod timeout;
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use clock_control::ClockControl;
 pub use delay::Delay;
 pub use error::{Error, Result};
