@@ -46,12 +46,12 @@ const TEST_GROUPS: &[&[&str]] = &[
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
 ];
 
-fn main() -> Result<()> {
+fn main() {
     let args: Args = argh::from_env();
 
     println!("Manifest dir: {}", env!("CARGO_MANIFEST_DIR"));
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let all_packages = automation::list_packages(workspace_root)?;
+    let all_packages = automation::list_packages(workspace_root).expect("failed to list workspace packages");
 
     let mut test_groups: Vec<Vec<String>> = TEST_GROUPS
         .iter()
@@ -109,10 +109,11 @@ fn main() -> Result<()> {
     println!();
 
     for group in &test_groups {
-        mutate_group(&group[..], &args)?;
+        if let Err(e) = mutate_group(&group[..], &args) {
+            eprintln!("❌ mutation testing failed for [{}]: {}", group.join(" "), e);
+            std::process::exit(1);
+        }
     }
-
-    Ok(())
 }
 
 fn mutate_group(group: &[String], args: &Args) -> Result<()> {
