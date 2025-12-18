@@ -21,11 +21,7 @@ impl BytesView {
     #[inline]
     #[must_use]
     pub fn get_byte(&mut self) -> u8 {
-        assert!(!self.is_empty());
-
-        // SAFETY: We asserted above that the view covers at least one byte,
-        // so the first slice must also have at least one byte.
-        let byte = unsafe { *self.first_slice().get_unchecked(0) };
+        let byte = *self.first_slice().get(0).expect("view must cover at least one byte");
         self.advance(1);
         byte
     }
