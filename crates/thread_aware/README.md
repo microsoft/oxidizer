@@ -1,12 +1,12 @@
 <div align="center">
- <img src="./logo.png" alt="Thread_Aware Logo" width="96">
+ <img src="./logo.png" alt="Thread Aware Logo" width="96">
 
-# thread_aware
+# Thread Aware
 
 [![crate.io](https://img.shields.io/crates/v/thread_aware.svg)](https://crates.io/crates/thread_aware)
 [![docs.rs](https://docs.rs/thread_aware/badge.svg)](https://docs.rs/thread_aware)
 [![MSRV](https://img.shields.io/crates/msrv/thread_aware)](https://crates.io/crates/thread_aware)
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 <a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -146,10 +146,10 @@ impl Service {
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG-dp_C9D4-jCG9tBl5F7M1bDG3mj9J-QdGxQGyUWhRYQiuECYXKEGxWHjFPHVfBQG3G58H2zodoBG5x8pW8Bc5imG8o5LL8tl2DqYWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxWHjFPHVfBQG3G58H2zodoBG5x8pW8Bc5imG8o5LL8tl2DqYWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjA
  [__link0]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
