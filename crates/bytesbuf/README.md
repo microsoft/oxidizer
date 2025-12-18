@@ -1,12 +1,12 @@
 <div align="center">
  <img src="./logo.png" alt="Bytesbuf Logo" width="96">
 
-# bytesbuf
+# Bytesbuf
 
 [![crate.io](https://img.shields.io/crates/v/bytesbuf.svg)](https://crates.io/crates/bytesbuf)
 [![docs.rs](https://docs.rs/bytesbuf/badge.svg)](https://docs.rs/bytesbuf)
 [![MSRV](https://img.shields.io/crates/msrv/bytesbuf)](https://crates.io/crates/bytesbuf)
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 <a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -536,10 +536,10 @@ processing in your code:
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG-dp_C9D4-jCG9tBl5F7M1bDG3mj9J-QdGxQGyUWhRYQiuECYXKEG5yAxXVX-INyGwACB9YZn6BLG5mUwiQgcGNZGyIa4-qKJXxMYWSBgmhieXRlc2J1ZmUwLjEuMg
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5yAxXVX-INyGwACB9YZn6BLG5mUwiQgcGNZGyIa4-qKJXxMYWSBgmhieXRlc2J1ZmUwLjEuMg
  [__link0]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
  [__link1]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory

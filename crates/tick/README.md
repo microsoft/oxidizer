@@ -1,12 +1,12 @@
 <div align="center">
  <img src="./logo.png" alt="Tick Logo" width="96">
 
-# tick
+# Tick
 
 [![crate.io](https://img.shields.io/crates/v/tick.svg)](https://crates.io/crates/tick)
 [![docs.rs](https://docs.rs/tick/badge.svg)](https://docs.rs/tick)
 [![MSRV](https://img.shields.io/crates/msrv/tick)](https://crates.io/crates/tick)
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 <a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -201,10 +201,10 @@ contain additional examples of how to use the time primitives.
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG-dp_C9D4-jCG9tBl5F7M1bDG3mj9J-QdGxQGyUWhRYQiuECYXKEG0YUhb-K8ea7G_NBN2_hIoeEGzhuGMMPiDz8G_nmDjrJF1TjYWSBgmR0aWNrZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0YUhb-K8ea7G_NBN2_hIoeEGzhuGMMPiDz8G_nmDjrJF1TjYWSBgmR0aWNrZTAuMS4w
  [__link0]: https://docs.rs/tick/0.1.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.1.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.1.0/tick/runtime/index.html
