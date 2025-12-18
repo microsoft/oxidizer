@@ -34,6 +34,9 @@ pub enum SimpleRedactorMode {
 
     /// Inserts a custom string in place of the original string and tags it with the class id.
     InsertAndTag(Cow<'static, str>),
+
+    /// dummy
+    Dummy,
 }
 
 /// A redactor that performs a variety of simple transformations on the input text.
@@ -121,6 +124,10 @@ impl Redactor for SimpleRedactor {
 
             SimpleRedactorMode::InsertAndTag(s) => {
                 write!(output, "<{data_class}:{s}>")
+            }
+
+            SimpleRedactorMode::Dummy => {
+                write!(output, "DUMMY2")
             }
         }
     }
