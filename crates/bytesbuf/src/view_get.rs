@@ -21,7 +21,7 @@ impl BytesView {
     #[inline]
     #[must_use]
     pub fn get_byte(&mut self) -> u8 {
-        let byte = *self.first_slice().get(0).expect("view must cover at least one byte");
+        let byte = *self.first_slice().first().expect("view must cover at least one byte");
         self.advance(1);
         byte
     }
