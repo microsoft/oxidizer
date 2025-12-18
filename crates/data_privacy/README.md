@@ -1,12 +1,12 @@
 <div align="center">
- <img src="./logo.png" alt="Data_Privacy Logo" width="96">
+ <img src="./logo.png" alt="Data Privacy Logo" width="96">
 
-# data_privacy
+# Data Privacy
 
 [![crate.io](https://img.shields.io/crates/v/data_privacy.svg)](https://crates.io/crates/data_privacy)
 [![docs.rs](https://docs.rs/data_privacy/badge.svg)](https://docs.rs/data_privacy)
 [![MSRV](https://img.shields.io/crates/msrv/data_privacy)](https://crates.io/crates/data_privacy)
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 <a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -189,10 +189,10 @@ assert_eq!(output_buffer, "********");
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG-dp_C9D4-jCG9tBl5F7M1bDG3mj9J-QdGxQGyUWhRYQiuECYXKEG60g5Zo_p4DxG7thIbirEmXiG-Rmydk-fpIuG-OodFo7tu4EYWSBgmxkYXRhX3ByaXZhY3lmMC4xMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG60g5Zo_p4DxG7thIbirEmXiG-Rmydk-fpIuG-OodFo7tu4EYWSBgmxkYXRhX3ByaXZhY3lmMC4xMC4w
  [__link0]: https://docs.rs/data_privacy/0.10.0/data_privacy/?search=Classified
  [__link1]: https://docs.rs/data_privacy/0.10.0/data_privacy/?search=Redactor
  [__link10]: https://docs.rs/data_privacy/0.10.0/data_privacy/?search=classified

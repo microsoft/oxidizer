@@ -1,12 +1,12 @@
 <div align="center">
  <img src="./logo.png" alt="Ohno Logo" width="96">
 
-# ohno
+# Ohno
 
 [![crate.io](https://img.shields.io/crates/v/ohno.svg)](https://crates.io/crates/ohno)
 [![docs.rs](https://docs.rs/ohno/badge.svg)](https://docs.rs/ohno)
 [![MSRV](https://img.shields.io/crates/msrv/ohno)](https://crates.io/crates/ohno)
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 <a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
@@ -234,10 +234,10 @@ fn open_file(path: &str) -> Result<String, MyError> {
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>.
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG-dp_C9D4-jCG9tBl5F7M1bDG3mj9J-QdGxQGyUWhRYQiuECYXKEGzgWfI8NISQyG6axg1O2rjQfGxzhzaW2WjRzG3owvcD8UYPxYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzgWfI8NISQyG6axg1O2rjQfGxzhzaW2WjRzG3owvcD8UYPxYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
  [__link0]: https://docs.rs/ohno/0.2.0/ohno/?search=ErrorExt
  [__link1]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
  [__link10]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
