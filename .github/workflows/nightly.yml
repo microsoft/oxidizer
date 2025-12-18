@@ -26,7 +26,6 @@ jobs:
           fetch-depth: 0
 
       - name: Check for changes in last 24 hours
-        id: check
         run: |
           # Check logs for commits in the last 24 hours on the current branch
           if [[ -z $(git log --since="24 hours ago" --pretty=format:"%H") ]]; then
@@ -44,21 +43,7 @@ jobs:
     env:
       RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
       RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
-      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
-      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
-      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
-      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
-      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
-      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
-      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
       CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
-      CARGO_RDME_VERSION: ${{ needs.constants.outputs.CARGO_RDME_VERSION }}
-      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
-      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
-      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
-      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
       SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
@@ -85,14 +70,12 @@ jobs:
 
       # execute
       - name: Mutate All
-        id: mutate
-        continue-on-error: true
         env:
           DISABLE_T_REX: 1
         run: cargo +nightly -Zscript scripts/mutants.rs
 
       - name: Create or Update Issue on Failure
-        if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
+        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -112,7 +95,3 @@ jobs:
               --body "$ISSUE_BODY" \
               --label "bug"
           fi
-
-      - name: Check for Step Failure
-        if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
-        run: exit 1
