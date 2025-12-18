@@ -155,11 +155,8 @@ jobs:
 
   semver:
     needs: constants
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     env:
       RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
       RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
@@ -174,7 +171,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.0
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Cache Cargo Dependencies
         uses: actions/cache@v4.3.0
         with:
@@ -201,31 +198,33 @@ jobs:
       - name: Semver Compatibility
         id: semver
         continue-on-error: true
-        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^ 2>&1 | tee semver-output.txt
+        run: |
+          set -o pipefail
+          cargo semver-checks --all-features --workspace --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
 
       # report
       - name: Prepare Semver Comment
-        if: github.event_name == 'pull_request' && steps.semver.outcome == 'failure'
+        if: steps.semver.outcome == 'failure'
         run: |
           echo "## ⚠️ Semver Compatibility Check Failed" > semver-comment.txt
           echo "" >> semver-comment.txt
           echo "The following semver violations were detected:" >> semver-comment.txt
           echo "" >> semver-comment.txt
           echo '```' >> semver-comment.txt
-          cat semver-output.txt >> semver-comment.txt
+          grep -v "^ *Cloning " semver-output.txt | grep -v "^ *Building " | grep -v "^ *Built \[" | grep -v "^ *Parsing " | grep -v "^ *Parsed \[" | grep -v "^ *Checking" | grep -v "^ *Checked \[" | grep -v "^ *Finished \[" | grep -v "^ *Summary " >> semver-comment.txt
           echo '```' >> semver-comment.txt
           echo "" >> semver-comment.txt
-          echo "Please review the changes and ensure they follow semantic versioning principles." >> semver-comment.txt
+          echo "Ensure your changes follow semantic versioning principles. You probably need to bump the version of the affected crates." >> semver-comment.txt
 
       - name: Post Semver Failure Comment
-        if: github.event_name == 'pull_request' && steps.semver.outcome == 'failure' && matrix.os == 'ubuntu-latest'
+        if: steps.semver.outcome == 'failure'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
-        if: github.event_name == 'pull_request' && steps.semver.outcome == 'success'
+        if: steps.semver.outcome == 'success'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: semver-check
