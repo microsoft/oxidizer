@@ -1,5 +1,5 @@
 <div align="center">
- <img src="./logo.svg" alt="Oxidizer Logo" width="128" height="128">
+ <img src="./logo.svg" alt="Oxidizer Logo" width="96">
 
 # The Oxidizer Project
 
@@ -56,7 +56,7 @@ The `add-crate` script does the following:
 - Adds an entry for the crate to the top-level [CHANGELOG.md](./CHANGELOG.md) file.
 
 - Prepares a `README.md` file for the crate, setup for use with [
-  `cargo-rdme`](https://docs.rs/cargo-rdme/latest/cargo_rdme/)
+  `cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme)
   with a set of appropriate CI badges.
 
 - Creates an empty `CHANGELOG.md` file for the crate, which will later get populated by the `scripts\release-crate.ps1`
@@ -92,8 +92,8 @@ features. We expect our Rust code to be fully documented in the normal Rust way,
 automation processes:
 
 - The `README.md` file in each crate's directory is auto-generated from the crate-level documentation.
-  We use the [`cargo-rdme`](https://crates.io/crates/cargo-rdme) tool which reads the crate docs, patches links, and
-  then inserts the results into the `README.md` file. A pull request gate ensures the `README.md` file
+  We use the [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) tool which reads the crate docs, resolves intra-doc links, and
+  generates the `README.md` file using a shared template. A pull request gate ensures the `README.md` file
   always reflects the latest crate documentation.
 
 - The `CHANGELOG.md` file in each crate's directory is auto-generated from the commits to a crate's directory by the
@@ -190,7 +190,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **License Headers**. We ensure all source files have the requisite license header. The headers are described in
   the `.github\license-check` directory.
 
-- **README Content**. We use [`cargo-rdme`](https://github.com/crates/cargo-rdme) to ensure each crate's `README.md`
+- **README Content**. We use [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) to ensure each crate's `README.md`
   file matches the crate's current crate-level documentation.
 
 ## Trademarks
