@@ -97,6 +97,23 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
+    let allocs_op = allocs.operation("copy_to_uninit_slice_bytesbuf");
+    group.bench_function("copy_to_uninit_slice_bytesbuf", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                let _span = allocs_op.measure_thread();
+                let mut target = [std::mem::MaybeUninit::<u8>::uninit(); COPY_TO_SLICE_LEN];
+                seq.copy_to_uninit_slice(&mut target);
+                black_box(target);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Note: bytes crate doesn't have an equivalent to copy_to_uninit_slice,
+    // so we skip that comparison for bytes
+
     group.finish();
 
     // ============================================================================
@@ -185,6 +202,25 @@ fn entrypoint(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+
+    let allocs_op = allocs.operation("put_byte_repeated_bytesbuf");
+    group.bench_function("put_byte_repeated_bytesbuf", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_byte_repeated(black_box(0xCD), COPY_TO_SLICE_LEN);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Note: bytes crate doesn't have an equivalent to put_byte_repeated,
+    // so we skip that comparison for bytes
 
     group.finish();
 
