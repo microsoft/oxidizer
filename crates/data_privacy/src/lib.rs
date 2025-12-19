@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 //! Mechanisms to classify, manipulate, and redact sensitive data.
 //!
@@ -196,10 +197,8 @@ pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
 #[cfg(feature = "rapidhash")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rapidhash")))]
 pub use redactors::rapidhash_redactor;
 #[cfg(feature = "xxh3")]
-#[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 pub use redactors::xxh3_redactor;
 pub use redactors::{Redactor, simple_redactor};
 pub use sensitive::Sensitive;

@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 //! Macros to support the [`fundle`](https://docs.rs/fundle) crate.
 //!
 //! # Macros

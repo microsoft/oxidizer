@@ -63,7 +63,6 @@ impl InactiveClock {
 }
 
 #[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 impl From<crate::ClockControl> for InactiveClock {
     fn from(control: crate::ClockControl) -> Self {
         Self(GlobalState::ClockControl(control))
