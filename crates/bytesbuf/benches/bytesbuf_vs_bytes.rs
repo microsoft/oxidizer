@@ -45,7 +45,7 @@ fn entrypoint(c: &mut Criterion) {
     // GET operations (slower, non-numeric)
     // ============================================================================
 
-    let mut group = c.benchmark_group("get");
+    let mut group = c.benchmark_group("bytesbuf_vs_bytes_get");
 
     // get_byte (bytesbuf) vs get_u8 (bytes)
     let allocs_op = allocs.operation("get_byte");
@@ -112,7 +112,7 @@ fn entrypoint(c: &mut Criterion) {
     // PUT operations (slower, non-numeric)
     // ============================================================================
 
-    let mut group = c.benchmark_group("put");
+    let mut group = c.benchmark_group("bytesbuf_vs_bytes_put");
 
     // put_slice - both use same method from BufMut trait
     let allocs_op = allocs.operation("put_slice");
@@ -214,7 +214,7 @@ fn entrypoint(c: &mut Criterion) {
     // GET_NUM operations (fast numeric reads)
     // ============================================================================
 
-    let mut group = c.benchmark_group("get_num");
+    let mut group = c.benchmark_group("bytesbuf_vs_bytes_get_num");
 
     // u8
     let allocs_op = allocs.operation("get_u8");
@@ -708,7 +708,7 @@ fn entrypoint(c: &mut Criterion) {
     // PUT_NUM operations (fast numeric writes)
     // ============================================================================
 
-    let mut group = c.benchmark_group("put_num");
+    let mut group = c.benchmark_group("bytesbuf_vs_bytes_put_num");
 
     // u8
     let allocs_op = allocs.operation("put_u8");
