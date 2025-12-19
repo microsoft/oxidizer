@@ -23,6 +23,9 @@ allowed_external_types = [
     "syn::error::Result",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 proc-macro2.workspace = true
 quote.workspace = true

@@ -26,6 +26,9 @@ allowed_external_types = [
     "num_traits::ops::bytes::ToBytes",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 fakes = []
