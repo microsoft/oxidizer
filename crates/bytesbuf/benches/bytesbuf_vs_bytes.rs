@@ -5,12 +5,14 @@
 
 use std::alloc::System;
 use std::hint::black_box;
+use std::mem::MaybeUninit;
 use std::num::NonZero;
+use std::time::Instant;
 
 use alloc_tracker::{Allocator, Session};
 use bytes::{Buf, BufMut};
 use bytesbuf::{BlockSize, BytesBuf, BytesView, FixedBlockTestMemory, TransparentTestMemory};
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
 criterion_group!(benches, entrypoint);
@@ -45,74 +47,64 @@ fn entrypoint(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("get");
 
-    let allocs_op = allocs.operation("get_byte_bytesbuf");
-    group.bench_function("get_byte_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // get_byte (bytesbuf) vs get_u8 (bytes)
+    let allocs_op = allocs.operation("get_byte");
+    group.bench_function("get_byte", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_byte());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    let allocs_op = allocs.operation("get_u8_bytes");
-    group.bench_function("get_u8_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    let allocs_op = allocs.operation("get_u8");
+    group.bench_function("get_u8", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u8());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    let allocs_op = allocs.operation("copy_to_slice_bytesbuf");
-    group.bench_function("copy_to_slice_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // copy_to_slice (both use same method, but we benchmark both to prove equivalence)
+    // Also includes copy_to_uninit_slice as a related operation
+    let allocs_op = allocs.operation("copy_to_slice");
+    group.bench_function("copy_to_slice", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 let mut target = [0u8; COPY_TO_SLICE_LEN];
                 seq.copy_to_slice(&mut target);
                 black_box(target);
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    let allocs_op = allocs.operation("copy_to_slice_bytes");
-    group.bench_function("copy_to_slice_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
-                let mut target = [0u8; COPY_TO_SLICE_LEN];
-                seq.copy_to_slice(&mut target);
-                black_box(target);
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    let allocs_op = allocs.operation("copy_to_uninit_slice_bytesbuf");
-    group.bench_function("copy_to_uninit_slice_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
-                let mut target = [std::mem::MaybeUninit::<u8>::uninit(); COPY_TO_SLICE_LEN];
+    let allocs_op = allocs.operation("copy_to_uninit_slice");
+    group.bench_function("copy_to_uninit_slice", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
+                let mut target = [MaybeUninit::<u8>::uninit(); COPY_TO_SLICE_LEN];
                 seq.copy_to_uninit_slice(&mut target);
                 black_box(target);
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
-
-    // Note: bytes crate doesn't have an equivalent to copy_to_uninit_slice,
-    // so we skip that comparison for bytes
 
     group.finish();
 
@@ -122,105 +114,99 @@ fn entrypoint(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("put");
 
-    let allocs_op = allocs.operation("put_slice_bytesbuf");
-    group.bench_function("put_slice_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // put_slice - both use same method from BufMut trait
+    let allocs_op = allocs.operation("put_slice");
+    group.bench_function("put_slice", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
                 sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
-                let data = [0xCD_u8; COPY_TO_SLICE_LEN];
-                sb.put_slice(data);
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    let allocs_op = allocs.operation("put_slice_bytes");
-    group.bench_function("put_slice_bytes", |b| {
-        b.iter_batched_ref(
-            || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
                 let data = [0xCD_u8; COPY_TO_SLICE_LEN];
                 sb.put_slice(&data[..]);
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    let allocs_op = allocs.operation("put_bytes_bytesbuf");
-    group.bench_function("put_bytes_bytesbuf", |b| {
-        b.iter_batched_ref(
-            BytesBuf::new,
-            |sb| {
-                let _span = allocs_op.measure_thread();
+    // put_bytes (BytesView) - unique to bytesbuf, no bytes equivalent
+    let allocs_op = allocs.operation("put_bytes_view");
+    group.bench_function("put_bytes_view", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut sb = BytesBuf::new();
                 sb.put_bytes(test_data_as_seq.clone());
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // Note: bytes crate doesn't have an equivalent to put_bytes(BytesView),
-    // so we skip that comparison
-
-    let allocs_op = allocs.operation("put_byte_bytesbuf");
-    group.bench_function("put_byte_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // put_byte (bytesbuf) vs put_u8 (bytes)
+    let allocs_op = allocs.operation("put_byte");
+    group.bench_function("put_byte", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
                 sb.reserve(1, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
                 sb.put_byte(black_box(0xAB));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    let allocs_op = allocs.operation("put_u8_bytes");
-    group.bench_function("put_u8_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+    let allocs_op = allocs.operation("put_u8");
+    group.bench_function("put_u8", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
                 sb.reserve(1, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
                 sb.put_u8(black_box(0xAB));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    let allocs_op = allocs.operation("put_byte_repeated_bytesbuf");
-    group.bench_function("put_byte_repeated_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // put_byte_repeated (bytesbuf) vs put_bytes (bytes) - these are equivalent!
+    let allocs_op = allocs.operation("put_byte_repeated");
+    group.bench_function("put_byte_repeated", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
                 sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
                 sb.put_byte_repeated(black_box(0xCD), COPY_TO_SLICE_LEN);
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // Note: bytes crate doesn't have an equivalent to put_byte_repeated,
-    // so we skip that comparison for bytes
+    let allocs_op = allocs.operation("put_bytes");
+    group.bench_function("put_bytes", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut sb = BytesBuf::new();
+                sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
+                BufMut::put_bytes(&mut sb, black_box(0xCD), COPY_TO_SLICE_LEN);
+                black_box(sb);
+            }
+            start.elapsed()
+        });
+    });
 
     group.finish();
 
@@ -230,454 +216,490 @@ fn entrypoint(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("get_num");
 
-    // u8 - no endianness variants needed
-    let allocs_op = allocs.operation("get_u8_bytesbuf");
-    group.bench_function("get_u8_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u8
+    let allocs_op = allocs.operation("get_u8");
+    group.bench_function("get_u8", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<u8>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u8_bytes");
     group.bench_function("get_u8_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u8());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i8 - no endianness variants needed
-    let allocs_op = allocs.operation("get_i8_bytesbuf");
-    group.bench_function("get_i8_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i8
+    let allocs_op = allocs.operation("get_i8");
+    group.bench_function("get_i8", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<i8>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i8_bytes");
     group.bench_function("get_i8_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i8());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // u16 - little-endian
-    let allocs_op = allocs.operation("get_u16_le_bytesbuf");
-    group.bench_function("get_u16_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u16 little-endian
+    let allocs_op = allocs.operation("get_u16_le");
+    group.bench_function("get_u16_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<u16>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u16_le_bytes");
     group.bench_function("get_u16_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u16_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // u16 - big-endian
-    let allocs_op = allocs.operation("get_u16_be_bytesbuf");
-    group.bench_function("get_u16_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u16 big-endian
+    let allocs_op = allocs.operation("get_u16_be");
+    group.bench_function("get_u16_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<u16>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u16_be_bytes");
     group.bench_function("get_u16_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u16());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i16 - little-endian
-    let allocs_op = allocs.operation("get_i16_le_bytesbuf");
-    group.bench_function("get_i16_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i16 little-endian
+    let allocs_op = allocs.operation("get_i16_le");
+    group.bench_function("get_i16_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<i16>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i16_le_bytes");
     group.bench_function("get_i16_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i16_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i16 - big-endian
-    let allocs_op = allocs.operation("get_i16_be_bytesbuf");
-    group.bench_function("get_i16_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i16 big-endian
+    let allocs_op = allocs.operation("get_i16_be");
+    group.bench_function("get_i16_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<i16>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i16_be_bytes");
     group.bench_function("get_i16_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i16());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // u32 - little-endian
-    let allocs_op = allocs.operation("get_u32_le_bytesbuf");
-    group.bench_function("get_u32_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u32 little-endian
+    let allocs_op = allocs.operation("get_u32_le");
+    group.bench_function("get_u32_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<u32>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u32_le_bytes");
     group.bench_function("get_u32_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u32_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // u32 - big-endian
-    let allocs_op = allocs.operation("get_u32_be_bytesbuf");
-    group.bench_function("get_u32_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u32 big-endian
+    let allocs_op = allocs.operation("get_u32_be");
+    group.bench_function("get_u32_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<u32>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u32_be_bytes");
     group.bench_function("get_u32_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u32());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i32 - little-endian
-    let allocs_op = allocs.operation("get_i32_le_bytesbuf");
-    group.bench_function("get_i32_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i32 little-endian
+    let allocs_op = allocs.operation("get_i32_le");
+    group.bench_function("get_i32_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<i32>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i32_le_bytes");
     group.bench_function("get_i32_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i32_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i32 - big-endian
-    let allocs_op = allocs.operation("get_i32_be_bytesbuf");
-    group.bench_function("get_i32_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i32 big-endian
+    let allocs_op = allocs.operation("get_i32_be");
+    group.bench_function("get_i32_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<i32>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i32_be_bytes");
     group.bench_function("get_i32_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i32());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // u64 - little-endian
-    let allocs_op = allocs.operation("get_u64_le_bytesbuf");
-    group.bench_function("get_u64_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u64 little-endian
+    let allocs_op = allocs.operation("get_u64_le");
+    group.bench_function("get_u64_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<u64>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u64_le_bytes");
     group.bench_function("get_u64_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u64_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // u64 - big-endian
-    let allocs_op = allocs.operation("get_u64_be_bytesbuf");
-    group.bench_function("get_u64_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // u64 big-endian
+    let allocs_op = allocs.operation("get_u64_be");
+    group.bench_function("get_u64_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<u64>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_u64_be_bytes");
     group.bench_function("get_u64_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_u64());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i64 - little-endian
-    let allocs_op = allocs.operation("get_i64_le_bytesbuf");
-    group.bench_function("get_i64_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i64 little-endian
+    let allocs_op = allocs.operation("get_i64_le");
+    group.bench_function("get_i64_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<i64>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i64_le_bytes");
     group.bench_function("get_i64_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i64_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // i64 - big-endian
-    let allocs_op = allocs.operation("get_i64_be_bytesbuf");
-    group.bench_function("get_i64_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // i64 big-endian
+    let allocs_op = allocs.operation("get_i64_be");
+    group.bench_function("get_i64_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<i64>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_i64_be_bytes");
     group.bench_function("get_i64_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_i64());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // f32 - little-endian
-    let allocs_op = allocs.operation("get_f32_le_bytesbuf");
-    group.bench_function("get_f32_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // f32 little-endian
+    let allocs_op = allocs.operation("get_f32_le");
+    group.bench_function("get_f32_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<f32>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_f32_le_bytes");
     group.bench_function("get_f32_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_f32_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // f32 - big-endian
-    let allocs_op = allocs.operation("get_f32_be_bytesbuf");
-    group.bench_function("get_f32_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // f32 big-endian
+    let allocs_op = allocs.operation("get_f32_be");
+    group.bench_function("get_f32_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<f32>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_f32_be_bytes");
     group.bench_function("get_f32_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_f32());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // f64 - little-endian
-    let allocs_op = allocs.operation("get_f64_le_bytesbuf");
-    group.bench_function("get_f64_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // f64 little-endian
+    let allocs_op = allocs.operation("get_f64_le");
+    group.bench_function("get_f64_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_le::<f64>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_f64_le_bytes");
     group.bench_function("get_f64_le_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_f64_le());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
-    // f64 - big-endian
-    let allocs_op = allocs.operation("get_f64_be_bytesbuf");
-    group.bench_function("get_f64_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+    // f64 big-endian
+    let allocs_op = allocs.operation("get_f64_be");
+    group.bench_function("get_f64_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_num_be::<f64>());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("get_f64_be_bytes");
     group.bench_function("get_f64_be_bytes", |b| {
-        b.iter_batched_ref(
-            || many_as_seq.clone(),
-            |seq| {
-                let _span = allocs_op.measure_thread();
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut seq = many_as_seq.clone();
                 black_box(seq.get_f64());
-            },
-            BatchSize::SmallInput,
-        );
+            }
+            start.elapsed()
+        });
     });
 
     group.finish();
@@ -688,598 +710,562 @@ fn entrypoint(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("put_num");
 
-    // u8 - no endianness variants needed
-    let allocs_op = allocs.operation("put_u8_bytesbuf");
-    group.bench_function("put_u8_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u8
+    let allocs_op = allocs.operation("put_u8");
+    group.bench_function("put_u8", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(1, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u8>(), &transparent_memory);
                 sb.put_num_le::<u8>(black_box(0xAB));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u8_bytes");
     group.bench_function("put_u8_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(1, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u8>(), &transparent_memory);
                 sb.put_u8(black_box(0xAB));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i8 - no endianness variants needed
-    let allocs_op = allocs.operation("put_i8_bytesbuf");
-    group.bench_function("put_i8_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i8
+    let allocs_op = allocs.operation("put_i8");
+    group.bench_function("put_i8", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(1, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i8>(), &transparent_memory);
                 sb.put_num_le::<i8>(black_box(-42));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i8_bytes");
     group.bench_function("put_i8_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(1, &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i8>(), &transparent_memory);
                 sb.put_i8(black_box(-42));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // u16 - little-endian
-    let allocs_op = allocs.operation("put_u16_le_bytesbuf");
-    group.bench_function("put_u16_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u16 little-endian
+    let allocs_op = allocs.operation("put_u16_le");
+    group.bench_function("put_u16_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u16>(), &transparent_memory);
                 sb.put_num_le::<u16>(black_box(0x1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u16_le_bytes");
     group.bench_function("put_u16_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u16>(), &transparent_memory);
                 sb.put_u16_le(black_box(0x1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // u16 - big-endian
-    let allocs_op = allocs.operation("put_u16_be_bytesbuf");
-    group.bench_function("put_u16_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u16 big-endian
+    let allocs_op = allocs.operation("put_u16_be");
+    group.bench_function("put_u16_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u16>(), &transparent_memory);
                 sb.put_num_be::<u16>(black_box(0x1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u16_be_bytes");
     group.bench_function("put_u16_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u16>(), &transparent_memory);
                 sb.put_u16(black_box(0x1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i16 - little-endian
-    let allocs_op = allocs.operation("put_i16_le_bytesbuf");
-    group.bench_function("put_i16_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i16 little-endian
+    let allocs_op = allocs.operation("put_i16_le");
+    group.bench_function("put_i16_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i16>(), &transparent_memory);
                 sb.put_num_le::<i16>(black_box(-1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i16_le_bytes");
     group.bench_function("put_i16_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i16>(), &transparent_memory);
                 sb.put_i16_le(black_box(-1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i16 - big-endian
-    let allocs_op = allocs.operation("put_i16_be_bytesbuf");
-    group.bench_function("put_i16_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i16 big-endian
+    let allocs_op = allocs.operation("put_i16_be");
+    group.bench_function("put_i16_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i16>(), &transparent_memory);
                 sb.put_num_be::<i16>(black_box(-1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i16_be_bytes");
     group.bench_function("put_i16_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i16>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i16>(), &transparent_memory);
                 sb.put_i16(black_box(-1234));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // u32 - little-endian
-    let allocs_op = allocs.operation("put_u32_le_bytesbuf");
-    group.bench_function("put_u32_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u32 little-endian
+    let allocs_op = allocs.operation("put_u32_le");
+    group.bench_function("put_u32_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u32>(), &transparent_memory);
                 sb.put_num_le::<u32>(black_box(0x1234_5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u32_le_bytes");
     group.bench_function("put_u32_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u32>(), &transparent_memory);
                 sb.put_u32_le(black_box(0x1234_5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // u32 - big-endian
-    let allocs_op = allocs.operation("put_u32_be_bytesbuf");
-    group.bench_function("put_u32_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u32 big-endian
+    let allocs_op = allocs.operation("put_u32_be");
+    group.bench_function("put_u32_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u32>(), &transparent_memory);
                 sb.put_num_be::<u32>(black_box(0x1234_5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u32_be_bytes");
     group.bench_function("put_u32_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u32>(), &transparent_memory);
                 sb.put_u32(black_box(0x1234_5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i32 - little-endian
-    let allocs_op = allocs.operation("put_i32_le_bytesbuf");
-    group.bench_function("put_i32_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i32 little-endian
+    let allocs_op = allocs.operation("put_i32_le");
+    group.bench_function("put_i32_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i32>(), &transparent_memory);
                 sb.put_num_le::<i32>(black_box(-123_456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i32_le_bytes");
     group.bench_function("put_i32_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i32>(), &transparent_memory);
                 sb.put_i32_le(black_box(-123_456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i32 - big-endian
-    let allocs_op = allocs.operation("put_i32_be_bytesbuf");
-    group.bench_function("put_i32_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i32 big-endian
+    let allocs_op = allocs.operation("put_i32_be");
+    group.bench_function("put_i32_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i32>(), &transparent_memory);
                 sb.put_num_be::<i32>(black_box(-123_456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i32_be_bytes");
     group.bench_function("put_i32_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i32>(), &transparent_memory);
                 sb.put_i32(black_box(-123_456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // u64 - little-endian
-    let allocs_op = allocs.operation("put_u64_le_bytesbuf");
-    group.bench_function("put_u64_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u64 little-endian
+    let allocs_op = allocs.operation("put_u64_le");
+    group.bench_function("put_u64_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u64>(), &transparent_memory);
                 sb.put_num_le::<u64>(black_box(0x1234_5678_9ABC_DEF0));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u64_le_bytes");
     group.bench_function("put_u64_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u64>(), &transparent_memory);
                 sb.put_u64_le(black_box(0x1234_5678_9ABC_DEF0));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // u64 - big-endian
-    let allocs_op = allocs.operation("put_u64_be_bytesbuf");
-    group.bench_function("put_u64_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // u64 big-endian
+    let allocs_op = allocs.operation("put_u64_be");
+    group.bench_function("put_u64_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u64>(), &transparent_memory);
                 sb.put_num_be::<u64>(black_box(0x1234_5678_9ABC_DEF0));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_u64_be_bytes");
     group.bench_function("put_u64_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<u64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<u64>(), &transparent_memory);
                 sb.put_u64(black_box(0x1234_5678_9ABC_DEF0));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i64 - little-endian
-    let allocs_op = allocs.operation("put_i64_le_bytesbuf");
-    group.bench_function("put_i64_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i64 little-endian
+    let allocs_op = allocs.operation("put_i64_le");
+    group.bench_function("put_i64_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i64>(), &transparent_memory);
                 sb.put_num_le::<i64>(black_box(-1_234_567_890));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i64_le_bytes");
     group.bench_function("put_i64_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i64>(), &transparent_memory);
                 sb.put_i64_le(black_box(-1_234_567_890));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // i64 - big-endian
-    let allocs_op = allocs.operation("put_i64_be_bytesbuf");
-    group.bench_function("put_i64_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // i64 big-endian
+    let allocs_op = allocs.operation("put_i64_be");
+    group.bench_function("put_i64_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i64>(), &transparent_memory);
                 sb.put_num_be::<i64>(black_box(-1_234_567_890));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_i64_be_bytes");
     group.bench_function("put_i64_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<i64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<i64>(), &transparent_memory);
                 sb.put_i64(black_box(-1_234_567_890));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // f32 - little-endian
-    let allocs_op = allocs.operation("put_f32_le_bytesbuf");
-    group.bench_function("put_f32_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // f32 little-endian
+    let allocs_op = allocs.operation("put_f32_le");
+    group.bench_function("put_f32_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f32>(), &transparent_memory);
                 sb.put_num_le::<f32>(black_box(123.456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_f32_le_bytes");
     group.bench_function("put_f32_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f32>(), &transparent_memory);
                 sb.put_f32_le(black_box(123.456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // f32 - big-endian
-    let allocs_op = allocs.operation("put_f32_be_bytesbuf");
-    group.bench_function("put_f32_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // f32 big-endian
+    let allocs_op = allocs.operation("put_f32_be");
+    group.bench_function("put_f32_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f32>(), &transparent_memory);
                 sb.put_num_be::<f32>(black_box(123.456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_f32_be_bytes");
     group.bench_function("put_f32_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f32>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f32>(), &transparent_memory);
                 sb.put_f32(black_box(123.456));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // f64 - little-endian
-    let allocs_op = allocs.operation("put_f64_le_bytesbuf");
-    group.bench_function("put_f64_le_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // f64 little-endian
+    let allocs_op = allocs.operation("put_f64_le");
+    group.bench_function("put_f64_le", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f64>(), &transparent_memory);
                 sb.put_num_le::<f64>(black_box(1234.5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_f64_le_bytes");
     group.bench_function("put_f64_le_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f64>(), &transparent_memory);
                 sb.put_f64_le(black_box(1234.5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
-    // f64 - big-endian
-    let allocs_op = allocs.operation("put_f64_be_bytesbuf");
-    group.bench_function("put_f64_be_bytesbuf", |b| {
-        b.iter_batched_ref(
-            || {
+    // f64 big-endian
+    let allocs_op = allocs.operation("put_f64_be");
+    group.bench_function("put_f64_be", |b| {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f64>(), &transparent_memory);
                 sb.put_num_be::<f64>(black_box(1234.5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     let allocs_op = allocs.operation("put_f64_be_bytes");
     group.bench_function("put_f64_be_bytes", |b| {
-        b.iter_batched_ref(
-            || {
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            let start = Instant::now();
+            for _ in 0..iters {
                 let mut sb = BytesBuf::new();
-                sb.reserve(std::mem::size_of::<f64>(), &transparent_memory);
-                sb
-            },
-            |sb| {
-                let _span = allocs_op.measure_thread();
+                sb.reserve(size_of::<f64>(), &transparent_memory);
                 sb.put_f64(black_box(1234.5678));
-            },
-            BatchSize::SmallInput,
-        );
+                black_box(sb);
+            }
+            start.elapsed()
+        });
     });
 
     group.finish();
