@@ -5,24 +5,29 @@ use std::ops::{Bound, Deref, RangeBounds};
 use std::ptr::NonNull;
 use std::{fmt, slice};
 
-use bytes::{Buf, Bytes};
-
 use crate::{BlockRef, BlockSize};
 
-/// A span of immutable bytes backed by memory from a memory block. This type is used as a building
-/// block for [`BytesView`][crate::BytesView]s.
+/// A span of immutable bytes backed by memory from a memory block.
+///
+/// This type is used as a building block for [`BytesView`][crate::BytesView].
 ///
 /// While the contents are immutable, the span itself is not - its size may be constrained by
-/// cutting off pieces from the front (consuming them) as the read cursor is advanced when calling
-/// members of the [`bytes::Buf][1]` trait implementation.
+/// cutting off bytes from the front (i.e. consuming them).
 ///
 /// Contents that have been consumed are no longer considered part of the span (any remaining
-/// content shifts to index 0 after data is consumed from the front).
+/// content shifts to index 0).
 ///
 /// Sub-slices of a span may be formed by calling [`.slice()`]. This does not copy the data,
-/// merely creates a new and independent view over the same immutable memory.
+/// merely creates a new and independent view over the same immutable bytes.
+///
+/// # Ownership of memory blocks
+///
+/// See [`SpanBuilder`][crate::SpanBuilder] for details.
 #[derive(Clone)]
 pub(crate) struct Span {
+    // For the purposes of the `Span` and `SpanBuilder` types, this merely controls the lifecycle
+    // of the memory block - dropping the last reference will permit the memory block to be
+    // reclaimed by the memory provider it originates from.
     block_ref: BlockRef,
 
     start: NonNull<u8>,
@@ -99,15 +104,48 @@ impl Span {
         })
     }
 
-    /// Allows the underlying memory block to be accessed, primarily used to extend its lifetime
-    /// beyond that of the `Span` itself.
+    /// References the memory block that provides the span's memory capacity.
     pub(crate) const fn block_ref(&self) -> &BlockRef {
         &self.block_ref
     }
 
-    /// Returns the span as an instance of `Bytes`. This operation is zero-copy.
-    pub(crate) fn to_bytes(&self) -> Bytes {
-        Bytes::from_owner(self.clone())
+    /// Marks `len` bytes as consumed from the start of the span, shrinking it.
+    ///
+    /// The remaining bytes shift to index 0.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `len` is less than or equal to the current length of the span.
+    pub(crate) unsafe fn advance(&mut self, len: usize) {
+        #[expect(clippy::cast_possible_truncation, reason = "guaranteed by safety requirements")]
+        let len_bs = len as BlockSize;
+
+        // Will never wrap - guaranteed by safety requirements.
+        self.len = self.len.wrapping_sub(len_bs);
+
+        // SAFETY: Guaranteed by safety requirements.
+        self.start = unsafe { self.start.add(len) };
+    }
+
+    /// Testing helper for easily consuming a fixed number of bytes from the front.
+    #[cfg(test)]
+    #[expect(clippy::cast_possible_truncation, reason = "test code, relax")]
+    pub(crate) fn get_array<const N: usize>(&mut self) -> [u8; N] {
+        assert!(self.len() >= N as BlockSize, "out of bounds read");
+
+        let mut array = [0_u8; N];
+
+        // SAFETY: Assertion above guarantees that we have enough bytes of data in the span.
+        let src = unsafe { slice::from_raw_parts(self.start.as_ptr(), N) };
+
+        array.copy_from_slice(src);
+
+        // SAFETY: Guarded by assertion above.
+        unsafe {
+            self.advance(N);
+        }
+
+        array
     }
 }
 
@@ -129,41 +167,18 @@ impl AsRef<[u8]> for Span {
     }
 }
 
-impl Buf for Span {
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
-    fn remaining(&self) -> usize {
-        self.len as usize
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
-    fn chunk(&self) -> &[u8] {
-        self
-    }
-
-    fn advance(&mut self, cnt: usize) {
-        // If it does not fit into BlockSize, it for sure does not fit in the block.
-        let count: BlockSize = BlockSize::try_from(cnt).expect("attempted to advance past end of span");
-
-        // Length is subtracted first, so even if we panic later, we do not overshoot the block.
-        self.len = self.len.checked_sub(count).expect("attempted to advance past end of span");
-
-        // SAFETY: We validated above that the pointer remains in-bounds.
-        self.start = unsafe { self.start.add(count as usize) };
-    }
-}
-
 impl fmt::Debug for Span {
+    #[cfg_attr(coverage_nightly, coverage(off))] // There is no specific API contract here for us to test.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("Span");
 
         debug_struct.field("start", &self.start).field("len", &self.len);
 
         if self.len >= 4 {
-            let mut clone = self.clone();
-            let byte1 = clone.get_u8();
-            let byte2 = clone.get_u8();
-            let byte3 = clone.get_u8();
-            let byte4 = clone.get_u8();
+            let byte1 = self[0];
+            let byte2 = self[1];
+            let byte3 = self[2];
+            let byte4 = self[3];
 
             debug_struct.field("first_four_bytes", &format!("{byte1:02x}{byte2:02x}{byte3:02x}{byte4:02x}"));
         }
@@ -179,60 +194,48 @@ unsafe impl Send for Span {}
 // state is thread-safe. Furthermore, instances are immutable so sharing is natural.
 unsafe impl Sync for Span {}
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::num::NonZero;
 
-    use bytes::BufMut;
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
-    use testing_aids::assert_panic;
 
     use super::*;
     use crate::std_alloc_block;
+
+    // The type is thread-mobile (Send) and can be shared (for reads) between threads (Sync).
+    assert_impl_all!(Span: Send, Sync);
 
     #[test]
     fn smoke_test() {
         let mut builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        builder.put_u64(1234);
-        builder.put_u16(16);
+        builder.put_slice(&1234_u64.to_ne_bytes());
+        builder.put_slice(&16_u16.to_ne_bytes());
 
         let mut span = builder.consume(nz!(10));
 
-        assert_eq!(0, builder.remaining_mut());
-        assert_eq!(span.remaining(), 10);
+        assert_eq!(0, builder.remaining_capacity());
+        assert_eq!(span.len(), 10);
         assert!(!span.is_empty());
 
-        let slice = span.chunk();
-        assert_eq!(10, slice.len());
+        assert_eq!(10, span.as_ref().len());
 
-        assert_eq!(span.get_u64(), 1234);
-        assert_eq!(span.get_u16(), 16);
+        assert_eq!(u64::from_ne_bytes(span.get_array()), 1234);
+        assert_eq!(u16::from_ne_bytes(span.get_array()), 16);
 
-        assert_eq!(0, span.remaining());
+        assert_eq!(0, span.len());
         assert!(span.is_empty());
-    }
-
-    #[test]
-    fn oob_is_panic() {
-        let mut builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
-
-        builder.put_u64(1234);
-        builder.put_u16(16);
-
-        let mut span = builder.consume(nz!(10));
-
-        assert_eq!(span.get_u64(), 1234);
-        assert_panic!(_ = span.get_u32()); // Reads 4 but only has 2 remaining.
     }
 
     #[test]
     fn slice() {
         let mut builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        builder.put_u64(1234);
-        builder.put_u16(16);
+        builder.put_slice(&1234_u64.to_ne_bytes());
+        builder.put_slice(&16_u16.to_ne_bytes());
 
         let mut span1 = builder.consume(nz!(10));
         let mut span2 = span1.slice(0..10);
@@ -240,24 +243,17 @@ mod tests {
         let span4 = span1.slice(10..10);
         assert!(span1.slice_checked(0..11).is_none()); // Out of bounds.
 
-        assert_eq!(span1.remaining(), 10);
-        assert_eq!(span2.remaining(), 10);
-        assert_eq!(span3.remaining(), 2);
-        assert_eq!(span4.remaining(), 0);
+        assert_eq!(span1.len(), 10);
+        assert_eq!(span2.len(), 10);
+        assert_eq!(span3.len(), 2);
+        assert_eq!(span4.len(), 0);
 
-        assert_eq!(span1.get_u64(), 1234);
-        assert_eq!(span1.get_u16(), 16);
+        assert_eq!(u64::from_ne_bytes(span1.get_array()), 1234);
+        assert_eq!(u16::from_ne_bytes(span1.get_array()), 16);
 
-        assert_eq!(span2.get_u64(), 1234);
-        assert_eq!(span2.get_u16(), 16);
-
-        assert_eq!(span3.get_u16(), 16);
-    }
-
-    #[test]
-    fn thread_safe_type() {
-        // The type is thread-mobile (Send) and can be shared (for reads) between threads (Sync).
-        assert_impl_all!(Span: Send, Sync);
+        assert_eq!(u64::from_ne_bytes(span2.get_array()), 1234);
+        assert_eq!(u16::from_ne_bytes(span2.get_array()), 16);
+        assert_eq!(u16::from_ne_bytes(span3.get_array()), 16);
     }
 
     #[test]
@@ -272,43 +268,38 @@ mod tests {
     fn slice_indexing_kinds() {
         let mut sb = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        sb.put_u8(0);
-        sb.put_u8(1);
-        sb.put_u8(2);
-        sb.put_u8(3);
-        sb.put_u8(4);
-        sb.put_u8(5);
+        sb.put_slice(&[0, 1, 2, 3, 4, 5]);
 
         let span = sb.consume(NonZero::new(sb.len()).unwrap());
 
         let mut middle_four = span.slice(1..5);
         assert_eq!(4, middle_four.len());
-        assert_eq!(1, middle_four.get_u8());
-        assert_eq!(2, middle_four.get_u8());
-        assert_eq!(3, middle_four.get_u8());
-        assert_eq!(4, middle_four.get_u8());
+        assert_eq!(1, u8::from_ne_bytes(middle_four.get_array()));
+        assert_eq!(2, u8::from_ne_bytes(middle_four.get_array()));
+        assert_eq!(3, u8::from_ne_bytes(middle_four.get_array()));
+        assert_eq!(4, u8::from_ne_bytes(middle_four.get_array()));
 
         let mut middle_four = span.slice(1..=4);
         assert_eq!(4, middle_four.len());
-        assert_eq!(1, middle_four.get_u8());
-        assert_eq!(2, middle_four.get_u8());
-        assert_eq!(3, middle_four.get_u8());
-        assert_eq!(4, middle_four.get_u8());
+        assert_eq!(1, u8::from_ne_bytes(middle_four.get_array()));
+        assert_eq!(2, u8::from_ne_bytes(middle_four.get_array()));
+        assert_eq!(3, u8::from_ne_bytes(middle_four.get_array()));
+        assert_eq!(4, u8::from_ne_bytes(middle_four.get_array()));
 
         let mut last_two = span.slice(4..);
         assert_eq!(2, last_two.len());
-        assert_eq!(4, last_two.get_u8());
-        assert_eq!(5, last_two.get_u8());
+        assert_eq!(4, u8::from_ne_bytes(last_two.get_array()));
+        assert_eq!(5, u8::from_ne_bytes(last_two.get_array()));
 
         let mut first_two = span.slice(..2);
         assert_eq!(2, first_two.len());
-        assert_eq!(0, first_two.get_u8());
-        assert_eq!(1, first_two.get_u8());
+        assert_eq!(0, u8::from_ne_bytes(first_two.get_array()));
+        assert_eq!(1, u8::from_ne_bytes(first_two.get_array()));
 
         let mut first_two = span.slice(..=1);
         assert_eq!(2, first_two.len());
-        assert_eq!(0, first_two.get_u8());
-        assert_eq!(1, first_two.get_u8());
+        assert_eq!(0, u8::from_ne_bytes(first_two.get_array()));
+        assert_eq!(1, u8::from_ne_bytes(first_two.get_array()));
     }
 
     #[test]
@@ -317,15 +308,7 @@ mod tests {
 
         let mut sb = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        sb.put_u8(0);
-        sb.put_u8(1);
-        sb.put_u8(2);
-        sb.put_u8(3);
-        sb.put_u8(4);
-        sb.put_u8(5);
-        sb.put_u8(6);
-        sb.put_u8(7);
-        sb.put_u8(8);
+        sb.put_slice(&[0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
         let span = sb.consume(NonZero::new(sb.len()).unwrap());
 
@@ -335,43 +318,13 @@ mod tests {
         assert!(sliced.is_some());
         let mut sliced = sliced.unwrap();
         assert_eq!(3, sliced.len());
-        assert_eq!(2, sliced.get_u8());
-        assert_eq!(3, sliced.get_u8());
-        assert_eq!(4, sliced.get_u8());
+        assert_eq!(2, u8::from_ne_bytes(sliced.get_array()));
+        assert_eq!(3, u8::from_ne_bytes(sliced.get_array()));
+        assert_eq!(4, u8::from_ne_bytes(sliced.get_array()));
 
         // Test edge case: excluded start at the last valid index returns empty sequence
         let sliced = span.slice_checked((Bound::Excluded(8), Bound::Unbounded));
         assert!(sliced.is_some());
         assert_eq!(0, sliced.unwrap().len());
-    }
-
-    #[test]
-    fn debug_includes_first_four_bytes_for_long_spans() {
-        let mut builder = std_alloc_block::allocate(nz!(8)).into_span_builder();
-
-        for byte in [0x10_u8, 0x20, 0x30, 0x40, 0x50] {
-            builder.put_u8(byte);
-        }
-
-        let span = builder.consume(nz!(5));
-        let debug = format!("{span:?}");
-
-        assert!(debug.contains("first_four_bytes"), "expected preview field in {debug}");
-        assert!(debug.contains("10203040"), "expected first four bytes preview in {debug}");
-    }
-
-    #[test]
-    fn debug_omits_preview_for_short_spans() {
-        let mut builder = std_alloc_block::allocate(nz!(3)).into_span_builder();
-
-        builder.put_u8(0xaa);
-        builder.put_u8(0xbb);
-        builder.put_u8(0xcc);
-
-        let span = builder.consume(nz!(3));
-        let debug = format!("{span:?}");
-
-        assert!(debug.contains("Span"));
-        assert!(!debug.contains("first_four_bytes"), "unexpected preview field in {debug}");
     }
 }

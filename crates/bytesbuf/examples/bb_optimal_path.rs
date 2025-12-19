@@ -18,7 +18,7 @@ use std::num::NonZero;
 use bytesbuf::{BlockSize, BytesBuf, BytesView, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
 
 fn main() {
-    // In a real application, both of these would be provided by the framework.
+    // In real-world code, both of these would be provided by the application framework.
     let global_memory_pool = GlobalPool::new();
     let io_context = IoContext::new();
 
@@ -35,7 +35,7 @@ fn main() {
 
     // This message uses a combination of both memory providers. This will not use the optimal
     // I/O path because the optimal I/O path requires all memory in a byte sequence to be optimal.
-    let message3 = BytesView::from_sequences([message1, message2]);
+    let message3 = BytesView::from_views([message1, message2]);
     connection.write(message3);
 }
 
@@ -64,7 +64,7 @@ impl Connection {
         // ues the optimal I/O path. There is no requirement that the data passed to us contains
         // only memory with our preferred configuration.
 
-        let use_optimal_path = message.iter_chunk_metas().all(|meta| {
+        let use_optimal_path = message.iter_slice_metas().all(|meta| {
             // If there is no metadata, the memory is not I/O memory.
             meta.is_some_and(|meta| {
                 // If the type of metadata does not match the metadata

@@ -206,15 +206,15 @@ jobs:
       - name: Prepare Semver Comment
         if: steps.semver.outcome == 'failure'
         run: |
-          echo "## ⚠️ Semver Compatibility Check Failed" > semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo "The following semver violations were detected:" >> semver-comment.txt
+          echo "## ⚠️ Breaking Changes Detected" > semver-comment.txt
           echo "" >> semver-comment.txt
           echo '```' >> semver-comment.txt
           grep -v "^ *Cloning " semver-output.txt | grep -v "^ *Building " | grep -v "^ *Built \[" | grep -v "^ *Parsing " | grep -v "^ *Parsed \[" | grep -v "^ *Checking" | grep -v "^ *Checked \[" | grep -v "^ *Finished \[" | grep -v "^ *Summary " >> semver-comment.txt
           echo '```' >> semver-comment.txt
           echo "" >> semver-comment.txt
-          echo "Ensure your changes follow semantic versioning principles. You probably need to bump the version of the affected crates." >> semver-comment.txt
+          echo "If the breaking changes are intentional then everything is fine - this message is merely informative." >> semver-comment.txt
+          echo "" >> semver-comment.txt
+          echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (`1.x.x -> 2.x.x` or `0.1.x -> 0.2.x`)." >> semver-comment.txt
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure'

@@ -9,8 +9,7 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use bytes::{Buf, BufMut};
-use bytesbuf::{BlockSize, BytesBuf, BytesView, FixedBlockTestMemory};
+use bytesbuf::{BlockSize, BytesBuf, BytesView, FixedBlockTestMemory, TransparentTestMemory};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
@@ -28,20 +27,22 @@ const TEST_DATA: &[u8] = &[88_u8; TEST_SPAN_SIZE.get() as usize];
 const MAX_INLINE_SPANS: usize = bytesbuf::MAX_INLINE_SPANS;
 // This should be more than MAX_INLINE_SPANS.
 const MANY_SPANS: usize = 32;
+const PUT_BYTES_LEN: usize = 512;
 
 #[expect(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 
     let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
+    let transparent_memory = TransparentTestMemory::new();
 
     let test_data_as_seq = BytesView::copied_from_slice(TEST_DATA, &memory);
 
     let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
-    let max_inline_as_seq = BytesView::from_sequences(max_inline.iter().cloned());
+    let max_inline_as_seq = BytesView::from_views(max_inline.iter().cloned());
 
     let many = iter::repeat_n(test_data_as_seq.clone(), MANY_SPANS).collect::<Vec<_>>();
-    let many_as_seq = BytesView::from_sequences(many.iter().cloned());
+    let many_as_seq = BytesView::from_views(many.iter().cloned());
 
     let mut group = c.benchmark_group("BytesBuf");
 
@@ -61,7 +62,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| sb.len(),
@@ -77,7 +78,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| sb.is_empty(),
@@ -93,7 +94,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| sb.capacity(),
@@ -105,30 +106,142 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(BytesBuf::new, |sb| sb.reserve(black_box(1), &memory), BatchSize::SmallInput);
     });
 
-    let allocs_op = allocs.operation("append_clean");
-    group.bench_function("append_clean", |b| {
+    let allocs_op = allocs.operation("put_f64_be");
+    group.bench_function("put_f64_be", |b| {
         b.iter_batched_ref(
-            BytesBuf::new,
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(std::mem::size_of::<f64>(), &transparent_memory);
+                sb
+            },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                sb.append(test_data_as_seq.clone());
+                sb.put_num_be::<f64>(black_box(1234.5678));
             },
             BatchSize::SmallInput,
         );
     });
 
-    let allocs_op = allocs.operation("append_dirty");
-    group.bench_function("append_dirty", |b| {
+    let allocs_op = allocs.operation("put_u64_be");
+    group.bench_function("put_u64_be", |b| {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
-                sb.put_u8(123);
+                sb.reserve(std::mem::size_of::<u64>(), &transparent_memory);
                 sb
             },
             |sb| {
                 let _span = allocs_op.measure_thread();
-                sb.append(test_data_as_seq.clone());
+                sb.put_num_be::<u64>(black_box(0x1234_5678_9ABC_DEF0));
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_f64_le");
+    group.bench_function("put_f64_le", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(std::mem::size_of::<f64>(), &transparent_memory);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_num_le::<f64>(black_box(8765.4321));
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_u64_le");
+    group.bench_function("put_u64_le", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(std::mem::size_of::<u64>(), &transparent_memory);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_num_le::<u64>(black_box(0x0FED_CBA9_8765_4321));
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_u8");
+    group.bench_function("put_u8", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(1, &transparent_memory);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_num_le::<u8>(black_box(0xAB));
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_bytes");
+    group.bench_function("put_bytes", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(PUT_BYTES_LEN, &transparent_memory);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_byte_repeated(0xCD, PUT_BYTES_LEN);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_buf");
+    group.bench_function("put", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(test_data_as_seq.len(), &memory);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_bytes(test_data_as_seq.clone());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_view_clean");
+    group.bench_function("put_view_clean", |b| {
+        b.iter_batched_ref(
+            BytesBuf::new,
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_bytes(test_data_as_seq.clone());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("put_view_dirty");
+    group.bench_function("put_view_dirty", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut sb = BytesBuf::new();
+                sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
+                sb.put_byte(123);
+                sb
+            },
+            |sb| {
+                let _span = allocs_op.measure_thread();
+                sb.put_bytes(test_data_as_seq.clone());
             },
             BatchSize::SmallInput,
         );
@@ -139,7 +252,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| {
@@ -155,7 +268,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(max_inline_as_seq.clone());
+                sb.put_bytes(max_inline_as_seq.clone());
                 sb
             },
             |sb| {
@@ -171,7 +284,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| {
@@ -187,7 +300,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(test_data_as_seq.clone());
+                sb.put_bytes(test_data_as_seq.clone());
                 sb
             },
             |sb| {
@@ -289,7 +402,7 @@ fn entrypoint(c: &mut Criterion) {
                 // SAFETY: Yes, I promise I wrote this many bytes.
                 // This is a lie but we do not touch the bytes, so should be a harmless lie.
                 unsafe {
-                    sb.advance_mut(BLOCK_SIZE.get() as usize);
+                    sb.advance(BLOCK_SIZE.get() as usize);
                 }
             },
             BatchSize::SmallInput,
@@ -301,7 +414,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || {
                 let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
+                sb.put_bytes(many_as_seq.clone());
                 sb
             },
             |sb| {
@@ -309,8 +422,8 @@ fn entrypoint(c: &mut Criterion) {
                 let mut peeked = sb.peek();
 
                 // We just seek to the end, that is all.
-                while peeked.has_remaining() {
-                    peeked.advance(peeked.chunk().len());
+                while !peeked.is_empty() {
+                    peeked.advance(peeked.first_slice().len());
                 }
             },
             BatchSize::SmallInput,
@@ -323,7 +436,7 @@ fn entrypoint(c: &mut Criterion) {
             || {
                 let mut sb = BytesBuf::new();
                 sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
-                sb.put_u8(123);
+                sb.put_byte(123);
                 sb
             },
             |sb| {
@@ -331,8 +444,8 @@ fn entrypoint(c: &mut Criterion) {
                 let mut peeked = sb.peek();
 
                 // We just seek to the end, that is all.
-                while peeked.has_remaining() {
-                    peeked.advance(peeked.chunk().len());
+                while !peeked.is_empty() {
+                    peeked.advance(peeked.first_slice().len());
                 }
             },
             BatchSize::SmallInput,

@@ -4,33 +4,32 @@
 //! Showcases how to implement the `HasMemory` trait
 //! using the `GlobalPool` implementation strategy.
 
-use bytes::Buf;
 use bytesbuf::{BytesView, GlobalPool, HasMemory, MemoryShared};
 
 fn main() {
-    // The global memory pool in a real application would be provided by the framework.
+    // The global memory pool in real-world code would be provided by the application framework.
     let global_memory_pool = GlobalPool::new();
 
     let mut checksum_calculator = ChecksumCalculator::new(global_memory_pool);
 
     // When we obtain an instance of a type that implements `HasMemory`,
-    // we should extract the memory provider so we can reuse it across calls to the instance.
+    // we should extract the memory provider if we need to access it on demand.
     let memory = checksum_calculator.memory();
 
-    // These byte sequences are meant to be passed to the checksum calculator,
+    // These messages are meant to be passed to the checksum calculator,
     // so they use the memory provider we obtained from the checksum calculator.
-    let data1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
-    let data2 = BytesView::copied_from_slice(b"Goodbye, world!", &memory);
-    let data3 = BytesView::copied_from_slice(b"Goodbye, universe!", &memory);
+    let message1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    let message2 = BytesView::copied_from_slice(b"Goodbye, world!", &memory);
+    let message3 = BytesView::copied_from_slice(b"Goodbye, universe!", &memory);
 
-    checksum_calculator.add_bytes(data1);
-    checksum_calculator.add_bytes(data2);
-    checksum_calculator.add_bytes(data3);
+    checksum_calculator.add_bytes(message1);
+    checksum_calculator.add_bytes(message2);
+    checksum_calculator.add_bytes(message3);
 
     println!("Checksum: {}", checksum_calculator.checksum());
 }
 
-/// Calculates a checksum for a given byte sequence.
+/// Calculates a checksum for a given message.
 ///
 /// # Implementation strategy for `HasMemory`
 ///
@@ -42,22 +41,19 @@ fn main() {
 #[derive(Debug)]
 struct ChecksumCalculator {
     // The application logic must provide this - it is our dependency.
-    memory_provider: GlobalPool,
+    memory: GlobalPool,
 
     checksum: u64,
 }
 
 impl ChecksumCalculator {
-    pub const fn new(memory_provider: GlobalPool) -> Self {
-        Self {
-            memory_provider,
-            checksum: 0,
-        }
+    pub const fn new(memory: GlobalPool) -> Self {
+        Self { memory, checksum: 0 }
     }
 
     pub fn add_bytes(&mut self, mut bytes: BytesView) {
         while !bytes.is_empty() {
-            let b = bytes.get_u8();
+            let b = bytes.get_byte();
             self.checksum = self.checksum.wrapping_add(u64::from(b));
         }
     }
@@ -70,6 +66,6 @@ impl ChecksumCalculator {
 impl HasMemory for ChecksumCalculator {
     fn memory(&self) -> impl MemoryShared {
         // Cloning a memory provider is intended to be a cheap operation, reusing resources.
-        self.memory_provider.clone()
+        self.memory.clone()
     }
 }
