@@ -118,12 +118,19 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_slice");
     group.bench_function("put_slice", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers and data outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
+                    sb
+                })
+                .collect();
+            let data = [0xCD_u8; COPY_TO_SLICE_LEN];
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
-                let data = [0xCD_u8; COPY_TO_SLICE_LEN];
+            for sb in &mut buffers {
                 sb.put_slice(&data[..]);
                 black_box(sb);
             }
@@ -135,10 +142,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_bytes_view");
     group.bench_function("put_bytes_view", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters).map(|_| BytesBuf::new()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
+            for sb in &mut buffers {
                 sb.put_bytes(test_data_as_seq.clone());
                 black_box(sb);
             }
@@ -150,11 +159,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_byte");
     group.bench_function("put_byte", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(1, &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(1, &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_byte(black_box(0xAB));
                 black_box(sb);
             }
@@ -165,11 +181,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u8");
     group.bench_function("put_u8", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(1, &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(1, &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u8(black_box(0xAB));
                 black_box(sb);
             }
@@ -181,11 +204,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_byte_repeated");
     group.bench_function("put_byte_repeated", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_byte_repeated(black_box(0xCD), COPY_TO_SLICE_LEN);
                 black_box(sb);
             }
@@ -196,12 +226,19 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_bytes");
     group.bench_function("put_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(COPY_TO_SLICE_LEN, &transparent_memory);
-                BufMut::put_bytes(&mut sb, black_box(0xCD), COPY_TO_SLICE_LEN);
+            for sb in &mut buffers {
+                BufMut::put_bytes(sb, black_box(0xCD), COPY_TO_SLICE_LEN);
                 black_box(sb);
             }
             start.elapsed()
@@ -714,11 +751,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u8");
     group.bench_function("put_u8", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u8>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u8>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<u8>(black_box(0xAB));
                 black_box(sb);
             }
@@ -729,11 +773,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u8_bytes");
     group.bench_function("put_u8_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u8>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u8>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u8(black_box(0xAB));
                 black_box(sb);
             }
@@ -745,11 +796,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i8");
     group.bench_function("put_i8", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i8>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i8>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<i8>(black_box(-42));
                 black_box(sb);
             }
@@ -760,11 +818,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i8_bytes");
     group.bench_function("put_i8_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i8>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i8>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i8(black_box(-42));
                 black_box(sb);
             }
@@ -776,11 +841,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u16_le");
     group.bench_function("put_u16_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<u16>(black_box(0x1234));
                 black_box(sb);
             }
@@ -791,11 +863,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u16_le_bytes");
     group.bench_function("put_u16_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u16_le(black_box(0x1234));
                 black_box(sb);
             }
@@ -807,11 +886,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u16_be");
     group.bench_function("put_u16_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<u16>(black_box(0x1234));
                 black_box(sb);
             }
@@ -822,11 +908,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u16_be_bytes");
     group.bench_function("put_u16_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u16(black_box(0x1234));
                 black_box(sb);
             }
@@ -838,11 +931,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i16_le");
     group.bench_function("put_i16_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<i16>(black_box(-1234));
                 black_box(sb);
             }
@@ -853,11 +953,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i16_le_bytes");
     group.bench_function("put_i16_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i16_le(black_box(-1234));
                 black_box(sb);
             }
@@ -869,11 +976,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i16_be");
     group.bench_function("put_i16_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<i16>(black_box(-1234));
                 black_box(sb);
             }
@@ -884,11 +998,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i16_be_bytes");
     group.bench_function("put_i16_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i16>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i16>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i16(black_box(-1234));
                 black_box(sb);
             }
@@ -900,11 +1021,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u32_le");
     group.bench_function("put_u32_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<u32>(black_box(0x1234_5678));
                 black_box(sb);
             }
@@ -915,11 +1043,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u32_le_bytes");
     group.bench_function("put_u32_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u32_le(black_box(0x1234_5678));
                 black_box(sb);
             }
@@ -931,11 +1066,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u32_be");
     group.bench_function("put_u32_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<u32>(black_box(0x1234_5678));
                 black_box(sb);
             }
@@ -946,11 +1088,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u32_be_bytes");
     group.bench_function("put_u32_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u32(black_box(0x1234_5678));
                 black_box(sb);
             }
@@ -962,11 +1111,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i32_le");
     group.bench_function("put_i32_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<i32>(black_box(-123_456));
                 black_box(sb);
             }
@@ -977,11 +1133,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i32_le_bytes");
     group.bench_function("put_i32_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i32_le(black_box(-123_456));
                 black_box(sb);
             }
@@ -993,11 +1156,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i32_be");
     group.bench_function("put_i32_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<i32>(black_box(-123_456));
                 black_box(sb);
             }
@@ -1008,11 +1178,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i32_be_bytes");
     group.bench_function("put_i32_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i32(black_box(-123_456));
                 black_box(sb);
             }
@@ -1024,11 +1201,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u64_le");
     group.bench_function("put_u64_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<u64>(black_box(0x1234_5678_9ABC_DEF0));
                 black_box(sb);
             }
@@ -1039,11 +1223,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u64_le_bytes");
     group.bench_function("put_u64_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u64_le(black_box(0x1234_5678_9ABC_DEF0));
                 black_box(sb);
             }
@@ -1055,11 +1246,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u64_be");
     group.bench_function("put_u64_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<u64>(black_box(0x1234_5678_9ABC_DEF0));
                 black_box(sb);
             }
@@ -1070,11 +1268,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_u64_be_bytes");
     group.bench_function("put_u64_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<u64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<u64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_u64(black_box(0x1234_5678_9ABC_DEF0));
                 black_box(sb);
             }
@@ -1086,11 +1291,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i64_le");
     group.bench_function("put_i64_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<i64>(black_box(-1_234_567_890));
                 black_box(sb);
             }
@@ -1101,11 +1313,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i64_le_bytes");
     group.bench_function("put_i64_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i64_le(black_box(-1_234_567_890));
                 black_box(sb);
             }
@@ -1117,11 +1336,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i64_be");
     group.bench_function("put_i64_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<i64>(black_box(-1_234_567_890));
                 black_box(sb);
             }
@@ -1132,11 +1358,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_i64_be_bytes");
     group.bench_function("put_i64_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<i64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<i64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_i64(black_box(-1_234_567_890));
                 black_box(sb);
             }
@@ -1148,11 +1381,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f32_le");
     group.bench_function("put_f32_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<f32>(black_box(123.456));
                 black_box(sb);
             }
@@ -1163,11 +1403,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f32_le_bytes");
     group.bench_function("put_f32_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_f32_le(black_box(123.456));
                 black_box(sb);
             }
@@ -1179,11 +1426,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f32_be");
     group.bench_function("put_f32_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<f32>(black_box(123.456));
                 black_box(sb);
             }
@@ -1194,11 +1448,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f32_be_bytes");
     group.bench_function("put_f32_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f32>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f32>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_f32(black_box(123.456));
                 black_box(sb);
             }
@@ -1210,11 +1471,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f64_le");
     group.bench_function("put_f64_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_le::<f64>(black_box(1234.5678));
                 black_box(sb);
             }
@@ -1225,11 +1493,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f64_le_bytes");
     group.bench_function("put_f64_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_f64_le(black_box(1234.5678));
                 black_box(sb);
             }
@@ -1241,11 +1516,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f64_be");
     group.bench_function("put_f64_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_num_be::<f64>(black_box(1234.5678));
                 black_box(sb);
             }
@@ -1256,11 +1538,18 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_f64_be_bytes");
     group.bench_function("put_f64_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare buffers outside the timed loop
+            let mut buffers: Vec<_> = (0..iters)
+                .map(|_| {
+                    let mut sb = BytesBuf::new();
+                    sb.reserve(size_of::<f64>(), &transparent_memory);
+                    sb
+                })
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut sb = BytesBuf::new();
-                sb.reserve(size_of::<f64>(), &transparent_memory);
+            for sb in &mut buffers {
                 sb.put_f64(black_box(1234.5678));
                 black_box(sb);
             }
