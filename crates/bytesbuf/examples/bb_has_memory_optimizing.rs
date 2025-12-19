@@ -5,7 +5,6 @@
 //! strategy that obtains memory from a memory provider specific to a particular purpose, with
 //! a configuration optimal for that purpose.
 
-use bytes::BufMut;
 use bytesbuf::{BytesBuf, BytesView, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
 
 fn main() {
@@ -15,12 +14,12 @@ fn main() {
     let mut connection = UdpConnection::new(io_context);
 
     // Prepare a packet to send and send it.
-    let mut sequence_builder = connection.memory().reserve(1 + 8 + 16);
-    sequence_builder.put_u8(42);
-    sequence_builder.put_u64(43);
-    sequence_builder.put_u128(44);
+    let mut buf = connection.memory().reserve(1 + 8 + 16);
+    buf.put_byte(42);
+    buf.put_num_be(43_u64);
+    buf.put_num_be(44_u128);
 
-    let packet = sequence_builder.consume_all();
+    let packet = buf.consume_all();
 
     connection.write(packet);
 }
@@ -51,7 +50,7 @@ impl UdpConnection {
     pub fn write(&mut self, packet: BytesView) {
         // Note: making use of optimally configured memory may need some additional logic here.
         // This is out of scope of this example, because this example targets targeting how to
-        // implement HasMemory. See `mem_optimal_path.rs` for an example of a type that
+        // implement HasMemory. See `bb_optimal_path.rs` for an example of a type that
         // has both an "optimal" and a "fallback" implementation depending on memory used.
         println!("Sending packet of length: {}", packet.len());
     }

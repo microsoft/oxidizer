@@ -3,27 +3,25 @@
 
 use std::io::Write;
 
-use bytes::BufMut;
-
 use crate::{BytesBuf, Memory};
 
-/// Adapts a [`BytesBuf`] to implement the `std::io::Write` trait.
+/// Adapter that implements `std::io::Write` for [`BytesBuf`].
 ///
-/// Instances are created via [`BytesBuf::as_write()`][1].
+/// Create an instance via [`BytesBuf::as_write()`][1].
 ///
 /// The adapter will automatically extend the underlying sequence builder as needed when writing
 /// by allocating additional memory capacity from the memory provider `M`.
 ///
 /// [1]: crate::BytesBuf::as_write
 #[derive(Debug)]
-pub(crate) struct BytesBufWrite<'sb, 'm, M: Memory> {
-    inner: &'sb mut BytesBuf,
+pub(crate) struct BytesBufWrite<'b, 'm, M: Memory> {
+    inner: &'b mut BytesBuf,
     memory: &'m M,
 }
 
-impl<'sb, 'm, M: Memory> BytesBufWrite<'sb, 'm, M> {
+impl<'b, 'm, M: Memory> BytesBufWrite<'b, 'm, M> {
     #[must_use]
-    pub(crate) const fn new(inner: &'sb mut BytesBuf, memory: &'m M) -> Self {
+    pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
         Self { inner, memory }
     }
 }
@@ -32,7 +30,7 @@ impl<M: Memory> Write for BytesBufWrite<'_, '_, M> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.inner.reserve(buf.len(), self.memory);
-        self.inner.put(buf);
+        self.inner.put_slice(buf);
         Ok(buf.len())
     }
 
@@ -43,6 +41,7 @@ impl<M: Memory> Write for BytesBufWrite<'_, '_, M> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use new_zealand::nz;
@@ -78,7 +77,7 @@ mod tests {
 
         // Add some initial content to the builder
         let initial_data = b"Initial content";
-        builder.put_slice(initial_data);
+        builder.put_slice(initial_data.as_slice());
 
         {
             let mut write_adapter = builder.as_write(&memory);
