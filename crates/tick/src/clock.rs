@@ -40,7 +40,7 @@ use crate::timers::TimerKey;
 /// # Clock construction
 ///
 /// The clock requires a runtime to drive the registered timers. This crate provides built-in support
-/// for Tokio via [`Clock::new_tokio`] (available with the `tokio` feature). For other async runtimes,
+/// for Tokio via [`Clock::new_tokio()`] (available with the `tokio` feature). For other async runtimes,
 /// you can use types in the [`runtime`][crate::runtime] module to drive the clock.
 ///
 /// In tests, the clock can be constructed directly using [`ClockControl`][crate::ClockControl] or via [`Clock::new_frozen`][crate::Clock::new_frozen]
@@ -61,7 +61,7 @@ use crate::timers::TimerKey;
 /// # Cloning and shared state
 ///
 /// Cloning a clock is inexpensive (just an `Arc` clone) and every clone shares the same underlying state,
-/// including registered timers and—when the `test-util` feature is enabled—the controlled passage of time.
+/// including registered timers and, when the `test-util` feature is enabled, the controlled passage of time.
 /// Any timers you register or time adjustments you perform through one clone are visible to every other clone
 /// created from the same clock.
 ///
@@ -294,7 +294,7 @@ impl Clock {
     ///
     /// The only theoretical failure case is in tests using manual time control (via the
     /// `test-util` feature), where time could be moved excessively far into the future,
-    /// potentially exceeding the target type's representable range. This is not a concern
+    /// potentially exceeding the target type's supported range of values. This is not a concern
     /// in production.
     #[expect(
         clippy::match_wild_err_arm,

@@ -214,21 +214,21 @@ where
 /// ```rust
 /// # use thread_aware::{ThreadAware, closure::relocate_once, closure::RelocateFnOnce};
 /// # use thread_aware::affinity::*;
-/// struct Transferrable;
-/// impl ThreadAware for Transferrable {
+/// struct Transferable;
+/// impl ThreadAware for Transferable {
 ///     // ...
 ///     # fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
 ///     #    Self {}
 ///     # }
 /// }
 ///
-/// let closure = relocate_once(Transferrable, |transferrable| {
-///     // do stuff with transferrable
+/// let closure = relocate_once(Transferable, |transferable| {
+///     // do stuff with transferable
 /// });
 ///
 /// closure.call_once();
 ///
-/// let closure_with_multiple_captured = relocate_once((Transferrable, Transferrable), |(a, b)| {
+/// let closure_with_multiple_captured = relocate_once((Transferable, Transferable), |(a, b)| {
 ///     // do stuff with a and b
 /// });
 ///

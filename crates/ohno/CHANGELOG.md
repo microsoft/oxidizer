@@ -9,7 +9,7 @@
 
 - ✨ Features
 
-  - make OhnoCore clonable ([#79](https://github.com/microsoft/oxidizer/pull/79))
+  - make OhnoCore cloneable ([#79](https://github.com/microsoft/oxidizer/pull/79))
 
 - 🧩 Miscellaneous
 

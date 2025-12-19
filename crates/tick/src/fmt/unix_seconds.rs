@@ -52,13 +52,13 @@ use crate::fmt::{Iso8601, Rfc2822};
 pub struct UnixSeconds(pub(super) Duration);
 
 impl UnixSeconds {
-    /// The maximum representable value of `UnixSeconds`.
+    /// The largest value that be can represented by `UnixSeconds`.
     ///
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
 
-    /// The minimum representable value of `UnixSeconds`.
+    /// The smallest value that can be represented by `UnixSeconds`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
     pub const MIN: Self = Self(Duration::ZERO);

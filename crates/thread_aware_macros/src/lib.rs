@@ -8,7 +8,7 @@
 //!
 //! # Provided Derives
 //!
-//! * `#[derive(ThreadAware)]` – Auto-implements the `thread_aware::ThreadAware` trait by recursively
+//! * `#[derive(ThreadAware)]`: Auto-implements the `thread_aware::ThreadAware` trait by recursively
 //!   calling `transfer` on each field.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_macros/logo.png")]

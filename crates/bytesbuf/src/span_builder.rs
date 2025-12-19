@@ -50,7 +50,7 @@ use crate::{BlockRef, BlockSize, Span};
 /// Memory blocks are reference counted to avoid lifetime parameter pollution and provide
 /// flexibility in usage. This also implies that we are not using the Rust borrow checker to
 /// enforce exclusive reference semantics. Instead, we rely on the guarantees provided by the
-/// Span/SpanBuilder types to ensure no forbidden mode of access takes place. This is supported
+/// [`Span`]/[`SpanBuilder`] types to ensure no forbidden mode of access takes place. This is supported
 /// by the following guarantees:
 ///
 /// 1. The only way to write to a memory block is to own a [`SpanBuilder`] that can be used
@@ -167,7 +167,7 @@ impl SpanBuilder {
         // This cannot overflow - guarded by assertion above.
         self.filled_bytes = self.filled_bytes.wrapping_sub(len.get());
 
-        // SAFETY: We only seeked over filled bytes, so we must still be in-bounds.
+        // SAFETY: We only skipped over filled bytes, so we must still be in-bounds.
         self.start = unsafe { self.start.add(len.get() as usize) };
 
         span

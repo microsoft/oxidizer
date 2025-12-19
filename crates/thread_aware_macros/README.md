@@ -17,7 +17,7 @@ Macros for the [`thread_aware`][__link0] crate.
 
 ## Provided Derives
 
-* `#[derive(ThreadAware)]` – Auto-implements the `thread_aware::ThreadAware` trait by recursively
+* `#[derive(ThreadAware)]`: Auto-implements the `thread_aware::ThreadAware` trait by recursively
   calling `transfer` on each field.
 
 

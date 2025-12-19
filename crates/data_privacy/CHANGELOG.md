@@ -73,7 +73,7 @@
 
 - ✨ Features
 
-  - Make RedactionEngine clonable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
+  - Make RedactionEngine cloneable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
 
 - 📚 Documentation
 

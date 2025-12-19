@@ -61,7 +61,7 @@
 //!
 //! [`Unaware`] can be used to encapsulate such types, a wrapper that itself implements [`ThreadAware`], but
 //! otherwise does not react to it. You can think of it as a `MoveAsIs<T>`. However, it was
-//! deliberately named `Unaware` to signal that only types which are genuinely unware of their
+//! deliberately named `Unaware` to signal that only types which are genuinely unaware of their
 //! thread relocations (i.e., don't impl [`ThreadAware`]) should be wrapped in such.
 //!
 //! Wrapping types that implement the trait is discouraged, as it will prevent them from properly
@@ -86,12 +86,13 @@
 //! as that type implies some level of cross-thread sharing and thus needs special attention when used
 //! from types that implement [`ThreadAware`].
 //!
-//! # Feature Flags
-//! * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion
+//! # Features
+//!
+//! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments: `default-features = false`.
-//! * **`test-util`** – Enables features used for testing.
-//! * **`threads`** – Enables features mainly used by async runtimes for OS interactions.
+//! * **`test-util`**: Enables features used for testing.
+//! * **`threads`**: Enables features mainly used by async runtimes for OS interactions.
 //!
 //! # Examples
 //!
@@ -172,7 +173,7 @@ pub use core::ThreadAware;
 /// Unions are not supported and will produce a compile error.
 ///
 /// # Attributes
-/// * `#[thread_aware(skip)]` – Prevents a field from being recursively transferred.
+/// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
 /// Generic type parameters appearing in non-skipped fields automatically receive a

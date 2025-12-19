@@ -241,8 +241,8 @@ where
     /// to another processor. The closure behaves like a `RelocateFnOnce` to ensure it captures only values that are safe to
     /// transfer themselves.
     ///
-    /// This function can be used to create a `Arc` of a type that itself doesn't implement [`ThreadAware`] because
-    /// we can ensure that each affinity will get its own, independenty-initialized value:
+    /// This function can be used to create an `Arc` of a type that itself doesn't implement [`ThreadAware`] because
+    /// we can ensure that each affinity will get its own, independently-initialized value:
     ///
     /// ```rust
     /// # use std::sync::{self, Mutex};

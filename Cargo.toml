@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [workspace]
-resolver = "3"
+resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]

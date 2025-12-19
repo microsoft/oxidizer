@@ -18,8 +18,8 @@ pub trait Enrichable {
     /// # Note
     ///
     /// This method is not intended to be used directly. Instead, use:
-    /// - The [`enrich_err!`](crate::enrich_err) macro for convenient error enrichment
-    /// - Methods from [`EnrichableExt`] trait ([`enrich`](EnrichableExt::enrich), [`enrich_with`](EnrichableExt::enrich_with))
+    /// - The [`enrich_err!()`](crate::enrich_err) macro for convenient error enrichment
+    /// - Methods from [`EnrichableExt`] trait ([`enrich()`](EnrichableExt::enrich), [`enrich_with()`](EnrichableExt::enrich_with))
     fn add_enrichment(&mut self, entry: EnrichmentEntry);
 }
 
@@ -44,7 +44,7 @@ impl Enrichable for OhnoCore {
 pub trait EnrichableExt: Enrichable {
     /// Adds enrichment information to the error.
     ///
-    /// It uses [`std::panic::Location::caller`] to capture the file and line number
+    /// It uses [`Location::caller`](std::panic::Location::caller) to capture the file and line number
     /// where this method is invoked.
     #[must_use]
     fn enrich(mut self, msg: impl Into<Cow<'static, str>>) -> Self
@@ -58,7 +58,7 @@ pub trait EnrichableExt: Enrichable {
 
     /// Adds lazily evaluated enrichment information to the error.
     ///
-    /// It uses [`std::panic::Location::caller`] to capture the file and line number
+    /// It uses [`Location::caller`](std::panic::Location::caller) to capture the file and line number
     /// where this method is invoked.
     #[must_use]
     fn enrich_with<F, R>(mut self, f: F) -> Self

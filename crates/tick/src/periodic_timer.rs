@@ -14,7 +14,7 @@ use super::timers::TimerKey;
 
 /// A timer that periodically ticks.
 ///
-/// A periodic timer can be created using the [`PeriodicTimer::new`] constructor,
+/// A periodic timer can be created using the [`PeriodicTimer::new()`] constructor,
 /// which requires a reference to a [`Clock`].
 ///
 /// # Precision
