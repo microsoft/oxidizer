@@ -51,10 +51,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_byte");
     group.bench_function("get_byte", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_byte());
             }
             start.elapsed()
@@ -64,10 +66,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u8");
     group.bench_function("get_u8", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u8());
             }
             start.elapsed()
@@ -79,12 +83,14 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("copy_to_slice");
     group.bench_function("copy_to_slice", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences and target buffers outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+            let mut targets: Vec<_> = (0..iters).map(|_| [0u8; COPY_TO_SLICE_LEN]).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
-                let mut target = [0u8; COPY_TO_SLICE_LEN];
-                seq.copy_to_slice(&mut target);
+            for (seq, target) in sequences.iter_mut().zip(targets.iter_mut()) {
+                seq.copy_to_slice(target);
                 black_box(target);
             }
             start.elapsed()
@@ -94,12 +100,16 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("copy_to_uninit_slice");
     group.bench_function("copy_to_uninit_slice", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences and target buffers outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+            let mut targets: Vec<_> = (0..iters)
+                .map(|_| [MaybeUninit::<u8>::uninit(); COPY_TO_SLICE_LEN])
+                .collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
-                let mut target = [MaybeUninit::<u8>::uninit(); COPY_TO_SLICE_LEN];
-                seq.copy_to_uninit_slice(&mut target);
+            for (seq, target) in sequences.iter_mut().zip(targets.iter_mut()) {
+                seq.copy_to_uninit_slice(target);
                 black_box(target);
             }
             start.elapsed()
@@ -257,10 +267,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u8");
     group.bench_function("get_u8", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<u8>());
             }
             start.elapsed()
@@ -270,10 +282,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u8_bytes");
     group.bench_function("get_u8_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u8());
             }
             start.elapsed()
@@ -284,10 +298,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i8");
     group.bench_function("get_i8", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<i8>());
             }
             start.elapsed()
@@ -297,10 +313,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i8_bytes");
     group.bench_function("get_i8_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i8());
             }
             start.elapsed()
@@ -311,10 +329,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u16_le");
     group.bench_function("get_u16_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<u16>());
             }
             start.elapsed()
@@ -324,10 +344,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u16_le_bytes");
     group.bench_function("get_u16_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u16_le());
             }
             start.elapsed()
@@ -338,10 +360,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u16_be");
     group.bench_function("get_u16_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<u16>());
             }
             start.elapsed()
@@ -351,10 +375,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u16_be_bytes");
     group.bench_function("get_u16_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u16());
             }
             start.elapsed()
@@ -365,10 +391,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i16_le");
     group.bench_function("get_i16_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<i16>());
             }
             start.elapsed()
@@ -378,10 +406,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i16_le_bytes");
     group.bench_function("get_i16_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i16_le());
             }
             start.elapsed()
@@ -392,10 +422,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i16_be");
     group.bench_function("get_i16_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<i16>());
             }
             start.elapsed()
@@ -405,10 +437,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i16_be_bytes");
     group.bench_function("get_i16_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i16());
             }
             start.elapsed()
@@ -419,10 +453,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u32_le");
     group.bench_function("get_u32_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<u32>());
             }
             start.elapsed()
@@ -432,10 +468,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u32_le_bytes");
     group.bench_function("get_u32_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u32_le());
             }
             start.elapsed()
@@ -446,10 +484,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u32_be");
     group.bench_function("get_u32_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<u32>());
             }
             start.elapsed()
@@ -459,10 +499,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u32_be_bytes");
     group.bench_function("get_u32_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u32());
             }
             start.elapsed()
@@ -473,10 +515,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i32_le");
     group.bench_function("get_i32_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<i32>());
             }
             start.elapsed()
@@ -486,10 +530,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i32_le_bytes");
     group.bench_function("get_i32_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i32_le());
             }
             start.elapsed()
@@ -500,10 +546,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i32_be");
     group.bench_function("get_i32_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<i32>());
             }
             start.elapsed()
@@ -513,10 +561,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i32_be_bytes");
     group.bench_function("get_i32_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i32());
             }
             start.elapsed()
@@ -527,10 +577,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u64_le");
     group.bench_function("get_u64_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<u64>());
             }
             start.elapsed()
@@ -540,10 +592,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u64_le_bytes");
     group.bench_function("get_u64_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u64_le());
             }
             start.elapsed()
@@ -554,10 +608,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u64_be");
     group.bench_function("get_u64_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<u64>());
             }
             start.elapsed()
@@ -567,10 +623,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_u64_be_bytes");
     group.bench_function("get_u64_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_u64());
             }
             start.elapsed()
@@ -581,10 +639,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i64_le");
     group.bench_function("get_i64_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<i64>());
             }
             start.elapsed()
@@ -594,10 +654,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i64_le_bytes");
     group.bench_function("get_i64_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i64_le());
             }
             start.elapsed()
@@ -608,10 +670,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i64_be");
     group.bench_function("get_i64_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<i64>());
             }
             start.elapsed()
@@ -621,10 +685,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_i64_be_bytes");
     group.bench_function("get_i64_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_i64());
             }
             start.elapsed()
@@ -635,10 +701,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f32_le");
     group.bench_function("get_f32_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<f32>());
             }
             start.elapsed()
@@ -648,10 +716,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f32_le_bytes");
     group.bench_function("get_f32_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_f32_le());
             }
             start.elapsed()
@@ -662,10 +732,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f32_be");
     group.bench_function("get_f32_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<f32>());
             }
             start.elapsed()
@@ -675,10 +747,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f32_be_bytes");
     group.bench_function("get_f32_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_f32());
             }
             start.elapsed()
@@ -689,10 +763,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f64_le");
     group.bench_function("get_f64_le", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_le::<f64>());
             }
             start.elapsed()
@@ -702,10 +778,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f64_le_bytes");
     group.bench_function("get_f64_le_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_f64_le());
             }
             start.elapsed()
@@ -716,10 +794,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f64_be");
     group.bench_function("get_f64_be", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_num_be::<f64>());
             }
             start.elapsed()
@@ -729,10 +809,12 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("get_f64_be_bytes");
     group.bench_function("get_f64_be_bytes", |b| {
         b.iter_custom(|iters| {
+            // Prepare sequences outside the timed loop
+            let mut sequences: Vec<_> = (0..iters).map(|_| many_as_seq.clone()).collect();
+
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
-            for _ in 0..iters {
-                let mut seq = many_as_seq.clone();
+            for seq in &mut sequences {
                 black_box(seq.get_f64());
             }
             start.elapsed()
