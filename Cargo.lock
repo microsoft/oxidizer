@@ -96,6 +96,7 @@ dependencies = [
  "mutants",
  "new_zealand",
  "nm",
+ "num-traits",
  "smallvec",
  "static_assertions",
  "testing_aids",

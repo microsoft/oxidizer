@@ -13,38 +13,41 @@
 
 </div>
 
-Manipulate sequences of bytes for efficient I/O.
+Create and manipulate byte sequences for efficient I/O.
 
-A [`BytesView`][__link0] is a view over a logical sequence of zero or more bytes
-stored in memory, similar to a slice `&[u8]` but with some key differences:
+A byte sequence is a logical sequence of zero or more bytes stored in memory,
+similar to a slice `&[u8]` but with some key differences:
 
 * The bytes in a byte sequence are not required to be consecutive in memory.
-* The bytes in a byte sequence are always immutable, even if you own the [`BytesView`][__link1].
+* The bytes in a byte sequence are always immutable.
 
 In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
-treated as one logical sequence of bytes. The types in this crate provide a way to work with
-byte sequences using an API that is reasonably convenient while also being compatible with
-the requirements of high-performance zero-copy I/O operations.
+treated as one logical sequence of bytes. Byte sequences are created via [`BytesBuf`][__link0] and
+consumed via [`BytesView`][__link1].
 
 ## Consuming Byte Sequences
 
-The standard model for using bytes of data from a [`BytesView`][__link2] is to consume them via the
-[`bytes::buf::Buf`][__link3] trait, which is implemented by [`BytesView`][__link4].
+A byte sequence is typically consumed by reading its contents. This is done via the
+[`BytesView`][__link2] type, which is a view over a byte sequence. When reading data, the read
+bytes are removed from the view, shrinking it to only the remaining bytes.
 
-There are many helper methods on this trait that will read bytes from the beginning of the
-sequence and simultaneously remove the read bytes from the sequence, shrinking it to only
-the remaining bytes.
+There are many helper methods on this type for easily consuming bytes from the view:
+
+* [`get_num_le::<T>()`][__link3] reads numbers. Big-endian/native-endian variants also exist.
+* [`get_byte()`][__link4] reads a single byte.
+* [`copy_to_slice()`][__link5] copies bytes into a provided slice.
+* [`copy_to_uninit_slice()`][__link6] copies bytes into a provided uninitialized slice.
+* [`as_read()`][__link7] creates a `std::io::Read` adapter for reading bytes via standard I/O methods.
 
 ```rust
-use bytes::Buf;
 use bytesbuf::BytesView;
 
 fn consume_message(mut message: BytesView) {
     // We read the message and calculate the sum of all the words in it.
     let mut sum: u64 = 0;
 
-    while message.has_remaining() {
-        let word = message.get_u64();
+    while !message.is_empty() {
+        let word = message.get_num_le::<u64>();
         sum = sum.saturating_add(word);
     }
 
@@ -52,77 +55,75 @@ fn consume_message(mut message: BytesView) {
 }
 ```
 
-If the helper methods are not sufficient, you can access the contents via byte slices using the
-more fundamental methods of the [`bytes::buf::Buf`][__link5] trait such as:
+If the helper methods are not sufficient, you can access the byte sequence via byte slices using the
+following fundamental methods that underpin the convenience methods:
 
-* [`chunk()`][__link6], which returns a slice of bytes from the beginning of the sequence. The
+* [`first_slice()`][__link8], which returns the first slice of bytes that makes up the byte sequence. The
   length of this slice is determined by the inner structure of the byte sequence and it may not
-  contain all the bytes in the sequence.
-* [`advance()`][__link7], which removes bytes from the beginning of the sequence, advancing the
-  head to a new position. When you advance past the slice returned by `chunk()`, the next
-  call to `chunk()` will return a new slice of bytes starting from the new head position.
-* [`chunks_vectored()`][__link8], which returns multiple slices of bytes from the beginning of the
-  sequence. This can be desirable for advanced access models that can consume multiple
-  chunks of data at the same time.
+  contain all the bytes.
+* [`advance()`][__link9], which marks bytes from the beginning of [`first_slice()`][__link10] as read, shrinking the
+  view of the byte sequence by the corresponding amount and moving remaining data up to the front.
+  When you advance past the slice returned by [`first_slice()`][__link11], the next call to [`first_slice()`][__link12]
+  will return a new slice of bytes starting from the new front position of the view.
 
 ```rust
-use bytes::Buf;
 use bytesbuf::BytesView;
 
-let len = sequence.len();
-let mut chunk_lengths = Vec::new();
+let len = bytes.len();
+let mut slice_lengths = Vec::new();
 
-while sequence.has_remaining() {
-    let chunk = sequence.chunk();
-    chunk_lengths.push(chunk.len());
+while !bytes.is_empty() {
+    let slice = bytes.first_slice();
+    slice_lengths.push(slice.len());
 
-    // We have completed processing this chunk, all we wanted was to know its length.
-    sequence.advance(chunk.len());
+    // We have completed processing this slice. All we wanted was to know its length.
+    // We can now mark this slice as consumed, revealing the next slice for inspection.
+    bytes.advance(slice.len());
 }
 
-println!("Inspected a sequence of {len} bytes with chunk lengths: {chunk_lengths:?}");
+println!("Inspected a view over {len} bytes with slice lengths: {slice_lengths:?}");
 ```
 
 To reuse a byte sequence, clone it before consuming the contents. This is a cheap
 zero-copy operation.
 
 ```rust
-use bytes::Buf;
 use bytesbuf::BytesView;
 
-assert_eq!(sequence.len(), 16);
+assert_eq!(bytes.len(), 16);
 
-let mut sequence_clone = sequence.clone();
-assert_eq!(sequence_clone.len(), 16);
+let mut bytes_clone = bytes.clone();
+assert_eq!(bytes_clone.len(), 16);
 
-_ = sequence_clone.get_u64();
-assert_eq!(sequence_clone.len(), 8);
+// Consume 8 bytes from the front.
+_ = bytes_clone.get_num_le::<u64>();
+assert_eq!(bytes_clone.len(), 8);
 
-// Operations on the clone have no effect on the original sequence.
-assert_eq!(sequence.len(), 16);
+// Operations on the clone have no effect on the original view.
+assert_eq!(bytes.len(), 16);
 ```
 
 ## Producing Byte Sequences
 
 For creating a byte sequence, you first need some memory capacity to put the bytes into. This
-means you need a memory provider, which is a type that implements the [`Memory`][__link9] trait.
+means you need a memory provider, which is a type that implements the [`Memory`][__link13] trait.
 
 Obtaining a memory provider is generally straightforward. Simply use the first matching option
 from the following list:
 
 1. If you are creating byte sequences for the purpose of submitting them to a specific
-   object of a known type (e.g. writing them to a network connection), the target type will
-   typically implement the [`HasMemory`][__link10] trait, which gives you a suitable memory
-   provider instance via [`HasMemory::memory`][__link11]. Use it - this memory provider will
+   object of a known type (e.g. writing them to a `TcpConnection`), the target type will
+   typically implement the [`HasMemory`][__link14] trait, which gives you a suitable memory
+   provider instance via [`HasMemory::memory()`][__link15]. Use this as the memory provider - it will
    give you memory with the configuration that is optimal for delivering bytes to that
-   specific instance.
+   specific consumer.
 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-   instance of [`GlobalPool`][__link12]. In a typical web application framework, this is a service
-   exposed by the application framework. In a different context (e.g. example or test code
-   with no framework), you can create your own instance via `GlobalPool::new()`.
+   instance of a shared [`GlobalPool`][__link16]. In a typical web application, the global memory pool
+   is a service exposed by the application framework. In a different context (e.g. example
+   or test code with no framework), you can create your own instance via `GlobalPool::new()`.
 
 Once you have a memory provider, you can reserve memory from it by calling
-[`Memory::reserve`][__link13] on it. This returns a [`BytesBuf`][__link14] with the requested
+[`Memory::reserve()`][__link17] on it. This returns a [`BytesBuf`][__link18] with the requested
 memory capacity.
 
 ```rust
@@ -130,161 +131,159 @@ use bytesbuf::Memory;
 
 let memory = connection.memory();
 
-let mut sequence_builder = memory.reserve(100);
+let mut buf = memory.reserve(100);
 ```
 
-Now that you have the memory capacity and a [`BytesBuf`][__link15], you can fill the memory
-capacity with bytes of data. The standard pattern for this is to use the
-[`bytes::buf::BufMut`][__link16] trait, which is implemented by [`BytesBuf`][__link17].
+Now that you have the memory capacity in a [`BytesBuf`][__link19], you can fill the memory
+capacity with bytes of data. Creating byte sequences in a [`BytesBuf`][__link20] is an
+append-only process - you can only add data to the end of the buffered sequence.
 
-Helper methods on this trait allow you to write bytes to the sequence builder up to the
-extent of the reserved memory capacity.
+There are many helper methods on [`BytesBuf`][__link21] for easily appending bytes to the buffer:
+
+* [`put_num_le::<T>()`][__link22], which appends numbers. Big-endian/native-endian variants also exist.
+* [`put_slice()`][__link23], which appends a slice of bytes.
+* [`put_byte()`][__link24], which appends a single byte.
+* [`put_byte_repeated()`][__link25], which appends multiple repetitions of a byte.
+* [`put_bytes()`][__link26], which appends an existing [`BytesView`][__link27].
 
 ```rust
-use bytes::buf::BufMut;
 use bytesbuf::Memory;
 
 let memory = connection.memory();
 
-let mut sequence_builder = memory.reserve(100);
+let mut buf = memory.reserve(100);
 
-sequence_builder.put_u64(1234);
-sequence_builder.put_u64(5678);
-sequence_builder.put(b"Hello, world!".as_slice());
+buf.put_num_be(1234_u64);
+buf.put_num_be(5678_u64);
+buf.put_slice(*b"Hello, world!");
 ```
 
-If the helper methods are not sufficient, you can append contents via mutable byte slices
-using the more fundamental methods of the [`bytes::buf::BufMut`][__link18] trait such as:
+If the helper methods are not sufficient, you can write contents directly into mutable byte slices
+using the fundamental methods that underpin the convenience methods:
 
-* [`chunk_mut()`][__link19], which returns a mutable slice of bytes from the beginning of the
-  sequence builder’s unused capacity. The length of this slice is determined by the inner
-  structure of the sequence builder and it may not contain all the capacity that has been
-  reserved.
-* [`advance_mut()`][__link20], which declares that a number of bytes from the beginning of the
-  unused capacity have been initialized with data and are no longer unused. This will
-  mark these bytes as valid for reading and advance `chunk_mut()` to the next slice if the
-  current one has been completely filled.
+* [`first_unfilled_slice()`][__link28], which returns a mutable slice of bytes from the beginning of the
+  buffer’s remaining capacity. The length of this slice is determined by the inner memory layout
+  of the buffer and it may not contain all the capacity that has been reserved.
+* [`advance()`][__link29], which declares that a number of bytes at the beginning of [`first_unfilled_slice()`][__link30]
+  have been initialized with data and are no longer unused. This will mark these bytes as valid for
+  consumption and advance [`first_unfilled_slice()`][__link31] to the next slice of unused memory capacity
+  if the current slice has been completely filled.
 
-See `examples/mem_chunk_write.rs` for an example of how to use these methods.
+See `examples/bb_slice_by_slice_write.rs` for an example of how to use these methods.
 
 If you do not know exactly how much memory you need in advance, you can extend the sequence
-builder capacity on demand if you run out by calling [`BytesBuf::reserve`][__link21],
-which will reserve more memory capacity. You can use [`bytes::buf::BufMut::remaining_mut()`][__link22]
-on the sequence builder to identify how much unused memory capacity is available for writing.
+builder capacity on demand by calling [`BytesBuf::reserve()`][__link32]. You can use [`remaining_capacity()`][__link33]
+to identify how much unused memory capacity is available.
 
 ```rust
-use bytes::buf::BufMut;
 use bytesbuf::Memory;
 
 let memory = connection.memory();
 
-let mut sequence_builder = memory.reserve(100);
+let mut buf = memory.reserve(100);
 
-// .. write some data into the sequence builder ..
+// .. write some data into the buffer ..
 
 // We discover that we need 80 additional bytes of memory! No problem.
-sequence_builder.reserve(80, &memory);
+buf.reserve(80, &memory);
 
 // Remember that a memory provider can always provide more memory than requested.
-assert!(sequence_builder.capacity() >= 100 + 80);
-assert!(sequence_builder.remaining_mut() >= 80);
+assert!(buf.capacity() >= 100 + 80);
+assert!(buf.remaining_capacity() >= 80);
 ```
 
-When you have filled the memory capacity with the bytes you wanted to write, you can consume
-the data in the sequence builder, turning it into a [`BytesView`][__link23] of immutable bytes.
+When you have filled the memory capacity with the contents of the byte sequence, you can consume
+the data in the buffer as a [`BytesView`][__link34] over immutable bytes.
 
 ```rust
-use bytes::buf::BufMut;
 use bytesbuf::Memory;
 
 let memory = connection.memory();
 
-let mut sequence_builder = memory.reserve(100);
+let mut buf = memory.reserve(100);
 
-sequence_builder.put_u64(1234);
-sequence_builder.put_u64(5678);
-sequence_builder.put(b"Hello, world!".as_slice());
+buf.put_num_be(1234_u64);
+buf.put_num_be(5678_u64);
+buf.put_slice(*b"Hello, world!");
 
-let message = sequence_builder.consume_all();
+let message = buf.consume_all();
 ```
 
-This can be done piece by piece, and you can continue writing to the sequence builder
+This can be done piece by piece, and you can continue writing to the buffer
 after consuming some already written bytes.
 
 ```rust
-use bytes::buf::BufMut;
 use bytesbuf::Memory;
 
 let memory = connection.memory();
 
-let mut sequence_builder = memory.reserve(100);
+let mut buf = memory.reserve(100);
 
-sequence_builder.put_u64(1234);
-sequence_builder.put_u64(5678);
+buf.put_num_be(1234_u64);
+buf.put_num_be(5678_u64);
 
-let first_8_bytes = sequence_builder.consume(8);
-let second_8_bytes = sequence_builder.consume(8);
+let first_8_bytes = buf.consume(8);
+let second_8_bytes = buf.consume(8);
 
-sequence_builder.put(b"Hello, world!".as_slice());
+buf.put_slice(*b"Hello, world!");
 
-let final_contents = sequence_builder.consume_all();
+let final_contents = buf.consume_all();
 ```
 
-If you already have a [`BytesView`][__link24] that you want to write into a [`BytesBuf`][__link25], call
-[`BytesBuf::append()`][__link26]. This is a highly efficient zero-copy operation
-that reuses the memory capacity of the sequence you are appending.
+If you already have a [`BytesView`][__link35] that you want to write into a [`BytesBuf`][__link36], call
+[`BytesBuf::put_bytes()`][__link37]. This is a highly efficient zero-copy operation
+that reuses the memory capacity of the view you are appending.
 
 ```rust
-use bytes::buf::BufMut;
 use bytesbuf::Memory;
 
 let memory = connection.memory();
 
 let mut header_builder = memory.reserve(16);
-header_builder.put_u64(1234);
+header_builder.put_num_be(1234_u64);
 let header = header_builder.consume_all();
 
-let mut sequence_builder = memory.reserve(128);
-sequence_builder.append(header);
-sequence_builder.put(b"Hello, world!".as_slice());
+let mut buf = memory.reserve(128);
+buf.put_bytes(header);
+buf.put_slice(*b"Hello, world!");
 ```
 
-Note that there is no requirement that the memory capacity of the sequence builder and the
-memory capacity of the sequence being appended come from the same memory provider. It is valid
+Note that there is no requirement that the memory capacity of the buffer and the
+memory capacity of the view being appended come from the same memory provider. It is valid
 to mix and match memory from different providers, though this may disable some optimizations.
 
 ## Implementing APIs that Consume Byte Sequences
 
 If you are implementing a type that accepts byte sequences, you should implement the
-[`HasMemory`][__link27] trait to make it possible for the caller to use optimally
-configured memory.
+[`HasMemory`][__link38] trait to make it possible for the caller to use optimally
+configured memory when creating the byte sequences for input to your type.
 
 Even if the implementation of your type today is not capable of taking advantage of
 optimizations that depend on the memory configuration, it may be capable of doing so
 in the future or may, today or in the future, pass the data to another type that
-implements [`HasMemory`][__link28], which can take advantage of memory optimizations.
+implements [`HasMemory`][__link39], which can take advantage of memory optimizations.
 Therefore, it is best to implement this trait on all types that accept byte sequences.
 
-The recommended implementation strategy for [`HasMemory`][__link29] is as follows:
+The recommended implementation strategy for [`HasMemory`][__link40] is as follows:
 
-* If your type always passes the data to another type that implements [`HasMemory`][__link30],
+* If your type always passes the data to another type that implements [`HasMemory`][__link41],
   simply forward the memory provider from the other type.
 * If your type can take advantage of optimizations enabled by specific memory configurations,
   (e.g. because it uses operating system APIs that unlock better performance when the memory
   is appropriately configured), return a memory provider that performs the necessary
   configuration.
-* If your type neither passes the data to another type that implements [`HasMemory`][__link31]
+* If your type neither passes the data to another type that implements [`HasMemory`][__link42]
   nor can take advantage of optimizations enabled by specific memory configurations, obtain
-  an instance of [`GlobalPool`][__link32] as a dependency and return it as the memory provider.
+  an instance of [`GlobalPool`][__link43] as a dependency and return it as the memory provider.
 
-Example of forwarding the memory provider (see `examples/mem_has_provider_forwarding.rs`
+Example of forwarding the memory provider (see `examples/bb_has_memory_forwarding.rs`
 for full code):
 
 ```rust
 use bytesbuf::{HasMemory, MemoryShared, BytesView};
 
-/// Counts the number of 0x00 bytes in a sequence before
-/// writing that sequence to a network connection.
+/// Counts the number of 0x00 bytes in a byte sequence before
+/// writing that byte sequence to a network connection.
 ///
 /// # Implementation strategy for `HasMemory`
 ///
@@ -306,10 +305,10 @@ impl ConnectionZeroCounter {
         }
     }
 
-    pub fn write(&mut self, sequence: BytesView) {
+    pub fn write(&mut self, message: BytesView) {
         // TODO: Count zeros.
 
-        self.connection.write(sequence);
+        self.connection.write(message);
     }
 }
 
@@ -323,7 +322,7 @@ impl HasMemory for ConnectionZeroCounter {
 ```
 
 Example of returning a memory provider that performs configuration for optimal memory (see
-`examples/mem_has_provider_optimizing.rs` for full code):
+`examples/bb_has_memory_optimizing.rs` for full code):
 
 ```rust
 use bytesbuf::{CallbackMemory, HasMemory, MemoryShared, BytesView};
@@ -334,7 +333,7 @@ use bytesbuf::{CallbackMemory, HasMemory, MemoryShared, BytesView};
 /// the memory is reserved from the I/O memory pool. It uses the I/O context to reserve memory,
 /// providing a usage-specific configuration when reserving memory capacity.
 ///
-/// A delegating memory provider is used to attach the configuration to each memory reservation.
+/// A callback memory provider is used to attach the configuration to each memory reservation.
 #[derive(Debug)]
 struct UdpConnection {
     io_context: IoContext,
@@ -368,8 +367,8 @@ impl HasMemory for UdpConnection {
 
 ```
 
-Example of returning a usage-neutral memory provider (see `examples/mem_has_provider_neutral.rs` for
-full code):
+Example of returning a global memory pool when the type is agnostic toward memory configuration
+(see `examples/bb_has_memory_global.rs` for full code):
 
 ```rust
 use bytesbuf::{GlobalPool, HasMemory, MemoryShared};
@@ -386,19 +385,19 @@ use bytesbuf::{GlobalPool, HasMemory, MemoryShared};
 #[derive(Debug)]
 struct ChecksumCalculator {
     // The application logic must provide this - it is our dependency.
-    memory_provider: GlobalPool,
+    memory: GlobalPool,
 }
 
 impl ChecksumCalculator {
-    pub fn new(memory_provider: GlobalPool) -> Self {
-        Self { memory_provider }
+    pub fn new(memory: GlobalPool) -> Self {
+        Self { memory }
     }
 }
 
 impl HasMemory for ChecksumCalculator {
     fn memory(&self) -> impl MemoryShared {
-        // Cloning a memory provider is a cheap operation, as clones reuse resources.
-        self.memory_provider.clone()
+        // Cloning a memory provider is intended to be a cheap operation, reusing resources.
+        self.memory.clone()
     }
 }
 ```
@@ -416,7 +415,7 @@ Otherwise, the implementation can fall back to a generic implementation that wor
 byte sequence.
 
 Example of identifying whether a byte sequence uses the optimal memory configuration (see
-`examples/mem_optimal_path.rs` for full code):
+`examples/bb_optimal_path.rs` for full code):
 
 ```rust
 use bytesbuf::BytesView;
@@ -426,7 +425,7 @@ pub fn write(&mut self, message: BytesView) {
     // ues the optimal I/O path. There is no requirement that the data passed to us contains
     // only memory with our preferred configuration.
 
-    let use_optimal_path = message.iter_chunk_metas().all(|meta| {
+    let use_optimal_path = message.iter_slice_metas().all(|meta| {
         // If there is no metadata, the memory is not I/O memory.
         meta.is_some_and(|meta| {
             // If the type of metadata does not match the metadata
@@ -456,15 +455,15 @@ checked for compatibility.
 
 ## Compatibility with the `bytes` Crate
 
-The popular [`Bytes`][__link33] type from the `bytes` crate is often used in the Rust ecosystem to
+The popular [`Bytes`][__link44] type from the `bytes` crate is often used in the Rust ecosystem to
 represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
-type, this crate offers conversion methods to translate between [`BytesView`][__link34] and [`Bytes`][__link35]:
+type, this crate offers conversion methods to translate between [`BytesView`][__link45] and [`Bytes`][__link46]:
 
-* [`BytesView::into_bytes`][__link36] converts a [`BytesView`][__link37] into a [`Bytes`][__link38] instance. This
+* [`BytesView::to_bytes()`][__link47] converts a [`BytesView`][__link48] into a [`Bytes`][__link49] instance. This
   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
   You are discouraged from using this method in any performance-relevant logic path.
-* `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][__link39] instance
-  into a [`BytesView`][__link40]. This is an efficient zero-copy operation that reuses the memory of the
+* `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][__link50] instance
+  into a [`BytesView`][__link51]. This is an efficient zero-copy operation that reuses the memory of the
   `Bytes` instance.
 
 ## Static Data
@@ -481,7 +480,7 @@ Optimal processing of static data requires satisfying multiple requirements:
 * We want to use memory that is optimally configured for the context in which the data is
   consumed (e.g. network connection, file, etc).
 
-The standard pattern here is to use [`OnceLock`][__link41] to lazily initialize a [`BytesView`][__link42] from
+The standard pattern here is to use [`OnceLock`][__link52] to lazily initialize a [`BytesView`][__link53] from
 the static data on first use, using memory from a memory provider that is optimal for the
 intended usage.
 
@@ -505,8 +504,9 @@ let header_prefix = OnceLock::<BytesView>::new();
 for _ in 0..10 {
     let mut connection = Connection::accept();
 
-    // The static data is transformed into a BytesView on first use,
-    // using memory optimally configured for a network connection.
+    // The static data is transformed into a BytesView on first use, using memory optimally configured
+    // for network connections. The underlying principle is that memory optimally configured for one network
+    // connection is likely also optimally configured for another network connection, enabling efficient reuse.
     let header_prefix = header_prefix
         .get_or_init(|| BytesView::copied_from_slice(HEADER_PREFIX, &connection.memory()));
 
@@ -526,9 +526,9 @@ For testing purposes, this crate exposes some special-purpose memory providers t
 optimized for real-world usage but may be useful to test corner cases of byte sequence
 processing in your code:
 
-* [`TransparentTestMemory`][__link43] - a memory provider that does not add any value, just uses memory
+* [`TransparentTestMemory`][__link54] - a memory provider that does not add any value, just uses memory
   from the Rust global allocator.
-* [`FixedBlockTestMemory`][__link44] - a variation of the transparent memory provider that limits
+* [`FixedBlockTestMemory`][__link55] - a variation of the transparent memory provider that limits
   each consecutive memory block to a fixed size. This is useful for testing scenarios where
   you want to ensure that your code works well even if a byte sequence consists of
   non-consecutive memory. You can go down to as low as 1 byte per block!
@@ -539,49 +539,60 @@ processing in your code:
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5yAxXVX-INyGwACB9YZn6BLG5mUwiQgcGNZGyIa4-qKJXxMYWSBgmhieXRlc2J1ZmUwLjEuMg
- [__link0]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3iSI3bi0cZkG8Tg7bBQfy7AG_Go-om_ZeJHG0mzQEby4eVxYWSBgmhieXRlc2J1ZmUwLjEuMg
+ [__link0]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link10]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
- [__link11]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory::memory
- [__link12]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=GlobalPool
- [__link13]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=Memory::reserve
- [__link14]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
- [__link15]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
- [__link16]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
- [__link17]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
- [__link18]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html
- [__link19]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html#method.chunk_mut
+ [__link10]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::first_slice
+ [__link11]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::first_slice
+ [__link12]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::first_slice
+ [__link13]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=Memory
+ [__link14]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
+ [__link15]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory::memory
+ [__link16]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=GlobalPool
+ [__link17]: `Memory::reserve()`
+ [__link18]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
+ [__link19]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
  [__link2]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link20]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html#method.advance
- [__link21]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::reserve
- [__link22]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html#method.remaining_mut
- [__link23]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link24]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link25]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
- [__link26]: https://docs.rs/bytes/latest/bytes/buf/trait.BufMut.html#method.remaining_mut
- [__link27]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
- [__link28]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
- [__link29]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
- [__link3]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
- [__link30]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
- [__link31]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
- [__link32]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=GlobalPool
- [__link33]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link20]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
+ [__link21]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
+ [__link22]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::put_num_le
+ [__link23]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::put_slice
+ [__link24]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::put_byte
+ [__link25]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::put_byte_repeated
+ [__link26]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::put_bytes
+ [__link27]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__link28]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link29]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::advance
+ [__link3]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::get_num_le
+ [__link30]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link31]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link32]: `BytesBuf::reserve()`
+ [__link33]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf::remaining_capacity
  [__link34]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link35]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link36]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::into_bytes
- [__link37]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link38]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link39]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link4]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link40]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link41]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
- [__link42]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
- [__link43]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=TransparentTestMemory
- [__link44]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=FixedBlockTestMemory
- [__link5]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
- [__link6]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html#method.chunk
- [__link7]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html#method.advance
- [__link8]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html#method.chunks_vectored
- [__link9]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=Memory
+ [__link35]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__link36]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
+ [__link37]: `BytesBuf::put_bytes()`
+ [__link38]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
+ [__link39]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
+ [__link4]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::get_byte
+ [__link40]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
+ [__link41]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
+ [__link42]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=HasMemory
+ [__link43]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=GlobalPool
+ [__link44]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link45]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__link46]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link47]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::to_bytes
+ [__link48]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__link49]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link5]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::copy_to_slice
+ [__link50]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link51]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__link52]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
+ [__link53]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
+ [__link54]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=TransparentTestMemory
+ [__link55]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=FixedBlockTestMemory
+ [__link6]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::copy_to_uninit_slice
+ [__link7]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::as_read
+ [__link8]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::first_slice
+ [__link9]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::advance

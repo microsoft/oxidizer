@@ -22,6 +22,8 @@ allowed_external_types = [
     "bytes::buf::buf_impl::Buf",
     "bytes::buf::uninit_slice::UninitSlice",
     "bytes::buf::buf_mut::BufMut",
+    "num_traits::ops::bytes::FromBytes",
+    "num_traits::ops::bytes::ToBytes",
 ]
 
 [package.metadata.docs.rs]
@@ -36,6 +38,7 @@ bytes = { workspace = true, features = ["std"] }
 infinity_pool.workspace = true
 new_zealand.workspace = true
 nm.workspace = true
+num-traits.workspace = true
 smallvec = { workspace = true, features = ["const_new", "union"] }
 
 [dev-dependencies]

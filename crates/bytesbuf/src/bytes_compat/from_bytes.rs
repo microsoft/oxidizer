@@ -1,28 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compatibility layer for types in the `bytes` crate.
-//!
-//! We support bidirectional translation between `Bytes` and `BytesView` types.
-//!
-//! `Bytes` to `BytesView` is always zero-copy. `BytesView` to `Bytes` is opportunistically zero-copy,
-//! depending on the memory layout of the `BytesView` instance.
-//!
-//! Besides this module, some functionality is also present directly in the `bytesbuf` types
-//! where the logic requires access to private fields of our types for efficiency.
-
 use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::ptr::NonNull;
 use std::sync::atomic::{self, AtomicUsize};
 
-use bytes::{BufMut, Bytes};
+use bytes::Bytes;
 use smallvec::SmallVec;
 
 use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesView, MAX_INLINE_SPANS, Span};
 
 impl From<Bytes> for BytesView {
     /// Converts a `Bytes` instance into a `BytesView`.
+    ///
+    /// This operation is always zero-copy, though does cost a small dynamic allocation.
     fn from(value: Bytes) -> Self {
         // A Bytes instance may contain any number of bytes, same as a BytesView. However, each
         // block of memory inside BytesView is limited to BlockSize::MAX, which is a smaller size.
@@ -44,12 +36,12 @@ impl From<Bytes> for BytesView {
             let mut span_builder = block.into_span_builder();
 
             #[expect(clippy::cast_possible_truncation, reason = "a span can never be larger than BlockSize")]
-            let len = NonZero::new(span_builder.remaining_mut() as BlockSize).expect("splitting Bytes cannot yield zero-sized chunks");
+            let len = NonZero::new(span_builder.remaining_capacity() as BlockSize).expect("splitting Bytes cannot yield zero-sized chunks");
 
             // SAFETY: We know that the data is already initialized; we simply declare this to the
             // SpanBuilder and get it to emit a completed Span from all its contents.
             unsafe {
-                span_builder.advance_mut(len.get() as usize);
+                span_builder.advance(len.get() as usize);
             }
 
             span_builder.consume(len)
@@ -200,7 +192,7 @@ impl Iterator for BytesBlockIterator {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
+    use bytes::{BufMut, BytesMut};
 
     use super::*;
     use crate::TransparentTestMemory;
@@ -217,7 +209,7 @@ mod tests {
         assert_eq!(sequence, b"Hello, world!");
 
         // We expect this to be zero-copy - Bytes to BytesView always is.
-        assert_eq!(sequence.chunk().as_ptr(), bytes_data_ptr);
+        assert_eq!(sequence.first_slice().as_ptr(), bytes_data_ptr);
     }
 
     #[test]
@@ -226,9 +218,9 @@ mod tests {
 
         let sequence = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
-        let sequence_chunk_ptr = sequence.chunk().as_ptr();
+        let sequence_chunk_ptr = sequence.first_slice().as_ptr();
 
-        let bytes = sequence.into_bytes();
+        let bytes = sequence.to_bytes();
 
         assert_eq!(bytes.as_ref(), b"Hello, world!");
 
@@ -242,9 +234,9 @@ mod tests {
 
         let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
         let world = BytesView::copied_from_slice(b"world!", &memory);
-        let sequence = BytesView::from_sequences([hello, world]);
+        let sequence = BytesView::from_views([hello, world]);
 
-        let bytes = sequence.into_bytes();
+        let bytes = sequence.to_bytes();
         assert_eq!(bytes.as_ref(), b"Hello, world!");
     }
 
@@ -267,7 +259,7 @@ mod tests {
 
         let sequence: BytesView = bytes.into();
         assert_eq!(sequence.len(), 5_000_000_000);
-        assert_eq!(sequence.chunk().len(), u32::MAX as usize);
+        assert_eq!(sequence.first_slice().len(), u32::MAX as usize);
         assert_eq!(sequence.into_spans_reversed().len(), 2);
     }
 

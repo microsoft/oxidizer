@@ -1,14 +1,17 @@
 # Memory layout
 
-A byte sequence backed by I/O memory may consist of any number of spans of consecutive bytes.
+A byte sequence represented by `bytesbuf` types may consist of any number
+of separate byte slices, each of which contains one or more bytes of data.
 
-There is no upper or lower bound on the length of each span of bytes. At one extreme, the I/O
-subsystem may allocate a single span of memory to hold all the data. At the opposite extreme, it is
-legal for the I/O subsystem to create byte where byte is stored as a separate allocation.
-Higher level APIs are required not assume any specific block size
+There is no upper or lower bound on the length of each slice of bytes. At one extreme,
+a byte sequence may be entirely represented by a single slice of bytes. At the opposite
+extreme, it is legal for each byte to be represented by a separate non-consecutive slice.
 
-Examples of how `b'Hello'` may be stored in I/O memory:
+Examples of legal memory layouts for the byte sequence `b'Hello'`:
 
 * `['H', 'e', 'l', 'l', 'o']`
 * `['H', 'e'], ['l', 'l', 'o']`
 * `['H'], ['e'], ['l'], ['l'], ['o']`
+
+Code using these APIs is required to work with any memory layout, as there are
+no guarantees on which layout will be used for which byte sequences.

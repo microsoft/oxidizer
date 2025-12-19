@@ -9,7 +9,6 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use bytes::Buf;
 use bytesbuf::{BlockSize, BytesView, FixedBlockTestMemory};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
@@ -28,6 +27,7 @@ const TEST_DATA: &[u8] = &[88_u8; TEST_SPAN_SIZE.get() as usize];
 const MAX_INLINE_SPANS: usize = bytesbuf::MAX_INLINE_SPANS;
 // This should be more than MAX_INLINE_SPANS.
 const MANY_SPANS: usize = 32;
+const COPY_TO_SLICE_LEN: usize = 256;
 
 #[expect(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
 fn entrypoint(c: &mut Criterion) {
@@ -40,11 +40,11 @@ fn entrypoint(c: &mut Criterion) {
     let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
 
     let many = iter::repeat_n(test_data_as_seq.clone(), MANY_SPANS).collect::<Vec<_>>();
-    let many_as_seq = BytesView::from_sequences(many.iter().cloned());
-    let many_as_bytes = many_as_seq.clone().into_bytes();
+    let many_as_seq = BytesView::from_views(many.iter().cloned());
+    let many_as_vec = many_as_seq.to_bytes().to_vec();
 
     let ten = iter::repeat_n(test_data_as_seq.clone(), 10).collect::<Vec<_>>();
-    let ten_as_seq = BytesView::from_sequences(ten.iter().cloned());
+    let ten_as_seq = BytesView::from_views(ten.iter().cloned());
 
     let mut group = c.benchmark_group("BytesView");
 
@@ -88,7 +88,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice_near", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_thread();
-            test_data_as_seq.slice(black_box(0..10))
+            test_data_as_seq.range(black_box(0..10))
         });
     });
 
@@ -96,7 +96,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice_far", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_thread();
-            test_data_as_seq.slice(black_box(12300..12310))
+            test_data_as_seq.range(black_box(12300..12310))
         });
     });
 
@@ -105,7 +105,7 @@ fn entrypoint(c: &mut Criterion) {
         // There are 10 spans in this sequence, with our slice being from the last one.
         b.iter(|| {
             let _span = allocs_op.measure_thread();
-            ten_as_seq.slice(black_box(123_000..123_010))
+            ten_as_seq.range(black_box(123_000..123_010))
         });
     });
 
@@ -115,7 +115,7 @@ fn entrypoint(c: &mut Criterion) {
             || test_data_as_seq.clone(),
             |seq| {
                 let _span = allocs_op.measure_thread();
-                seq.consume_all_chunks(|chunk| {
+                seq.consume_all_slices(|chunk| {
                     _ = black_box(chunk);
                 });
             },
@@ -127,7 +127,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter(|| {
             // Will only fill 1 of 4 slots, since the test data is just one chunk.
             let mut slices: Vec<&[u8]> = vec![&[]; 4];
-            test_data_as_seq.chunks_as_slices_vectored(&mut slices);
+            test_data_as_seq.slices(&mut slices);
 
             _ = black_box(slices);
         });
@@ -163,13 +163,76 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
-    let allocs_op = allocs.operation("to_bytes_single_chunk");
-    group.bench_function("to_bytes_single_chunk", |b| {
-        let seq = BytesView::from(test_data_as_seq.clone().into_bytes());
+    group.bench_function("get_f64_be", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                black_box(seq.get_num_be::<f64>());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("get_u64_be", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                black_box(seq.get_num_be::<u64>());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("get_f64_le", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                black_box(seq.get_num_le::<f64>());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("get_u64_le", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                black_box(seq.get_num_le::<u64>());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("get_u8", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                black_box(seq.get_num_le::<u8>());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("copy_to_slice", |b| {
+        b.iter_batched_ref(
+            || many_as_seq.clone(),
+            |seq| {
+                let mut target = [0u8; COPY_TO_SLICE_LEN];
+                seq.copy_to_slice(&mut target);
+                black_box(target);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    let allocs_op = allocs.operation("to_bytes_single_span");
+    group.bench_function("to_bytes_single_span", |b| {
+        // This forces it to be a single span.
+        let view = BytesView::from(test_data_as_seq.to_bytes());
 
         b.iter(|| {
             let _span = allocs_op.measure_process();
-            let _bytes = seq.clone().into_bytes();
+            let _bytes = view.to_bytes();
         });
     });
 
@@ -189,7 +252,7 @@ fn entrypoint(c: &mut Criterion) {
 
     group.bench_function("eq_slice", |b| {
         b.iter_batched_ref(
-            || many_as_bytes.chunk(),
+            || many_as_vec.as_slice(),
             |other| {
                 assert!(black_box(many_as_seq == *other));
             },
@@ -197,11 +260,11 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
-    let allocs_op = allocs.operation("to_bytes_many_chunks");
-    group.bench_function("to_bytes_many_chunks", |b| {
+    let allocs_op = allocs.operation("to_bytes_many_spans");
+    group.bench_function("to_bytes_many_spans", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_process();
-            let _bytes = many_as_seq.clone().into_bytes();
+            let _bytes = many_as_seq.to_bytes();
         });
     });
 
@@ -211,7 +274,7 @@ fn entrypoint(c: &mut Criterion) {
             || many.iter().cloned(),
             |many_clones| {
                 let _span = allocs_op.measure_thread();
-                BytesView::from_sequences(black_box(many_clones))
+                BytesView::from_views(black_box(many_clones))
             },
             BatchSize::SmallInput,
         );
@@ -231,7 +294,7 @@ fn entrypoint(c: &mut Criterion) {
             || max_inline.iter().cloned(),
             |max_inline_clones| {
                 let _span = allocs_op.measure_thread();
-                BytesView::from_sequences(black_box(max_inline_clones))
+                BytesView::from_views(black_box(max_inline_clones))
             },
             BatchSize::SmallInput,
         );
