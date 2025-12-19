@@ -269,7 +269,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn test_unaware_nested_structure() {
         #[derive(Debug, PartialEq)]
         struct Complex {
