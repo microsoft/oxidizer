@@ -16,12 +16,11 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
-
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["thread_aware_macros::ThreadAware"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["derive"]

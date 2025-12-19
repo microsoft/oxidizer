@@ -151,7 +151,6 @@ impl Clock {
     ///
     /// Panics if called outside of a Tokio runtime context.
     #[cfg(any(feature = "tokio", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn new_tokio() -> Self {
@@ -213,7 +212,6 @@ impl Clock {
     /// assert_eq!(instance, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen() -> Self {
         crate::ClockControl::new().to_clock()
@@ -242,7 +240,6 @@ impl Clock {
     /// assert_eq!(system_time, clock.system_time());
     /// ```
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_clock()

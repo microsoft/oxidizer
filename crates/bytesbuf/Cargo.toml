@@ -24,6 +24,9 @@ allowed_external_types = [
     "bytes::buf::buf_mut::BufMut",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 fakes = []

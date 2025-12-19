@@ -50,7 +50,7 @@ $crateKeywords = Read-Host -Prompt "Enter comma-separated crate keywords (see ht
 $crateCategories = Read-Host -Prompt "Enter comma-separated crate categories (see https://crates.io/categories for allowed categories)"
 
 # Define paths
-$templateDir = Join-Path $repoRoot "scripts" "repo-template"
+$templateDir = Join-Path $repoRoot "scripts" "crate-template"
 $destinationDir = Join-Path $repoRoot "crates" $crateName
 
 # Check if crate already exists
