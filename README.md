@@ -188,6 +188,8 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **License Headers**. We ensure all source files have the requisite license header. The headers are described in
   the `.github\license-check` directory.
 
+- **Spell Checking**. We use [cargo-spellcheck](https://crates.io/crates/cargo-spellcheck) to help our docs have fewer typos.
+
 - **README Content**. We use [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) to ensure each crate's `README.md`
   file matches the crate's current crate-level documentation.
 

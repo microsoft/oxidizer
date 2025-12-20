@@ -89,6 +89,7 @@ xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]
 ambiguous_negative_literals = "warn"
+missing_crate_level_docs = "warn"
 missing_debug_implementations = "warn"
 missing_docs = "warn"
 redundant_imports = "warn"
@@ -158,6 +159,9 @@ significant_drop_tightening = "allow"
 wildcard_imports = "allow"
 # In a large workspace, duplicate dependencies are inevitable; this lint causes more maintenance burden than practical benefit.
 multiple_crate_versions = "allow"
+
+[workspace.lints.rustdoc]
+unescaped_backticks = "warn"
 
 [profile.release]
 debug = "line-tables-only"

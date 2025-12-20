@@ -9,7 +9,7 @@ use crate::{EnrichmentEntry, OhnoCore};
 /// Base trait for adding error enrichment to error types.
 ///
 /// This trait provides the fundamental error enrichment addition method and is dyn-compatible.
-/// It serves as the base for the more ergonomic `EnrichableExt` trait.
+/// It serves as the base for the more ergonomic [`EnrichableExt`] trait.
 pub trait Enrichable {
     /// Adds enrichment information to the error.
     ///

@@ -87,25 +87,18 @@ jobs:
         run: cargo deny --all-features --workspace --color always check all
 
   spell-check:
-    needs: constants
     runs-on: ubuntu-latest
-    env:
-      CARGO_SPELLCHECK_VERSION: ${{ needs.constants.outputs.CARGO_SPELLCHECK_VERSION }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
         with:
           fetch-depth: 1
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          toolchain: ${{ env.RUST_LATEST }}
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-spellcheck@${{ env.CARGO_SPELLCHECK_VERSION }}
+          rust-toolchain: RUST_LATEST
+          cargo-tools: CARGO_SPELLCHECK_VERSION
 
       # execute
       - name: Validate Dictionary

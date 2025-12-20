@@ -167,7 +167,7 @@ impl SpanBuilder {
         // This cannot overflow - guarded by assertion above.
         self.filled_bytes = self.filled_bytes.wrapping_sub(len.get());
 
-        // SAFETY: We only skipped over filled bytes, so we must still be in-bounds.
+        // SAFETY: Above, we only seek over filled bytes, so we must still be in-bounds.
         self.start = unsafe { self.start.add(len.get() as usize) };
 
         span
