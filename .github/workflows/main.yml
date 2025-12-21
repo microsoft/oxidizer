@@ -10,54 +10,24 @@ on:
   push:
     branches: [ main ]
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  constants:
-    uses: ./.github/workflows/repo-constants.yml
-
   testing:
-    needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
-      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_MSRV }}
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
+          enable-sccache: true
+          enable-cargo-cache: true
+          rust-toolchain: RUST_MSRV
+          cargo-tools: CARGO_HACK_VERSION
 
       # execute
       - name: Build
@@ -68,62 +38,30 @@ jobs:
       - name: Docs
         if: success() || failure()
         env:
-          RUSTDOCFLAGS: -D warnings
+          RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --verbose --workspace --all-features
       - name: Doc Tests
         if: success() || failure()
         run: cargo test --doc --verbose --workspace --all-features
 
   static-analysis:
-    needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-      CARGO_AUDIT_VERSION: ${{ needs.constants.outputs.CARGO_AUDIT_VERSION }}
-      CARGO_DENY_VERSION: ${{ needs.constants.outputs.CARGO_DENY_VERSION }}
-      CARGO_DOC2README_VERSION: ${{ needs.constants.outputs.CARGO_DOC2README_VERSION }}
-      CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}
-      CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: ${{ needs.constants.outputs.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}
-      CARGO_HACK_VERSION: ${{ needs.constants.outputs.CARGO_HACK_VERSION }}
-      CARGO_SORT_VERSION: ${{ needs.constants.outputs.CARGO_SORT_VERSION }}
-      CARGO_WORKSPACES_VERSION: ${{ needs.constants.outputs.CARGO_WORKSPACES_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          fetch-depth: 1
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-doc2readme@${{ env.CARGO_DOC2README_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}
+          enable-sccache: true
+          enable-cargo-cache: true
+          rust-toolchain: RUST_LATEST
+          rust-components: clippy, rustfmt
+          cargo-tools: CARGO_AUDIT_VERSION, CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
 
       # execute
       - name: Clippy
@@ -154,16 +92,8 @@ jobs:
         run: cargo deny --all-features --workspace --color always check all
 
   semver:
-    needs: constants
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      CARGO_SEMVER_CHECKS_VERSION: ${{ needs.constants.outputs.CARGO_SEMVER_CHECKS_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     permissions:
       pull-requests: write
     steps:
@@ -172,27 +102,13 @@ jobs:
         uses: actions/checkout@v6.0.0
         with:
           fetch-depth: 0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }}
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
+          enable-sccache: true
+          enable-cargo-cache: true
+          rust-toolchain: RUST_LATEST
+          cargo-tools: CARGO_SEMVER_CHECKS_VERSION
 
       # execute
       - name: Semver Compatibility
@@ -232,40 +148,23 @@ jobs:
 
   extended-analysis:
     if: github.event_name == 'pull_request'
-    needs: [constants, testing, static-analysis]
+    needs: [testing, static-analysis]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-      CARGO_UDEPS_VERSION: ${{ needs.constants.outputs.CARGO_UDEPS_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY }}
-          components: miri
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-udeps@${{ env.CARGO_UDEPS_VERSION }}
+          enable-cargo-cache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+          cargo-tools: CARGO_UDEPS_VERSION
 
       # execute
       - name: Udeps
@@ -276,96 +175,50 @@ jobs:
 
   mutation-testing:
     if: github.event_name == 'pull_request'
-    needs: [constants, testing]
+    needs: [testing]
     runs-on: ubuntu-latest
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
         with:
           fetch-depth: 0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }},nightly
-      - name: Installing Wild Linker
-        uses: davidlattimore/wild-action@0.7.0
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          enable-sccache: true
+          enable-cargo-cache: true
+          enable-wild-linker: true
+          rust-toolchain: RUST_NIGHTLY
+          cargo-tools: CARGO_MUTANTS_VERSION
 
       # execute
-      - name: Generate PR diff
+      - name: Generate PR Diff
         run: git diff origin/main...HEAD >diff.txt
       - name: Mutate Diff
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
-        run: cargo +nightly -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
-    needs: constants
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      RUST_NIGHTLY: ${{ needs.constants.outputs.RUST_NIGHTLY }}
-      CARGO_LLVM_COV_VERSION: ${{ needs.constants.outputs.CARGO_LLVM_COV_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY }}
-          components: llvm-tools-preview
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
+          enable-sccache: true
+          enable-cargo-cache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: llvm-tools-preview
+          cargo-tools: CARGO_LLVM_COV_VERSION
 
       # execute
       - name: Generate Coverage (all-features)
@@ -409,6 +262,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.0
+        with:
+          fetch-depth: 1
       - name: Check License Headers
         uses: viperproject/check-license-header@v2
         with:
@@ -417,25 +272,16 @@ jobs:
           strict: true
 
   external-type-exposure:
-    needs: constants
     runs-on: ubuntu-latest
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_NIGHTLY_EXTERNAL_TYPES: ${{ needs.constants.outputs.RUST_NIGHTLY_EXTERNAL_TYPES }}
-      CARGO_CHECK_EXTERNAL_TYPES_VERSION: ${{ needs.constants.outputs.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          toolchain: ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-check-external-types@${{ env.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+          rust-toolchain: RUST_NIGHTLY_EXTERNAL_TYPES
+          cargo-tools: CARGO_CHECK_EXTERNAL_TYPES_VERSION
 
       # execute
       - name: Check External Type Exposure

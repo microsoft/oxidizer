@@ -1,0 +1,151 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: Setup Environment
+description: Configures tool versions, sets up caches, installs Rust and Cargo tools.
+
+inputs:
+  enable-sccache:
+    description: Enable sccache for build caching
+    required: false
+    default: 'false'
+  enable-cargo-cache:
+    description: Enable cargo dependency caching
+    required: false
+    default: 'false'
+  rust-toolchain:
+    description: Rust toolchain to install. Can be a version (e.g., "stable", "1.70"), multiple (e.g., "stable,nightly"), or environment variable names from constants.toml (e.g., "RUST_MSRV" or "RUST_LATEST,RUST_NIGHTLY"). Leave empty to skip Rust installation.
+    required: false
+    default: ''
+  rust-components:
+    description: Comma-separated list of Rust components to install (e.g., "clippy, rustfmt")
+    required: false
+    default: ''
+  cargo-tools:
+    description: Comma-separated list of cargo tools to install. Can be environment variable names (e.g., "CARGO_HACK_VERSION") which will be expanded to "cargo-hack@<value>", or explicit tool@version pairs (e.g., "cargo-hack@0.6.39")
+    required: false
+    default: ''
+  enable-wild-linker:
+    description: Install Wild linker for faster linking
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Loading Repo Constants
+      shell: pwsh
+      run: |
+        $constantsPath = Join-Path '${{ github.workspace }}' 'constants.toml'
+
+        if (-not (Test-Path $constantsPath)) {
+          Write-Error "constants.toml not found at $constantsPath"
+          exit 1
+        }
+
+        Add-Content -Path $env:GITHUB_ENV -Value "CARGO_TERM_COLOR=always"
+
+        Get-Content $constantsPath | ForEach-Object {
+          if ($_ -match '^([A-Z0-9_]+)\s*=\s*"([^"]+)"') {
+            $key = $matches[1]
+            $value = $matches[2]
+            Add-Content -Path $env:GITHUB_ENV -Value "$key=$value"
+          }
+        }
+
+    - name: Processing Tool Versions
+      if: inputs.rust-toolchain != '' || inputs.cargo-tools != ''
+      id: expand
+      shell: pwsh
+      run: |
+        # Expand Rust Toolchain Variables
+        $toolchain = '${{ inputs.rust-toolchain }}'
+        if ($toolchain) {
+          $parts = $toolchain.Split(',') | ForEach-Object {
+            $part = $_.Trim()
+            # Check if this part is an environment variable (all caps with underscores)
+            if ($part -match '^[A-Z0-9_]+$') {
+              $envValue = [System.Environment]::GetEnvironmentVariable($part)
+              if ($envValue) {
+                return $envValue
+              }
+            }
+            return $part
+          }
+          $expandedToolchain = $parts -join ','
+          "toolchain=$expandedToolchain" >> $env:GITHUB_OUTPUT
+        }
+
+        # Expand Cargo Tools Variables
+        $tools = '${{ inputs.cargo-tools }}'
+        if ($tools) {
+          $expandedParts = $tools.Split(',') | ForEach-Object {
+            $tool = $_.Trim()
+
+            # Pattern 1: CARGO_<NAME>_VERSION -> cargo-<name>@<value>
+            if ($tool -match '^CARGO_([A-Z0-9_]+)_VERSION$') {
+              $toolName = $matches[1].ToLower().Replace('_', '-')
+              $envValue = [System.Environment]::GetEnvironmentVariable($tool)
+              if ($envValue) {
+                return "cargo-$toolName@$envValue"
+              }
+            }
+
+            # Pattern 2: tool@ENV_VAR_NAME -> tool@value
+            if ($tool -match '^(.+)@([A-Z0-9_]+)$') {
+              $toolName = $matches[1]
+              $envVarName = $matches[2]
+              $envValue = [System.Environment]::GetEnvironmentVariable($envVarName)
+              if ($envValue) {
+                return "$toolName@$envValue"
+              }
+            }
+
+            # Pattern 3: literal tool@version, pass through
+            return $tool
+          }
+
+          $expandedTools = $expandedParts -join ', '
+          "tools=$expandedTools" >> $env:GITHUB_OUTPUT
+        }
+
+    - name: Configure Cargo Dependency Cache
+      if: inputs.enable-cargo-cache == 'true'
+      uses: actions/cache@v4.3.0
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Configure Sccache
+      if: inputs.enable-sccache == 'true'
+      shell: pwsh
+      run: |
+        Add-Content -Path $env:GITHUB_ENV -Value "SCCACHE_GHA_ENABLED=true"
+        Add-Content -Path $env:GITHUB_ENV -Value "RUSTC_WRAPPER=sccache"
+
+    - name: Start Sccache
+      if: inputs.enable-sccache == 'true'
+      uses: mozilla-actions/sccache-action@v0.0.9
+      with:
+        version: ${{ env.SCCACHE_VERSION }}
+
+    - name: Install Rust
+      if: inputs.rust-toolchain != ''
+      uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+      with:
+        toolchain: ${{ steps.expand.outputs.toolchain }}
+        components: ${{ inputs.rust-components }}
+
+    - name: Install Cargo Tools
+      if: inputs.cargo-tools != '' && steps.expand.outputs.tools != ''
+      uses: taiki-e/install-action@v2.62.62
+      with:
+        tool: ${{ steps.expand.outputs.tools }}
+
+    - name: Install Wild Linker
+      if: inputs.enable-wild-linker == 'true'
+      uses: davidlattimore/wild-action@0.7.0

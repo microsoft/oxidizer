@@ -9,13 +9,7 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  constants:
-    uses: ./.github/workflows/repo-constants.yml
-
   nightly-gatekeeper:
     runs-on: ubuntu-latest
     outputs:
@@ -37,42 +31,28 @@ jobs:
           fi
 
   mutation-testing:
-    needs: [constants, nightly-gatekeeper]
+    needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    env:
-      RUST_MSRV: ${{ needs.constants.outputs.RUST_MSRV }}
-      RUST_LATEST: ${{ needs.constants.outputs.RUST_LATEST }}
-      CARGO_MUTANTS_VERSION: ${{ needs.constants.outputs.CARGO_MUTANTS_VERSION }}
-      SCCACHE_VERSION: ${{ needs.constants.outputs.SCCACHE_VERSION }}
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     permissions:
       issues: write
     steps:
       # prep
       - name: Checkout
         uses: actions/checkout@v6.0.0
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }},nightly
-      - name: Installing Wild Linker
-        uses: davidlattimore/wild-action@0.7.0
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          enable-sccache: true
+          enable-wild-linker: true
+          rust-toolchain: RUST_NIGHTLY
+          cargo-tools: CARGO_MUTANTS_VERSION
 
       # execute
       - name: Mutate All
         env:
           DISABLE_T_REX: 1
-        run: cargo +nightly -Zscript scripts/mutants.rs
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs
 
       - name: Create or Update Issue on Failure
         if: failure()
