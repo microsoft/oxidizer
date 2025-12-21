@@ -20,12 +20,11 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
-          enable-cargo-cache: true
           rust-toolchain: RUST_MSRV
           cargo-tools: CARGO_HACK_VERSION
 
@@ -53,12 +52,11 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
-          enable-cargo-cache: true
           rust-toolchain: RUST_LATEST
           rust-components: clippy, rustfmt
           cargo-tools: CARGO_AUDIT_VERSION, CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
@@ -99,14 +97,13 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
-          enable-cargo-cache: true
           rust-toolchain: RUST_LATEST
           cargo-tools: CARGO_SEMVER_CHECKS_VERSION
 
@@ -134,14 +131,14 @@ jobs:
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v2.9.4
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
         if: steps.semver.outcome == 'success'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v2.9.4
         with:
           header: semver-check
           delete: true
@@ -157,11 +154,11 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          enable-cargo-cache: true
+          enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
           cargo-tools: CARGO_UDEPS_VERSION
@@ -180,14 +177,13 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
-          enable-cargo-cache: true
           enable-wild-linker: true
           rust-toolchain: RUST_NIGHTLY
           cargo-tools: CARGO_MUTANTS_VERSION
@@ -210,12 +206,11 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
-          enable-cargo-cache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: llvm-tools-preview
           cargo-tools: CARGO_LLVM_COV_VERSION
@@ -226,7 +221,7 @@ jobs:
       - name: Generate Coverage (no-default-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v5.5.1
+        uses: codecov/codecov-action@v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-all.info,lcov-no-def.info
@@ -261,11 +256,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 1
       - name: Check License Headers
-        uses: viperproject/check-license-header@v2
+        uses: viperproject/check-license-header@v2.0.3
         with:
           path: .
           config: .github/license-check/config.json
@@ -276,10 +271,11 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          enable-sccache: true
           rust-toolchain: RUST_NIGHTLY_EXTERNAL_TYPES
           cargo-tools: CARGO_CHECK_EXTERNAL_TYPES_VERSION
 

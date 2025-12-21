@@ -15,7 +15,7 @@ jobs:
     outputs:
       should_skip: ${{ steps.check.outputs.should_skip }}
     steps:
-      - uses: actions/checkout@v6.0.0
+      - uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
@@ -39,7 +39,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
       - name: Setup
         uses: ./.github/actions/setup
         with:

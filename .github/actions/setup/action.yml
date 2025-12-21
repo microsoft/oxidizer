@@ -9,10 +9,6 @@ inputs:
     description: Enable sccache for build caching
     required: false
     default: 'false'
-  enable-cargo-cache:
-    description: Enable cargo dependency caching
-    required: false
-    default: 'false'
   rust-toolchain:
     description: Rust toolchain to install. Can be a version (e.g., "stable", "1.70"), multiple (e.g., "stable,nightly"), or environment variable names from constants.toml (e.g., "RUST_MSRV" or "RUST_LATEST,RUST_NIGHTLY"). Leave empty to skip Rust installation.
     required: false
@@ -34,98 +30,61 @@ runs:
   using: composite
   steps:
     - name: Loading Repo Constants
-      shell: pwsh
+      shell: bash
       run: |
-        $constantsPath = Join-Path '${{ github.workspace }}' 'constants.toml'
+        echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
 
-        if (-not (Test-Path $constantsPath)) {
-          Write-Error "constants.toml not found at $constantsPath"
-          exit 1
-        }
-
-        Add-Content -Path $env:GITHUB_ENV -Value "CARGO_TERM_COLOR=always"
-
-        Get-Content $constantsPath | ForEach-Object {
-          if ($_ -match '^([A-Z0-9_]+)\s*=\s*"([^"]+)"') {
-            $key = $matches[1]
-            $value = $matches[2]
-            Add-Content -Path $env:GITHUB_ENV -Value "$key=$value"
-          }
-        }
+        constants_path="${{ github.workspace }}/constants.toml"
+        while IFS= read -r line; do
+          if [[ "$line" =~ ^([A-Z0-9_]+)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+            echo "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
+          fi
+        done < "$constants_path"
 
     - name: Processing Tool Versions
       if: inputs.rust-toolchain != '' || inputs.cargo-tools != ''
       id: expand
-      shell: pwsh
+      shell: bash
       run: |
-        # Expand Rust Toolchain Variables
-        $toolchain = '${{ inputs.rust-toolchain }}'
-        if ($toolchain) {
-          $parts = $toolchain.Split(',') | ForEach-Object {
-            $part = $_.Trim()
-            # Check if this part is an environment variable (all caps with underscores)
-            if ($part -match '^[A-Z0-9_]+$') {
-              $envValue = [System.Environment]::GetEnvironmentVariable($part)
-              if ($envValue) {
-                return $envValue
-              }
-            }
-            return $part
-          }
-          $expandedToolchain = $parts -join ','
-          "toolchain=$expandedToolchain" >> $env:GITHUB_OUTPUT
-        }
+        # Expand Rust Toolchain
+        if [[ -n '${{ inputs.rust-toolchain }}' ]]; then
+          expanded=""
+          IFS=',' read -ra parts <<< '${{ inputs.rust-toolchain }}'
+          for part in "${parts[@]}"; do
+            part=${part// /}
+            if [[ "$part" =~ ^[A-Z0-9_]+$ ]] && [[ -n "${!part}" ]]; then
+              part="${!part}"
+            fi
+            expanded+="${expanded:+,}$part"
+          done
+          echo "toolchain=$expanded" >> "$GITHUB_OUTPUT"
+        fi
 
-        # Expand Cargo Tools Variables
-        $tools = '${{ inputs.cargo-tools }}'
-        if ($tools) {
-          $expandedParts = $tools.Split(',') | ForEach-Object {
-            $tool = $_.Trim()
-
-            # Pattern 1: CARGO_<NAME>_VERSION -> cargo-<name>@<value>
-            if ($tool -match '^CARGO_([A-Z0-9_]+)_VERSION$') {
-              $toolName = $matches[1].ToLower().Replace('_', '-')
-              $envValue = [System.Environment]::GetEnvironmentVariable($tool)
-              if ($envValue) {
-                return "cargo-$toolName@$envValue"
-              }
-            }
-
-            # Pattern 2: tool@ENV_VAR_NAME -> tool@value
-            if ($tool -match '^(.+)@([A-Z0-9_]+)$') {
-              $toolName = $matches[1]
-              $envVarName = $matches[2]
-              $envValue = [System.Environment]::GetEnvironmentVariable($envVarName)
-              if ($envValue) {
-                return "$toolName@$envValue"
-              }
-            }
-
-            # Pattern 3: literal tool@version, pass through
-            return $tool
-          }
-
-          $expandedTools = $expandedParts -join ', '
-          "tools=$expandedTools" >> $env:GITHUB_OUTPUT
-        }
-
-    - name: Configure Cargo Dependency Cache
-      if: inputs.enable-cargo-cache == 'true'
-      uses: actions/cache@v4.3.0
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-        key: ${{ runner.os }}-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+        # Expand Cargo Tools
+        if [[ -n '${{ inputs.cargo-tools }}' ]]; then
+          expanded=""
+          IFS=',' read -ra parts <<< '${{ inputs.cargo-tools }}'
+          for tool in "${parts[@]}"; do
+            tool=${tool// /}
+            if [[ "$tool" =~ ^CARGO_([A-Z0-9_]+)_VERSION$ ]]; then
+              name=$(echo "${BASH_REMATCH[1]}" | tr 'A-Z_' 'a-z-')
+              val="${!tool}"
+              [[ -n "$val" ]] && tool="cargo-$name@$val"
+            elif [[ "$tool" =~ ^(.+)@([A-Z0-9_]+)$ ]]; then
+              val="${!BASH_REMATCH[2]}"
+              [[ -n "$val" ]] && tool="${BASH_REMATCH[1]}@$val"
+            fi
+            expanded+="${expanded:+, }$tool"
+          done
+          echo "cargo_tools=$expanded" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Configure Sccache
       if: inputs.enable-sccache == 'true'
-      shell: pwsh
+      shell: bash
       run: |
-        Add-Content -Path $env:GITHUB_ENV -Value "SCCACHE_GHA_ENABLED=true"
-        Add-Content -Path $env:GITHUB_ENV -Value "RUSTC_WRAPPER=sccache"
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
     - name: Start Sccache
       if: inputs.enable-sccache == 'true'
@@ -141,10 +100,10 @@ runs:
         components: ${{ inputs.rust-components }}
 
     - name: Install Cargo Tools
-      if: inputs.cargo-tools != '' && steps.expand.outputs.tools != ''
-      uses: taiki-e/install-action@v2.62.62
+      if: inputs.cargo-tools != ''
+      uses: taiki-e/install-action@v2.65.1
       with:
-        tool: ${{ steps.expand.outputs.tools }}
+        tool: ${{ steps.expand.outputs.cargo_tools }}
 
     - name: Install Wild Linker
       if: inputs.enable-wild-linker == 'true'
