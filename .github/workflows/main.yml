@@ -26,14 +26,14 @@ jobs:
         with:
           enable-sccache: true
           rust-toolchain: RUST_MSRV
-          cargo-tools: CARGO_HACK_VERSION
+          cargo-tools: CARGO_NEXTEST_VERSION, CARGO_HACK_VERSION
 
       # execute
       - name: Build
         run: cargo hack build --each-feature --workspace --verbose --locked --color always
       - name: Tests
         if: success() || failure()
-        run: cargo test --verbose --workspace --all-features
+        run: cargo nextest run --verbose --workspace --all-features
       - name: Docs
         if: success() || failure()
         env:
@@ -59,14 +59,11 @@ jobs:
           enable-sccache: true
           rust-toolchain: RUST_LATEST
           rust-components: clippy, rustfmt
-          cargo-tools: CARGO_AUDIT_VERSION, CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
+          cargo-tools: CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
 
       # execute
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Audit
-        if: success() || failure()
-        run: cargo audit
       - name: Source Format
         if: success() || failure()
         run: cargo fmt -- --check
@@ -161,11 +158,14 @@ jobs:
           enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
-          cargo-tools: CARGO_UDEPS_VERSION
+          cargo-tools: CARGO_UDEPS_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
 
       # execute
       - name: Udeps
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
+      - name: Careful
+        if: success() || failure()
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace --color always --target ${{ runner.os == 'Linux' && 'x86_64-unknown-linux-gnu' || 'x86_64-pc-windows-msvc' }}
       - name: Miri
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
