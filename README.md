@@ -128,7 +128,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   We use [`cargo-hack`](https://crates.io/crates/cargo-hack) to iterate through
   different crate feature combinations to make sure everything builds properly.
 
-- **Testing**. We run `cargo test --all-features` to run every normal test and documentation test in the repo.
+- **Testing**. We run `cargo nextest --all-features` to run every normal test and documentation test in the repo.
 
 - **Code Coverage**. We calculate code coverage for the whole repo using [
   `cargo-llvm-cov`](https://crates.io/crates/cargo-llvm-cov).
@@ -148,10 +148,8 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **Cargo.toml Formatting**. We use [`cargo-sort`](https://crates.io/crates/cargo-sort) to keep Cargo.toml
   files in a consistent format and layout.
 
-- **Dependency Auditing**. We use [`cargo-audit`](https://crates.io/crates/cargo-audit) to be alerted of
-  any security vulnerabilities in our dependencies.
-
-- **Unsafe Verification**. We use Miri to verify that our unsafe code doesn't induce undefined behaviors.
+- **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
+  unsafe code doesn't induce undefined behaviors.
 
 - **External Type Exposure**. We use [`cargo-external-types`](https://crates.io/crates/cargo-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
