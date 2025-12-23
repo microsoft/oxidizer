@@ -69,7 +69,7 @@ no I/O, or otherwise do not require any thread-specific handling.
 
 [`Unaware`][__link15] can be used to encapsulate such types, a wrapper that itself implements [`ThreadAware`][__link16], but
 otherwise does not react to it. You can think of it as a `MoveAsIs<T>`. However, it was
-deliberately named `Unaware` to signal that only types which are genuinely unware of their
+deliberately named `Unaware` to signal that only types which are genuinely unaware of their
 thread relocations (i.e., don’t impl [`ThreadAware`][__link17]) should be wrapped in such.
 
 Wrapping types that implement the trait is discouraged, as it will prevent them from properly
@@ -94,13 +94,13 @@ String, Option, Result, tuples, etc. However, it’s explicitly not implemented 
 as that type implies some level of cross-thread sharing and thus needs special attention when used
 from types that implement [`ThreadAware`][__link23].
 
-## Feature Flags
+## Features
 
-* **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion
+* **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
   environments: `default-features = false`.
-* **`test-util`** – Enables features used for testing.
-* **`threads`** – Enables features mainly used by async runtimes for OS interactions.
+* **`test-util`**: Enables features used for testing.
+* **`threads`**: Enables features mainly used by async runtimes for OS interactions.
 
 ## Examples
 
@@ -149,7 +149,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxWHjFPHVfBQG3G58H2zodoBG5x8pW8Bc5imG8o5LL8tl2DqYWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGwabU5uz2qquG_j8SFVj_LBRGwO1cv_yfvBmG3KObwv0KYE7YWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjA
  [__link0]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.6.0/thread_aware_macros/?search=ThreadAware

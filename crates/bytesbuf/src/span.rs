@@ -37,7 +37,7 @@ pub(crate) struct Span {
 impl Span {
     /// # Safety
     ///
-    /// The caller must guarantee that the memory block region referenced by (start, len)
+    /// The caller must guarantee that the memory block region referenced by `(start, len)`
     /// has been initialized.
     pub(crate) const unsafe fn new(start: NonNull<u8>, len: BlockSize, block_ref: BlockRef) -> Self {
         Self { block_ref, start, len }

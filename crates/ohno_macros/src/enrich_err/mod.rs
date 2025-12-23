@@ -66,7 +66,7 @@ fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definiti
 
 /// Generate error enrichment expression for complex format expressions.
 /// Supports both simple string literals and format strings with complex expressions.
-/// Also supports legacy-style parameter interpolation like "{param}".
+/// Also supports legacy-style parameter interpolation like `{param}`.
 pub fn generate_msg_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
     // Parse the token stream - it could be:
     // 1. A single string literal: "message"

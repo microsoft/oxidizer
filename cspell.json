@@ -1,0 +1,17 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "files": [
+    "crates/**/*.rs"
+  ],
+  "dictionaries": [
+    "oxidizer-words"
+  ],
+  "dictionaryDefinitions": [
+    {
+      "name": "oxidizer-words",
+      "path": "./.spelling",
+      "addWords": true
+    }
+  ]
+}

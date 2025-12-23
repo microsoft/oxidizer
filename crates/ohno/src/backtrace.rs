@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A lightweight, clonable wrapper around [`std::backtrace::Backtrace`].
+//! A lightweight, clonable wrapper around [`Backtrace`].
 
 use std::backtrace::{Backtrace as StdBacktrace, BacktraceStatus};
 use std::sync::Arc;
 
-/// A lightweight, clonable wrapper around [`std::backtrace::Backtrace`].
+/// A lightweight, clonable wrapper around [`Backtrace`].
 ///
 /// This type provides cloning support for backtraces while minimizing overhead:
-/// - Captured backtraces are stored in an `Arc` for efficient sharing
+/// - Captured backtraces are stored in an [`Arc`] for efficient sharing
 /// - Disabled and unsupported backtraces require no heap allocation
 #[derive(Debug, Clone)]
 pub(crate) enum Backtrace {

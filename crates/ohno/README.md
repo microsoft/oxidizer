@@ -20,11 +20,11 @@ into one ergonomic crate for comprehensive error handling.
 
 ## Key Features
 
-* [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
+* [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, [`Display`][__link0], [`Debug`][__link1] implementations
 * [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
 * [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
-* [**`ErrorExt`**][__link0]: Trait that provides additional methods for ohno error types, it’s implemented automatically for all ohno error types
-* [**`OhnoCore`**][__link1]: Core error type that wraps source errors, captures backtraces, and holds enrichment entries
+* [**`ErrorExt`**][__link2]: Trait that provides additional methods for ohno error types, it’s implemented automatically for all ohno error types
+* [**`OhnoCore`**][__link3]: Core error type that wraps source errors, captures backtraces, and holds enrichment entries
 
 ## Quick Start
 
@@ -45,10 +45,11 @@ fn open_file(path: impl AsRef<Path>) -> Result<String, ConfigError> {
 
 Derive macro for automatically implementing error traits.
 
-When applied to a struct or enum containing an [`OhnoCore`][__link2] field,
-this macro automatically implements [`std::error::Error`][__link3], [`std::fmt::Display`][__link4], [`std::fmt::Debug`][__link5], and [`From`][__link6] conversions.
+When applied to a struct or enum containing an [`OhnoCore`][__link4] field,
+this macro automatically implements [`std::error::Error`][__link5], [`std::fmt::Display`][__link6], [`std::fmt::Debug`][__link7], and [`From`][__link8] conversions.
 
-Note: From\<[`std::convert::Infallible`][__link7]\> is implemented by default and calls via [`unreachable!`][__link8] macro.
+ > 
+ > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`][__link9] macro.
 
 ```rust
 use ohno::{OhnoCore, Error};
@@ -168,15 +169,15 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 ## Error Enrichment
 
-The [`#[enrich_err("message")]`][__link9] attribute macro adds error enrichment with file and line info to function errors.
+The [`#[enrich_err("message")]`][__link10] attribute macro adds error enrichment with file and line info to function errors.
 
-Functions annotated with [`#[enrich_err("message")]`][__link10] automatically wrap any returned `Result`. If
+Functions annotated with [`#[enrich_err("message")]`][__link11] automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a message, including file and line information, into the error chain.
 
 **Requirements:**
 
 * The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-* The error type must implement the [`ohno::Enrichable`][__link11] trait (automatically implemented for all ohno error types)
+* The error type must implement the [`Enrichable`][__link12] trait (automatically implemented for all ohno error types)
 
 **Supported syntax patterns:**
 
@@ -237,16 +238,17 @@ fn open_file(path: &str) -> Result<String, MyError> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzgWfI8NISQyG6axg1O2rjQfGxzhzaW2WjRzG3owvcD8UYPxYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
- [__link0]: https://docs.rs/ohno/0.2.0/ohno/?search=ErrorExt
- [__link1]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6HS9SqShsaSGz42vAKwc2RWG7_xPji8SZ7NG3f-jaQ9sVJTYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
+ [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
- [__link11]: https://docs.rs/ohno/0.2.0/ohno/?search=Enrichable
- [__link2]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
- [__link3]: https://doc.rust-lang.org/stable/std/?search=error::Error
- [__link4]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
- [__link5]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
- [__link6]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
- [__link7]: https://doc.rust-lang.org/stable/std/?search=convert::Infallible
- [__link8]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
- [__link9]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
+ [__link11]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
+ [__link12]: https://docs.rs/ohno/0.2.0/ohno/?search=Enrichable
+ [__link2]: https://docs.rs/ohno/0.2.0/ohno/?search=ErrorExt
+ [__link3]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
+ [__link4]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
+ [__link5]: https://doc.rust-lang.org/stable/std/?search=error::Error
+ [__link6]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
+ [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
+ [__link8]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
+ [__link9]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

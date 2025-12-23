@@ -95,7 +95,7 @@ pub struct BytesBuf {
     frozen: usize,
 
     /// Available capacity that can accept additional data into it.
-    /// The total capacity is `len` + `available`.
+    /// The total capacity is `len + available`.
     ///
     /// We cache this to avoid recalculating it every time we need this information.
     available: usize,

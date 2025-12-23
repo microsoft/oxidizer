@@ -57,12 +57,12 @@ This crate provides a unified API for working with time that:
 * **Easy async runtime integration** - Provides built-in support for Tokio and can be extended
   to work with other runtimes without tight coupling to any specific implementation.
 * **Enables deterministic testing** - With the `test-util` feature, [`ClockControl`][__link0] lets you
-  manipulate the passage of time—advance it instantly, pause it, or jump forward. No waiting
+  manipulate the passage of time: advance it instantly, pause it, or jump forward. No waiting
   for a 1-minute periodic job in your tests.
 * **Improves testability** - Time-dependent code becomes fast and reproducible to test
   without relying on wall-clock time.
 
-The testability features are transparent to consumers—code using [`Clock`][__link1] works identically
+The testability features are transparent to consuming code, as using [`Clock`][__link1] works identically
 in production and tests, with zero runtime overhead when `test-util` is disabled.
 
 ## Overview
@@ -104,7 +104,7 @@ This crate provides a way to control the passage of time in tests via the `Clock
 type, which is exposed when the `test-util` feature is enabled.
 
  > 
- > **Important:** Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
+ > **Important**: Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
 
 ## Examples
 
@@ -204,7 +204,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0YUhb-K8ea7G_NBN2_hIoeEGzhuGMMPiDz8G_nmDjrJF1TjYWSBgmR0aWNrZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGye19xWMtftNG5SBR1lSQd0HG1O5g9a9CyQOG5sh2LWD3CBTYWSBgmR0aWNrZTAuMS4w
  [__link0]: https://docs.rs/tick/0.1.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.1.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.1.0/tick/runtime/index.html

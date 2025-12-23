@@ -87,12 +87,12 @@ use crate::fmt::{Rfc2822, UnixSeconds};
 pub struct Iso8601(pub(super) Timestamp);
 
 impl Iso8601 {
-    /// The maximum representable value of `Iso8601`.
+    /// The largest value that can be represented by `Iso8601`.
     ///
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
-    /// The minimum representable value of `Iso8601`.
+    /// The smallest value that can be represented by `Iso8601`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
     pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
@@ -179,7 +179,7 @@ fn with_rounded_nanos(timestamp: Timestamp) -> Timestamp {
 
     Timestamp::UNIX_EPOCH
         .saturating_add(duration)
-        .expect("this can never fail as we know we are withing a valid range")
+        .expect("this can never fail as we know we are within a valid range")
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]

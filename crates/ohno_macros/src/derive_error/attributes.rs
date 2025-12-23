@@ -144,7 +144,7 @@ fn parse_from_config_list(tokens: &proc_macro2::TokenStream) -> Result<Vec<FromC
     Ok(configs)
 }
 
-/// Parse field expressions: field: value, field2: value2, 0: value3
+/// Parse field expressions: `field: value, field2: value2, 0: value3`
 fn parse_field_expressions(content: syn::parse::ParseStream) -> Result<std::collections::HashMap<String, Expr>> {
     let mut field_expressions = std::collections::HashMap::new();
 

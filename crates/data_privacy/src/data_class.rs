@@ -25,7 +25,7 @@ impl DataClass {
     ///
     /// # Panics
     ///
-    /// Panics if `taxonomy` or `name` are not valid ASCII identifiers. Valid identifiers must
+    /// Panics if `taxonomy` or `name` are not valid identifiers. Valid identifiers must
     /// start with `_` or an ASCII letter, followed by zero or more `_`, ASCII letters, or ASCII
     /// digits (e.g., `foo`, `_bar`, `Baz123`)
     #[must_use]
