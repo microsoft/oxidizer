@@ -58,12 +58,12 @@
 //! - **Easy async runtime integration** - Provides built-in support for Tokio and can be extended
 //!   to work with other runtimes without tight coupling to any specific implementation.
 //! - **Enables deterministic testing** - With the `test-util` feature, [`ClockControl`] lets you
-//!   manipulate the passage of time—advance it instantly, pause it, or jump forward. No waiting
+//!   manipulate the passage of time: advance it instantly, pause it, or jump forward. No waiting
 //!   for a 1-minute periodic job in your tests.
 //! - **Improves testability** - Time-dependent code becomes fast and reproducible to test
 //!   without relying on wall-clock time.
 //!
-//! The testability features are transparent to consumers—code using [`Clock`] works identically
+//! The testability features are transparent to consuming code, as using [`Clock`] works identically
 //! in production and tests, with zero runtime overhead when `test-util` is disabled.
 //!
 //! # Overview
@@ -108,7 +108,7 @@
 //! This crate provides a way to control the passage of time in tests via the `ClockControl`
 //! type, which is exposed when the `test-util` feature is enabled.
 //!
-//! > **Important:** Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
+//! > **Important**: Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
 //!
 //! # Examples
 //!

@@ -88,7 +88,7 @@ impl PinnedAffinity {
 ///
 /// # Parameters
 ///
-/// * `counts`: A slice of usize representing the number of processors in each memory region.
+/// * `counts`: A slice of `usize` representing the number of processors in each memory region.
 ///
 /// # Panics
 ///
@@ -122,7 +122,7 @@ pub fn pinned_affinities(counts: &[usize]) -> Vec<PinnedAffinity> {
 ///
 /// # Parameters
 ///
-/// * `counts`: A slice of usize representing the number of processors in each memory region.
+/// * `counts`: A slice of `usize` representing the number of processors in each memory region.
 ///
 /// # Panics
 ///

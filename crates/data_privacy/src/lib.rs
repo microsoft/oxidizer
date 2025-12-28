@@ -87,7 +87,7 @@
 //!
 //! # Classified Containers
 //!
-//! Types that implement the [`Classified`] trait are said to be classified containers. They encapsulate
+//! Types that implement the [`Classified`] trait are said to be _classified containers_. They encapsulate
 //! an instance of another type. Although containers can be created by hand, they are most commonly created
 //! using the [`classified`] attribute. See the documentation for the attribute to learn how you define your own
 //! classified type.
