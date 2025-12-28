@@ -184,7 +184,7 @@ jobs:
           echo "" >> semver-comment.txt
           echo "If the breaking changes are intentional then everything is fine - this message is merely informative." >> semver-comment.txt
           echo "" >> semver-comment.txt
-          echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (`1.x.x -> 2.x.x` or `0.1.x -> 0.2.x`)." >> semver-comment.txt
+          echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (\`1.x.x -> 2.x.x\` or \`0.1.x -> 0.2.x\`)." >> semver-comment.txt
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure'
