@@ -69,16 +69,15 @@ mod tests {
         );
 
         // out of range
-
         assert_eq!(
-            (SystemTime::UNIX_EPOCH + Duration::from_hours(24 * 365 * 20000))
+            (SystemTime::UNIX_EPOCH + Duration::from_secs(3600 * 24 * 365 * 20000))
                 .display()
                 .to_string(),
             "9999-12-30T22:00:00.999999999Z"
         );
 
         assert_eq!(
-            (SystemTime::UNIX_EPOCH - Duration::from_hours(24 * 365 * 20000))
+            (SystemTime::UNIX_EPOCH - Duration::from_secs(3600 * 24 * 365 * 20000))
                 .display()
                 .to_string(),
             "-009999-01-02T01:59:59Z"
