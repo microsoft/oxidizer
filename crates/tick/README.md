@@ -204,27 +204,27 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGye19xWMtftNG5SBR1lSQd0HG1O5g9a9CyQOG5sh2LWD3CBTYWSBgmR0aWNrZTAuMS4w
- [__link0]: https://docs.rs/tick/0.1.0/tick/?search=ClockControl
- [__link1]: https://docs.rs/tick/0.1.0/tick/?search=Clock
- [__link10]: https://docs.rs/tick/0.1.0/tick/runtime/index.html
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGye19xWMtftNG5SBR1lSQd0HG1O5g9a9CyQOG5sh2LWD3CBTYWSBgmR0aWNrZTAuMS4x
+ [__link0]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
+ [__link1]: https://docs.rs/tick/0.1.1/tick/?search=Clock
+ [__link10]: https://docs.rs/tick/0.1.1/tick/runtime/index.html
  [__link11]: https://crates.io/crates/jiff
  [__link12]: https://crates.io/crates/chrono
  [__link13]: https://crates.io/crates/time
- [__link14]: https://docs.rs/tick/0.1.0/tick/?search=Clock
- [__link15]: https://docs.rs/tick/0.1.0/tick/?search=Clock::instant
- [__link16]: https://docs.rs/tick/0.1.0/tick/?search=Stopwatch
+ [__link14]: https://docs.rs/tick/0.1.1/tick/?search=Clock
+ [__link15]: https://docs.rs/tick/0.1.1/tick/?search=Clock::instant
+ [__link16]: https://docs.rs/tick/0.1.1/tick/?search=Stopwatch
  [__link17]: https://tokio.rs/
- [__link18]: https://docs.rs/tick/0.1.0/tick/?search=Clock::new_tokio
- [__link19]: https://docs.rs/tick/0.1.0/tick/?search=ClockControl
- [__link2]: https://docs.rs/tick/0.1.0/tick/?search=Clock
+ [__link18]: https://docs.rs/tick/0.1.1/tick/?search=Clock::new_tokio
+ [__link19]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
+ [__link2]: https://docs.rs/tick/0.1.1/tick/?search=Clock
  [__link20]: https://serde.rs/
- [__link21]: https://docs.rs/tick/0.1.0/tick/fmt/index.html
+ [__link21]: https://docs.rs/tick/0.1.1/tick/fmt/index.html
  [__link22]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
- [__link3]: https://docs.rs/tick/0.1.0/tick/?search=ClockControl
- [__link4]: https://docs.rs/tick/0.1.0/tick/?search=Stopwatch
- [__link5]: https://docs.rs/tick/0.1.0/tick/?search=Delay
- [__link6]: https://docs.rs/tick/0.1.0/tick/?search=PeriodicTimer
- [__link7]: https://docs.rs/tick/0.1.0/tick/?search=FutureExt
- [__link8]: https://docs.rs/tick/0.1.0/tick/?search=Error
- [__link9]: https://docs.rs/tick/0.1.0/tick/fmt/index.html
+ [__link3]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
+ [__link4]: https://docs.rs/tick/0.1.1/tick/?search=Stopwatch
+ [__link5]: https://docs.rs/tick/0.1.1/tick/?search=Delay
+ [__link6]: https://docs.rs/tick/0.1.1/tick/?search=PeriodicTimer
+ [__link7]: https://docs.rs/tick/0.1.1/tick/?search=FutureExt
+ [__link8]: https://docs.rs/tick/0.1.1/tick/?search=Error
+ [__link9]: https://docs.rs/tick/0.1.1/tick/fmt/index.html
