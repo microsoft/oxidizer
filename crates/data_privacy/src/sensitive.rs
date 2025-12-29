@@ -28,7 +28,7 @@ impl<T> Debug for Sensitive<T> {
 }
 
 impl<T> Sensitive<T> {
-    /// Creates a new instance of `Protected` with the given value and data class.
+    /// Creates a new instance of [`Sensitive`] with the given value and data class.
     pub fn new(value: T, data_class: impl IntoDataClass) -> Self {
         Self {
             value,
@@ -45,7 +45,7 @@ impl<T> Sensitive<T> {
         }
     }
 
-    /// Extracts the wrapped value, consuming the `Sensitive` wrapper.
+    /// Extracts the wrapped value, consuming the [`Sensitive`] wrapper.
     #[must_use]
     pub fn declassify_into(self) -> T {
         self.value

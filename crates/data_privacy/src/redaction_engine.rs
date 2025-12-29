@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 /// Lets you apply redaction to classified data.
 ///
-/// You use [`RedactionEngineBuilder`](crate::RedactionEngineBuilder) to create an instance of this type.
+/// You use [`RedactionEngineBuilder`] to create an instance of this type.
 /// The builder lets you configure exactly which redactor to use to redact individual data classes encountered
 /// while producing telemetry.
 ///

@@ -9,7 +9,7 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 ///
 /// For performance reasons mentioned in the [crate documentation](`crate`), the basic
 /// goal of the `ThreadAware` trait is that the value returned by
-/// [`ThreadAware::relocated`] should be as independent as possible from any state on the source
+/// [`ThreadAware::relocated()`] should be as independent as possible from any state on the source
 /// (or any other) thread in the sense that interacting with the object should not result
 /// in contention over synchronization primitives when this interaction happens in parallel
 /// with interactions with related values (e.g. clones) on other threads.
@@ -71,10 +71,10 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// }
 /// ```
 ///
-/// Note that this trait is independent of the `Send` trait as there can be usages of isolated
+/// Note that this trait is independent of the [`Send`] trait as there can be usages of isolated
 /// affinities with multiple affinities on a single thread. However, that
-/// is a fairly specific use case, so types that implement `ThreadAware` should generally also implement
-/// Send.
+/// is a fairly specific use case, so types that implement [`ThreadAware`] should generally also implement
+/// [`Send`].
 pub trait ThreadAware {
     /// Consume a value and return a value in the destination affinity.
     ///

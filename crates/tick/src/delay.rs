@@ -50,7 +50,7 @@ impl Delay {
     /// If the duration is [`Duration::ZERO`], the delay completes immediately.
     /// If the duration is [`Duration::MAX`], the delay never completes.
     ///
-    /// > **Note**: Consider using [`Clock::delay`] as a shortcut for creating delays.
+    /// > **Note**: Consider using [`Clock::delay()`] as a shortcut for creating delays.
     ///
     /// # Examples
     ///

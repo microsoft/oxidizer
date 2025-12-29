@@ -1,0 +1,37 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Check spelling in code comments marked as dev/developer comments.
+# Set to false to skip comments like `// TODO:` or `// FIXME:`.
+dev_comments = false
+
+# Whether to skip spell checking README files.
+# Set to false to include README files in spell checking.
+skip_readme = false
+
+[Hunspell]
+# The language dictionary to use for spell checking.
+# "en_US" uses the built-in English (US) dictionary.
+lang = "en_US"
+
+# Directories to search for custom dictionary files.
+# Relative paths in extra_dictionaries are resolved relative to these directories.
+search_dirs = ["."]
+
+# Additional custom dictionary files to load.
+# Format: First line = word count, remaining lines = sorted words (one per line).
+# Add project-specific terms, acronyms, and technical words here.
+extra_dictionaries = [".spelling"]
+
+# Skip looking up words in OS-provided dictionaries.
+# Set to true for consistent results across different systems.
+skip_os_lookups = true
+
+# Use cargo-spellcheck's built-in dictionaries.
+# Set to true to ensure consistent behavior without relying on system dictionaries.
+use_builtin = true
+
+[Hunspell.quirks]
+# Allow checking concatenated words (e.g., "TcpStream" as "Tcp" + "Stream").
+# Useful for CamelCase identifiers common in Rust code.
+allow_concatenation = true

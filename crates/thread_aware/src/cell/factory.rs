@@ -12,7 +12,7 @@ pub enum Factory<T> {
     /// An external closure was provided to create the data.
     Closure(sync::Arc<ErasedClosureOnce<T>>, Option<MemoryAffinity>),
 
-    /// The data is `ThreadAware` + Clone and will be cloned and transferred.
+    /// The data is [`ThreadAware`] and [`Clone`] and will be cloned and transferred.
     Data(DataFn<T>),
 
     Manual,

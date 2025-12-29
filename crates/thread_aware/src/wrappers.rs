@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// You should never wrap types that are immediately [`ThreadAware`], hence its
 /// name `Unaware`.
 ///
-/// In addition, if the wrapped value contains an Arc with interior mutability
+/// In addition, if the wrapped value contains an [`std::sync::Arc`] with interior mutability
 /// somewhere inside, this wrapper should not be used, and an [`Arc`](crate::Arc) with a
 /// [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma)
 /// with independent initialization per affinity is a better option.
@@ -269,7 +269,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "test-util")]
     fn test_unaware_nested_structure() {
         #[derive(Debug, PartialEq)]
         struct Complex {

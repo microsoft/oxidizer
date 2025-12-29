@@ -96,7 +96,7 @@ assert_eq!(dc.name(), "customer_identifier");
 
 ## Classified Containers
 
-Types that implement the [`Classified`][__link9] trait are said to be classified containers. They encapsulate
+Types that implement the [`Classified`][__link9] trait are said to be *classified containers*. They encapsulate
 an instance of another type. Although containers can be created by hand, they are most commonly created
 using the [`classified`][__link10] attribute. See the documentation for the attribute to learn how you define your own
 classified type.
@@ -192,7 +192,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG60g5Zo_p4DxG7thIbirEmXiG-Rmydk-fpIuG-OodFo7tu4EYWSBgmxkYXRhX3ByaXZhY3lmMC4xMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4FOBR6whxj8G3U5pc6nDCctG_VrdEzFuyNGG1q0A9c-9HLoYWSBgmxkYXRhX3ByaXZhY3lmMC4xMC4w
  [__link0]: https://docs.rs/data_privacy/0.10.0/data_privacy/?search=Classified
  [__link1]: https://docs.rs/data_privacy/0.10.0/data_privacy/?search=Redactor
  [__link10]: https://docs.rs/data_privacy/0.10.0/data_privacy/?search=classified
