@@ -92,8 +92,13 @@ impl Rfc2822 {
 
     /// The smallest value that can be represented by `Rfc2822`.
     ///
+    /// This represents the minimum timestamp supported by the underlying jiff library.
+    pub const MIN: Self = Self(Timestamp::MIN);
+
+    /// The Unix epoch represented as an `Rfc2822` timestamp.
+    ///
     /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
+    pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 
     pub(super) fn to_unix_epoch_duration(self) -> Duration {
         self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
@@ -185,8 +190,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_min() {
+    fn parse_unix_epoch() {
         let stamp: Rfc2822 = "Thu, 1 Jan 1970 00:00:00 GMT".parse().unwrap();
+        assert_eq!(stamp, Rfc2822::UNIX_EPOCH);
         assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH);
     }
 

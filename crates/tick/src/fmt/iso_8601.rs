@@ -94,8 +94,13 @@ impl Iso8601 {
 
     /// The smallest value that can be represented by `Iso8601`.
     ///
+    /// This represents the minimum timestamp supported by the underlying jiff library.
+    pub const MIN: Self = Self(Timestamp::MIN);
+
+    /// The Unix epoch represented as an `Iso8601` timestamp.
+    ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
+    pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 
     pub(super) fn to_unix_epoch_duration(self) -> Duration {
         self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
@@ -199,10 +204,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_min() {
+    fn parse_unix_epoch() {
         let iso: Iso8601 = "1970-01-01T00:00:00Z".parse().unwrap();
 
-        assert_eq!(iso, Iso8601::MIN);
+        assert_eq!(iso, Iso8601::UNIX_EPOCH);
         let system_time: SystemTime = iso.into();
         assert_eq!(system_time, SystemTime::UNIX_EPOCH);
     }

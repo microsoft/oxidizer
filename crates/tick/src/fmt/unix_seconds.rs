@@ -61,7 +61,15 @@ impl UnixSeconds {
     /// The smallest value that can be represented by `UnixSeconds`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
+    /// Note: While the underlying jiff library supports timestamps before the Unix epoch,
+    /// `UnixSeconds` is designed to represent only non-negative durations since the epoch.
     pub const MIN: Self = Self(Duration::ZERO);
+
+    /// The Unix epoch represented as `UnixSeconds`.
+    ///
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
+    /// This is equivalent to `UnixSeconds::MIN`.
+    pub const UNIX_EPOCH: Self = Self(Duration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
     ///
@@ -236,6 +244,8 @@ mod tests {
     #[test]
     fn parse_min() {
         let stamp: UnixSeconds = "0".parse().unwrap();
+        assert_eq!(stamp, UnixSeconds::MIN);
+        assert_eq!(stamp, UnixSeconds::UNIX_EPOCH);
         assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH);
     }
 
@@ -291,7 +301,10 @@ mod tests {
         assert_eq!(iso, Iso8601::MAX);
 
         let iso: Iso8601 = UnixSeconds::MIN.into();
-        assert_eq!(iso, Iso8601::MIN);
+        assert_eq!(iso, Iso8601::UNIX_EPOCH);
+        
+        let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
+        assert_eq!(iso, Iso8601::UNIX_EPOCH);
     }
 
     #[test]

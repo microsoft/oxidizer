@@ -122,22 +122,39 @@ mod tests {
 
     #[test]
     fn min_values_are_aligned() {
-        // All MIN values should represent Unix epoch (1 January 1970 00:00:00 UTC)
+        // Iso8601 and Rfc2822 MIN values should represent the minimum timestamp supported by jiff
         let iso_min: SystemTime = Iso8601::MIN.into();
         let rfc_min: SystemTime = Rfc2822::MIN.into();
-        let unix_min: SystemTime = UnixSeconds::MIN.into();
 
-        assert_eq!(iso_min, SystemTime::UNIX_EPOCH, "Iso8601::MIN should be Unix epoch");
-        assert_eq!(rfc_min, SystemTime::UNIX_EPOCH, "Rfc2822::MIN should be Unix epoch");
+        assert_eq!(iso_min, rfc_min, "Iso8601::MIN and Rfc2822::MIN should be equal");
+
+        // UnixSeconds::MIN should represent Unix epoch since it can't represent negative times
+        let unix_min: SystemTime = UnixSeconds::MIN.into();
         assert_eq!(unix_min, SystemTime::UNIX_EPOCH, "UnixSeconds::MIN should be Unix epoch");
 
         // Cross-format conversions at MIN should preserve the value
         assert_eq!(Iso8601::from(Rfc2822::MIN), Iso8601::MIN);
-        assert_eq!(Iso8601::from(UnixSeconds::MIN), Iso8601::MIN);
         assert_eq!(Rfc2822::from(Iso8601::MIN), Rfc2822::MIN);
-        assert_eq!(Rfc2822::from(UnixSeconds::MIN), Rfc2822::MIN);
-        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
-        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
+    }
+
+    #[test]
+    fn unix_epoch_values_are_aligned() {
+        // All UNIX_EPOCH values should represent Unix epoch (1 January 1970 00:00:00 UTC)
+        let iso_epoch: SystemTime = Iso8601::UNIX_EPOCH.into();
+        let rfc_epoch: SystemTime = Rfc2822::UNIX_EPOCH.into();
+        let unix_epoch: SystemTime = UnixSeconds::UNIX_EPOCH.into();
+
+        assert_eq!(iso_epoch, SystemTime::UNIX_EPOCH, "Iso8601::UNIX_EPOCH should be Unix epoch");
+        assert_eq!(rfc_epoch, SystemTime::UNIX_EPOCH, "Rfc2822::UNIX_EPOCH should be Unix epoch");
+        assert_eq!(unix_epoch, SystemTime::UNIX_EPOCH, "UnixSeconds::UNIX_EPOCH should be Unix epoch");
+
+        // Cross-format conversions at UNIX_EPOCH should preserve the value
+        assert_eq!(Iso8601::from(Rfc2822::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
+        assert_eq!(Iso8601::from(UnixSeconds::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
+        assert_eq!(Rfc2822::from(Iso8601::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
+        assert_eq!(Rfc2822::from(UnixSeconds::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
+        assert_eq!(UnixSeconds::from(Iso8601::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
+        assert_eq!(UnixSeconds::from(Rfc2822::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
     }
 
     #[test]
