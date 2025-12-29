@@ -11,14 +11,15 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [Crates](#crates)
-- [About this Repo](#about-this-repo)
+- [The Oxidizer Project](#the-oxidizer-project)
+  - [Crates](#crates)
+  - [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
     - [CI Workflows](#ci-workflows)
     - [Pull Request Gates](#pull-request-gates)
-- [Trademarks](#trademarks)
+  - [Trademarks](#trademarks)
 
 ## Crates
 
@@ -36,7 +37,11 @@ These are the crates built out of this repo:
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/README.md) - Macros for the `thread_aware` crate.
+<<<<<<< HEAD
+- [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.
+=======
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
+>>>>>>> 9dbba9df9e954e1b7f14be110feb4ab25da62e86
 
 ## About this Repo
 
