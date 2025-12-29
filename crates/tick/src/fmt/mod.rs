@@ -122,23 +122,21 @@ mod tests {
 
     #[test]
     fn min_values_are_aligned() {
-        // Iso8601 and Rfc2822 MIN values should represent the minimum timestamp supported by jiff
+        // All MIN values should represent the minimum timestamp (1 January -9999 00:00:00 UTC)
         let iso_min: SystemTime = Iso8601::MIN.into();
         let rfc_min: SystemTime = Rfc2822::MIN.into();
+        let unix_min: SystemTime = UnixSeconds::MIN.into();
 
         assert_eq!(iso_min, rfc_min, "Iso8601::MIN and Rfc2822::MIN should be equal");
+        assert_eq!(iso_min, unix_min, "Iso8601::MIN and UnixSeconds::MIN should be equal");
 
-        // UnixSeconds::MIN should represent Unix epoch since it can't represent negative times
-        let unix_min: SystemTime = UnixSeconds::MIN.into();
-        assert_eq!(unix_min, SystemTime::UNIX_EPOCH, "UnixSeconds::MIN should be Unix epoch");
-
-        // Cross-format conversions at MIN preserve the value only for formats with the same MIN
+        // Cross-format conversions at MIN should preserve the value
         assert_eq!(Iso8601::from(Rfc2822::MIN), Iso8601::MIN);
+        assert_eq!(Iso8601::from(UnixSeconds::MIN), Iso8601::MIN);
         assert_eq!(Rfc2822::from(Iso8601::MIN), Rfc2822::MIN);
-
-        // Note: Converting Iso8601::MIN or Rfc2822::MIN to UnixSeconds does NOT preserve MIN
-        // because UnixSeconds::MIN is UNIX_EPOCH, while Iso8601/Rfc2822::MIN is before epoch.
-        // The conversion uses unsigned_abs(), so it represents the distance from epoch.
+        assert_eq!(Rfc2822::from(UnixSeconds::MIN), Rfc2822::MIN);
+        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
+        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
     }
 
     #[test]

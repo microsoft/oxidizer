@@ -3,7 +3,7 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use jiff::Timestamp;
 use jiff::fmt::rfc2822;
@@ -92,18 +92,13 @@ impl Rfc2822 {
 
     /// The smallest value that can be represented by `Rfc2822`.
     ///
-    /// This represents the minimum timestamp supported by the underlying jiff library,
-    /// approximately year -9999 (9999 BCE) in the proleptic Gregorian calendar.
+    /// This represents a Unix system time at `1 January -9999 00:00:00 UTC`.
     pub const MIN: Self = Self(Timestamp::MIN);
 
     /// The Unix epoch represented as an `Rfc2822` timestamp.
     ///
     /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
     pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
-
-    pub(super) fn to_unix_epoch_duration(self) -> Duration {
-        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
-    }
 }
 
 impl FromStr for Rfc2822 {

@@ -94,18 +94,13 @@ impl Iso8601 {
 
     /// The smallest value that can be represented by `Iso8601`.
     ///
-    /// This represents the minimum timestamp supported by the underlying jiff library,
-    /// approximately year -9999 (9999 BCE) in the proleptic Gregorian calendar.
+    /// This represents a Unix system time of `1 January -9999 00:00:00 UTC`.
     pub const MIN: Self = Self(Timestamp::MIN);
 
     /// The Unix epoch represented as an `Iso8601` timestamp.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
     pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
-
-    pub(super) fn to_unix_epoch_duration(self) -> Duration {
-        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
-    }
 }
 
 impl FromStr for Iso8601 {
