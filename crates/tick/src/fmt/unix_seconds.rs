@@ -68,7 +68,8 @@ impl UnixSeconds {
     /// The Unix epoch represented as `UnixSeconds`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    /// This is equivalent to `UnixSeconds::MIN`.
+    /// This constant is equivalent to `UnixSeconds::MIN` and is provided for clarity and
+    /// consistency with other timestamp formats (`Iso8601::UNIX_EPOCH` and `Rfc2822::UNIX_EPOCH`).
     pub const UNIX_EPOCH: Self = Self(Duration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.

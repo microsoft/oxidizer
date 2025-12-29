@@ -94,7 +94,8 @@ impl Iso8601 {
 
     /// The smallest value that can be represented by `Iso8601`.
     ///
-    /// This represents the minimum timestamp supported by the underlying jiff library.
+    /// This represents the minimum timestamp supported by the underlying jiff library,
+    /// approximately year -9999 (9999 BCE) in the proleptic Gregorian calendar.
     pub const MIN: Self = Self(Timestamp::MIN);
 
     /// The Unix epoch represented as an `Iso8601` timestamp.

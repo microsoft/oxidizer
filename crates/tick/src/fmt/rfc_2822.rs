@@ -92,7 +92,8 @@ impl Rfc2822 {
 
     /// The smallest value that can be represented by `Rfc2822`.
     ///
-    /// This represents the minimum timestamp supported by the underlying jiff library.
+    /// This represents the minimum timestamp supported by the underlying jiff library,
+    /// approximately year -9999 (9999 BCE) in the proleptic Gregorian calendar.
     pub const MIN: Self = Self(Timestamp::MIN);
 
     /// The Unix epoch represented as an `Rfc2822` timestamp.

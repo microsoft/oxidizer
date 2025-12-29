@@ -135,7 +135,7 @@ mod tests {
         // Cross-format conversions at MIN preserve the value only for formats with the same MIN
         assert_eq!(Iso8601::from(Rfc2822::MIN), Iso8601::MIN);
         assert_eq!(Rfc2822::from(Iso8601::MIN), Rfc2822::MIN);
-        
+
         // Note: Converting Iso8601::MIN or Rfc2822::MIN to UnixSeconds does NOT preserve MIN
         // because UnixSeconds::MIN is UNIX_EPOCH, while Iso8601/Rfc2822::MIN is before epoch.
         // The conversion uses unsigned_abs(), so it represents the distance from epoch.
