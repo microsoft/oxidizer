@@ -3,6 +3,7 @@
 
 #![expect(missing_docs, reason = "Benchmark code")]
 
+use std::f64;
 use std::hint::black_box;
 use std::mem::MaybeUninit;
 use std::num::NonZero;
@@ -325,7 +326,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_le::<f64>(black_box(3.141_592_653_589_793));
+                buf.put_num_le::<f64>(black_box(f64::consts::PI));
                 black_box(buf);
             }
             start.elapsed()
@@ -340,7 +341,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                BufMut::put_f64_le(buf, black_box(3.141_592_653_589_793));
+                BufMut::put_f64_le(buf, black_box(f64::consts::PI));
                 black_box(buf);
             }
             start.elapsed()
@@ -445,7 +446,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_be::<f64>(black_box(3.141_592_653_589_793));
+                buf.put_num_be::<f64>(black_box(f64::consts::PI));
                 black_box(buf);
             }
             start.elapsed()
@@ -460,7 +461,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                BufMut::put_f64(buf, black_box(3.141_592_653_589_793));
+                BufMut::put_f64(buf, black_box(f64::consts::PI));
                 black_box(buf);
             }
             start.elapsed()
