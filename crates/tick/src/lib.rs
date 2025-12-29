@@ -236,3 +236,10 @@ pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use timeout::Timeout;
+
+pub(crate) mod sealed {
+    #[expect(unnameable_types, reason = "intentional, sealed trait pattern")]
+    pub trait Sealed {}
+
+    impl<T> Sealed for T {}
+}

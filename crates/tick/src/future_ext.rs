@@ -6,7 +6,7 @@ use std::time::Duration;
 use super::{Clock, Delay, Timeout};
 
 /// Extensions for the [`Future`] trait.
-pub trait FutureExt: Future {
+pub trait FutureExt: Future + crate::sealed::Sealed {
     /// Applies a timeout to the future.
     ///
     /// This extension uses a [`Clock`] to control the passage of time and enables
