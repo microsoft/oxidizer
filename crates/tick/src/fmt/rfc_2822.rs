@@ -176,6 +176,7 @@ impl<'de> serde_core::Deserialize<'de> for Rfc2822 {
 #[cfg(test)]
 mod tests {
     use std::hash::Hash;
+    use std::time::Duration;
 
     use super::*;
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
