@@ -12,7 +12,7 @@ use smallvec::SmallVec;
 use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesView, MAX_INLINE_SPANS, Span};
 
 impl From<Bytes> for BytesView {
-    /// Converts a `Bytes` instance into a `BytesView`.
+    /// Converts a [`Bytes`] instance into a `BytesView`.
     ///
     /// This operation is always zero-copy, though does cost a small dynamic allocation.
     fn from(value: Bytes) -> Self {

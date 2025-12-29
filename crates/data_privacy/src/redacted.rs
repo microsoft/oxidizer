@@ -6,7 +6,7 @@ use core::fmt::{Formatter, Result};
 
 /// Formats the redacted value using the given formatter.
 ///
-/// This trait behaves similarly to the standard library's [`std::fmt::Debug`] trait, but it produces a redacted
+/// This trait behaves similarly to the standard library's [`Debug`](core::fmt::Debug) trait, but it produces a redacted
 /// representation of the value based on the provided [`RedactionEngine`].
 ///
 /// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDebug`] as well.
@@ -24,7 +24,7 @@ pub trait RedactedDebug {
 
 /// Formats the redacted value using the given formatter.
 ///
-/// This trait behaves similarly to the standard library's [`std::fmt::Display`] trait, but it produces a redacted
+/// This trait behaves similarly to the standard library's [`Display`](std::fmt::Display) trait, but it produces a redacted
 /// representation of the value based on the provided [`RedactionEngine`].
 ///
 /// Types implementing [`Classified`](crate::Classified) usually implement [`RedactedDisplay`] as well.

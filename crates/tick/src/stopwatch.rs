@@ -7,8 +7,8 @@ use super::Clock;
 
 /// A stopwatch that facilitates the measurement of elapsed time.
 ///
-/// An instance of `Stopwatch` is created by calling [`Clock::stopwatch`] or by passing
-/// a [`Clock`] to the [`Stopwatch::new`] constructor.
+/// An instance of `Stopwatch` is created by calling [`Clock::stopwatch()`] or by passing
+/// a [`Clock`] to the [`Stopwatch::new()`] constructor.
 ///
 /// # Examples
 ///
@@ -37,7 +37,7 @@ enum StopwatchRepr {
 impl Stopwatch {
     /// Creates a high-accuracy stopwatch that measures elapsed time.
     ///
-    /// > **Note**: Consider using [`Clock::stopwatch`] as a shortcut for creating stopwatches.
+    /// > **Note**: Consider using [`Clock::stopwatch()`] as a shortcut for creating stopwatches.
     ///
     /// # Examples
     ///

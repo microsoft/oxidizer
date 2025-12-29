@@ -29,7 +29,7 @@
   - Major improvements in the data_privacy crate ([#50](https://github.com/microsoft/oxidizer/pull/50))
   - Introduce the ohno and ohno_macros crates ([#53](https://github.com/microsoft/oxidizer/pull/53))
   - Introduce the #[classified] macro ([#48](https://github.com/microsoft/oxidizer/pull/48))
-  - Make RedactionEngine clonable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
+  - Make RedactionEngine cloneable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
 
 - 📚 Documentation
 

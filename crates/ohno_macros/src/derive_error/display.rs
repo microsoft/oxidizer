@@ -7,7 +7,7 @@ use syn::{Data, DeriveInput, Expr, Fields, Result};
 use crate::derive_error::attributes::DisplayAttribute;
 use crate::utils::bail;
 
-/// Parse display template to support field references like {`field_name`}
+/// Parse display template to support field references like `{field_name}`
 /// or format!-style with separate arguments
 #[cfg_attr(test, mutants::skip)] // Baselined - we lack full test coverage of the {} escaping logic.
 pub fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {

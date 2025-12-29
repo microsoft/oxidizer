@@ -38,6 +38,6 @@ impl std::fmt::Display for ErrorFieldRef {
 pub struct FromConfig {
     /// The type to implement From for
     pub from_type: syn::Type,
-    /// Custom field expressions: `field_name` -> expression
+    /// Custom field expressions: `field_name -> expression`
     pub field_expressions: HashMap<String, syn::Expr>,
 }

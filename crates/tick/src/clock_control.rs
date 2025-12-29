@@ -186,7 +186,7 @@ impl ClockControl {
     /// amount of time that can be auto-advanced. Once the limit is reached, further calls to
     /// access the current time will no longer auto-advance the clock.
     ///
-    /// > **Note:** This method only has an effect if [`Self::auto_advance`] has been called
+    /// > **Note**: This method only has an effect if [`Self::auto_advance`] has been called
     /// > previously to set a non-zero auto-advance duration.
     ///
     /// # Examples
@@ -228,7 +228,7 @@ impl ClockControl {
     /// When enabled, the clock will automatically advance to the next scheduled timer whenever
     /// the current time is accessed, firing timers in sequence.
     ///
-    /// > **Note:** When [`Self::auto_advance_limit`] is set, the maximum total auto-advance
+    /// > **Note**: When [`Self::auto_advance_limit`] is set, the maximum total auto-advance
     /// > duration is respected. Once the limit is reached, no further timers will be fired
     /// > automatically.
     #[must_use]

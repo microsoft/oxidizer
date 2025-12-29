@@ -422,7 +422,7 @@ use bytesbuf::BytesView;
 
 pub fn write(&mut self, message: BytesView) {
     // We now need to identify whether the message actually uses memory that allows us to
-    // ues the optimal I/O path. There is no requirement that the data passed to us contains
+    // use the optimal I/O path. There is no requirement that the data passed to us contains
     // only memory with our preferred configuration.
 
     let use_optimal_path = message.iter_slice_metas().all(|meta| {
@@ -539,7 +539,7 @@ processing in your code:
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3iSI3bi0cZkG8Tg7bBQfy7AG_Go-om_ZeJHG0mzQEby4eVxYWSBgmhieXRlc2J1ZmUwLjEuMg
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2YKC2Yw591uG6zZAyC2ksKSG9_tQgDdiHRZG311Qa2rpkRmYWSBgmhieXRlc2J1ZmUwLjEuMg
  [__link0]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.1.2/bytesbuf/?search=BytesView::first_slice
