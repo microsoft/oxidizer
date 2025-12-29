@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{self, Display, Formatter};
+use std::fmt::Display;
 use std::time::SystemTime;
 
 use jiff::Timestamp;
@@ -27,15 +27,8 @@ pub trait SystemTimeExt {
 
 impl SystemTimeExt for SystemTime {
     fn display(&self) -> impl Display {
-        SystemTimeDisplay(*self)
-    }
-}
-
-struct SystemTimeDisplay(SystemTime);
-
-impl Display for SystemTimeDisplay {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        Display::fmt(&to_timestamp_saturating(self.0), f)
+        // jiff's Timestamp implements Display that outputs ISO 8601 format
+        to_timestamp_saturating(*self)
     }
 }
 
