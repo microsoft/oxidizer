@@ -7,22 +7,21 @@ use std::time::SystemTime;
 use jiff::Timestamp;
 
 /// Extension trait for [`SystemTime`] that provides formatting capabilities.
-///
-/// # Examples
-///
-/// ```
-/// use std::time::{Duration, SystemTime};
-/// use tick::fmt::SystemTimeExt;
-///
-/// let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
-/// println!("Time: {}", time.display());
-/// // Output: Time: 1970-01-01T01:00:00Z
-/// ```
 pub trait SystemTimeExt {
     /// Returns a value that formats the [`SystemTime`] in ISO 8601 format.
     ///
     /// Times outside the valid range (before year -9999 or after year 9999) are saturated
     /// to the nearest boundary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::{Duration, SystemTime};
+    /// use tick::fmt::SystemTimeExt;
+    ///
+    /// let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
+    /// assert_eq!(time.display().to_string(), "1970-01-01T01:00:00Z");
+    /// ```
     fn display(&self) -> impl Display;
 }
 
