@@ -302,7 +302,7 @@ mod tests {
 
         let iso: Iso8601 = UnixSeconds::MIN.into();
         assert_eq!(iso, Iso8601::UNIX_EPOCH);
-        
+
         let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
         assert_eq!(iso, Iso8601::UNIX_EPOCH);
     }
