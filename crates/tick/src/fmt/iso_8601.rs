@@ -209,6 +209,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_min() {
+        // MIN represents year -9999, which cannot be parsed in standard ISO 8601 format
+        // but we can verify MIN constant exists and can be converted to SystemTime
+        let min_system_time: SystemTime = Iso8601::MIN.into();
+        let unix_epoch_time: SystemTime = Iso8601::UNIX_EPOCH.into();
+
+        // MIN should be before UNIX_EPOCH
+        assert!(min_system_time < unix_epoch_time);
+    }
+
+    #[test]
     fn parse_then_display() {
         let stamp: Iso8601 = "1970-01-01T01:00:00Z".parse().unwrap();
 

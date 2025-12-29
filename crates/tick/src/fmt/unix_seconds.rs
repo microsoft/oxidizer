@@ -3,7 +3,7 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use jiff::{SignedDuration, Timestamp};
 
@@ -92,13 +92,28 @@ impl UnixSeconds {
     /// assert_eq!(negative.to_secs(), -100);
     /// ```
     pub fn from_secs(seconds: i64) -> Result<Self, Error> {
-        Self::try_from(SignedDuration::from_secs(seconds))
+        Self::try_from_signed_duration(SignedDuration::from_secs(seconds))
     }
 
     /// Returns the number of whole seconds since the Unix epoch.
     #[must_use]
     pub fn to_secs(self) -> i64 {
         self.0.as_secs()
+    }
+
+    fn try_from_signed_duration(value: SignedDuration) -> Result<Self, Error> {
+        if value > Self::MAX.0 {
+            return Err(Error::out_of_range(
+                "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`",
+            ));
+        }
+        if value < Self::MIN.0 {
+            return Err(Error::out_of_range(
+                "the `duration` is less than the minimum value that can be represented by `UnixSeconds`",
+            ));
+        }
+
+        Ok(Self(value))
     }
 }
 
@@ -126,22 +141,12 @@ impl From<UnixSeconds> for SystemTime {
     }
 }
 
-impl TryFrom<SignedDuration> for UnixSeconds {
+impl TryFrom<Duration> for UnixSeconds {
     type Error = Error;
 
-    fn try_from(value: SignedDuration) -> Result<Self, Self::Error> {
-        if value > Self::MAX.0 {
-            return Err(Error::out_of_range(
-                "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`",
-            ));
-        }
-        if value < Self::MIN.0 {
-            return Err(Error::out_of_range(
-                "the `duration` is less than the minimum value that can be represented by `UnixSeconds`",
-            ));
-        }
-
-        Ok(Self(value))
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        let signed = SignedDuration::try_from(value).map_err(Error::jiff)?;
+        Self::try_from_signed_duration(signed)
     }
 }
 
@@ -151,7 +156,7 @@ impl TryFrom<SystemTime> for UnixSeconds {
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
         let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
         let duration = timestamp.duration_since(Timestamp::UNIX_EPOCH);
-        Self::try_from(duration)
+        Self::try_from_signed_duration(duration)
     }
 }
 
@@ -228,20 +233,15 @@ mod tests {
 
     #[test]
     fn try_from_duration() {
-        let ts = UnixSeconds::try_from(SignedDuration::new(i64::MAX, 0)).unwrap_err();
-        assert_eq!(
-            ts.to_string(),
-            "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`"
-        );
+        // Duration::MAX will overflow when converting to SignedDuration
+        let ts = UnixSeconds::try_from(Duration::MAX).unwrap_err();
+        assert!(ts.to_string().contains("overflowed"));
     }
 
     #[test]
-    fn try_from_duration_min() {
-        let ts = UnixSeconds::try_from(SignedDuration::new(i64::MIN, 0)).unwrap_err();
-        assert_eq!(
-            ts.to_string(),
-            "the `duration` is less than the minimum value that can be represented by `UnixSeconds`"
-        );
+    fn try_from_duration_success() {
+        let ts = UnixSeconds::try_from(Duration::from_secs(100)).unwrap();
+        assert_eq!(ts.to_secs(), 100);
     }
 
     #[test]
@@ -272,6 +272,14 @@ mod tests {
         let stamp: UnixSeconds = "0".parse().unwrap();
         assert_eq!(stamp, UnixSeconds::UNIX_EPOCH);
         assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn parse_min() {
+        // Parse the minimum value
+        let min_secs = UnixSeconds::MIN.to_secs();
+        let stamp: UnixSeconds = min_secs.to_string().parse().unwrap();
+        assert_eq!(stamp, UnixSeconds::MIN);
     }
 
     #[test]
@@ -347,13 +355,18 @@ mod tests {
 
     #[test]
     fn try_from_max_ensure_accepted() {
-        let unix_seconds = UnixSeconds::try_from(UnixSeconds::MAX.0).unwrap();
-        assert_eq!(unix_seconds, UnixSeconds::MAX);
+        // Test that the maximum seconds value is accepted
+        let max_secs = UnixSeconds::MAX.to_secs();
+        let unix_seconds = UnixSeconds::from_secs(max_secs).unwrap();
+        // from_secs only preserves whole seconds, so we compare seconds
+        assert_eq!(unix_seconds.to_secs(), UnixSeconds::MAX.to_secs());
     }
 
     #[test]
     fn try_from_min_ensure_accepted() {
-        let unix_seconds = UnixSeconds::try_from(UnixSeconds::MIN.0).unwrap();
+        // Test that the minimum seconds value is accepted
+        let min_secs = UnixSeconds::MIN.to_secs();
+        let unix_seconds = UnixSeconds::from_secs(min_secs).unwrap();
         assert_eq!(unix_seconds, UnixSeconds::MIN);
     }
 }

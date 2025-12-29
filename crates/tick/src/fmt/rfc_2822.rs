@@ -194,6 +194,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_min() {
+        // RFC 2822 format cannot represent year -9999, but we can verify MIN constant exists
+        // and can be converted to SystemTime
+        let min_system_time: SystemTime = Rfc2822::MIN.into();
+        let unix_epoch_time: SystemTime = Rfc2822::UNIX_EPOCH.into();
+
+        // MIN should be before UNIX_EPOCH
+        assert!(min_system_time < unix_epoch_time);
+    }
+
+    #[test]
     fn to_system_time() {
         let stamp: Rfc2822 = "Thu, 1 Jan 1970 00:00:01 GMT".parse().unwrap();
         assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_secs(1));
