@@ -116,6 +116,8 @@ struct BlockRefVTableInner {
     meta: Option<MetaFn>,
 }
 
+/// Function table that implements [`BlockRef`] for a specific memory provider.
+///
 /// Wraps a specific memory provider's [`BlockRefDynamic`] or [`BlockRefDynamicWithMeta`]
 /// implementation into a form required to construct a [`BlockRef`].
 #[derive(Debug)]
@@ -168,8 +170,7 @@ fn wrap_meta<T: BlockRefDynamicWithMeta>(state_ptr: OpaqueStatePtr) -> NonNull<d
     T::meta(state_ptr.cast())
 }
 
-/// Implements the dynamic logic inside a [`BlockRef`] and can be used to
-/// create a [`BlockRefVTable`].
+/// Implements [`BlockRefVTable`] via a trait, without publishing block metadata.
 ///
 /// This is the minimal that required to implement a [`BlockRef`] for a memory provider.
 ///
@@ -213,8 +214,7 @@ pub unsafe trait BlockRefDynamic {
     fn drop(state_ptr: NonNull<Self::State>);
 }
 
-/// Implements the dynamic logic inside a [`BlockRef`] and can be used to
-/// create a [`BlockRefVTable`] that provides metadata to callers.
+/// Implements [`BlockRefVTable`] via a trait.
 ///
 /// This is an extension of [`BlockRefDynamic`] that adds the ability to
 /// retrieve metadata about the memory block.

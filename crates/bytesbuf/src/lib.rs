@@ -631,7 +631,7 @@ mod write_adapter;
 
 pub use block::{Block, BlockSize};
 pub use block_ref::{BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable};
-pub use buf::{BytesBuf, BytesBufAvailableIterator, BytesBufVectoredWrite};
+pub use buf::{BytesBuf, BytesBufRemaining, BytesBufVectoredWrite};
 pub use callback_memory::CallbackMemory;
 pub use constants::MAX_INLINE_SPANS;
 #[cfg(any(test, feature = "test-util"))]
@@ -646,7 +646,7 @@ pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
 #[cfg(any(test, feature = "test-util"))]
 pub use transparent::TransparentTestMemory;
-pub use view::{BytesView, BytesViewSliceMetasIterator};
+pub use view::{BytesView, BytesViewSliceMetas};
 pub(crate) use write_adapter::BytesBufWrite;
 
 #[cfg(test)]

@@ -9,10 +9,13 @@ use std::sync::Arc;
 
 use crate::{BlockSize, BytesBuf, Memory, std_alloc_block};
 
-/// A memory provider that cuts the memory allocation into blocks of fixed size
-/// and delegates to the Rust global allocator for allocating those blocks.
+/// A test memory provider that uses fixed-size memory blocks.
 ///
-/// This is meant for test scenarios where a specific memory block size is important.
+/// Every memory capacity reservation is cut into into blocks of fixed size
+/// and delegated to the Rust global allocator for obtaining the memory.
+///
+/// This is meant for test scenarios where a specific memory block size is important,
+/// such as when testing edge cases of multi-block byte sequence handling.
 ///
 /// This memory provider is a simple implementation that does not perform any pooling
 /// or performance optimization, so should not be used in real code.

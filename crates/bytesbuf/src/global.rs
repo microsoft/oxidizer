@@ -15,7 +15,10 @@ use new_zealand::nz;
 use crate::constants::ERR_POISONED_LOCK;
 use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesBuf, Memory};
 
-/// A memory pool for general-purpose memory used for storage/processing of byte sequences.
+/// A memory pool that obtains memory from the Rust global allocator.
+///
+/// For clarity, the pool itself is not in any way global - rather the word "global" in the name
+/// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
 #[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
 #[derive(Clone, Debug)]
 pub struct GlobalPool {

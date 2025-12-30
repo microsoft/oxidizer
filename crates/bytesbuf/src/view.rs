@@ -466,8 +466,8 @@ impl BytesView {
     /// configuration of the memory blocks backing the byte sequence.
     ///
     /// [`first_slice()`]: Self::first_slice
-    pub fn iter_slice_metas(&self) -> BytesViewSliceMetasIterator<'_> {
-        BytesViewSliceMetasIterator::new(self)
+    pub fn iter_slice_metas(&self) -> BytesViewSliceMetas<'_> {
+        BytesViewSliceMetas::new(self)
     }
 
     /// Marks the first `count` bytes as consumed.
@@ -656,13 +656,13 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
     }
 }
 
-/// Iterator over all `first_slice_meta()` values of a [`BytesView`].
+/// Exposes all `first_slice_meta()` values of a [`BytesView`].
 ///
 /// Returned by [`BytesView::iter_slice_metas()`][BytesView::iter_slice_metas] and allows you to
 /// inspect the metadata of each slice that makes up the view without consuming any part of the view.
 #[must_use]
 #[derive(Debug)]
-pub struct BytesViewSliceMetasIterator<'s> {
+pub struct BytesViewSliceMetas<'s> {
     // This starts off as a clone of the view, just for ease of implementation.
     // We consume the parts of the view we have already iterated over.
     view: BytesView,
@@ -672,7 +672,7 @@ pub struct BytesViewSliceMetasIterator<'s> {
     _parent: PhantomData<&'s BytesView>,
 }
 
-impl<'s> BytesViewSliceMetasIterator<'s> {
+impl<'s> BytesViewSliceMetas<'s> {
     pub(crate) fn new(view: &'s BytesView) -> Self {
         Self {
             view: view.clone(),
@@ -681,7 +681,7 @@ impl<'s> BytesViewSliceMetasIterator<'s> {
     }
 }
 
-impl<'s> Iterator for BytesViewSliceMetasIterator<'s> {
+impl<'s> Iterator for BytesViewSliceMetas<'s> {
     type Item = Option<&'s dyn Any>;
 
     fn next(&mut self) -> Option<Self::Item> {

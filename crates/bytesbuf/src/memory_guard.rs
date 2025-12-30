@@ -5,8 +5,7 @@ use smallvec::SmallVec;
 
 use crate::{BlockRef, MAX_INLINE_SPANS};
 
-/// Guards memory blocks with a liveness lock, preventing a set of memory blocks
-/// from being released while the guard is alive.
+/// Prevents memory blocks from being released while the guard is alive.
 ///
 /// Call [`BytesView::extend_lifetime()`][1] or [`BytesBuf::extend_lifetime()`][2] to obtain
 /// an instance.

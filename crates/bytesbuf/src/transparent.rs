@@ -7,7 +7,7 @@ use std::num::NonZero;
 
 use crate::{BlockSize, BytesBuf, Memory, std_alloc_block};
 
-/// A memory provider that simply delegates 1:1 to the Rust global allocator.
+/// A test memory provider that delegates 1:1 to the Rust global allocator.
 ///
 /// This is meant for test scenarios where the minimal set of memory provider
 /// functionality is desired, to establish maximally controlled conditions.

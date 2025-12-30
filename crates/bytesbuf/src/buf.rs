@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
 
-/// Assembles byte sequences in reserved memory, exposing them as [`BytesView`]s.
+/// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
 /// The buffer owns some memory capacity into which it allows you to write a sequence of bytes that
 /// you can thereafter extract as one or more [`BytesView`]s over immutable data. Mutation of the
@@ -583,10 +583,10 @@ impl BytesBuf {
         Some(BytesBufVectoredWrite { buf: self, max_len })
     }
 
-    fn iter_available_capacity(&mut self, max_len: Option<usize>) -> BytesBufAvailableIterator<'_> {
+    fn iter_available_capacity(&mut self, max_len: Option<usize>) -> BytesBufRemaining<'_> {
         let next_span_builder_index = if self.span_builders_reversed.is_empty() { None } else { Some(0) };
 
-        BytesBufAvailableIterator {
+        BytesBufRemaining {
             buf: self,
             next_span_builder_index,
             max_len,
@@ -671,12 +671,15 @@ impl ConsumeManifest {
     }
 }
 
-/// Concurrently writes data into multiple slices of buffer memory capacity.
+/// Coordinates concurrent write operations into a buffer's memory capacity.
 ///
 /// The operation takes exclusive ownership of the `BytesBuf`. During the vectored write,
 /// the remaining capacity of the `BytesBuf` is exposed as `MaybeUninit<u8>` slices
 /// that at the end of the operation must be filled sequentially and in order, without gaps,
 /// in any desired amount (from 0 bytes written to all slices filled).
+///
+/// All slices may be written to concurrently and/or in any order - consistency of the contents
+/// is only required at the moment the write is committed.
 ///
 /// The capacity exposed during the operation can optionally be limited to `max_len` bytes.
 ///
@@ -697,7 +700,7 @@ impl BytesBufVectoredWrite<'_> {
     ///
     /// The slices returned from this iterator have the lifetime of the vectored
     /// write operation itself, allowing them to be mutated concurrently.
-    pub fn iter_slices_mut(&mut self) -> BytesBufAvailableIterator<'_> {
+    pub fn iter_slices_mut(&mut self) -> BytesBufRemaining<'_> {
         self.buf.iter_available_capacity(self.max_len)
     }
 
@@ -756,12 +759,14 @@ impl BytesBufVectoredWrite<'_> {
     }
 }
 
-/// Iterates over the available capacity of a `BytesBuf` as part of a vectored write
-/// operation, returning a sequence of `MaybeUninit<u8>` slices.
+/// Exposes the remaining memory capacity of a `BytesBuf` for concurrent writes.
+///
+/// This is used during a vectored write operation, iterating over a sequence
+/// of `MaybeUninit<u8>` slices that the caller can concurrently write into.
 ///
 /// The slices may be mutated for as long as the vectored write operation exists.
 #[derive(Debug)]
-pub struct BytesBufAvailableIterator<'a> {
+pub struct BytesBufRemaining<'a> {
     buf: &'a mut BytesBuf,
     next_span_builder_index: Option<usize>,
 
@@ -772,7 +777,7 @@ pub struct BytesBufAvailableIterator<'a> {
     max_len: Option<usize>,
 }
 
-impl<'a> Iterator for BytesBufAvailableIterator<'a> {
+impl<'a> Iterator for BytesBufRemaining<'a> {
     type Item = &'a mut [MaybeUninit<u8>];
 
     #[cfg_attr(test, mutants::skip)] // This gets mutated into an infinite loop which is not very helpful.
