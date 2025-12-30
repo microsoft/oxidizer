@@ -15,12 +15,6 @@
 //! - [`UnixSeconds`]: Parsing and formatting of system time that is represented as the number of whole seconds since Unix epoch.
 //!   For example, `0` represents `Thu, 1 Jan 1970 00:00:00 -0000`.
 //!
-//! # Extension Traits
-//!
-//! - [`SystemTimeExt`]: Extension trait for [`SystemTime`][`std::time::SystemTime`] that provides convenient
-//!   formatting methods. The [`display()`][SystemTimeExt::display] method returns an `impl Display` that
-//!   formats the time in ISO 8601 format.
-//!
 //! # Interoperability with `SystemTime`
 //!
 //! Types in this module use the [`TryFrom`] trait to convert from `SystemTime` to the respective format. The conversion is fallible
@@ -57,22 +51,23 @@
 //!
 //! ```
 //! use std::time::{Duration, SystemTime};
-//! use tick::fmt::SystemTimeExt;
+//! use tick::SystemTimeExt;
 //!
 //! let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
-//! println!("Time: {}", time.display());
+//! println!("Time: {}", time.display_iso_8601());
 //! // Output: Time: 1970-01-01T01:00:00Z
 //! ```
 
 mod iso_8601;
 mod rfc_2822;
-mod system_time_ext;
 mod unix_seconds;
 
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
-pub use system_time_ext::SystemTimeExt;
 pub use unix_seconds::UnixSeconds;
+
+// Re-export SystemTimeExt from parent module
+pub use crate::SystemTimeExt;
 
 #[cfg(test)]
 mod tests {
