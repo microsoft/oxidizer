@@ -32,17 +32,15 @@ impl SystemTimeExt for SystemTime {
 }
 
 #[cfg(any(feature = "fmt", test))]
-#[cfg_attr(test, mutants::skip)] // produces unkillable mutants
 fn to_timestamp_saturating(system_time: SystemTime) -> jiff::Timestamp {
     use jiff::Timestamp;
 
     match Timestamp::try_from(system_time) {
         Ok(timestamp) => timestamp,
         Err(_) => {
-            if system_time >= SystemTime::from(Timestamp::MAX) {
-                Timestamp::MAX
-            } else {
-                Timestamp::MIN
+            match system_time.duration_since(SystemTime::UNIX_EPOCH) {
+                Ok(_) => Timestamp::MAX,
+                Err(_) => Timestamp::MIN, // earlier than UNIX_EPOCH, so this must be Timestamp::MIN
             }
         }
     }
