@@ -48,7 +48,6 @@ fn to_timestamp_saturating(system_time: SystemTime) -> jiff::Timestamp {
 
 mod sealed {
     pub trait Sealed {}
-
     impl Sealed for std::time::SystemTime {}
 }
 

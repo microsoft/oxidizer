@@ -42,7 +42,6 @@ impl<T: Future> FutureExt for T {}
 
 mod sealed {
     pub trait Sealed {}
-
     impl<T: Future> Sealed for T {}
 }
 
