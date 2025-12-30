@@ -1,0 +1,72 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "layered"
+description = "A foundational service abstraction for building composable, middleware-driven systems."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "service", "middleware", "layer", "oxidizer", "compose"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+intercept = []
+dynamic-service = ["dep:dynosaur"]
+tower-service = ["dep:tower-service"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+tower-layer = { workspace = true }
+dynosaur = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
+
+[dev-dependencies]
+dynosaur = { workspace = true }
+static_assertions = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true }
+alloc_tracker = { workspace = true }
+tower = { workspace = true, features = ["limit", "util"] }
+tower-service = { workspace = true }
+pin-project-lite = { workspace = true }
+mutants = { workspace = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "custom_layer"
+
+[[example]]
+name = "service_basic"
+required-features = ["intercept"]
+
+[[example]]
+name = "tower_compatibility"
+required-features = ["tower-service", "intercept"]
+
+[[bench]]
+harness = false
+name = "dynamic"
+required-features = ["dynamic-service", "intercept"]
+
+[[bench]]
+harness = false
+name = "intercept"
+required-features = ["intercept"]
+
+[[bench]]
+harness = false
+name = "tower"
+required-features = ["intercept", "tower-service"]

@@ -3,7 +3,7 @@
 
 [toolchain]
 # This needs to match RUST_LATEST in constants.toml.
-channel = "1.92"
+channel = "ms-prod-1.92"
 
 # Additional targets to install for all builds (in both cloud and local builds).
 # The toolchain will always come with support for the host platform.
