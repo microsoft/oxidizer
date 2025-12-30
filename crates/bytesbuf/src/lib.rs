@@ -553,7 +553,7 @@ pub mod mem;
 
 mod buf;
 mod buf_put;
-#[cfg(any(test, feature = "bytes"))]
+#[cfg(any(test, feature = "bytes-compat"))]
 mod bytes_compat;
 mod constants;
 mod memory_guard;
