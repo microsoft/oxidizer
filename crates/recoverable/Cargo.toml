@@ -1,0 +1,29 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "recoverable"
+description = "Recovery information and classification for resilience patterns."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "resilience", "metadata", "classification", "oxidizer"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+
+[dev-dependencies]
+ohno.workspace = true
+static_assertions.workspace = true
+
+[lints]
+workspace = true
