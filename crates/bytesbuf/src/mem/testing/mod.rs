@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Utilities for testing memory management logic.
 //!
 //! This module contains special-purpose memory providers that are not optimized for real-world
