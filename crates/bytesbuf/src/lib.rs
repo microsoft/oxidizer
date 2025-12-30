@@ -566,13 +566,13 @@
 //!
 //! # Testing
 //!
-//! For testing purposes, this crate exposes some special-purpose memory providers that are not
-//! optimized for real-world usage but may be useful to test corner cases of byte sequence
-//! processing in your code:
+//! For testing purposes (behind `test-util` Cargo feature), this crate exposes some special-purpose
+//! memory providers that are not optimized for real-world usage but may be useful to test corner
+//! cases of byte sequence processing in your code:
 //!
-//! * [`TransparentTestMemory`] - a memory provider that does not add any value, just uses memory
+//! * `TransparentTestMemory` - a memory provider that does not add any value, just uses memory
 //!   from the Rust global allocator.
-//! * [`FixedBlockTestMemory`] - a variation of the transparent memory provider that limits
+//! * `FixedBlockTestMemory` - a variation of the transparent memory provider that limits
 //!   each consecutive memory block to a fixed size. This is useful for testing scenarios where
 //!   you want to ensure that your code works well even if a byte sequence consists of
 //!   non-consecutive memory. You can go down to as low as 1 byte per block!
@@ -610,6 +610,7 @@ mod buf_put;
 mod bytes_compat;
 mod callback_memory;
 mod constants;
+#[cfg(any(test, feature = "test-util"))]
 mod fixed_block;
 mod global;
 mod has_memory;
@@ -621,6 +622,7 @@ mod read_adapter;
 mod slice;
 mod span;
 mod span_builder;
+#[cfg(any(test, feature = "test-util"))]
 mod transparent;
 mod vec;
 mod view;
@@ -632,6 +634,7 @@ pub use block_ref::{BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRef
 pub use buf::{BytesBuf, BytesBufAvailableIterator, BytesBufVectoredWrite};
 pub use callback_memory::CallbackMemory;
 pub use constants::MAX_INLINE_SPANS;
+#[cfg(any(test, feature = "test-util"))]
 pub use fixed_block::FixedBlockTestMemory;
 pub use global::GlobalPool;
 pub use has_memory::HasMemory;
@@ -641,6 +644,7 @@ pub use memory_shared::MemoryShared;
 pub use opaque_memory::OpaqueMemory;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
+#[cfg(any(test, feature = "test-util"))]
 pub use transparent::TransparentTestMemory;
 pub use view::{BytesView, BytesViewSliceMetasIterator};
 pub(crate) use write_adapter::BytesBufWrite;
@@ -648,4 +652,5 @@ pub(crate) use write_adapter::BytesBufWrite;
 #[cfg(test)]
 mod testing;
 
+#[cfg(any(test, feature = "test-util"))]
 pub(crate) mod std_alloc_block;

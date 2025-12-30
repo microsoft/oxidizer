@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(any(test, feature = "test-util"))]
+
 use std::alloc::{Layout, alloc, dealloc};
 use std::mem::MaybeUninit;
 use std::num::NonZero;

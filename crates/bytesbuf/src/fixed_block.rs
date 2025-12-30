@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(any(test, feature = "test-util"))]
+
 use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;

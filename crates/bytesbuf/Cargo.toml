@@ -31,7 +31,7 @@ all-features = true
 
 [features]
 default = []
-fakes = []
+test-util = []
 
 [dependencies]
 bytes = { workspace = true, features = ["std"] }
@@ -56,6 +56,7 @@ workspace = true
 [[bench]]
 name = "buf"
 harness = false
+required-features = ["test-util"]
 
 [[bench]]
 name = "global_pool"
@@ -64,3 +65,16 @@ harness = false
 [[bench]]
 name = "view"
 harness = false
+required-features = ["test-util"]
+
+[[example]]
+name = "bb_has_memory_forwarding"
+required-features = ["test-util"]
+
+[[example]]
+name = "bb_has_memory_optimizing"
+required-features = ["test-util"]
+
+[[example]]
+name = "bb_static_data"
+required-features = ["test-util"]
