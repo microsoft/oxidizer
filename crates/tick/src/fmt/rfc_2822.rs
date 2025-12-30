@@ -3,7 +3,7 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use jiff::Timestamp;
 use jiff::fmt::rfc2822;
@@ -92,12 +92,13 @@ impl Rfc2822 {
 
     /// The smallest value that can be represented by `Rfc2822`.
     ///
-    /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
+    /// This represents a Unix system time at `1 January -9999 00:00:00 UTC`.
+    pub const MIN: Self = Self(Timestamp::MIN);
 
-    pub(super) fn to_unix_epoch_duration(self) -> Duration {
-        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
-    }
+    /// The Unix epoch represented as an `Rfc2822` timestamp.
+    ///
+    /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
+    pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 }
 
 impl FromStr for Rfc2822 {
@@ -175,6 +176,7 @@ impl<'de> serde_core::Deserialize<'de> for Rfc2822 {
 #[cfg(test)]
 mod tests {
     use std::hash::Hash;
+    use std::time::Duration;
 
     use super::*;
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
@@ -185,9 +187,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_min() {
+    fn parse_unix_epoch() {
         let stamp: Rfc2822 = "Thu, 1 Jan 1970 00:00:00 GMT".parse().unwrap();
+        assert_eq!(stamp, Rfc2822::UNIX_EPOCH);
         assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn parse_min() {
+        // RFC 2822 format cannot represent year -9999, but we can verify MIN constant exists
+        // and can be converted to SystemTime
+        let min_system_time: SystemTime = Rfc2822::MIN.into();
+        let unix_epoch_time: SystemTime = Rfc2822::UNIX_EPOCH.into();
+
+        // MIN should be before UNIX_EPOCH
+        assert!(min_system_time < unix_epoch_time);
     }
 
     #[test]
