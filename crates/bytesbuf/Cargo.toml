@@ -31,6 +31,8 @@ all-features = true
 
 [features]
 default = []
+# Compatibility with the `bytes` crate.
+bytes = []
 test-util = []
 
 [dependencies]
