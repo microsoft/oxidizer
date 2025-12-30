@@ -3,17 +3,20 @@
 
 use smallvec::SmallVec;
 
-use crate::{BlockRef, MAX_INLINE_SPANS};
+use crate::MAX_INLINE_SPANS;
+use crate::mem::BlockRef;
 
-/// Prevents memory blocks from being released while the guard is alive.
+/// Prevents memory capacity from being released while the guard is alive.
 ///
 /// Call [`BytesView::extend_lifetime()`][1] or [`BytesBuf::extend_lifetime()`][2] to obtain
 /// an instance.
 ///
 /// The memory may be used for any otherwise legal purpose; all this guard does is act as a
-/// shadow reference to the memory blocks. This can be useful when executing unsafe logic,
-/// where there may not otherwise exist any Rust objects holding references to memory blocks
-/// in use (e.g. because the code operating on them is not even Rust code).
+/// shadow reference to some memory capacity.
+///
+/// This can be useful when executing unsafe logic, where there may not otherwise exist any Rust objects
+/// holding references to memory capacity in use (e.g. because the code operating on the capacity is not
+/// even Rust code).
 ///
 /// [1]: crate::BytesView::extend_lifetime
 /// [2]: crate::BytesBuf::extend_lifetime
@@ -33,7 +36,7 @@ impl MemoryGuard {
 }
 
 impl Default for MemoryGuard {
-    /// Creates a memory guard that does not guard any memory blocks.
+    /// Creates a memory guard that does not guard any memory capacity.
     ///
     /// Useless for real logic but potentially meaningful as a placeholder in tests.
     fn default() -> Self {

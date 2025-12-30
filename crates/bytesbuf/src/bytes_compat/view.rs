@@ -35,11 +35,11 @@ mod tests {
     use new_zealand::nz;
 
     use super::*;
-    use crate::FixedBlockTestMemory;
+    use crate::mem::testing::FixedBlockMemory;
 
     #[test]
     fn buf_compat() {
-        let memory = FixedBlockTestMemory::new(nz!(25));
+        let memory = FixedBlockMemory::new(nz!(25));
 
         // 25 x 4
         let mut buf = memory.reserve(100);

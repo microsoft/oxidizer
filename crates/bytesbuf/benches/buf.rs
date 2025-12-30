@@ -9,7 +9,9 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use bytesbuf::{BlockSize, BytesBuf, BytesView, FixedBlockTestMemory, TransparentTestMemory};
+use bytesbuf::mem::BlockSize;
+use bytesbuf::mem::testing::{FixedBlockMemory, TransparentMemory};
+use bytesbuf::{BytesBuf, BytesView};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
@@ -33,8 +35,8 @@ const PUT_BYTES_LEN: usize = 512;
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 
-    let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
-    let transparent_memory = TransparentTestMemory::new();
+    let memory = FixedBlockMemory::new(TEST_SPAN_SIZE);
+    let transparent_memory = TransparentMemory::new();
 
     let test_data_as_seq = BytesView::copied_from_slice(TEST_DATA, &memory);
 
@@ -314,7 +316,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("vectored_write_one_span");
     group.bench_function("vectored_write_one_span", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
@@ -339,7 +341,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("vectored_write_max_inline_spans");
     group.bench_function("vectored_write_max_inline_spans", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
@@ -364,7 +366,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("vectored_write_many_spans");
     group.bench_function("vectored_write_many_spans", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
@@ -390,7 +392,7 @@ fn entrypoint(c: &mut Criterion) {
     // the vectored write API.
     group.bench_function("advance_mut_one_span", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {

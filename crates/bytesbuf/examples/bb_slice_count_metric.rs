@@ -7,7 +7,8 @@
 //!
 //! Reporting via metrics pipeline (e.g. OpenTelemetry) is also possible but out of scope here.
 
-use bytesbuf::{BytesView, GlobalPool};
+use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use nm::Report;
 
 fn main() {

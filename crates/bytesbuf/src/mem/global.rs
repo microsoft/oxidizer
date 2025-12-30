@@ -12,14 +12,15 @@ use std::{iter, ptr};
 use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use new_zealand::nz;
 
+use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesBuf, Memory};
+use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory};
 
 /// A memory pool that obtains memory from the Rust global allocator.
 ///
 /// For clarity, the pool itself is not in any way global - rather the word "global" in the name
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
-#[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
+#[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
 #[derive(Clone, Debug)]
 pub struct GlobalPool {
     inner: Arc<GlobalPoolInner>,
@@ -313,7 +314,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::MemoryShared;
+    use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
 

@@ -11,8 +11,9 @@ use std::{iter, mem};
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
-use crate::read_adapter::BytesViewReader;
-use crate::{BlockSize, MAX_INLINE_SPANS, Memory, MemoryGuard, Span};
+use crate::BytesViewReader;
+use crate::mem::{BlockSize, Memory};
+use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
 ///
@@ -736,8 +737,8 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::testing::TestMemoryBlock;
-    use crate::{BytesBuf, TransparentTestMemory, std_alloc_block};
+    use crate::BytesBuf;
+    use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
 
     assert_impl_all!(BytesView: Send, Sync);
 
@@ -1140,7 +1141,7 @@ mod tests {
             .unwrap();
         }
 
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
         post_to_another_thread(view);
@@ -1148,7 +1149,7 @@ mod tests {
 
     #[test]
     fn vectored_read_as_io_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
         let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
@@ -1168,7 +1169,7 @@ mod tests {
 
     #[test]
     fn vectored_read_as_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
         let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
@@ -1188,7 +1189,7 @@ mod tests {
 
     #[test]
     fn eq_sequence() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
         let view2 = BytesView::copied_from_slice(b"Hello, world!", &memory);
@@ -1218,7 +1219,7 @@ mod tests {
 
     #[test]
     fn eq_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
@@ -1247,7 +1248,7 @@ mod tests {
 
     #[test]
     fn eq_array() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
@@ -1276,7 +1277,7 @@ mod tests {
 
     #[test]
     fn meta_none() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
         let view2 = BytesView::copied_from_slice(b"world!", &memory);
@@ -1337,7 +1338,7 @@ mod tests {
 
     #[test]
     fn append_single_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         // Create two single-span views.
         let mut view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
@@ -1354,7 +1355,7 @@ mod tests {
 
     #[test]
     fn append_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         // Create two multi-span views (2 spans each)
         let view1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
@@ -1376,7 +1377,7 @@ mod tests {
 
     #[test]
     fn append_empty_view() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let mut view1 = BytesView::copied_from_slice(b"Hello", &memory);
         let view2 = BytesView::new();
@@ -1395,7 +1396,7 @@ mod tests {
 
     #[test]
     fn concat_single_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         // Create two single-span views
         let view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
@@ -1417,7 +1418,7 @@ mod tests {
 
     #[test]
     fn concat_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         // Create two multi-span views (2 spans each)
         let view1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
@@ -1444,7 +1445,7 @@ mod tests {
 
     #[test]
     fn concat_empty_views() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let view1 = BytesView::copied_from_slice(b"Hello", &memory);
         let view2 = BytesView::new();

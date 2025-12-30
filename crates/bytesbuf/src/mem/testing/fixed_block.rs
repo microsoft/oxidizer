@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(any(test, feature = "test-util"))]
-
 use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
-use crate::{BlockSize, BytesBuf, Memory, std_alloc_block};
+use crate::BytesBuf;
+use crate::mem::testing::std_alloc_block;
+use crate::mem::{BlockSize, Memory};
 
-/// A test memory provider that uses fixed-size memory blocks.
+/// A memory provider that uses fixed-size memory blocks.
 ///
 /// Every memory capacity reservation is cut into into blocks of fixed size
 /// and delegated to the Rust global allocator for obtaining the memory.
@@ -20,16 +20,16 @@ use crate::{BlockSize, BytesBuf, Memory, std_alloc_block};
 /// This memory provider is a simple implementation that does not perform any pooling
 /// or performance optimization, so should not be used in real code.
 #[derive(Clone, Debug)]
-pub struct FixedBlockTestMemory {
-    inner: Arc<FixedBlockTestMemoryInner>,
+pub struct FixedBlockMemory {
+    inner: Arc<FixedBlockMemoryInner>,
 }
 
-impl FixedBlockTestMemory {
+impl FixedBlockMemory {
     /// Creates a new instance of the memory provider.
     #[must_use]
     pub fn new(block_size: NonZero<BlockSize>) -> Self {
         Self {
-            inner: Arc::new(FixedBlockTestMemoryInner::new(block_size)),
+            inner: Arc::new(FixedBlockMemoryInner::new(block_size)),
         }
     }
 
@@ -56,7 +56,7 @@ impl FixedBlockTestMemory {
     }
 }
 
-impl Memory for FixedBlockTestMemory {
+impl Memory for FixedBlockMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
@@ -64,18 +64,18 @@ impl Memory for FixedBlockTestMemory {
 }
 
 #[derive(Debug)]
-struct FixedBlockTestMemoryInner {
+struct FixedBlockMemoryInner {
     block_size: NonZero<BlockSize>,
 }
 
-impl FixedBlockTestMemoryInner {
+impl FixedBlockMemoryInner {
     #[must_use]
     pub(crate) const fn new(block_size: NonZero<BlockSize>) -> Self {
         Self { block_size }
     }
 }
 
-impl FixedBlockTestMemoryInner {
+impl FixedBlockMemoryInner {
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         let Some(min_bytes) = NonZero::new(min_bytes) else {
             return BytesBuf::default();
@@ -95,13 +95,14 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::{BytesView, MemoryShared};
+    use crate::BytesView;
+    use crate::mem::MemoryShared;
 
-    assert_impl_all!(FixedBlockTestMemory: MemoryShared);
+    assert_impl_all!(FixedBlockMemory: MemoryShared);
 
     #[test]
     fn byte_by_byte() {
-        let memory = FixedBlockTestMemory::new(nz!(1));
+        let memory = FixedBlockMemory::new(nz!(1));
 
         let sb = memory.reserve(0);
         assert_eq!(sb.len(), 0);

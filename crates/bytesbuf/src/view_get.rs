@@ -306,11 +306,11 @@ impl BytesView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TransparentTestMemory;
+    use crate::mem::testing::TransparentMemory;
 
     #[test]
     fn get_byte() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         assert_eq!(view.get_byte(), 1);
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn copy_to_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [0u8; 4];
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn copy_to_smaller_slice_copies_partially() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [0u8; 3];
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn copy_to_bigger_slice_panics() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [0u8; 8];
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn copy_to_uninit_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [MaybeUninit::<u8>::uninit(); 4];
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn copy_to_uninit_smaller_slice_copies_partially() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [MaybeUninit::<u8>::uninit(); 3];
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn copy_to_uninit_bigger_slice_panics() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[1, 2, 3, 4], &memory);
 
         let mut dst = [MaybeUninit::<u8>::uninit(); 8];
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn copy_to_slice_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let data_part1 = [10_u8, 20];
         let data_part2 = [30_u8, 40, 50];
         let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn copy_to_uninit_slice_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let data_part1 = [10_u8, 20];
         let data_part2 = [30_u8, 40, 50];
         let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn get_num_le() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
 
         assert_eq!(view.get_num_le::<u16>(), 0x1234);
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn get_num_le_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let data_part1 = [0x78_u8, 0x56];
         let data_part2 = [0x34_u8, 0x12];
         let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn get_num_be() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[0x12, 0x34, 0x56, 0x78], &memory);
 
         assert_eq!(view.get_num_be::<u16>(), 0x1234);
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn get_num_be_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let data_part1 = [0x12_u8, 0x34];
         let data_part2 = [0x56_u8, 0x78];
         let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn get_num_ne() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
 
         if cfg!(target_endian = "big") {
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn get_num_ne_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let data_part1 = [0x78_u8, 0x56];
         let data_part2 = [0x34_u8, 0x12];
         let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);

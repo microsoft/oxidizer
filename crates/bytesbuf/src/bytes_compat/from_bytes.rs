@@ -9,7 +9,8 @@ use std::sync::atomic::{self, AtomicUsize};
 use bytes::Bytes;
 use smallvec::SmallVec;
 
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesView, MAX_INLINE_SPANS, Span};
+use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize};
+use crate::{BytesView, MAX_INLINE_SPANS, Span};
 
 impl From<Bytes> for BytesView {
     /// Converts a [`Bytes`] instance into a `BytesView`.
@@ -195,7 +196,7 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     use super::*;
-    use crate::TransparentTestMemory;
+    use crate::mem::testing::TransparentMemory;
 
     #[test]
     fn test_bytes_to_sequence() {
@@ -214,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_sequence_to_bytes() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let sequence = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
@@ -230,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_multi_block_sequence_to_bytes() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
         let world = BytesView::copied_from_slice(b"world!", &memory);

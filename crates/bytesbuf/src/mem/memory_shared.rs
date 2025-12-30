@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::Memory;
+use crate::mem::Memory;
 
 /// Provides memory for byte sequences in a thread-safe manner.
 ///

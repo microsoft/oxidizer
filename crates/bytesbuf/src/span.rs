@@ -5,7 +5,7 @@ use std::ops::{Bound, Deref, RangeBounds};
 use std::ptr::NonNull;
 use std::{fmt, slice};
 
-use crate::{BlockRef, BlockSize};
+use crate::mem::{BlockRef, BlockSize};
 
 /// A span of immutable bytes backed by memory from a memory block.
 ///
@@ -203,7 +203,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::std_alloc_block;
+    use crate::mem::testing::std_alloc_block;
 
     // The type is thread-mobile (Send) and can be shared (for reads) between threads (Sync).
     assert_impl_all!(Span: Send, Sync);

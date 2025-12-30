@@ -5,9 +5,10 @@ use std::any::type_name;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::{BytesBuf, Memory};
+use crate::BytesBuf;
+use crate::mem::Memory;
 
-/// Implements [`MemoryShared`][crate::MemoryShared] by delegating to a closure.
+/// Implements [`MemoryShared`][crate::mem::MemoryShared] by delegating to a closure.
 ///
 /// This can be used to construct wrapping memory providers that add logic or configuration
 /// on top of an existing memory provider.
@@ -92,7 +93,8 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::{MemoryShared, TransparentTestMemory};
+    use crate::mem::MemoryShared;
+    use crate::mem::testing::TransparentMemory;
 
     assert_impl_all!(CallbackMemory<fn(usize) -> BytesBuf>: MemoryShared);
 
@@ -105,7 +107,7 @@ mod tests {
 
             move |min_bytes| {
                 callback_called_times.fetch_add(1, atomic::Ordering::SeqCst);
-                TransparentTestMemory::new().reserve(min_bytes)
+                TransparentMemory::new().reserve(min_bytes)
             }
         });
 
@@ -123,7 +125,7 @@ mod tests {
 
             move |min_bytes| {
                 callback_called_times.fetch_add(1, atomic::Ordering::SeqCst);
-                TransparentTestMemory::new().reserve(min_bytes)
+                TransparentMemory::new().reserve(min_bytes)
             }
         });
 
@@ -140,7 +142,7 @@ mod tests {
 
     #[test]
     fn debug_output_contains_type_and_field_info() {
-        let provider = CallbackMemory::new(|min_bytes| TransparentTestMemory::new().reserve(min_bytes));
+        let provider = CallbackMemory::new(|min_bytes| TransparentMemory::new().reserve(min_bytes));
 
         // Call the original provider to help code coverage.
         _ = Memory::reserve(&provider, 50);

@@ -68,7 +68,7 @@ mod tests {
     use new_zealand::nz;
 
     use super::*;
-    use crate::std_alloc_block;
+    use crate::mem::testing::std_alloc_block;
 
     #[test]
     fn view_to_bytes() {

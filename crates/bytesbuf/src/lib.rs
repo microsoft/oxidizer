@@ -592,10 +592,11 @@
 //! [`first_unfilled_slice()`]: crate::BytesBuf::first_unfilled_slice
 //! [BufAdvance]: crate::BytesBuf::advance
 //! [`BytesView::to_bytes()`]: crate::BytesView::to_bytes
-//! [`Memory`]: crate::Memory
-//! [`HasMemory`]: crate::HasMemory
-//! [`HasMemory::memory()`]: crate::HasMemory::memory
-//! [`GlobalPool`]: crate::GlobalPool
+//! [`Memory`]: crate::mem::Memory
+//! [`Memory::reserve()`]: crate::mem::Memory::reserve
+//! [`HasMemory`]: crate::mem::HasMemory
+//! [`HasMemory::memory()`]: crate::mem::HasMemory::memory
+//! [`GlobalPool`]: crate::mem::GlobalPool
 //! [`Bytes`]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [`remaining_capacity()`]: crate::BytesBuf::remaining_capacity
 //! [`OnceLock`]: std::sync::OnceLock
@@ -603,54 +604,34 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/favicon.ico")]
 
-mod block;
-mod block_ref;
+// The root level contains "byte sequence" types, whereas the closely related
+// "memory management" types are shoved away into the `mem` module. This is largely
+// for organizational purposes, to help navigate the API documentation better. Both
+// sets of types very often need to be used together, so they are not functionally separate.
+pub mod mem;
+
 mod buf;
 mod buf_put;
 mod bytes_compat;
-mod callback_memory;
 mod constants;
-#[cfg(any(test, feature = "test-util"))]
-mod fixed_block;
-mod global;
-mod has_memory;
-mod memory;
 mod memory_guard;
-mod memory_shared;
-mod opaque_memory;
 mod read_adapter;
 mod slice;
 mod span;
 mod span_builder;
-#[cfg(any(test, feature = "test-util"))]
-mod transparent;
 mod vec;
 mod view;
 mod view_get;
 mod write_adapter;
 
-pub use block::{Block, BlockSize};
-pub use block_ref::{BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable};
 pub use buf::{BytesBuf, BytesBufRemaining, BytesBufVectoredWrite};
-pub use callback_memory::CallbackMemory;
 pub use constants::MAX_INLINE_SPANS;
-#[cfg(any(test, feature = "test-util"))]
-pub use fixed_block::FixedBlockTestMemory;
-pub use global::GlobalPool;
-pub use has_memory::HasMemory;
-pub use memory::Memory;
 pub use memory_guard::MemoryGuard;
-pub use memory_shared::MemoryShared;
-pub use opaque_memory::OpaqueMemory;
+pub(crate) use read_adapter::BytesViewReader;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
-#[cfg(any(test, feature = "test-util"))]
-pub use transparent::TransparentTestMemory;
 pub use view::{BytesView, BytesViewSliceMetas};
 pub(crate) use write_adapter::BytesBufWrite;
 
 #[cfg(test)]
 mod testing;
-
-#[cfg(any(test, feature = "test-util"))]
-pub(crate) mod std_alloc_block;

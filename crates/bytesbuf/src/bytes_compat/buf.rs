@@ -35,11 +35,11 @@ unsafe impl BufMut for BytesBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TransparentTestMemory;
+    use crate::mem::testing::TransparentMemory;
 
     #[test]
     fn buf_mut_compat() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         assert_eq!(buf.remaining_mut(), 100);

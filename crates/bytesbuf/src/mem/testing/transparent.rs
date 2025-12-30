@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(any(test, feature = "test-util"))]
-
 use std::num::NonZero;
 
-use crate::{BlockSize, BytesBuf, Memory, std_alloc_block};
+use crate::BytesBuf;
+use crate::mem::testing::std_alloc_block;
+use crate::mem::{BlockSize, Memory};
 
-/// A test memory provider that delegates 1:1 to the Rust global allocator.
+/// A memory provider that delegates 1:1 to the Rust global allocator.
 ///
 /// This is meant for test scenarios where the minimal set of memory provider
 /// functionality is desired, to establish maximally controlled conditions.
@@ -15,14 +15,14 @@ use crate::{BlockSize, BytesBuf, Memory, std_alloc_block};
 /// For general-purpose public use, the [`GlobalPool`][1] should be used instead,
 /// as it is geared for actual efficiency - this here is just a simple passthrough implementation.
 ///
-/// [1]: crate::GlobalPool
+/// [1]: crate::mem::GlobalPool
 #[derive(Clone, Debug, Default)]
-pub struct TransparentTestMemory {
+pub struct TransparentMemory {
     // We may add more fields later, so this is a placeholder to ensure we do not empty-type this.
     _placeholder: (),
 }
 
-impl TransparentTestMemory {
+impl TransparentMemory {
     /// Creates a new instance of the memory provider.
     #[must_use]
     pub const fn new() -> Self {
@@ -50,7 +50,7 @@ impl TransparentTestMemory {
     }
 }
 
-impl Memory for TransparentTestMemory {
+impl Memory for TransparentMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
@@ -91,13 +91,13 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::MemoryShared;
+    use crate::mem::MemoryShared;
 
-    assert_impl_all!(TransparentTestMemory: MemoryShared);
+    assert_impl_all!(TransparentMemory: MemoryShared);
 
     #[test]
     fn smoke_test() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
         let mut sb = memory.reserve(0);
         assert_eq!(sb.len(), 0);
@@ -127,7 +127,7 @@ mod tests {
 
         // This is a giant allocation that does not fit into one memory block.
 
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let sb = memory.reserve(5_000_000_000);
 
         assert_eq!(sb.capacity(), 5_000_000_000);

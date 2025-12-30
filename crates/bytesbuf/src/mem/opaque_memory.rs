@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{Memory, MemoryShared};
+use crate::mem::{Memory, MemoryShared};
 
 /// Adapter to erase the type of a [`MemoryShared`] implementation.
 ///
@@ -58,7 +58,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::GlobalPool;
+    use crate::mem::GlobalPool;
 
     assert_impl_all!(OpaqueMemory: MemoryShared);
 

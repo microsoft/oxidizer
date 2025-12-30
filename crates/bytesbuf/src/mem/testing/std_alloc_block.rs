@@ -1,15 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(any(test, feature = "test-util"))]
-
 use std::alloc::{Layout, alloc, dealloc};
 use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::ptr::NonNull;
 use std::sync::atomic::{self, AtomicUsize};
 
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize};
+use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize};
 
 /// Allocates a new memory block of the given length from the Rust global allocator.
 #[must_use]

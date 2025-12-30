@@ -7,7 +7,8 @@ use std::num::NonZero;
 
 use smallvec::SmallVec;
 
-use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
+use crate::mem::{Block, BlockSize, Memory};
+use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
@@ -45,7 +46,7 @@ use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory
 /// consuming capacity as each appended [`BytesView`] brings its own backing memory capacity.
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
-/// [memory provider]: crate::Memory
+/// [memory provider]: crate::mem::Memory
 /// [`reserve()`]: Self::reserve
 /// [`put_bytes()`]: Self::put_bytes
 /// [`consume()`]: Self::consume
@@ -865,8 +866,8 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::testing::TestMemoryBlock;
-    use crate::{FixedBlockTestMemory, GlobalPool};
+    use crate::mem::GlobalPool;
+    use crate::mem::testing::{FixedBlockMemory, TestMemoryBlock};
 
     const U64_SIZE: usize = size_of::<u64>();
     const TWO_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>();
@@ -876,7 +877,7 @@ mod tests {
 
     #[test]
     fn smoke_test() {
-        let memory = FixedBlockTestMemory::new(nz!(1234));
+        let memory = FixedBlockMemory::new(nz!(1234));
 
         let min_length = 1000;
 
@@ -936,7 +937,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(100));
+        let memory = FixedBlockMemory::new(nz!(100));
 
         // Have 0, desired 10, requesting 10, will get 100.
         buf.reserve(10, &memory);
@@ -969,7 +970,7 @@ mod tests {
 
     #[test]
     fn append_existing_view() {
-        let memory = FixedBlockTestMemory::new(nz!(1234));
+        let memory = FixedBlockMemory::new(nz!(1234));
 
         let min_length = 1000;
 
@@ -1020,7 +1021,7 @@ mod tests {
     #[test]
     fn consume_all_mixed() {
         let mut buf = BytesBuf::new();
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Reserve some capacity and add initial data.
         buf.reserve(16, &memory);
@@ -1058,7 +1059,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
 
         // Peeking an empty buffer is fine, it is just an empty BytesView in that case.
         let peeked = buf.peek();
@@ -1144,7 +1145,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
 
         buf.reserve(100, &memory);
 
@@ -1187,7 +1188,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(100));
+        let memory = FixedBlockMemory::new(nz!(100));
 
         // Capacity: 0 -> 1000 (10x100)
         buf.reserve(1000, &memory);
@@ -1218,7 +1219,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
         buf.reserve(TWO_U64_SIZE, &memory);
@@ -1273,7 +1274,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
         buf.reserve(TWO_U64_SIZE, &memory);
@@ -1299,7 +1300,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 8 (1x8)
         buf.reserve(U64_SIZE, &memory);
@@ -1335,7 +1336,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
         buf.reserve(THREE_U64_SIZE, &memory);
@@ -1400,7 +1401,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
         buf.reserve(THREE_U64_SIZE, &memory);
@@ -1461,7 +1462,7 @@ mod tests {
     fn vectored_write_max_len_overflow() {
         let mut buf = BytesBuf::new();
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
         buf.reserve(THREE_U64_SIZE, &memory);
@@ -1480,7 +1481,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
         buf.reserve(TWO_U64_SIZE, &memory);
@@ -1505,7 +1506,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 8 (1x8)
         buf.reserve(U64_SIZE, &memory);
@@ -1635,7 +1636,7 @@ mod tests {
 
     #[test]
     fn consume_manifest_correctly_calculated() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
 
         let mut buf = BytesBuf::new();
         buf.reserve(100, &memory);
@@ -1708,7 +1709,7 @@ mod tests {
 
     #[test]
     fn peek_with_frozen_spans_only() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
@@ -1729,7 +1730,7 @@ mod tests {
 
     #[test]
     fn peek_with_partially_filled_span_builder() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
         let mut buf = BytesBuf::new();
 
         buf.reserve(10, &memory);
@@ -1750,7 +1751,7 @@ mod tests {
 
     #[test]
     fn peek_preserves_capacity_of_partial_span_builder() {
-        let memory = FixedBlockTestMemory::new(nz!(20));
+        let memory = FixedBlockMemory::new(nz!(20));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
@@ -1783,7 +1784,7 @@ mod tests {
 
     #[test]
     fn peek_with_mixed_frozen_and_unfrozen() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
         let mut buf = BytesBuf::new();
 
         buf.reserve(30, &memory);
@@ -1817,7 +1818,7 @@ mod tests {
 
     #[test]
     fn peek_then_consume() {
-        let memory = FixedBlockTestMemory::new(nz!(20));
+        let memory = FixedBlockMemory::new(nz!(20));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
@@ -1848,7 +1849,7 @@ mod tests {
 
     #[test]
     fn peek_multiple_times() {
-        let memory = FixedBlockTestMemory::new(nz!(20));
+        let memory = FixedBlockMemory::new(nz!(20));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);

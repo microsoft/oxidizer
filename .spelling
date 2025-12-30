@@ -134,6 +134,7 @@ interoperate
 IOCP
 IP
 Kubernetes
+libc
 libs
 libunwind-devel
 lifecycle
@@ -142,6 +143,7 @@ llvm-cov
 macros
 Macros
 Makefile
+MEMORYSTATUSEX
 metadata
 Metas
 Microservices
@@ -240,6 +242,8 @@ supertrait
 supertraits
 Symcrypt
 sys
+syscall
+sysinfo
 tdnf
 testability
 timestamp
