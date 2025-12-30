@@ -69,8 +69,10 @@ mod tests {
             (SystemTime::UNIX_EPOCH + Duration::from_secs(3600)).display_iso_8601().to_string(),
             "1970-01-01T01:00:00Z"
         );
+    }
 
-        // out of range
+    #[test]
+    fn display_out_of_range() {
         let time = SystemTime::from(Timestamp::MAX) + Duration::from_secs(12345);
         assert_eq!(time.display_iso_8601().to_string(), "9999-12-30T22:00:00.999999999Z");
 
