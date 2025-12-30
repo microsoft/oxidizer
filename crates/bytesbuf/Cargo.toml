@@ -3,7 +3,7 @@
 
 [package]
 name = "bytesbuf"
-description = "Manipulate sequences of bytes for efficient I/O."
+description = "Types for creating and manipulating byte sequences."
 version = "0.1.2"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
