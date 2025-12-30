@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.1.2"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
