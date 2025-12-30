@@ -6,7 +6,7 @@
 # Rust toolchain versions
 RUST_MSRV = "1.88"                                  # used for testing, ensures the MSRV promise is kept; must match Cargo.toml [workspace.package].rust-version
 RUST_LATEST = "1.92"                                # used for static analysis & mutation testing; must match rust-toolchain.toml
-RUST_NIGHTLY = "nightly-2025-12-20"                 # used for coverage and extended analysis; update on a regular basis
+RUST_NIGHTLY = "nightly-2025-12-29"                 # used for coverage and extended analysis; update on a regular basis
 RUST_NIGHTLY_EXTERNAL_TYPES = "nightly-2025-10-18"  # used for external type exposure checks; update alongside updates to cargo-check-external-types
 
 # Cargo tools

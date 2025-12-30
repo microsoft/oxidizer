@@ -76,12 +76,16 @@
 //! - [`Stopwatch`] - Measures elapsed time.
 //! - [`Delay`] - Delays the execution for a specified duration.
 //! - [`PeriodicTimer`] - Schedules a task to run periodically.
-//! - [`FutureExt`] - Extensions for the `Future` trait.
 //! - [`Error`] - Represents an error that can occur when working with time. Provides limited
 //!   introspection capabilities.
 //! - [`fmt`] - Utilities for formatting `SystemTime` into various formats. Available when
 //!   the `fmt` feature is enabled.
 //! - [`runtime`] - Infrastructure for integrating time primitives into async runtimes.
+//!
+//! # Extensions
+//!
+//! - [`FutureExt`] - Extensions for the `Future` trait, providing timeout functionality.
+//! - [`SystemTimeExt`] - Extensions for [`SystemTime`][`std::time::SystemTime`].
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!
@@ -223,6 +227,7 @@ mod future_ext;
 mod periodic_timer;
 mod state;
 mod stopwatch;
+mod system_time_ext;
 mod timers;
 
 pub mod runtime;
@@ -235,4 +240,5 @@ pub use error::{Error, Result};
 pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
+pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
