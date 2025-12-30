@@ -32,11 +32,11 @@ all-features = true
 [features]
 default = []
 # Interoperability with the `bytes` crate.
-bytes-compat = []
+bytes-compat = ["dep:bytes"]
 test-util = []
 
 [dependencies]
-bytes = { workspace = true, features = ["std"] }
+bytes = { workspace = true, features = ["std"], optional = true }
 infinity_pool.workspace = true
 new_zealand.workspace = true
 nm.workspace = true
