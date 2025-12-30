@@ -4,13 +4,13 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-//! Create and manipulate byte sequences for efficient I/O.
+//! Types for creating and manipulating byte sequences.
 //!
-//! A byte sequence is a logical sequence of zero or more bytes stored in memory,
-//! similar to a slice `&[u8]` but with some key differences:
+//! The data we operate on are logical sequences of zero or more bytes stored in memory,
+//! similar to a `&[u8]` but with some key differences:
 //!
 //! * The bytes in a byte sequence are not required to be consecutive in memory.
-//! * The bytes in a byte sequence are always immutable.
+//! * The bytes in a byte sequence are always immutable (append-only construction).
 //!
 //! In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
 //! treated as one logical sequence of bytes. Byte sequences are created via [`BytesBuf`] and
@@ -18,9 +18,9 @@
 //!
 //! # Consuming Byte Sequences
 //!
-//! A byte sequence is typically consumed by reading its contents. This is done via the
-//! [`BytesView`] type, which is a view over a byte sequence. When reading data, the read
-//! bytes are removed from the view, shrinking it to only the remaining bytes.
+//! A byte sequence is typically consumed by reading its contents from the start. This is done via the
+//! [`BytesView`] type, which is a view over a byte sequence. When reading data, the bytes read are
+//! removed from the front of the view, shrinking it to only the remaining bytes.
 //!
 //! There are many helper methods on this type for easily consuming bytes from the view:
 //!
@@ -28,10 +28,10 @@
 //! * [`get_byte()`] reads a single byte.
 //! * [`copy_to_slice()`] copies bytes into a provided slice.
 //! * [`copy_to_uninit_slice()`] copies bytes into a provided uninitialized slice.
-//! * [`as_read()`] creates a `std::io::Read` adapter for reading bytes via standard I/O methods.
+//! * [`as_read()`] creates a `std::io::Read` adapter for reading bytes from the view.
 //!
 //! ```
-//! # let memory = bytesbuf::GlobalPool::new();
+//! # let memory = bytesbuf::mem::GlobalPool::new();
 //! # let message = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use bytesbuf::BytesView;
 //!
@@ -49,19 +49,19 @@
 //! # consume_message(message);
 //! ```
 //!
-//! If the helper methods are not sufficient, you can access the byte sequence via byte slices using the
-//! following fundamental methods that underpin the convenience methods:
+//! If the helper methods are not sufficient, you can access the byte sequence behind the [`BytesView`]
+//! via byte slices using the following fundamental methods that underpin the convenience methods:
 //!
-//! * [`first_slice()`], which returns the first slice of bytes that makes up the byte sequence. The
-//!   length of this slice is determined by the inner structure of the byte sequence and it may not
-//!   contain all the bytes.
-//! * [`advance()`][ViewAdvance], which marks bytes from the beginning of [`first_slice()`] as read, shrinking the
-//!   view of the byte sequence by the corresponding amount and moving remaining data up to the front.
+//! * [`first_slice()`] returns the first slice of bytes that makes up the byte sequence. The
+//!   length of this slice is determined by the memory layout of the byte sequence and the first slice
+//!   may not contain all the bytes.
+//! * [`advance()`][ViewAdvance] marks bytes from the beginning of [`first_slice()`] as read, shrinking the
+//!   view by the corresponding amount and moving remaining data up to the front.
 //!   When you advance past the slice returned by [`first_slice()`], the next call to [`first_slice()`]
 //!   will return a new slice of bytes starting from the new front position of the view.
 //!
 //! ```
-//! # let memory = bytesbuf::GlobalPool::new();
+//! # let memory = bytesbuf::mem::GlobalPool::new();
 //! # let mut bytes = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use bytesbuf::BytesView;
 //!
@@ -80,11 +80,11 @@
 //! println!("Inspected a view over {len} bytes with slice lengths: {slice_lengths:?}");
 //! ```
 //!
-//! To reuse a byte sequence, clone it before consuming the contents. This is a cheap
+//! To reuse a [`BytesView`], clone it before consuming the contents. This is a cheap
 //! zero-copy operation.
 //!
 //! ```
-//! # let memory = bytesbuf::GlobalPool::new();
+//! # let memory = bytesbuf::mem::GlobalPool::new();
 //! # let mut bytes = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use bytesbuf::BytesView;
 //!
@@ -112,23 +112,23 @@
 //! 1. If you are creating byte sequences for the purpose of submitting them to a specific
 //!    object of a known type (e.g. writing them to a `TcpConnection`), the target type will
 //!    typically implement the [`HasMemory`] trait, which gives you a suitable memory
-//!    provider instance via [`HasMemory::memory()`]. Use this as the memory provider - it will
-//!    give you memory with the configuration that is optimal for delivering bytes to that
-//!    specific consumer.
+//!    provider instance via [`HasMemory::memory()`]. Use this as the memory provider - this
+//!    object will give you memory capacity with a configuration that is optimal for
+//!    delivering bytes of data to that specific consumer (e.g. `TcpConnection`).
 //! 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
 //!    instance of a shared [`GlobalPool`]. In a typical web application, the global memory pool
 //!    is a service exposed by the application framework. In a different context (e.g. example
-//!    or test code with no framework), you can create your own instance via `GlobalPool::new()`.
+//!    or test code with no framework), you can create your own instance via [`GlobalPool::new()`].
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
-//! [`Memory::reserve()`] on it. This returns a [`BytesBuf`] with the requested
-//! memory capacity.
+//! [`Memory::reserve()`] on it. This returns a [`BytesBuf`] with at least the requested
+//! number of bytes of memory capacity.
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use bytesbuf::Memory;
+//! use bytesbuf::mem::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -141,17 +141,17 @@
 //!
 //! There are many helper methods on [`BytesBuf`] for easily appending bytes to the buffer:
 //!
-//! * [`put_num_le::<T>()`], which appends numbers. Big-endian/native-endian variants also exist.
-//! * [`put_slice()`], which appends a slice of bytes.
-//! * [`put_byte()`], which appends a single byte.
-//! * [`put_byte_repeated()`], which appends multiple repetitions of a byte.
-//! * [`put_bytes()`], which appends an existing [`BytesView`].
+//! * [`put_num_le::<T>()`] appends numbers. Big-endian/native-endian variants also exist.
+//! * [`put_slice()`] appends a slice of bytes.
+//! * [`put_byte()`] appends a single byte.
+//! * [`put_byte_repeated()`] appends multiple repetitions of a byte.
+//! * [`put_bytes()`] appends an existing [`BytesView`].
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use bytesbuf::Memory;
+//! use bytesbuf::mem::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -165,25 +165,25 @@
 //! If the helper methods are not sufficient, you can write contents directly into mutable byte slices
 //! using the fundamental methods that underpin the convenience methods:
 //!
-//! * [`first_unfilled_slice()`], which returns a mutable slice of bytes from the beginning of the
-//!   buffer's remaining capacity. The length of this slice is determined by the inner memory layout
+//! * [`first_unfilled_slice()`] returns a mutable slice of uninitialized bytes from the beginning of the
+//!   buffer's remaining capacity. The length of this slice is determined by the memory layout
 //!   of the buffer and it may not contain all the capacity that has been reserved.
-//! * [`advance()`][BufAdvance], which declares that a number of bytes at the beginning of [`first_unfilled_slice()`]
+//! * [`advance()`][BufAdvance] declares that a number of bytes at the beginning of [`first_unfilled_slice()`]
 //!   have been initialized with data and are no longer unused. This will mark these bytes as valid for
 //!   consumption and advance [`first_unfilled_slice()`] to the next slice of unused memory capacity
 //!   if the current slice has been completely filled.
 //!
 //! See `examples/bb_slice_by_slice_write.rs` for an example of how to use these methods.
 //!
-//! If you do not know exactly how much memory you need in advance, you can extend the sequence
-//! builder capacity on demand by calling [`BytesBuf::reserve()`]. You can use [`remaining_capacity()`]
+//! If you do not know exactly how much memory you need in advance, you can extend the [`BytesBuf`]
+//! capacity on demand by calling [`BytesBuf::reserve()`]. You can use [`remaining_capacity()`]
 //! to identify how much unused memory capacity is available.
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use bytesbuf::Memory;
+//! use bytesbuf::mem::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -199,14 +199,14 @@
 //! assert!(buf.remaining_capacity() >= 80);
 //! ```
 //!
-//! When you have filled the memory capacity with the contents of the byte sequence, you can consume
-//! the data in the buffer as a [`BytesView`] over immutable bytes.
+//! When you have written your byte sequence into the memory capacity of the [`BytesBuf`], you can consume
+//! the data in the buffer as a [`BytesView`].
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use bytesbuf::Memory;
+//! use bytesbuf::mem::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -219,14 +219,14 @@
 //! let message = buf.consume_all();
 //! ```
 //!
-//! This can be done piece by piece, and you can continue writing to the buffer
+//! This can be done piece by piece, and you can continue writing to the [`BytesBuf`]
 //! after consuming some already written bytes.
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use bytesbuf::Memory;
+//! use bytesbuf::mem::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -249,9 +249,9 @@
 //!
 //! ```
 //! # struct Connection {}
-//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::GlobalPool::new() } }
+//! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
-//! use bytesbuf::Memory;
+//! use bytesbuf::mem::Memory;
 //!
 //! let memory = connection.memory();
 //!
@@ -268,27 +268,28 @@
 //! memory capacity of the view being appended come from the same memory provider. It is valid
 //! to mix and match memory from different providers, though this may disable some optimizations.
 //!
-//! # Implementing APIs that Consume Byte Sequences
+//! # Implementing Types that Produce or Consume Byte Sequences
 //!
-//! If you are implementing a type that accepts byte sequences, you should implement the
-//! [`HasMemory`] trait to make it possible for the caller to use optimally
-//! configured memory when creating the byte sequences for input to your type.
+//! If you are implementing a type that produces or consumes byte sequences, you should
+//! implement the [`HasMemory`] trait to make it possible for the caller to use optimally
+//! configured memory when creating the byte sequences or buffers to use with your type.
 //!
 //! Even if the implementation of your type today is not capable of taking advantage of
 //! optimizations that depend on the memory configuration, it may be capable of doing so
 //! in the future or may, today or in the future, pass the data to another type that
 //! implements [`HasMemory`], which can take advantage of memory optimizations.
-//! Therefore, it is best to implement this trait on all types that accept byte sequences.
+//! Therefore, it is best to implement this trait on all types that consume byte sequences
+//! via [`BytesView`] or produce byte sequences via [`BytesBuf`].
 //!
 //! The recommended implementation strategy for [`HasMemory`] is as follows:
 //!
-//! * If your type always passes the data to another type that implements [`HasMemory`],
-//!   simply forward the memory provider from the other type.
+//! * If your type always passes a [`BytesView`] or [`BytesBuf`] to another type that
+//!   implements [`HasMemory`], simply forward the memory provider from the other type.
 //! * If your type can take advantage of optimizations enabled by specific memory configurations,
 //!   (e.g. because it uses operating system APIs that unlock better performance when the memory
 //!   is appropriately configured), return a memory provider that performs the necessary
 //!   configuration.
-//! * If your type neither passes the data to another type that implements [`HasMemory`]
+//! * If your type neither passes anything to another type that implements [`HasMemory`]
 //!   nor can take advantage of optimizations enabled by specific memory configurations, obtain
 //!   an instance of [`GlobalPool`] as a dependency and return it as the memory provider.
 //!
@@ -296,73 +297,32 @@
 //! for full code):
 //!
 //! ```
-//! use bytesbuf::{HasMemory, MemoryShared, BytesView};
-//!
-//! /// Counts the number of 0x00 bytes in a byte sequence before
-//! /// writing that byte sequence to a network connection.
-//! ///
-//! /// # Implementation strategy for `HasMemory`
-//! ///
-//! /// This type merely inspects a byte sequence before passing it on. This means that it does not
-//! /// have a preference of its own for how that memory should be configured.
-//! ///
-//! /// However, the thing it passes the sequence to (the `Connection` type) may have a preference,
-//! /// so we forward the memory provider of the `Connection` type as our own memory provider, so the
-//! /// caller can use memory optimal for submission to the `Connection` instance.
-//! #[derive(Debug)]
-//! struct ConnectionZeroCounter {
-//!     connection: Connection,
-//! }
-//!
-//! impl ConnectionZeroCounter {
-//!     pub fn new(connection: Connection) -> Self {
-//!         Self {
-//!             connection,
-//!         }
-//!     }
-//!
-//!     pub fn write(&mut self, message: BytesView) {
-//!         // TODO: Count zeros.
-//!
-//!         self.connection.write(message);
-//!     }
-//! }
+//! # #[derive(Debug)]
+//! # struct ConnectionZeroCounter {
+//! #     connection: Connection,
+//! # }
+//! # use bytesbuf::BytesView;
+//! use bytesbuf::mem::{HasMemory, MemoryShared};
 //!
 //! impl HasMemory for ConnectionZeroCounter {
 //!     fn memory(&self) -> impl MemoryShared {
-//!         // We forward the memory provider of the connection, so that the caller can use
-//!         // memory optimal for submission to the connection.
 //!         self.connection.memory()
 //!     }
 //! }
 //! # #[derive(Debug)] struct Connection;
 //! # impl Connection { fn write(&mut self, mut _message: BytesView) {} }
-//! # impl HasMemory for Connection { fn memory(&self) -> impl MemoryShared { bytesbuf::TransparentTestMemory::new() } }
+//! # impl HasMemory for Connection { fn memory(&self) -> impl MemoryShared { bytesbuf::mem::GlobalPool::new() } }
 //! ```
 //!
 //! Example of returning a memory provider that performs configuration for optimal memory (see
 //! `examples/bb_has_memory_optimizing.rs` for full code):
 //!
 //! ```
-//! use bytesbuf::{CallbackMemory, HasMemory, MemoryShared, BytesView};
-//!
-//! /// # Implementation strategy for `HasMemory`
-//! ///
-//! /// This type can benefit from optimal performance if specifically configured memory is used and
-//! /// the memory is reserved from the I/O memory pool. It uses the I/O context to reserve memory,
-//! /// providing a usage-specific configuration when reserving memory capacity.
-//! ///
-//! /// A callback memory provider is used to attach the configuration to each memory reservation.
-//! #[derive(Debug)]
-//! struct UdpConnection {
-//!     io_context: IoContext,
-//! }
-//!
-//! impl UdpConnection {
-//!     pub fn new(io_context: IoContext) -> Self {
-//!         Self { io_context }
-//!     }
-//! }
+//! # #[derive(Debug)]
+//! # struct UdpConnection {
+//! #     io_context: IoContext,
+//! # }
+//! use bytesbuf::mem::{CallbackMemory, HasMemory, MemoryShared};
 //!
 //! /// Represents the optimal memory configuration for a UDP connection when reserving I/O memory.
 //! const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfiguration {
@@ -403,28 +363,12 @@
 //! (see `examples/bb_has_memory_global.rs` for full code):
 //!
 //! ```
-//! use bytesbuf::{GlobalPool, HasMemory, MemoryShared};
-//!
-//! /// Calculates a checksum for a given byte sequence.
-//! ///
-//! /// # Implementation strategy for `HasMemory`
-//! ///
-//! /// This type does not benefit from any specific memory configuration - it consumes bytes no
-//! /// matter what sort of memory they are in. It also does not pass the bytes to some other type.
-//! ///
-//! /// Therefore, we simply use `GlobalPool` as the memory provider we publish, as this is
-//! /// the default choice when there is no specific provider to prefer.
-//! #[derive(Debug)]
-//! struct ChecksumCalculator {
-//!     // The application logic must provide this - it is our dependency.
-//!     memory: GlobalPool,
-//! }
-//!
-//! impl ChecksumCalculator {
-//!     pub fn new(memory: GlobalPool) -> Self {
-//!         Self { memory }
-//!     }
-//! }
+//! # #[derive(Debug)]
+//! # struct ChecksumCalculator {
+//! #     memory: GlobalPool,
+//! # }
+//! # use bytesbuf::mem::GlobalPool;
+//! use bytesbuf::mem::{HasMemory, MemoryShared};
 //!
 //! impl HasMemory for ChecksumCalculator {
 //!     fn memory(&self) -> impl MemoryShared {
@@ -434,7 +378,7 @@
 //! }
 //! ```
 //!
-//! It is generally expected that all APIs work with byte sequences using memory from any provider.
+//! It is generally expected that all types work with byte sequences using memory from any provider.
 //! It is true that in some cases this may be impossible (e.g. because you are interacting directly
 //! with a device driver that requires the data to be in a specific physical memory module) but
 //! these cases will be rare and must be explicitly documented.
@@ -555,7 +499,7 @@
 //! # struct Connection;
 //! # impl Connection {
 //! #     fn accept() -> Self { Connection }
-//! #     fn memory(&self) -> impl bytesbuf::Memory { bytesbuf::GlobalPool::new() }
+//! #     fn memory(&self) -> impl bytesbuf::mem::Memory { bytesbuf::mem::GlobalPool::new() }
 //! #     fn write(&self, _sequence: BytesView) {}
 //! # }
 //! ```
@@ -566,16 +510,11 @@
 //!
 //! # Testing
 //!
-//! For testing purposes (behind `test-util` Cargo feature), this crate exposes some special-purpose
-//! memory providers that are not optimized for real-world usage but may be useful to test corner
-//! cases of byte sequence processing in your code:
+//! For testing purposes, this crate exposes some special-purpose memory providers that are not
+//! optimized for real-world usage but may be useful to test corner cases of byte sequence
+//! processing in your code.
 //!
-//! * `TransparentTestMemory` - a memory provider that does not add any value, just uses memory
-//!   from the Rust global allocator.
-//! * `FixedBlockTestMemory` - a variation of the transparent memory provider that limits
-//!   each consecutive memory block to a fixed size. This is useful for testing scenarios where
-//!   you want to ensure that your code works well even if a byte sequence consists of
-//!   non-consecutive memory. You can go down to as low as 1 byte per block!
+//! See the [`mem::testing`] module for details (requires `test-util` Cargo feature).
 //!
 //! [`get_num_le::<T>()`]: crate::BytesView::get_num_le
 //! [`get_byte()`]: crate::BytesView::get_byte
@@ -600,6 +539,8 @@
 //! [`Bytes`]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [`remaining_capacity()`]: crate::BytesBuf::remaining_capacity
 //! [`OnceLock`]: std::sync::OnceLock
+//! [`mem::testing`]: crate::mem::testing
+//! [`GlobalPool::new()`]: crate::mem::GlobalPool::new
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/favicon.ico")]

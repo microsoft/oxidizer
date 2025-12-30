@@ -12,6 +12,8 @@ use crate::mem::{BlockSize, Memory};
 /// This is meant for test scenarios where the minimal set of memory provider
 /// functionality is desired, to establish maximally controlled conditions.
 ///
+/// # Performance
+///
 /// For general-purpose public use, the [`GlobalPool`][1] should be used instead,
 /// as it is geared for actual efficiency - this here is just a simple passthrough implementation.
 ///
@@ -29,8 +31,7 @@ impl TransparentMemory {
         Self { _placeholder: () }
     }
 
-    /// Reserves `len` bytes of mutable memory, returning an empty
-    /// [`BytesBuf`] whose capacity is backed by the reserved memory.
+    /// Reserves exactly `min_bytes` bytes of memory capacity.
     ///
     /// The memory reservation request will always be fulfilled, obtaining more memory from the
     /// operating system if necessary.
@@ -38,7 +39,7 @@ impl TransparentMemory {
     /// # Zero-sized reservations
     ///
     /// Reserving zero bytes of memory is a valid operation and will return a [`BytesBuf`]
-    /// with zero or more bytes of capacity.
+    /// with zero bytes of capacity.
     ///
     /// # Panics
     ///
@@ -120,7 +121,7 @@ mod tests {
         // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
         // where this may not be available, so we skip this test in that environment.
         #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
-        if crate::testing::system_memory() < 6_000_000_000 {
+        if crate::testing::system_memory() < 10_000_000_000 {
             eprintln!("Skipping giant allocation test due to insufficient memory.");
             return;
         }

@@ -12,10 +12,14 @@ use crate::mem::{BlockSize, Memory};
 /// A memory provider that uses fixed-size memory blocks.
 ///
 /// Every memory capacity reservation is cut into into blocks of fixed size
-/// and delegated to the Rust global allocator for obtaining the memory.
+/// and delegated to the Rust global allocator, which provides the actual memory capacity.
 ///
-/// This is meant for test scenarios where a specific memory block size is important,
-/// such as when testing edge cases of multi-block byte sequence handling.
+/// This provider is meant for test scenarios where a specific memory block size is important,
+/// such as when testing edge cases of multi-block byte sequence handling. You can go down
+/// as low as 1 byte per block to simulate extreme memory fragmentation. All user code is
+/// expected to correctly operate with memory blocks of any size, including single-byte blocks.
+///
+/// # Performance
 ///
 /// This memory provider is a simple implementation that does not perform any pooling
 /// or performance optimization, so should not be used in real code.
@@ -35,9 +39,9 @@ impl FixedBlockMemory {
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
     ///
-    /// Returns an empty [`BytesBuf`] that can be used to fill the reserved memory with data.
+    /// The requested amount `min_bytes` is rounded up to the nearest multiple of the fixed block size.
     ///
-    /// The memory provider may provide more memory than requested.
+    /// Returns a [`BytesBuf`] that can be used to fill the reserved memory with data.
     ///
     /// The memory reservation request will always be fulfilled, obtaining more memory from the
     /// operating system if necessary.
@@ -45,7 +49,7 @@ impl FixedBlockMemory {
     /// # Zero-sized reservations
     ///
     /// Reserving zero bytes of memory is a valid operation and will return a [`BytesBuf`]
-    /// with zero or more bytes of capacity.
+    /// with zero bytes of capacity.
     ///
     /// # Panics
     ///
