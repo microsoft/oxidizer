@@ -11,9 +11,8 @@ use std::{iter, mem};
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
-use crate::BytesViewReader;
 use crate::mem::{BlockSize, Memory};
-use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
+use crate::{BytesViewReader, MAX_INLINE_SPANS, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
 ///
