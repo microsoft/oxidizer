@@ -72,7 +72,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(coverage_nightly, ignore)] // ignored, because fails with overflow on Windows,
     fn display_out_of_range() {
         let time = SystemTime::from(Timestamp::MAX) + Duration::from_secs(12345);
         assert_eq!(time.display_iso_8601().to_string(), "9999-12-30T22:00:00.999999999Z");
