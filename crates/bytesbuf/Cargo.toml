@@ -64,3 +64,7 @@ harness = false
 [[bench]]
 name = "view"
 harness = false
+
+[[bench]]
+name = "bytesbuf_vs_bytes"
+harness = false
