@@ -6,7 +6,9 @@
 
 //! Types for creating and manipulating byte sequences.
 //!
-//! The data we operate on are logical sequences of zero or more bytes stored in memory,
+//! <img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/doc/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
+//!
+//! Types in this crate enable you to operate on logical sequences of bytes stored in memory,
 //! similar to a `&[u8]` but with some key differences:
 //!
 //! * The bytes in a byte sequence are not required to be consecutive in memory.
@@ -15,6 +17,9 @@
 //! In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
 //! treated as one logical sequence of bytes. Byte sequences are created via [`BytesBuf`] and
 //! consumed via [`BytesView`].
+//!
+//! The primary motivation for using byte sequences instead of simple byte slices is to enable
+//! high-performance zero-copy I/O APIs to produce and consume byte sequences with minimal overhead.
 //!
 //! # Consuming Byte Sequences
 //!
@@ -439,9 +444,10 @@
 //!
 //! The popular [`Bytes`] type from the `bytes` crate is often used in the Rust ecosystem to
 //! represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
-//! type, this crate offers conversion methods to translate between [`BytesView`] and [`Bytes`]:
+//! type, this crate offers conversion methods to translate between [`BytesView`] and [`Bytes`]
+//! when the `bytes-compat` Cargo feature is enabled:
 //!
-//! * [`BytesView::to_bytes()`] converts a [`BytesView`] into a [`Bytes`] instance. This
+//! * `BytesView::to_bytes()` converts a [`BytesView`] into a [`Bytes`] instance. This
 //!   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
 //!   You are discouraged from using this method in any performance-relevant logic path.
 //! * `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`] instance
@@ -514,7 +520,7 @@
 //! optimized for real-world usage but may be useful to test corner cases of byte sequence
 //! processing in your code.
 //!
-//! See the [`mem::testing`] module for details (requires `test-util` Cargo feature).
+//! See the `mem::testing` module for details (requires `test-util` Cargo feature).
 //!
 //! [`get_num_le::<T>()`]: crate::BytesView::get_num_le
 //! [`get_byte()`]: crate::BytesView::get_byte
@@ -530,7 +536,6 @@
 //! [`put_bytes()`]: crate::BytesBuf::put_bytes
 //! [`first_unfilled_slice()`]: crate::BytesBuf::first_unfilled_slice
 //! [BufAdvance]: crate::BytesBuf::advance
-//! [`BytesView::to_bytes()`]: crate::BytesView::to_bytes
 //! [`Memory`]: crate::mem::Memory
 //! [`Memory::reserve()`]: crate::mem::Memory::reserve
 //! [`HasMemory`]: crate::mem::HasMemory
@@ -539,7 +544,6 @@
 //! [`Bytes`]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
 //! [`remaining_capacity()`]: crate::BytesBuf::remaining_capacity
 //! [`OnceLock`]: std::sync::OnceLock
-//! [`mem::testing`]: crate::mem::testing
 //! [`GlobalPool::new()`]: crate::mem::GlobalPool::new
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/logo.png")]
