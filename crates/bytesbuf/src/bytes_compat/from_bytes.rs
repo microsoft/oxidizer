@@ -217,7 +217,7 @@ mod tests {
     fn zero_sized_bytes() {
         let bytes = Bytes::new();
         let sequence: BytesView = bytes.into();
-        
+
         assert_eq!(sequence.len(), 0);
         assert!(sequence.is_empty());
     }
