@@ -68,7 +68,7 @@ mod tests {
         Buf::advance(&mut bytes, 5);
 
         let mut io_slices = [IoSlice::new(&[]); 4];
-        let n = Buf::chunks_vectored(&mut bytes, &mut io_slices);
+        let n = Buf::chunks_vectored(&bytes, &mut io_slices);
 
         // We have already advanced past the first 30 bytes
         // but the remaining 70 should still be here for us as 20 + 25 + 25.
