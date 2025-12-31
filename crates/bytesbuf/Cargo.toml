@@ -64,6 +64,11 @@ harness = false
 required-features = ["test-util"]
 
 [[bench]]
+name = "bytesbuf_vs_bytes"
+harness = false
+required-features = ["test-util"]
+
+[[bench]]
 name = "global_pool"
 harness = false
 
