@@ -15,7 +15,9 @@
 
 Types for creating and manipulating byte sequences.
 
-The data we operate on are logical sequences of zero or more bytes stored in memory,
+<img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/doc/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
+
+Types in this crate enable you to operate on logical sequences of bytes stored in memory,
 similar to a `&[u8]` but with some key differences:
 
 * The bytes in a byte sequence are not required to be consecutive in memory.
@@ -24,6 +26,9 @@ similar to a `&[u8]` but with some key differences:
 In practical terms, you may think of a byte sequence as a `Vec<Vec<u8>>` whose contents are
 treated as one logical sequence of bytes. Byte sequences are created via [`BytesBuf`][__link0] and
 consumed via [`BytesView`][__link1].
+
+The primary motivation for using byte sequences instead of simple byte slices is to enable
+high-performance zero-copy I/O APIs to produce and consume byte sequences with minimal overhead.
 
 ## Consuming Byte Sequences
 
@@ -387,13 +392,14 @@ checked for compatibility.
 
 The popular [`Bytes`][__link54] type from the `bytes` crate is often used in the Rust ecosystem to
 represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
-type, this crate offers conversion methods to translate between [`BytesView`][__link55] and [`Bytes`][__link56]:
+type, this crate offers conversion methods to translate between [`BytesView`][__link55] and [`Bytes`][__link56]
+when the `bytes-compat` Cargo feature is enabled:
 
-* [`BytesView::to_bytes()`][__link57] converts a [`BytesView`][__link58] into a [`Bytes`][__link59] instance. This
+* `BytesView::to_bytes()` converts a [`BytesView`][__link57] into a [`Bytes`][__link58] instance. This
   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
   You are discouraged from using this method in any performance-relevant logic path.
-* `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][__link60] instance
-  into a [`BytesView`][__link61]. This is an efficient zero-copy operation that reuses the memory of the
+* `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][__link59] instance
+  into a [`BytesView`][__link60]. This is an efficient zero-copy operation that reuses the memory of the
   `Bytes` instance.
 
 ## Static Data
@@ -410,7 +416,7 @@ Optimal processing of static data requires satisfying multiple requirements:
 * We want to use memory that is optimally configured for the context in which the data is
   consumed (e.g. network connection, file, etc).
 
-The standard pattern here is to use [`OnceLock`][__link62] to lazily initialize a [`BytesView`][__link63] from
+The standard pattern here is to use [`OnceLock`][__link61] to lazily initialize a [`BytesView`][__link62] from
 the static data on first use, using memory from a memory provider that is optimal for the
 intended usage.
 
@@ -456,7 +462,7 @@ For testing purposes, this crate exposes some special-purpose memory providers t
 optimized for real-world usage but may be useful to test corner cases of byte sequence
 processing in your code.
 
-See the [`mem::testing`][__link64] module for details (requires `test-util` Cargo feature).
+See the `mem::testing` module for details (requires `test-util` Cargo feature).
 
 
 <hr/>
@@ -464,7 +470,7 @@ See the [`mem::testing`][__link64] module for details (requires `test-util` Carg
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-wg2x-ApzcEG7ferRerKpsKG8jAI5urYpP2G7A8A6TGEE1lYWSBgmhieXRlc2J1ZmUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG35LVBrJ7vvEGxCicLSON_WqG-sDa5PkflmSG_YPjJi1DMHVYWSBgmhieXRlc2J1ZmUwLjIuMA
  [__link0]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::advance
@@ -518,15 +524,13 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link54]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
  [__link55]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
  [__link56]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link57]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::to_bytes
- [__link58]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
+ [__link57]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
+ [__link58]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
  [__link59]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
  [__link6]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::copy_to_uninit_slice
- [__link60]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link61]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link62]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
- [__link63]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link64]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::testing
+ [__link60]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
+ [__link61]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
+ [__link62]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
  [__link7]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::as_read
  [__link8]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
  [__link9]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::first_slice
