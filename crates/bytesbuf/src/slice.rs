@@ -19,10 +19,13 @@ impl From<&'static [u8]> for BytesView {
             return Self::new();
         };
 
+        // SAFETY: A reference is never null.
+        let universal_block_state = unsafe { NonNull::new_unchecked((&raw const UNIVERSAL_BLOCK_STATE).cast_mut()) };
+
         // SAFETY: The state must remain valid for the lifetime for the BlockRef. Well, our state is a no-op
         // placeholder that is never accessed, so it is a completely meaningless type, in fact, only existing
         // to satisfy the API contract but with entirely no-op functions inside.
-        let block_ref = unsafe { BlockRef::new(NonNull::from_ref(&UNIVERSAL_BLOCK_STATE), &BLOCK_REF_FNS) };
+        let block_ref = unsafe { BlockRef::new(universal_block_state, &BLOCK_REF_FNS) };
 
         // SAFETY: We started from a reference, which cannot possibly be null.
         let ptr = unsafe { NonNull::new(value.as_ptr().cast_mut()).unwrap_unchecked() };
@@ -64,7 +67,8 @@ unsafe impl BlockRefDynamic for StaticSliceBlock {
 
     #[cfg_attr(test, mutants::skip)] // Impractical to test - it does nothing, really.
     fn clone(_state_ptr: NonNull<Self::State>) -> NonNull<Self::State> {
-        NonNull::from_ref(&UNIVERSAL_BLOCK_STATE)
+        // SAFETY: A reference is never null.
+        unsafe { NonNull::new_unchecked((&raw const UNIVERSAL_BLOCK_STATE).cast_mut()) }
     }
 
     #[cfg_attr(test, mutants::skip)] // Impractical to test. Miri will inform about memory leaks.
