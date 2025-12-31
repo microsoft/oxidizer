@@ -129,7 +129,7 @@ unsafe impl BlockRefDynamic for VecBlock {
 /// # Safety
 ///
 /// The block contents must be treated as immutable because once converted to a `BytesView`,
-/// the Vec's contents are accessed via shared references only.
+/// the contents of the `Vec` are accessed via shared references only.
 unsafe fn non_empty_vec_to_immutable_block(vec: Vec<u8>) -> Block {
     assert!(!vec.is_empty());
 
