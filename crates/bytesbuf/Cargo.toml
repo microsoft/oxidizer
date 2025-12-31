@@ -16,6 +16,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "bytes::bytes::Bytes",
@@ -51,9 +54,6 @@ mutants.workspace = true
 static_assertions.workspace = true
 testing_aids.workspace = true
 windows-sys.workspace = true
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-libc.workspace = true
 
 [lints]
 workspace = true
