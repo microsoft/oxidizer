@@ -57,9 +57,9 @@ impl<const LEN: usize> From<&'static [u8; LEN]> for BytesView {
 /// An implementation of `BlockRef` that is associated with a `&'static [u8]`.
 ///
 /// As the state is empty, every instance can reuse it.
-struct StaticSliceBlock {}
+struct StaticSliceBlock;
 
-static UNIVERSAL_BLOCK_STATE: StaticSliceBlock = StaticSliceBlock {};
+static UNIVERSAL_BLOCK_STATE: StaticSliceBlock = StaticSliceBlock;
 
 // SAFETY: We must guarantee thread-safety. We do.
 unsafe impl BlockRefDynamic for StaticSliceBlock {
