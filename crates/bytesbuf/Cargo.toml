@@ -45,6 +45,7 @@ smallvec = { workspace = true, features = ["const_new", "union"] }
 
 [dev-dependencies]
 alloc_tracker.workspace = true
+bytes = { workspace = true, features = ["std"] }
 criterion.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
