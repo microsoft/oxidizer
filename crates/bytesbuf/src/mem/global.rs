@@ -305,6 +305,7 @@ unsafe impl BlockRefDynamic for BlockMeta {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, reason = "panic is fine in tests")]

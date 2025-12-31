@@ -53,6 +53,7 @@ impl Memory for OpaqueMemory {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use static_assertions::assert_impl_all;

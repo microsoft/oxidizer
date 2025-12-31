@@ -93,6 +93,7 @@ impl FixedBlockMemoryInner {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use new_zealand::nz;

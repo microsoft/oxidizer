@@ -99,4 +99,13 @@ mod tests {
 
         assert_eq!(seq, data);
     }
+
+    #[test]
+    fn zero_sized_slice() {
+        let data: &'static [u8] = b"";
+        let seq = BytesView::from(data);
+
+        assert_eq!(seq.len(), 0);
+        assert!(seq.is_empty());
+    }
 }

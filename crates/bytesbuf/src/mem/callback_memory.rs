@@ -86,6 +86,7 @@ where
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{self, AtomicUsize};

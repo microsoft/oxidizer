@@ -234,6 +234,7 @@ pub unsafe trait BlockRefDynamicWithMeta: BlockRefDynamic {
     fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn Any>;
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{self, AtomicUsize};

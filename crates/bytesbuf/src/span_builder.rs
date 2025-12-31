@@ -254,6 +254,7 @@ unsafe impl Send for SpanBuilder {}
 // multithreaded mutation).
 unsafe impl Sync for SpanBuilder {}
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use new_zealand::nz;

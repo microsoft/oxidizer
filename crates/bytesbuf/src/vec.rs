@@ -218,6 +218,15 @@ mod tests {
     }
 
     #[test]
+    fn zero_sized_vec() {
+        let vec = Vec::<u8>::new();
+        let sequence: BytesView = vec.into();
+
+        assert_eq!(sequence.len(), 0);
+        assert!(sequence.is_empty());
+    }
+
+    #[test]
     fn test_vec_to_sequence() {
         let vec = vec![b'H', b'e', b'l', b'l', b'o', b',', b' ', b'w', b'o', b'r', b'l', b'd', b'!'];
 
