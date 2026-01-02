@@ -13,7 +13,7 @@ careful FILTER="":
     cargo +$env:RUST_NIGHTLY careful test {{ target_package }} --no-fail-fast --all-features --locked -- {{ FILTER }}
 
 check PROFILE='dev':
-    cargo check {{ target_package }} --profile {{ PROFILE }} --all-features --all-targets --locked
+    cargo +$env:RUST_MSRV check {{ target_package }} --profile {{ PROFILE }} --all-features --all-targets --locked
 
 clippy PROFILE='dev':
     cargo clippy {{ target_package }} --profile {{ PROFILE }} --all-targets --all-features --locked
@@ -69,7 +69,7 @@ readme-check:
 
 # Runs unit and integration tests.
 test FILTER="":
-    cargo nextest run {{ target_package }} --no-fail-fast --all-features --locked -- {{ FILTER }}
+    cargo +$env:RUST_MSRV nextest run {{ target_package }} --no-fail-fast --all-features --locked -- {{ FILTER }}
 
 # Runs inline examples in documentation comments (doctests).
 [script]
@@ -78,13 +78,13 @@ test-docs FILTER="":
     $PSNativeCommandUseErrorActionPreference = $true
 
     if ("{{ package }}" -eq "") {
-        cargo test --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
+        cargo +$env:RUST_MSRV test --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
     } else {
         # Single package - check if it's a library crate, otherwise skip it.
         $lib_rs_path = "crates/{{ package }}/src/lib.rs"
 
         if (Test-Path $lib_rs_path) {
-            cargo test {{ target_package }} --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
+            cargo +$env:RUST_MSRV test {{ target_package }} --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
         } else {
             # Binary-only crate - skip doctests because Cargo expects library targets for doctests.
             # Binary crates (with only main.rs) cannot contain doctests, so running `cargo test --doc`
@@ -97,7 +97,7 @@ test-docs FILTER="":
 test-more FILTER="":
     # We separate this from "test" because the benchmark infra is quite slow, so we want to avoid
     # running them for quick iterative testing, only running them in thorough validation workflows.
-    cargo nextest run {{ target_package }} --no-fail-fast --all-features --locked --tests --benches -- {{ FILTER }}
+    cargo +$env:RUST_MSRV nextest run {{ target_package }} --no-fail-fast --all-features --locked --tests --benches -- {{ FILTER }}
 
 # Detect unused dependencies.
 [script]
