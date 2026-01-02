@@ -23,6 +23,36 @@ use crate::mem::{BlockSize, Memory};
 ///
 /// This memory provider is a simple implementation that does not perform any pooling
 /// or performance optimization, so should not be used in real code.
+///
+/// # Examples
+///
+/// Reserving memory returns capacity rounded up to the block size:
+///
+/// ```
+/// use std::num::NonZero;
+///
+/// use bytesbuf::BytesView;
+/// use bytesbuf::mem::Memory;
+/// use bytesbuf::mem::testing::FixedBlockMemory;
+///
+/// // Create a memory provider with 16-byte blocks.
+/// let memory = FixedBlockMemory::new(NonZero::new(16).unwrap());
+///
+/// // Request 10 bytes - capacity is rounded up to 16 (one full block).
+/// let buf = memory.reserve(10);
+/// assert_eq!(buf.capacity(), 16);
+///
+/// // Request 20 bytes - capacity is rounded up to 32 (two full blocks).
+/// let buf = memory.reserve(20);
+/// assert_eq!(buf.capacity(), 32);
+///
+/// // Data spanning multiple blocks is split across slices.
+/// let mut data = BytesView::copied_from_slice(b"Hello, world! This is a test!", &memory);
+/// assert_eq!(data.len(), 29);
+/// assert_eq!(data.first_slice().len(), 16); // First block is full.
+/// data.advance(16);
+/// assert_eq!(data.first_slice().len(), 13); // Remaining 13 bytes in second block.
+/// ```
 #[derive(Clone, Debug)]
 pub struct FixedBlockMemory {
     inner: Arc<FixedBlockMemoryInner>,

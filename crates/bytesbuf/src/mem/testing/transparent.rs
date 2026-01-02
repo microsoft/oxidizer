@@ -17,6 +17,26 @@ use crate::mem::{BlockSize, Memory};
 /// For general-purpose public use, the [`GlobalPool`][1] should be used instead,
 /// as it is geared for actual efficiency - this here is just a simple passthrough implementation.
 ///
+/// # Examples
+///
+/// Reserving memory returns exactly the requested capacity:
+///
+/// ```
+/// use bytesbuf::BytesView;
+/// use bytesbuf::mem::Memory;
+/// use bytesbuf::mem::testing::TransparentMemory;
+///
+/// let memory = TransparentMemory::new();
+///
+/// // Capacity exactly matches the requested amount.
+/// let buf = memory.reserve(100);
+/// assert_eq!(buf.capacity(), 100);
+///
+/// // The resulting byte sequence uses a single contiguous slice.
+/// let data = BytesView::copied_from_slice(b"Hello, world!", &memory);
+/// assert_eq!(data.first_slice().len(), 13); // Entire content in one slice.
+/// ```
+///
 /// [1]: crate::mem::GlobalPool
 #[derive(Clone, Debug, Default)]
 pub struct TransparentMemory {

@@ -12,6 +12,35 @@ use crate::mem::Memory;
 ///
 /// This can be used to construct wrapping memory providers that add logic or configuration
 /// on top of an existing memory provider.
+///
+/// # Examples
+///
+/// Configure an inner memory provider with additional parameters:
+///
+/// ```
+/// use bytesbuf::mem::{CallbackMemory, Memory};
+/// # use bytesbuf::BytesBuf;
+/// # #[derive(Clone)]
+/// # struct IoContext;
+/// # impl IoContext {
+/// #     fn reserve_with_config(&self, min_len: usize, _align: bool) -> BytesBuf {
+/// #         bytesbuf::mem::testing::TransparentMemory::new().reserve(min_len)
+/// #     }
+/// # }
+///
+/// // Create a callback memory that configures the inner provider.
+/// let io_context = IoContext;
+/// let memory = CallbackMemory::new(move |min_len| {
+///     // Apply custom configuration when reserving memory.
+///     let page_aligned = true;
+///     io_context.reserve_with_config(min_len, page_aligned)
+/// });
+///
+/// let buf = memory.reserve(64);
+/// assert!(buf.capacity() >= 64);
+/// ```
+///
+/// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
 pub struct CallbackMemory<FReserve>
 where
     FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
