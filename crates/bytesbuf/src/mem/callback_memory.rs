@@ -18,18 +18,20 @@ use crate::mem::Memory;
 /// Configure an inner memory provider with additional parameters:
 ///
 /// ```
-/// use bytesbuf::mem::{CallbackMemory, Memory};
+/// use bytesbuf::mem::{CallbackMemory, GlobalPool, Memory};
 /// # use bytesbuf::BytesBuf;
 /// # #[derive(Clone)]
-/// # struct IoContext;
+/// # struct IoContext {
+/// #     pool: GlobalPool,
+/// # }
 /// # impl IoContext {
 /// #     fn reserve_with_config(&self, min_len: usize, _align: bool) -> BytesBuf {
-/// #         bytesbuf::mem::testing::TransparentMemory::new().reserve(min_len)
+/// #         self.pool.reserve(min_len)
 /// #     }
 /// # }
 ///
 /// // Create a callback memory that configures the inner provider.
-/// let io_context = IoContext;
+/// # let io_context = IoContext { pool: GlobalPool::new() };
 /// let memory = CallbackMemory::new(move |min_len| {
 ///     // Apply custom configuration when reserving memory.
 ///     let page_aligned = true;

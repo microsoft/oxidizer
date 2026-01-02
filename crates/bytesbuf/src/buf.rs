@@ -804,15 +804,15 @@ impl BytesBuf {
     /// let capacity = buf.remaining_capacity();
     ///
     /// let mut vectored = buf.begin_vectored_write(None);
-    /// let slices: Vec<_> = vectored.iter_slices_mut().collect();
+    /// let mut slices: Vec<_> = vectored.iter_slices_mut().collect();
     ///
     /// // Fill all slices with 0xAE bytes.
     /// // In practice, these could be filled concurrently by vectored I/O APIs.
     /// let mut total_written = 0;
-    /// for slice in &slices {
+    /// for slice in &mut slices {
     ///     // SAFETY: Writing valid u8 values to the entire slice.
     ///     unsafe {
-    ///         ptr::write_bytes(slice.as_ptr().cast_mut(), 0xAE, slice.len());
+    ///         ptr::write_bytes(slice.as_mut_ptr(), 0xAE, slice.len());
     ///     }
     ///     total_written += slice.len();
     /// }
