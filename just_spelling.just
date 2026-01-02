@@ -23,6 +23,10 @@ spellcheck:
     $line_count = $filtered_lines.Count
 
     $output_content = @($line_count) + $filtered_lines
+
+    # Ensure the output directory exists.
+    [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($output_file)) | Out-Null
+
     $output_content | Set-Content $output_file
 
     cargo spellcheck --cfg spellcheck.toml --code 1
