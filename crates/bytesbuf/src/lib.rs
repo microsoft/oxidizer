@@ -562,7 +562,6 @@ mod bytes_compat;
 mod constants;
 mod memory_guard;
 mod read_adapter;
-mod slice;
 mod span;
 mod span_builder;
 mod vec;
