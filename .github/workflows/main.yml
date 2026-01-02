@@ -43,7 +43,7 @@ jobs:
         if: success() || failure()
         run: cargo test --doc --verbose --workspace --all-features
       - name: Examples
-        run: just run-examples
+        run: just examples
 
   static-analysis:
     runs-on: ${{ matrix.os }}
