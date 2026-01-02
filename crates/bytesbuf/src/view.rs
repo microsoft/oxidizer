@@ -1033,7 +1033,7 @@ mod tests {
     use std::thread;
 
     use new_zealand::nz;
-    use static_assertions::assert_impl_all;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
     use testing_aids::assert_panic;
 
     use super::*;
@@ -1041,6 +1041,12 @@ mod tests {
     use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
 
     assert_impl_all!(BytesView: Send, Sync);
+
+    // BytesView intentionally does not implement From<&[u8]> because creating a view
+    // requires a memory provider to ensure optimal memory configuration. Users should
+    // call `BytesView::copied_from_slice()` instead, which makes the memory provider
+    // requirement explicit.
+    assert_not_impl_any!(BytesView: From<&'static [u8]>);
 
     #[test]
     fn smoke_test() {
