@@ -38,11 +38,11 @@ impl Read for BytesViewReader<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TransparentTestMemory;
+    use crate::mem::testing::TransparentMemory;
 
     #[test]
     fn smoke_test() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(b"Hello, world", &memory);
         let mut reader = view.as_read();
 

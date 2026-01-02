@@ -5,7 +5,8 @@
 //! strategy that obtains memory from a memory provider specific to a particular purpose, with
 //! a configuration optimal for that purpose.
 
-use bytesbuf::{BytesBuf, BytesView, CallbackMemory, HasMemory, Memory, MemoryShared, TransparentTestMemory};
+use bytesbuf::mem::{CallbackMemory, HasMemory, Memory, MemoryShared};
+use bytesbuf::{BytesBuf, BytesView};
 
 fn main() {
     // In a real application, the I/O context would be provided by the framework.
@@ -90,7 +91,7 @@ impl IoContext {
     #[expect(clippy::unused_self, reason = "for example realism")]
     pub fn reserve_io_memory(&self, min_len: usize, _memory_configuration: MemoryConfiguration) -> BytesBuf {
         // This is a wrong way to implement this! Only to make the example compile.
-        let memory = TransparentTestMemory::new();
+        let memory = bytesbuf::mem::testing::TransparentMemory::new();
         memory.reserve(min_len)
     }
 }

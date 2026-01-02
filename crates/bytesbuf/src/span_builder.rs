@@ -6,7 +6,8 @@ use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::ptr::NonNull;
 
-use crate::{BlockRef, BlockSize, Span};
+use crate::Span;
+use crate::mem::{BlockRef, BlockSize};
 
 /// Owns a mutable span of memory capacity from a memory block, which can be filled with data,
 /// enabling you to detach spans of immutable bytes from the front to create views over the data.
@@ -253,13 +254,14 @@ unsafe impl Send for SpanBuilder {}
 // multithreaded mutation).
 unsafe impl Sync for SpanBuilder {}
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::std_alloc_block;
+    use crate::mem::testing::std_alloc_block;
 
     // The type is thread-mobile (Send) and can be shared (for reads) between threads (Sync).
     assert_impl_all!(SpanBuilder: Send, Sync);

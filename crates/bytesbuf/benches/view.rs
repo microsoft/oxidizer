@@ -9,7 +9,9 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use bytesbuf::{BlockSize, BytesView, FixedBlockTestMemory};
+use bytesbuf::BytesView;
+use bytesbuf::mem::BlockSize;
+use bytesbuf::mem::testing::FixedBlockMemory;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
@@ -32,7 +34,7 @@ const MANY_SPANS: usize = 32;
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 
-    let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
+    let memory = FixedBlockMemory::new(TEST_SPAN_SIZE);
 
     let test_data_as_view = BytesView::copied_from_slice(TEST_DATA, &memory);
 
@@ -221,7 +223,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("clone_many", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_process();
-            let _sequence = many_as_view.clone();
+            let _view = many_as_view.clone();
         });
     });
 

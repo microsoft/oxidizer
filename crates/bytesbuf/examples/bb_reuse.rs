@@ -3,7 +3,8 @@
 
 //! Showcases how you can easily and cheaply reuse `BytesView` in part or whole.
 
-use bytesbuf::{BytesView, GlobalPool};
+use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 
 fn main() {
     // The global memory pool in real-world code would be provided by the application framework.

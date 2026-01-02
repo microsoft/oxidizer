@@ -11,7 +11,8 @@
 
 use std::ptr;
 
-use bytesbuf::{BytesBuf, GlobalPool};
+use bytesbuf::BytesBuf;
+use bytesbuf::mem::GlobalPool;
 
 const LUCKY_NUMBER: usize = 8888;
 const FAVORITE_COLOR: &[u8] = b"octarine";

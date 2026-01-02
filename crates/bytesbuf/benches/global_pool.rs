@@ -6,7 +6,8 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use bytesbuf::{BytesView, GlobalPool};
+use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use testing_aids::repeating_incrementing_bytes;
 

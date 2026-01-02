@@ -15,7 +15,8 @@
 
 use std::num::NonZero;
 
-use bytesbuf::{BlockSize, BytesBuf, BytesView, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
+use bytesbuf::mem::{BlockSize, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
+use bytesbuf::{BytesBuf, BytesView};
 
 fn main() {
     // In real-world code, both of these would be provided by the application framework.
@@ -172,7 +173,7 @@ mod io_memory {
     use std::ptr::{self, NonNull};
     use std::sync::atomic::{self, AtomicUsize};
 
-    use bytesbuf::{Block, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
+    use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
 
     use super::MemoryConfiguration;
 
