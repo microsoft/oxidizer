@@ -106,19 +106,21 @@ impl BytesView {
 
     /// Creates a `BytesView` by copying the contents of a `&[u8]`.
     ///
-    /// # Reusing existing data
+    /// # Reusing without copying
     ///
-    /// There is intentionally no mechanism in `bytesbuf` to reference an existing `&[u8]`
-    /// without copying, even if `'static`, because high-performance I/O requires all data
-    /// to exist in memory owned by the I/O subsystem. Reusing arbitrary byte slices is
-    /// not supported in order to discourage design practices that would work against this
-    /// efficiency goal.
+    /// There is intentionally no mechanism in the `bytesbuf` crate to reference an existing
+    /// `&[u8]` without copying the contents, even if it has a `'static` lifetime.
     ///
-    /// To reuse memory allocations, reuse the `BytesView` itself. See the `bb_reuse.rs`
-    /// example in the `bytesbuf` source code for an example of how to do this efficiently.
+    /// The purpose of this limitation is to discourage accidentally involving arbitrary
+    /// memory in high-performance I/O workflows. For efficient I/O processing, data must
+    /// be stored in memory configured according to the needs of the consuming I/O endpoint,
+    /// which is not the case for a `&'static [u8]`.
+    ///
+    /// To reuse memory allocations, you need to reuse `BytesView` instances themselves.
+    /// See the `bb_reuse.rs` example in the `bytesbuf` crate for an example.
     #[must_use]
-    pub fn copied_from_slice(bytes: &[u8], memory_provider: &impl Memory) -> Self {
-        let mut buf = memory_provider.reserve(bytes.len());
+    pub fn copied_from_slice(bytes: &[u8], memory: &impl Memory) -> Self {
+        let mut buf = memory.reserve(bytes.len());
         buf.put_slice(bytes);
         buf.consume_all()
     }
@@ -958,33 +960,33 @@ mod tests {
         buf.put_byte(4);
         buf.put_byte(5);
 
-        let sequence = buf.consume_all();
+        let data = buf.consume_all();
 
-        let mut middle_four = sequence.range(1..5);
+        let mut middle_four = data.range(1..5);
         assert_eq!(4, middle_four.len());
         assert_eq!(1, middle_four.get_byte());
         assert_eq!(2, middle_four.get_byte());
         assert_eq!(3, middle_four.get_byte());
         assert_eq!(4, middle_four.get_byte());
 
-        let mut middle_four = sequence.range(1..=4);
+        let mut middle_four = data.range(1..=4);
         assert_eq!(4, middle_four.len());
         assert_eq!(1, middle_four.get_byte());
         assert_eq!(2, middle_four.get_byte());
         assert_eq!(3, middle_four.get_byte());
         assert_eq!(4, middle_four.get_byte());
 
-        let mut last_two = sequence.range(4..);
+        let mut last_two = data.range(4..);
         assert_eq!(2, last_two.len());
         assert_eq!(4, last_two.get_byte());
         assert_eq!(5, last_two.get_byte());
 
-        let mut first_two = sequence.range(..2);
+        let mut first_two = data.range(..2);
         assert_eq!(2, first_two.len());
         assert_eq!(0, first_two.get_byte());
         assert_eq!(1, first_two.get_byte());
 
-        let mut first_two = sequence.range(..=1);
+        let mut first_two = data.range(..=1);
         assert_eq!(2, first_two.len());
         assert_eq!(0, first_two.get_byte());
         assert_eq!(1, first_two.get_byte());
@@ -1077,13 +1079,12 @@ mod tests {
 
         let view = buf.consume_all();
 
-        let sub_sequence = view.range(50..50);
-        assert_eq!(0, sub_sequence.len());
+        let sub_view = view.range(50..50);
+        assert_eq!(0, sub_view.len());
 
         // 100 is the index at the end of the view - still in-bounds, if at edge.
-        let sub_sequence = view.range(100..100);
-        assert_eq!(0, sub_sequence.len());
-
+        let sub_view = view.range(100..100);
+        assert_eq!(0, sub_view.len());
         assert!(view.range_checked(101..101).is_none());
     }
 
@@ -1185,7 +1186,7 @@ mod tests {
     }
 
     #[test]
-    fn eq_sequence() {
+    fn eq_view() {
         let memory = TransparentMemory::new();
 
         let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);

@@ -100,20 +100,20 @@ mod tests {
     fn smoke_test() {
         let memory = TransparentMemory::new();
 
-        let mut sb = memory.reserve(0);
-        assert_eq!(sb.len(), 0);
-        assert_eq!(sb.capacity(), 0);
+        let mut buf = memory.reserve(0);
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.capacity(), 0);
 
-        sb = memory.reserve(1313);
+        buf = memory.reserve(1313);
 
-        assert_eq!(sb.capacity(), 1313);
+        assert_eq!(buf.capacity(), 1313);
 
-        sb.put_byte_repeated(3, 1313);
+        buf.put_byte_repeated(3, 1313);
 
-        let sequence = sb.consume_all();
+        let data = buf.consume_all();
 
-        assert_eq!(sequence.len(), 1313);
-        assert_eq!(sequence.first_slice().len(), 1313);
+        assert_eq!(data.len(), 1313);
+        assert_eq!(data.first_slice().len(), 1313);
     }
 
     #[test]
@@ -129,9 +129,9 @@ mod tests {
         // This is a giant allocation that does not fit into one memory block.
 
         let memory = TransparentMemory::new();
-        let sb = memory.reserve(5_000_000_000);
+        let buf = memory.reserve(5_000_000_000);
 
-        assert_eq!(sb.capacity(), 5_000_000_000);
+        assert_eq!(buf.capacity(), 5_000_000_000);
 
         // NB! We cannot simply check the first chunk length because there is no guarantee on which
         // order a BytesBuf consumes its blocks in - the first might not be u32::MAX here!

@@ -196,62 +196,33 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     use super::*;
-    use crate::mem::testing::TransparentMemory;
 
     #[test]
-    fn test_bytes_to_sequence() {
+    fn test_bytes_to_view() {
         let bytes = Bytes::from_static(b"Hello, world!");
 
         let bytes_data_ptr = bytes.as_ptr();
 
-        let sequence: BytesView = bytes.into();
+        let view: BytesView = bytes.into();
 
-        assert_eq!(sequence.len(), 13);
-        assert_eq!(sequence, b"Hello, world!");
+        assert_eq!(view.len(), 13);
+        assert_eq!(view, b"Hello, world!");
 
         // We expect this to be zero-copy - Bytes to BytesView always is.
-        assert_eq!(sequence.first_slice().as_ptr(), bytes_data_ptr);
+        assert_eq!(view.first_slice().as_ptr(), bytes_data_ptr);
     }
 
     #[test]
     fn zero_sized_bytes() {
         let bytes = Bytes::new();
-        let sequence: BytesView = bytes.into();
+        let view: BytesView = bytes.into();
 
-        assert_eq!(sequence.len(), 0);
-        assert!(sequence.is_empty());
+        assert_eq!(view.len(), 0);
+        assert!(view.is_empty());
     }
 
     #[test]
-    fn test_sequence_to_bytes() {
-        let memory = TransparentMemory::new();
-
-        let sequence = BytesView::copied_from_slice(b"Hello, world!", &memory);
-
-        let sequence_chunk_ptr = sequence.first_slice().as_ptr();
-
-        let bytes = sequence.to_bytes();
-
-        assert_eq!(bytes.as_ref(), b"Hello, world!");
-
-        // We expect this to be zero-copy since we used the passthrough allocator.
-        assert_eq!(bytes.as_ptr(), sequence_chunk_ptr);
-    }
-
-    #[test]
-    fn test_multi_block_sequence_to_bytes() {
-        let memory = TransparentMemory::new();
-
-        let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let world = BytesView::copied_from_slice(b"world!", &memory);
-        let sequence = BytesView::from_views([hello, world]);
-
-        let bytes = sequence.to_bytes();
-        assert_eq!(bytes.as_ref(), b"Hello, world!");
-    }
-
-    #[test]
-    fn test_giant_bytes_to_sequence() {
+    fn test_giant_bytes_to_view() {
         // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
         // where this may not be available, so we skip this test in that environment.
         #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
@@ -267,10 +238,10 @@ mod tests {
 
         let bytes = bytes.freeze();
 
-        let sequence: BytesView = bytes.into();
-        assert_eq!(sequence.len(), 5_000_000_000);
-        assert_eq!(sequence.first_slice().len(), u32::MAX as usize);
-        assert_eq!(sequence.into_spans_reversed().len(), 2);
+        let view: BytesView = bytes.into();
+        assert_eq!(view.len(), 5_000_000_000);
+        assert_eq!(view.first_slice().len(), u32::MAX as usize);
+        assert_eq!(view.into_spans_reversed().len(), 2);
     }
 
     #[test]

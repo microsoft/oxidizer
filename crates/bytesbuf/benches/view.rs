@@ -223,7 +223,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("clone_many", |b| {
         b.iter(|| {
             let _span = allocs_op.measure_process();
-            let _sequence = many_as_view.clone();
+            let _view = many_as_view.clone();
         });
     });
 

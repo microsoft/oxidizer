@@ -266,11 +266,11 @@ mod tests {
 
     #[test]
     fn slice_indexing_kinds() {
-        let mut sb = std_alloc_block::allocate(nz!(10)).into_span_builder();
+        let mut buf = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        sb.put_slice(&[0, 1, 2, 3, 4, 5]);
+        buf.put_slice(&[0, 1, 2, 3, 4, 5]);
 
-        let span = sb.consume(NonZero::new(sb.len()).unwrap());
+        let span = buf.consume(NonZero::new(buf.len()).unwrap());
 
         let mut middle_four = span.slice(1..5);
         assert_eq!(4, middle_four.len());
@@ -306,11 +306,11 @@ mod tests {
     fn slice_checked_with_excluded_start_bound() {
         use std::ops::Bound;
 
-        let mut sb = std_alloc_block::allocate(nz!(100)).into_span_builder();
+        let mut sub = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        sb.put_slice(&[0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        sub.put_slice(&[0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
-        let span = sb.consume(NonZero::new(sb.len()).unwrap());
+        let span = sub.consume(NonZero::new(sub.len()).unwrap());
 
         // Test with excluded start bound: (Bound::Excluded(1), Bound::Excluded(5))
         // This should be equivalent to 2..5 (items at indices 2, 3, 4)

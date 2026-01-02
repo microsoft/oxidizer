@@ -67,8 +67,8 @@ mod tests {
             assert_eq!(bytes_written, test_data.len());
         }
 
-        let sequence = builder.consume_all();
-        assert_eq!(sequence, test_data.as_slice());
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
     }
 
     #[test]
@@ -89,9 +89,9 @@ mod tests {
         }
 
         // Verify both initial and additional data are present
-        let sequence = builder.consume_all();
+        let data = builder.consume_all();
         let expected = b"Initial content - Additional data";
-        assert_eq!(sequence, expected.as_slice());
+        assert_eq!(data, expected.as_slice());
     }
 
     #[test]
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(builder.capacity(), initial_capacity);
 
         // Verify the data is there
-        let sequence = builder.consume_all();
-        assert_eq!(sequence, test_data.as_slice());
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
     }
 }

@@ -71,7 +71,7 @@ mod tests {
     use new_zealand::nz;
 
     use super::*;
-    use crate::mem::testing::std_alloc_block;
+    use crate::mem::testing::{TransparentMemory, std_alloc_block};
 
     #[test]
     fn view_to_bytes() {
@@ -83,18 +83,18 @@ mod tests {
         let span1 = builder.consume(nz!(8));
         let span2 = builder.consume(nz!(8));
 
-        let sequence_single_span = BytesView::from_spans(vec![span1.clone()]);
-        let sequence_multi_span = BytesView::from_spans(vec![span1, span2]);
+        let view_single_span = BytesView::from_spans(vec![span1.clone()]);
+        let view_multi_span = BytesView::from_spans(vec![span1, span2]);
 
-        let mut bytes = sequence_single_span.to_bytes();
+        let mut bytes = view_single_span.to_bytes();
         assert_eq!(8, bytes.len());
         assert_eq!(1234, bytes.get_u64_ne());
 
-        let mut bytes = sequence_single_span.to_bytes();
+        let mut bytes = view_single_span.to_bytes();
         assert_eq!(8, bytes.len());
         assert_eq!(1234, bytes.get_u64_ne());
 
-        let mut bytes = sequence_multi_span.to_bytes();
+        let mut bytes = view_multi_span.to_bytes();
         assert_eq!(16, bytes.len());
         assert_eq!(1234, bytes.get_u64_ne());
         assert_eq!(5678, bytes.get_u64_ne());
@@ -105,5 +105,33 @@ mod tests {
         let view = BytesView::default();
         let bytes = view.to_bytes();
         assert_eq!(0, bytes.len());
+    }
+
+    #[test]
+    fn test_view_to_bytes() {
+        let memory = TransparentMemory::new();
+
+        let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+
+        let view_chunk_ptr = view.first_slice().as_ptr();
+
+        let bytes = view.to_bytes();
+
+        assert_eq!(bytes.as_ref(), b"Hello, world!");
+
+        // We expect this to be zero-copy since we used the passthrough allocator.
+        assert_eq!(bytes.as_ptr(), view_chunk_ptr);
+    }
+
+    #[test]
+    fn test_multi_block_view_to_bytes() {
+        let memory = TransparentMemory::new();
+
+        let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let world = BytesView::copied_from_slice(b"world!", &memory);
+        let view = BytesView::from_views([hello, world]);
+
+        let bytes = view.to_bytes();
+        assert_eq!(bytes.as_ref(), b"Hello, world!");
     }
 }

@@ -200,77 +200,48 @@ impl Iterator for VecBlockIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mem::testing::TransparentMemory;
 
     #[test]
-    fn vec_into_sequence() {
+    fn vec_into_view() {
         let vec = vec![1, 2, 3, 4, 5];
-        let mut sequence: BytesView = vec.into();
-        assert_eq!(sequence.len(), 5);
+        let mut view: BytesView = vec.into();
+        assert_eq!(view.len(), 5);
 
-        assert_eq!(sequence.get_byte(), 1);
-        assert_eq!(sequence.get_byte(), 2);
-        assert_eq!(sequence.get_byte(), 3);
-        assert_eq!(sequence.get_byte(), 4);
-        assert_eq!(sequence.get_byte(), 5);
+        assert_eq!(view.get_byte(), 1);
+        assert_eq!(view.get_byte(), 2);
+        assert_eq!(view.get_byte(), 3);
+        assert_eq!(view.get_byte(), 4);
+        assert_eq!(view.get_byte(), 5);
 
-        assert!(sequence.is_empty());
+        assert!(view.is_empty());
     }
 
     #[test]
     fn zero_sized_vec() {
         let vec = Vec::<u8>::new();
-        let sequence: BytesView = vec.into();
+        let view: BytesView = vec.into();
 
-        assert_eq!(sequence.len(), 0);
-        assert!(sequence.is_empty());
+        assert_eq!(view.len(), 0);
+        assert!(view.is_empty());
     }
 
     #[test]
-    fn test_vec_to_sequence() {
+    fn test_vec_to_view() {
         let vec = vec![b'H', b'e', b'l', b'l', b'o', b',', b' ', b'w', b'o', b'r', b'l', b'd', b'!'];
 
         let vec_data_ptr = vec.as_ptr();
 
-        let sequence: BytesView = vec.into();
+        let view: BytesView = vec.into();
 
-        assert_eq!(sequence.len(), 13);
-        assert_eq!(sequence, b"Hello, world!");
+        assert_eq!(view.len(), 13);
+        assert_eq!(view, b"Hello, world!");
 
         // We expect this to be zero-copy - Vec to BytesView always is.
-        assert_eq!(sequence.first_slice().as_ptr(), vec_data_ptr);
+        assert_eq!(view.first_slice().as_ptr(), vec_data_ptr);
     }
 
     #[test]
-    fn test_sequence_to_bytes() {
-        let memory = TransparentMemory::new();
-
-        let sequence = BytesView::copied_from_slice(b"Hello, world!", &memory);
-
-        let sequence_chunk_ptr = sequence.first_slice().as_ptr();
-
-        let bytes = sequence.to_bytes();
-
-        assert_eq!(bytes.as_ref(), b"Hello, world!");
-
-        // We expect this to be zero-copy since we used the passthrough allocator.
-        assert_eq!(bytes.as_ptr(), sequence_chunk_ptr);
-    }
-
-    #[test]
-    fn test_multi_block_sequence_to_bytes() {
-        let memory = TransparentMemory::new();
-
-        let hello = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let world = BytesView::copied_from_slice(b"world!", &memory);
-        let sequence = BytesView::from_views([hello, world]);
-
-        let bytes = sequence.to_bytes();
-        assert_eq!(bytes.as_ref(), b"Hello, world!");
-    }
-
-    #[test]
-    fn test_giant_vec_to_sequence() {
+    fn test_giant_vec_to_view() {
         // This test requires at least 5 GB of memory to run. The publishing pipeline runs on a system
         // where this may not be available, so we skip this test in that environment.
         #[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
@@ -281,10 +252,10 @@ mod tests {
 
         let vec = vec![0u8; 5_000_000_000];
 
-        let sequence: BytesView = vec.into();
-        assert_eq!(sequence.len(), 5_000_000_000);
-        assert_eq!(sequence.first_slice().len(), u32::MAX as usize);
-        assert_eq!(sequence.into_spans_reversed().len(), 2);
+        let view: BytesView = vec.into();
+        assert_eq!(view.len(), 5_000_000_000);
+        assert_eq!(view.first_slice().len(), u32::MAX as usize);
+        assert_eq!(view.into_spans_reversed().len(), 2);
     }
 
     #[test]

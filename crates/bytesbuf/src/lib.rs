@@ -506,7 +506,7 @@
 //! # impl Connection {
 //! #     fn accept() -> Self { Connection }
 //! #     fn memory(&self) -> impl bytesbuf::mem::Memory { bytesbuf::mem::GlobalPool::new() }
-//! #     fn write(&self, _sequence: BytesView) {}
+//! #     fn write(&self, _data: BytesView) {}
 //! # }
 //! ```
 //!

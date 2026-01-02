@@ -109,18 +109,18 @@ mod tests {
     fn byte_by_byte() {
         let memory = FixedBlockMemory::new(nz!(1));
 
-        let sb = memory.reserve(0);
-        assert_eq!(sb.len(), 0);
-        assert_eq!(sb.capacity(), 0);
+        let buf = memory.reserve(0);
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.capacity(), 0);
 
-        let mut sequence = BytesView::copied_from_slice(b"Hello, world", &memory);
-        assert_eq!(sequence, b"Hello, world");
+        let mut data = BytesView::copied_from_slice(b"Hello, world", &memory);
+        assert_eq!(data, b"Hello, world");
 
-        assert_eq!(sequence.first_slice().len(), 1);
+        assert_eq!(data.first_slice().len(), 1);
 
         let mut chunks_encountered: usize = 0;
 
-        sequence.consume_all_slices(|chunk| {
+        data.consume_all_slices(|chunk| {
             chunks_encountered = chunks_encountered.saturating_add(1);
             assert_eq!(chunk.len(), 1);
         });
