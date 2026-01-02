@@ -59,11 +59,11 @@ miri-example EXAMPLE_NAME:
         cargo +$env:RUST_NIGHTLY miri run -p {{ package }} --all-features --example {{ EXAMPLE_NAME }} --locked
     }
 
-# Update README.md files for all packges.
+# Update README.md files for all packages.
 readme:
     cargo workspaces exec --ignore-private cargo doc2readme --lib --template ../README.j2
 
-# Check that README.md files for all packges are up to date.
+# Check that README.md files for all packages are up to date.
 readme-check:
     cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
 
