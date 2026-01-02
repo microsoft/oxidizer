@@ -98,53 +98,10 @@ jobs:
         uses: ./.github/actions/setup
         with:
           rust-toolchain: RUST_LATEST
-          cargo-tools: CARGO_SPELLCHECK_VERSION
+          cargo-tools: CARGO_SPELLCHECK_VERSION, JUST_VERSION
 
-      # execute
-      - name: Validate Dictionary
-        run: |
-          FILE=".spelling"
-
-          # Verify the first line is an integer
-          first_line=$(head -n 1 "$FILE")
-          if ! [[ "$first_line" =~ ^[0-9]+$ ]]; then
-            echo "Error: The first line of $FILE must be an integer, but got: '$first_line'"
-            exit 1
-          fi
-          expected_count="$first_line"
-
-          # Check that the number of lines matches the integer
-          actual_count=$(sed '1d' "$FILE" | wc -l | xargs)
-          if [ "$expected_count" -ne "$actual_count" ]; then
-            echo "Error: The number of lines ($actual_count) does not match $expected_count."
-            exit 1
-          fi
-
-          # Verify words are sorted and contain no duplicates
-          # Use LC_ALL=en_US.UTF8 for consistent sorting across environments
-          (
-            sed '1d' $FILE | LC_ALL=en_US.UTF8 sort -uc
-          ) || {
-            echo "Error: Dictionary is not in sorted order or contains duplicates."
-            echo "Expected order:"
-            LC_ALL=en_US.UTF8 sort -u <(sed '1d' $FILE)
-            exit 1
-          }
-
-          echo "Dictionary format is valid ($expected_count words)"
       - name: Check Spelling
-        run: |
-          if ! cargo spellcheck --cfg spellcheck.toml --code 1
-          then
-              echo ''
-              echo ''
-              echo 'If this is a Rust method/type/variable name, then you should'
-              echo 'enclose it in backticks like this: `MyRustType`.'
-              echo ''
-              echo 'If this is a real word, then you can add it to .spelling'
-              echo '(add the word in sorted order and update the count on line 1)'
-              exit 1
-          fi
+        run: just spellcheck
 
   semver:
     if: github.event_name == 'pull_request'

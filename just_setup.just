@@ -1,5 +1,4 @@
 # Installs the complete set of Rust toolchains and other tools for local PC development.
-[group('setup')]
 [script]
 install-tools:
     $ErrorActionPreference = "Stop"

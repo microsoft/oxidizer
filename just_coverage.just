@@ -1,7 +1,6 @@
 # llvm-cov tool needs a different way to specify the package.
 coverage-package := if package == "" { "" } else { "-p " + package }
 
-[group('coverage')]
 [script]
 coverage-measure:
     $ErrorActionPreference = "Stop"
@@ -14,7 +13,6 @@ coverage-measure:
     # This will run tests and generate test coverage data files, to be analyzed separately by coverage-report.
     cargo +$env:RUST_NIGHTLY llvm-cov nextest {{ target_package }} --no-fail-fast --all-targets --no-report --all-features --locked
 
-[group('coverage')]
 [script]
 coverage-report:
     $ErrorActionPreference = "Stop"
