@@ -234,33 +234,6 @@ impl BytesView {
     /// This can be useful when unsafe code is used to reference the contents of a `BytesView` and it
     /// is possible to reach a condition where the `BytesView` itself no longer exists, even though
     /// the contents are referenced (e.g. because the remaining references are in non-Rust code).
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// # mod ffi { pub unsafe fn process_buffer(_ptr: *const u8, _len: usize) {} }
-    /// use bytesbuf::BytesView;
-    ///
-    /// let view = BytesView::copied_from_slice(b"data for FFI", &memory);
-    ///
-    /// // Extend the lifetime before obtaining raw pointers.
-    /// let guard = view.extend_lifetime();
-    /// // For example simplicity, we assume processing the first slice is sufficient.
-    /// let ptr = view.first_slice().as_ptr();
-    /// let len = view.first_slice().len();
-    ///
-    /// // The view can now be dropped - the memory remains valid.
-    /// drop(view);
-    ///
-    /// // SAFETY: The guard keeps the memory alive during FFI processing.
-    /// unsafe {
-    ///     ffi::process_buffer(ptr, len);
-    /// }
-    ///
-    /// // Drop the guard only after FFI processing is complete.
-    /// drop(guard);
-    /// ```
     pub fn extend_lifetime(&self) -> MemoryGuard {
         MemoryGuard::new(self.spans_reversed.iter().map(Span::block_ref).map(Clone::clone))
     }
