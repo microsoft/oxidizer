@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # fmt needs a different way to specify the package.
 format_package := if package == "" { " --all" } else { " -p " + package }
 

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 build PROFILE='dev':
     cargo build {{ target_package }} --profile {{ PROFILE }} --all-features --all-targets --locked
 

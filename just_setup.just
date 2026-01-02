@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Installs the complete set of Rust toolchains and other tools for local PC development.
 [script]
 install-tools:

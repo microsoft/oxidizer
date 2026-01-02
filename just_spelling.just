@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Check the spelling of the workspace contents.
 [script]
 spellcheck:

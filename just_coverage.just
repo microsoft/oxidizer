@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # llvm-cov tool needs a different way to specify the package.
 coverage-package := if package == "" { "" } else { "-p " + package }
 
