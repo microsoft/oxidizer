@@ -6,8 +6,11 @@ The standard development environment is a Windows PC, with Windows Subsystem for
 
 The following software must be present on the PC:
 
+* [Latest version of LLVM](https://github.com/llvm/llvm-project/releases)
+  * Select: ☑️ Add LLVM to the system PATH for the current user
 * [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) with components:
   * Workload: Desktop development with C++
+  * Individual Components: C++ Clang Compiler for Windows
 * [Latest version of Visual Studio Code](https://code.visualstudio.com/Download) with extensions:
   * C/C++ (ms-vscode.cpptools)
   * rust-analyzer (rust-lang.rust-analyzer)
@@ -26,7 +29,7 @@ This guide assumes a clean Windows PC in other regards.
 # Windows environment setup
 
 1. Install Rust using [Rustup](https://rustup.rs/), with all default settings.
-1. Execute `rustup toolchain install nightly` to install the Rust nightly toolchain, used by some development tools.
+1. Execute `cargo install just --locked` to install the Just utility (unless already installed).
 
 After installing the Rust toolchain, we setup repository-specific tooling:
 
@@ -36,7 +39,7 @@ After installing the Rust toolchain, we setup repository-specific tooling:
 
 2. Switch to the `oxidizer` directory: `cd oxidizer`.
 2. Execute `git config --local include.path ./.gitconfig` to attach the repo-specific Git configuration.
-2. Execute `rustup toolchain install` to install the specific version of the Rust toolchain used by the `oxidizer` repo.
+2. Execute `just install-tools` to install all necessary Rust toolchain versions and development tooling.
 2. Open `.vscode/settings.template.jsonc` and save a copy as `.vscode/settings.json` to apply repo-specific settings for Visual Studio Code. Part of this file should be the same for everyone but the rest you can customize - refer to inline comments.
 
 ## Validate Windows environment
@@ -58,17 +61,17 @@ All commands that follow are to be executed in the Ubuntu terminal.
 Next, we upgrade, install and configure development prerequisites:
 
 1. Execute `sudo apt update && sudo apt dist-upgrade -y` to upgrade everything that is already installed.
-1. Execute `sudo apt install -y curl gdb perl python3 python3-pip git git-lfs build-essential cmake pkg-config` to ensure that essential packages are installed.
+1. Execute `sudo apt install -y curl clang llvm libclang-dev gdb perl python3 python3-pip git git-lfs build-essential cmake pkg-config libssl-dev` to ensure that essential packages are installed.
 1. [Install PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu?view=powershell-7.5#installation-via-package-repository-the-package-repository).
 1. Execute `git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"` to set the correct Git authentication flow.
 1. Execute `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` and install Rust with all default settings.
 1. Reopen the terminal to apply changes.
-1. Execute `rustup toolchain install nightly` to install the Rust nightly toolchain, used by some development tools.
+1. Execute `cargo install just --locked` to install the Just utility (unless already installed).
 
 Next, we setup repository-specific tooling on Linux:
 
 1. Switch to the `oxidizer` directory you previously cloned on Windows, using a `/mnt/c` style path to access the Windows filesystem: `cd /mnt/c/Users/username/Desktop/oxidizer` (adjusting the path to match your chosen location).
-1. Execute `rustup toolchain install` to install the  specific version of the Rust toolchain used by the `oxidizer` repo.
+1. Execute `just install-tools` to install all necessary Rust toolchain versions and development tooling.
 
 ## Optimize Linux build performance
 

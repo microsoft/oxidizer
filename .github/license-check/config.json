@@ -34,7 +34,8 @@
     {
         "include": [
             "**/*.toml",
-            "**/*.ps1"
+            "**/*.ps1",
+            "**/*.env"
         ],
         "exclude": [
             "target"

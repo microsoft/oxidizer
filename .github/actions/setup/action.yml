@@ -10,7 +10,7 @@ inputs:
     required: false
     default: 'false'
   rust-toolchain:
-    description: Rust toolchain to install. Can be a version (e.g., "stable", "1.70"), multiple (e.g., "stable,nightly"), or environment variable names from constants.toml (e.g., "RUST_MSRV" or "RUST_LATEST,RUST_NIGHTLY"). Leave empty to skip Rust installation.
+    description: Rust toolchain to install. Can be a version (e.g., "stable", "1.70"), multiple (e.g., "stable,nightly"), or environment variable names from constants.env (e.g., "RUST_MSRV" or "RUST_LATEST,RUST_NIGHTLY"). Leave empty to skip Rust installation.
     required: false
     default: ''
   rust-components:
@@ -34,9 +34,9 @@ runs:
       run: |
         echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
 
-        constants_path="${{ github.workspace }}/constants.toml"
+        constants_path="${{ github.workspace }}/constants.env"
         while IFS= read -r line; do
-          if [[ "$line" =~ ^([A-Z0-9_]+)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+          if [[ "$line" =~ ^([A-Z0-9_]+)=([^[:space:]]+) ]]; then
             echo "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
           fi
         done < "$constants_path"
