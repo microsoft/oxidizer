@@ -9,10 +9,6 @@ use crate::BytesView;
 impl BytesView {
     /// Returns a `bytes::Bytes` that contains the same byte sequence.
     ///
-    /// We do not expose `From<BytesView> for Bytes` because this is not guaranteed to be a cheap
-    /// operation and may involve data copying, so `.to_bytes()` must be explicitly called to
-    /// make the conversion obvious.
-    ///
     /// # Performance
     ///
     /// This operation is zero-copy if the sequence is backed by a single consecutive
@@ -21,8 +17,14 @@ impl BytesView {
     /// If the sequence is backed by multiple slices of memory capacity, the data will be copied
     /// to a new `Bytes` instance backed by new memory capacity from the Rust global allocator.
     ///
-    /// This conversion requires a small dynamic memory allocation for
+    /// This conversion always requires a small dynamic memory allocation for
     /// metadata, so avoiding conversions is valuable even if zero-copy.
+    ///
+    /// # Why is this not `.into()`?
+    ///
+    /// We do not allow conversion via `.into()` because the conversion is not guaranteed to be
+    /// a cheap operation and may involve data copying. The `.to_bytes()` function must always
+    /// be explicitly called to make the conversion more obvious and easier to catch in reviews.
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn to_bytes(&self) -> Bytes {

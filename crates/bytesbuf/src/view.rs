@@ -79,8 +79,6 @@ impl BytesView {
 
     /// Concatenates a number of existing byte sequences, yielding a combined view.
     ///
-    /// Later changes made to the input views will not be reflected in the resulting view.
-    ///
     /// # Panics
     ///
     /// Panics if the resulting view would be larger than `usize::MAX` bytes.
