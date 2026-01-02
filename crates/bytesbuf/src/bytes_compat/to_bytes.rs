@@ -9,6 +9,23 @@ use crate::BytesView;
 impl BytesView {
     /// Returns a `bytes::Bytes` that contains the same byte sequence.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytes::Buf;
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"\x12\x34\x56\x78", &memory);
+    ///
+    /// let mut bytes = view.to_bytes();
+    ///
+    /// // Consume the data using the bytes crate's Buf trait.
+    /// assert_eq!(bytes.get_u16(), 0x1234);
+    /// assert_eq!(bytes.get_u16(), 0x5678);
+    /// assert!(!bytes.has_remaining());
+    /// ```
+    ///
     /// # Performance
     ///
     /// This operation is zero-copy if the sequence is backed by a single consecutive
@@ -16,6 +33,8 @@ impl BytesView {
     ///
     /// If the sequence is backed by multiple slices of memory capacity, the data will be copied
     /// to a new `Bytes` instance backed by new memory capacity from the Rust global allocator.
+    ///
+    /// **You generally want to avoid this conversion in performance-sensitive code.**
     ///
     /// This conversion always requires a small dynamic memory allocation for
     /// metadata, so avoiding conversions is valuable even if zero-copy.

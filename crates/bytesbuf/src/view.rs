@@ -19,10 +19,44 @@ use crate::{BytesViewReader, MAX_INLINE_SPANS, MemoryGuard, Span};
 /// Only the contents are immutable - the view itself can be mutated in terms of progressively
 /// marking the byte sequence as consumed until the view becomes empty.
 ///
-/// To create a `BytesView`, use a [`BytesBuf`] or clone/slice an existing `BytesView`.
+/// # Creating a `BytesView`
+///
+/// Instances can be created in different ways:
+///
+/// * Use a [`BytesBuf`] to build the byte sequence piece by piece, consuming the buffered data as a new `BytesView` when finished.
+/// * Clone an existing `BytesView` with [`clone()`].
+/// * Take a range of bytes from an existing `BytesView` via [`range()`].
+/// * Combine multiple `BytesView` instances into one via [`from_views()`], [`concat()`] or [`append()`].
+/// * Copy data from a `&[u8]` using [`copied_from_slice()`].
+///
+/// Some of these methods may require you to first [obtain access to a memory provider].
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
+/// # Example
+///
+/// ```
+/// # let memory = bytesbuf::mem::GlobalPool::new();
+/// use bytesbuf::BytesView;
+///
+/// let mut view = BytesView::copied_from_slice(b"Hello!", &memory);
+///
+/// // Read bytes one at a time until the view is empty.
+/// while !view.is_empty() {
+///     let byte = view.get_byte();
+///     println!("Read byte: {byte}");
+/// }
+///
+/// assert!(view.is_empty());
+/// ```
+///
 /// [`BytesBuf`]: crate::BytesBuf
+/// [`copied_from_slice()`]: Self::copied_from_slice
+/// [`concat()`]: Self::concat
+/// [`append()`]: Self::append
+/// [`range()`]: Self::range
+/// [`from_views()`]: Self::from_views
+/// [`clone()`]: Self::clone
+/// [obtain access to a memory provider]: crate#producing-byte-sequences
 #[derive(Clone, Debug)]
 pub struct BytesView {
     /// The spans of the byte sequence, stored in reverse order for efficient consumption
@@ -79,6 +113,22 @@ impl BytesView {
 
     /// Concatenates a number of existing byte sequences, yielding a combined view.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let header = BytesView::copied_from_slice(b"HTTP/1.1 ", &memory);
+    /// let status = BytesView::copied_from_slice(b"200 ", &memory);
+    /// let message = BytesView::copied_from_slice(b"OK", &memory);
+    ///
+    /// let response_line = BytesView::from_views([header, status, message]);
+    ///
+    /// assert_eq!(response_line.len(), 15);
+    /// assert_eq!(response_line, b"HTTP/1.1 200 OK");
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if the resulting view would be larger than `usize::MAX` bytes.
@@ -106,6 +156,23 @@ impl BytesView {
 
     /// Creates a `BytesView` by copying the contents of a `&[u8]`.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # struct TcpConnection;
+    /// # impl TcpConnection {
+    /// #     fn memory(&self) -> impl bytesbuf::mem::Memory { bytesbuf::mem::GlobalPool::new() }
+    /// # }
+    /// # let tcp_connection = TcpConnection;
+    /// use bytesbuf::BytesView;
+    ///
+    /// const CONTENT_TYPE_KEY: &[u8] = b"Content-Type: ";
+    ///
+    /// let header_key = BytesView::copied_from_slice(CONTENT_TYPE_KEY, &tcp_connection.memory());
+    ///
+    /// assert_eq!(header_key.len(), 14);
+    /// ```
+    ///
     /// # Reusing without copying
     ///
     /// There is intentionally no mechanism in the `bytesbuf` crate to reference an existing
@@ -114,10 +181,10 @@ impl BytesView {
     /// The purpose of this limitation is to discourage accidentally involving arbitrary
     /// memory in high-performance I/O workflows. For efficient I/O processing, data must
     /// be stored in memory configured according to the needs of the consuming I/O endpoint,
-    /// which is not the case for a `&'static [u8]`.
+    /// which is not the case for an arbitrary `&'static [u8]`.
     ///
     /// To reuse memory allocations, you need to reuse `BytesView` instances themselves.
-    /// See the `bb_reuse.rs` example in the `bytesbuf` crate for an example.
+    /// See the `bb_reuse.rs` example in the `bytesbuf` crate for a detailed example.
     #[must_use]
     pub fn copied_from_slice(bytes: &[u8], memory: &impl Memory) -> Self {
         let mut buf = memory.reserve(bytes.len());
@@ -132,6 +199,22 @@ impl BytesView {
     /// The number of bytes exposed through the view.
     ///
     /// Consuming bytes from the view reduces its length.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"Hello", &memory);
+    /// assert_eq!(view.len(), 5);
+    ///
+    /// _ = view.get_byte();
+    /// assert_eq!(view.len(), 4);
+    ///
+    /// _ = view.get_num_le::<u16>();
+    /// assert_eq!(view.len(), 2);
+    /// ```
     #[must_use]
     pub fn len(&self) -> usize {
         // Sanity check.
@@ -151,6 +234,33 @@ impl BytesView {
     /// This can be useful when unsafe code is used to reference the contents of a `BytesView` and it
     /// is possible to reach a condition where the `BytesView` itself no longer exists, even though
     /// the contents are referenced (e.g. because the remaining references are in non-Rust code).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// # mod ffi { pub unsafe fn process_buffer(_ptr: *const u8, _len: usize) {} }
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"data for FFI", &memory);
+    ///
+    /// // Extend the lifetime before obtaining raw pointers.
+    /// let guard = view.extend_lifetime();
+    /// // For example simplicity, we assume processing the first slice is sufficient.
+    /// let ptr = view.first_slice().as_ptr();
+    /// let len = view.first_slice().len();
+    ///
+    /// // The view can now be dropped - the memory remains valid.
+    /// drop(view);
+    ///
+    /// // SAFETY: The guard keeps the memory alive during FFI processing.
+    /// unsafe {
+    ///     ffi::process_buffer(ptr, len);
+    /// }
+    ///
+    /// // Drop the guard only after FFI processing is complete.
+    /// drop(guard);
+    /// ```
     pub fn extend_lifetime(&self) -> MemoryGuard {
         MemoryGuard::new(self.spans_reversed.iter().map(Span::block_ref).map(Clone::clone))
     }
@@ -159,6 +269,20 @@ impl BytesView {
     ///
     /// The bounds logic only considers data currently present in the view.
     /// Any data already consumed is not considered part of the view.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    ///
+    /// assert_eq!(view.range(0..5), b"Hello");
+    /// assert_eq!(view.range(7..), b"world!");
+    /// assert_eq!(view.range(..5), b"Hello");
+    /// assert_eq!(view.range(..), b"Hello, world!");
+    /// ```
     ///
     /// # Panics
     ///
@@ -370,6 +494,25 @@ impl BytesView {
     ///
     /// The slices that make up the view are iterated in order,
     /// providing each to `f`. The view becomes empty after this.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// // Create a multi-slice view by concatenating independent views.
+    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
+    /// # let part2 = BytesView::copied_from_slice(b", ", &memory);
+    /// # let part3 = BytesView::copied_from_slice(b"world!", &memory);
+    /// let mut view = BytesView::from_views([part1, part2, part3]);
+    ///
+    /// view.consume_all_slices(|slice| {
+    ///     println!("Slice of {} bytes: {:?}", slice.len(), slice);
+    /// });
+    ///
+    /// assert!(view.is_empty());
+    /// ```
     pub fn consume_all_slices<F>(&mut self, mut f: F)
     where
         F: FnMut(&[u8]),
@@ -387,6 +530,29 @@ impl BytesView {
     ///
     /// Returns an empty slice if the view is over a zero-sized byte sequence.
     #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"0123456789ABCDEF", &memory);
+    ///
+    /// // Read the first 10 bytes without assuming the length of first_slice().
+    /// let mut ten_bytes = Vec::with_capacity(10);
+    ///
+    /// while ten_bytes.len() < 10 {
+    ///     let slice = view.first_slice();
+    ///
+    ///     let bytes_to_take = slice.len().min(10 - ten_bytes.len());
+    ///
+    ///     ten_bytes.extend_from_slice(&slice[..bytes_to_take]);
+    ///     view.advance(bytes_to_take);
+    /// }
+    ///
+    /// assert_eq!(ten_bytes, b"0123456789");
+    /// ```
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn first_slice(&self) -> &[u8] {
@@ -400,6 +566,30 @@ impl BytesView {
     ///
     /// See also [`slices()`] for a version that fills an array of regular slices instead of [`IoSlice`]s.
     #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::io::IoSlice;
+    ///
+    /// use bytesbuf::BytesView;
+    ///
+    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
+    /// # let part2 = BytesView::copied_from_slice(b"World", &memory);
+    /// let view = BytesView::from_views([part1, part2]);
+    ///
+    /// let mut io_slices = [IoSlice::new(&[]); 4];
+    /// let count = view.io_slices(&mut io_slices);
+    ///
+    /// for i in 0..count {
+    ///     println!(
+    ///         "IoSlice {i}: {} bytes at {:p}",
+    ///         io_slices[i].len(),
+    ///         io_slices[i].as_ptr()
+    ///     );
+    /// }
+    /// ```
     ///
     /// [`slices()`]: Self::slices
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
@@ -428,6 +618,28 @@ impl BytesView {
     /// See also [`io_slices()`] for a version that fills an array of [`IoSlice`]s instead of regular byte slices.
     #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
+    /// # let part2 = BytesView::copied_from_slice(b"World", &memory);
+    /// let view = BytesView::from_views([part1, part2]);
+    ///
+    /// let mut slices: [&[u8]; 4] = [&[]; 4];
+    /// let count = view.slices(&mut slices);
+    ///
+    /// for i in 0..count {
+    ///     println!(
+    ///         "Slice {i}: {} bytes at {:p}",
+    ///         slices[i].len(),
+    ///         slices[i].as_ptr()
+    ///     );
+    /// }
+    /// ```
+    ///
     /// [`io_slices()`]: Self::io_slices
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn slices<'a>(&'a self, dst: &mut [&'a [u8]]) -> usize {
@@ -450,6 +662,25 @@ impl BytesView {
     /// `None` if there is no metadata associated with the first slice or
     /// if the view is over a zero-sized byte sequence.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// # struct PageAlignedMemory;
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello", &memory);
+    ///
+    /// let is_page_aligned = view
+    ///     .first_slice_meta()
+    ///     .is_some_and(|meta| meta.is::<PageAlignedMemory>());
+    ///
+    /// println!("First slice is page-aligned: {is_page_aligned}");
+    /// ```
+    ///
+    /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
+    /// a more detailed example of how to make use of the slice metadata.
+    ///
     /// [`first_slice()`]: Self::first_slice
     #[must_use]
     pub fn first_slice_meta(&self) -> Option<&dyn Any> {
@@ -458,21 +689,68 @@ impl BytesView {
 
     /// Iterates over the metadata of all the slices that make up the view.
     ///
-    /// Each slice iterated over is a slice that would be returned by [`first_slice()]`
+    /// Each slice iterated over is a slice that would be returned by [`first_slice()`]
     /// at some point during the complete consumption of the data covered by a `BytesView`.
     ///
     /// You may wish to iterate over the metadata to determine in advance which implementation
     /// strategy to use for a function, depending on what the metadata indicates about the
     /// configuration of the memory blocks backing the byte sequence.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// # struct PageAlignedMemory;
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello", &memory);
+    ///
+    /// let all_page_aligned = view
+    ///     .iter_slice_metas()
+    ///     .all(|meta| meta.is_some_and(|m| m.is::<PageAlignedMemory>()));
+    ///
+    /// if all_page_aligned {
+    ///     println!("All slices are page-aligned, using optimized I/O path.");
+    /// }
+    /// ```
+    ///
+    /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
+    /// a more detailed example of how to make use of the slice metadata.
+    ///
     /// [`first_slice()`]: Self::first_slice
     pub fn iter_slice_metas(&self) -> BytesViewSliceMetas<'_> {
         BytesViewSliceMetas::new(self)
     }
 
-    /// Marks the first `count` bytes as consumed.
+    /// Removes the first `count` bytes from the front of the view.
     ///
     /// The consumed bytes are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"0123456789ABCDEF", &memory);
+    ///
+    /// // Read the first 10 bytes without assuming the length of first_slice().
+    /// let mut ten_bytes = Vec::with_capacity(10);
+    ///
+    /// while ten_bytes.len() < 10 {
+    ///     let slice = view.first_slice();
+    ///
+    ///     let bytes_to_take = slice.len().min(10 - ten_bytes.len());
+    ///
+    ///     ten_bytes.extend_from_slice(&slice[..bytes_to_take]);
+    ///     view.advance(bytes_to_take);
+    /// }
+    ///
+    /// assert_eq!(ten_bytes, b"0123456789");
+    /// ```
     ///
     /// # Panics
     ///
@@ -506,6 +784,20 @@ impl BytesView {
     ///
     /// This is a zero-copy operation, reusing the memory capacity of the other view.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut greeting = BytesView::copied_from_slice(b"Hello, ", &memory);
+    /// let name = BytesView::copied_from_slice(b"world!", &memory);
+    ///
+    /// greeting.append(name);
+    ///
+    /// assert_eq!(greeting, b"Hello, world!");
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if the resulting view would be larger than `usize::MAX` bytes.
@@ -522,6 +814,23 @@ impl BytesView {
     ///
     /// This is a zero-copy operation, reusing the memory capacity of the other view.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let greeting = BytesView::copied_from_slice(b"Hello, ", &memory);
+    /// let name = BytesView::copied_from_slice(b"world!", &memory);
+    ///
+    /// let message = greeting.concat(name);
+    ///
+    /// // Original view is unchanged.
+    /// assert_eq!(greeting, b"Hello, ");
+    /// // New view contains the concatenation.
+    /// assert_eq!(message, b"Hello, world!");
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if the resulting view would be larger than `usize::MAX` bytes.
@@ -533,6 +842,25 @@ impl BytesView {
     }
 
     /// Exposes the instance through the [`Read`][std::io::Read] trait.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::io::Read;
+    ///
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    /// let mut reader = view.as_read();
+    ///
+    /// let mut buffer = [0u8; 5];
+    /// let bytes_read = reader.read(&mut buffer)?;
+    ///
+    /// assert_eq!(bytes_read, 5);
+    /// assert_eq!(&buffer, b"Hello");
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     #[must_use]
     pub fn as_read(&mut self) -> impl std::io::Read {
         BytesViewReader::new(self)

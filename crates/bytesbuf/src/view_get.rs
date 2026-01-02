@@ -13,7 +13,24 @@ use crate::BytesView;
 impl BytesView {
     /// Consumes a `u8` from the byte sequence.
     ///
-    /// The byte is removed from the front of the view, shrinking it.
+    /// The consumed byte is dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"ABC", &memory);
+    ///
+    /// assert_eq!(view.get_byte(), b'A');
+    /// assert_eq!(view.get_byte(), b'B');
+    /// assert_eq!(view.get_byte(), b'C');
+    /// assert!(view.is_empty());
+    /// ```
     ///
     /// # Panics
     ///
@@ -28,7 +45,25 @@ impl BytesView {
 
     /// Transfers bytes into an initialized slice.
     ///
-    /// The bytes are removed from the front of the view, shrinking it.
+    /// The copied bytes are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    ///
+    /// let mut buffer = [0u8; 5];
+    /// view.copy_to_slice(&mut buffer);
+    ///
+    /// assert_eq!(&buffer, b"Hello");
+    /// assert_eq!(view.len(), 8); // ", world!" remains
+    /// ```
     ///
     /// # Panics
     ///
@@ -49,7 +84,28 @@ impl BytesView {
 
     /// Transfers bytes into a potentially uninitialized slice.
     ///
-    /// The bytes are removed from the front of the view, shrinking it.
+    /// The copied bytes are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::mem::MaybeUninit;
+    ///
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"Hello", &memory);
+    ///
+    /// let mut buffer: [MaybeUninit<u8>; 5] = [const { MaybeUninit::uninit() }; 5];
+    /// view.copy_to_uninit_slice(&mut buffer);
+    ///
+    /// // SAFETY: The buffer has been fully initialized by copy_to_uninit_slice.
+    /// let buffer: [u8; 5] = unsafe { std::mem::transmute(buffer) };
+    /// assert_eq!(&buffer, b"Hello");
+    /// ```
     ///
     /// # Panics
     ///
@@ -75,7 +131,28 @@ impl BytesView {
 
     /// Consumes a number of type `T` in little-endian representation.
     ///
-    /// The bytes of the `T` are removed from the front of the view, shrinking it.
+    /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// // Little-endian: least significant byte first.
+    /// let data: &[u8] = &[
+    ///     0x34, 0x12, // u16: 0x1234
+    ///     0x78, 0x56, 0x34, 0x12, // u32: 0x12345678
+    /// ];
+    /// let mut view = BytesView::copied_from_slice(data, &memory);
+    ///
+    /// assert_eq!(view.get_num_le::<u16>(), 0x1234);
+    /// assert_eq!(view.get_num_le::<u32>(), 0x12345678);
+    /// assert!(view.is_empty());
+    /// ```
     ///
     /// # Panics
     ///
@@ -151,7 +228,28 @@ impl BytesView {
 
     /// Consumes a number of type `T` in big-endian representation.
     ///
-    /// The bytes of the `T` are removed from the front of the view, shrinking it.
+    /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// // Big-endian: most significant byte first.
+    /// let data: &[u8] = &[
+    ///     0x12, 0x34, 0x56, 0x78, // u32: 0x12345678
+    ///     0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, // u64: 0x0123456789ABCDEF
+    /// ];
+    /// let mut view = BytesView::copied_from_slice(data, &memory);
+    ///
+    /// assert_eq!(view.get_num_be::<u32>(), 0x12345678);
+    /// assert_eq!(view.get_num_be::<u64>(), 0x0123456789ABCDEF);
+    /// assert!(view.is_empty());
+    /// ```
     ///
     /// # Panics
     ///
@@ -227,7 +325,31 @@ impl BytesView {
 
     /// Consumes a number of type `T` in native-endian representation.
     ///
-    /// The bytes of the `T` are removed from the front of the view, shrinking it.
+    /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// // Native-endian: byte order matches the platform.
+    /// let value1: u16 = 0x1234;
+    /// let value2: u64 = 0x0123456789ABCDEF;
+    ///
+    /// let mut data = Vec::new();
+    /// data.extend_from_slice(&value1.to_ne_bytes());
+    /// data.extend_from_slice(&value2.to_ne_bytes());
+    ///
+    /// let mut view = BytesView::copied_from_slice(&data, &memory);
+    ///
+    /// assert_eq!(view.get_num_ne::<u16>(), 0x1234);
+    /// assert_eq!(view.get_num_ne::<u64>(), 0x0123456789ABCDEF);
+    /// assert!(view.is_empty());
+    /// ```
     ///
     /// # Panics
     ///
