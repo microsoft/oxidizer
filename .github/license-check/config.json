@@ -56,6 +56,7 @@
             "**/*.json",
             "**/*.snap",
             "**/*.stderr",
+            "**/*.graphml",
             "LICENSE",
             "Cargo.lock"
         ]

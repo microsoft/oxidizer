@@ -4,7 +4,8 @@
 //! Showcases how to implement the `HasMemory` trait using the forwarding
 //! implementation strategy, whereby the memory provider of a dependency is used.
 
-use bytesbuf::{BytesBuf, BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
+use bytesbuf::mem::{HasMemory, Memory, MemoryShared};
+use bytesbuf::{BytesBuf, BytesView};
 
 const PAYLOAD_LEN: usize = 12345;
 
@@ -109,13 +110,13 @@ impl Connection {
 impl HasMemory for Connection {
     fn memory(&self) -> impl MemoryShared {
         // This is a wrong way to implement this trait! Only to make the example compile.
-        TransparentTestMemory::new()
+        bytesbuf::mem::testing::TransparentMemory::new()
     }
 }
 
 impl Memory for Connection {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         // This is a wrong way to implement this trait! Only to make the example compile.
-        TransparentTestMemory::new().reserve(min_bytes)
+        bytesbuf::mem::testing::TransparentMemory::new().reserve(min_bytes)
     }
 }

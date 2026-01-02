@@ -24,7 +24,7 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.1.2" }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
@@ -97,10 +97,9 @@ trivial_numeric_casts = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
-# Allow cfg attributes for coverage builds and docs.rs builds
+# Allow our special-purpose nonstandard cfg attributes.
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
-    'cfg(docsrs)',
 ] }
 
 [workspace.lints.clippy]

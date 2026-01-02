@@ -5,7 +5,8 @@ use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::ptr::NonNull;
 
-use crate::{BlockRef, SpanBuilder};
+use crate::SpanBuilder;
+use crate::mem::BlockRef;
 
 /// An integer type that can represent the size of a memory block in bytes.
 ///
@@ -15,8 +16,13 @@ use crate::{BlockRef, SpanBuilder};
 /// multiple blocks but a single block is always limited to `BlockSize`.
 pub type BlockSize = u32;
 
-/// Describes an exclusively owned memory block that can be used as part of the capacity
-/// of a newly created [`BytesBuf`][crate::BytesBuf].
+/// Represents exclusive ownership of a rented memory block.
+///
+/// Memory blocks are rented from a memory provider. Shared ownership is represented by
+/// [`BlockRef`][crate::mem::BlockRef], whereas this type represents exclusive ownership.
+///
+/// Only exclusively owned memory blocks can be used to supply memory capacity
+/// to a newly created [`BytesBuf`][crate::BytesBuf].
 #[derive(Debug)]
 pub struct Block {
     ptr: NonNull<MaybeUninit<u8>>,

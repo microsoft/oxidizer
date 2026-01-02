@@ -3,16 +3,18 @@
 
 #![expect(missing_docs, reason = "Benchmark code")]
 
-use std::f64;
+use std::alloc::System;
 use std::hint::black_box;
 use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::time::Instant;
-use std::{alloc::System, iter};
+use std::{f64, iter};
 
 use alloc_tracker::{Allocator, Session};
 use bytes::{Buf, BufMut};
-use bytesbuf::{BlockSize, BytesBuf, BytesView, TransparentTestMemory};
+use bytesbuf::mem::BlockSize;
+use bytesbuf::mem::testing::TransparentMemory;
+use bytesbuf::{BytesBuf, BytesView};
 use criterion::{Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
@@ -34,7 +36,7 @@ const WORKING_SLICE_LEN: usize = 256;
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 
-    let memory = TransparentTestMemory::new();
+    let memory = TransparentMemory::new();
 
     let test_data_view = BytesView::copied_from_slice(TEST_DATA, &memory);
     let many = iter::repeat_n(test_data_view.clone(), MANY_SPANS).collect::<Vec<_>>();

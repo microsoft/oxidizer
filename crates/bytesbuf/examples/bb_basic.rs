@@ -7,7 +7,8 @@
 //! 2. We encode a message into this buffer and create a `BytesView` over the message.
 //! 3. We receive the message in another function and write a status report to the terminal.
 
-use bytesbuf::{BytesView, GlobalPool, Memory};
+use bytesbuf::BytesView;
+use bytesbuf::mem::{GlobalPool, Memory};
 
 fn main() {
     // The global memory pool in real-world code would be provided by the application framework.

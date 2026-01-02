@@ -9,7 +9,7 @@ use crate::BytesBuf;
 ///
 /// Call [`reserve()`][Self::reserve] to reserve memory capacity and obtain a [`BytesBuf`]
 /// that can be used to fill the reserved memory with data.
-#[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
+#[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
 ///
 /// # Resource management
 ///
