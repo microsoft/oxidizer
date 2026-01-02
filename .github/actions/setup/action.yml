@@ -70,6 +70,10 @@ runs:
               name=$(echo "${BASH_REMATCH[1]}" | tr 'A-Z_' 'a-z-')
               val="${!tool}"
               [[ -n "$val" ]] && tool="cargo-$name@$val"
+            elif [[ "$tool" =~ ^([A-Z0-9_]+)_VERSION$ ]]; then
+              name=$(echo "${BASH_REMATCH[1]}" | tr 'A-Z_' 'a-z-')
+              val="${!tool}"
+              [[ -n "$val" ]] && tool="$name@$val"
             elif [[ "$tool" =~ ^(.+)@([A-Z0-9_]+)$ ]]; then
               val="${!BASH_REMATCH[2]}"
               [[ -n "$val" ]] && tool="${BASH_REMATCH[1]}@$val"
