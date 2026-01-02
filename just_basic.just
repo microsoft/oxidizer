@@ -31,7 +31,7 @@ examples PROFILE='dev':
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
-    . ./scripts/run-examples.ps1 -Package "{{ package }}" -Profile "{{ PROFILE }}"
+    . ./scripts/run-examples.ps1 -Package "{{ package }}" -CargoProfile "{{ PROFILE }}"
 
 hack:
     cargo hack {{ target_package }} check --feature-powerset --locked

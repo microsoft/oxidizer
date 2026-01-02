@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Runs all stand-alone example binaries in the workspace (or the specified package).
 # Each example has a 30-second timeout to avoid misbehaving examples causing trouble.
 # Supports both .rs files and subdirectories with main.rs files.
@@ -5,7 +8,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Profile,
+    [string]$CargoProfile,
 
     [Parameter(Mandatory = $false)]
     [string]$Package = ""
@@ -43,7 +46,7 @@ else {
 
 Write-Host "Running examples for packages: $($packages_to_process -join ', ')"
 Write-Host "Timeout per example: $timeout_seconds seconds"
-Write-Host "Cargo profile: $Profile"
+Write-Host "Cargo profile: $CargoProfile"
 Write-Host ""
 
 foreach ($pkg in $packages_to_process) {
@@ -80,11 +83,11 @@ foreach ($pkg in $packages_to_process) {
         try {
             # Run the example with a timeout to prevent hanging
             $job = Start-Job -ScriptBlock {
-                param($pkg, $example_name, $profile)
+                param($pkg, $example_name, $CargoProfile)
                 $env:IS_TESTING = "1"
-                & cargo run --package $pkg --example $example_name --profile $profile --all-features --locked 2>&1
+                & cargo run --package $pkg --example $example_name --profile $CargoProfile --all-features --locked 2>&1
                 return $LASTEXITCODE
-            } -ArgumentList $pkg, $example_name, $Profile
+            } -ArgumentList $pkg, $example_name, $CargoProfile
 
             $completed = Wait-Job -Job $job -Timeout $timeout_seconds
 
@@ -138,11 +141,11 @@ foreach ($pkg in $packages_to_process) {
         try {
             # Run the example with a timeout to prevent hanging
             $job = Start-Job -ScriptBlock {
-                param($pkg, $example_name, $profile)
+                param($pkg, $example_name, $CargoProfile)
                 $env:IS_TESTING = "1"
-                & cargo run --package $pkg --example $example_name --profile $profile --all-features --locked 2>&1
+                & cargo run --package $pkg --example $example_name --profile $CargoProfile --all-features --locked 2>&1
                 return $LASTEXITCODE
-            } -ArgumentList $pkg, $example_name, $Profile
+            } -ArgumentList $pkg, $example_name, $CargoProfile
 
             $completed = Wait-Job -Job $job -Timeout $timeout_seconds
 
