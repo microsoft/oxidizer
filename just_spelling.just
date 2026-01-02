@@ -6,7 +6,7 @@ spellcheck:
 
     # The `.spelling` file we have is not strictly speaking `cargo spellcheck` compatible because
     # it has very strict requirements that do not play well with Code Spell Checker in the IDE.
-    # Therefore, we post-process the `.spelling` file into `target/spelling.dic` before executing.
+    # Therefore, we preprocess the `.spelling` file into `target/spelling.dic` before executing.
     #
     # What do we have to do?
     # 1. Sort lines alphabetically.
