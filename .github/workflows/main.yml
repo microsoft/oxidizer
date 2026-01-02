@@ -26,7 +26,7 @@ jobs:
         with:
           enable-sccache: true
           rust-toolchain: RUST_MSRV
-          cargo-tools: CARGO_NEXTEST_VERSION, CARGO_HACK_VERSION
+          cargo-tools: CARGO_NEXTEST_VERSION, CARGO_HACK_VERSION, JUST_VERSION
 
       # execute
       - name: Build
@@ -42,6 +42,8 @@ jobs:
       - name: Doc Tests
         if: success() || failure()
         run: cargo test --doc --verbose --workspace --all-features
+      - name: Examples
+        run: just run-examples
 
   static-analysis:
     runs-on: ${{ matrix.os }}
