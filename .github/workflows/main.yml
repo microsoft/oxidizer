@@ -37,7 +37,7 @@ jobs:
       - name: Docs
         if: success() || failure()
         env:
-          RUSTDOCFLAGS: "-D warnings"
+          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
         run: cargo doc --verbose --workspace --all-features
       - name: Doc Tests
         if: success() || failure()
@@ -72,6 +72,8 @@ jobs:
         run: cargo sort --check --grouped --workspace
       - name: Docs
         if: success() || failure()
+        env:
+          RUSTDOCFLAGS: "--cfg docsrs"
         run: cargo doc --no-deps --workspace --all-features
       - name: Readmes
         if: success() || failure()
