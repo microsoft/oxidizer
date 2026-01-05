@@ -88,7 +88,7 @@ pub trait ReadExt: Read {
     where
         F: FnMut(BytesView) -> ReadInspectDecision + Send;
 
-    /// Transforms the `Read` into a [`futures::Stream`]
+    /// Transforms the `Read` into a `futures::Stream`.
     ///
     /// Each item yielded by the stream corresponds to a sequence of one or more bytes read from this source.
     #[cfg(feature = "futures-stream")]
