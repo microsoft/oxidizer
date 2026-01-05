@@ -38,7 +38,7 @@ jobs:
         if: success() || failure()
         env:
           RUSTDOCFLAGS: "--cfg docsrs -D warnings"
-        run: cargo +${{ env.RUST_NIGHTLY }} doc --verbose --workspace --all-features
+        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace --all-features
       - name: Doc Tests
         if: success() || failure()
         run: cargo test --doc --verbose --workspace --all-features
