@@ -22,9 +22,10 @@ concerns like timeouts, retries, and logging.
 
 ### Why not Tower?
 
-[Tower][__link1] predates `async fn` in traits, requiring boxed futures and
-`poll_ready` semantics. This crate offers a simpler `execute`-based model with cleaner
-trait bounds, while still providing Tower interop via the `tower-service` feature.
+[Tower][__link1] predates `async fn` in traits, requiring manual `Future` types
+or boxing and `poll_ready` backpressure semantics. Tower’s `&mut self` also requires cloning
+for concurrent requests. This crate uses `async fn` with `&self`, enabling simpler middleware
+and natural concurrency. Tower interop is available via the `tower-service` feature.
 
 ### Quickstart
 
@@ -121,7 +122,7 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8It-r4LRxirGzWo8_Kg38LPG44A6yKuJ611GyE0tVefO-l8YWSBgmdsYXllcmVkZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4rdPerMyvvgG7IVRwbTCxH2Gz65DpuOLyu9G34aCjJKQEC7YWSBgmdsYXllcmVkZTAuMS4w
  [__link0]: https://docs.rs/layered/0.1.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
  [__link10]: https://docs.rs/layered/0.1.0/layered/tower/index.html

@@ -9,9 +9,10 @@
 //!
 //! ## Why not Tower?
 //!
-//! [Tower](https://docs.rs/tower) predates `async fn` in traits, requiring boxed futures and
-//! `poll_ready` semantics. This crate offers a simpler `execute`-based model with cleaner
-//! trait bounds, while still providing Tower interop via the `tower-service` feature.
+//! [Tower](https://docs.rs/tower) predates `async fn` in traits, requiring manual `Future` types
+//! or boxing and `poll_ready` backpressure semantics. Tower's `&mut self` also requires cloning
+//! for concurrent requests. This crate uses `async fn` with `&self`, enabling simpler middleware
+//! and natural concurrency. Tower interop is available via the `tower-service` feature.
 //!
 //! ## Quickstart
 //!
