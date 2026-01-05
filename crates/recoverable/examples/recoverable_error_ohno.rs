@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating how to use implement `Recoverable` trait
+//! Example demonstrating how to use implement `Recovery` trait
 //! for errors implemented using the `ohno` crate.
 
-use recoverable::{Recoverable, RecoveryInfo, RecoveryKind};
+use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 fn main() {
     handle_network_error(&NetworkError::dns_resolution_failed());
@@ -32,7 +32,7 @@ impl NetworkError {
     }
 }
 
-impl Recoverable for NetworkError {
+impl Recovery for NetworkError {
     fn recovery(&self) -> RecoveryInfo {
         self.recovery_info.clone()
     }

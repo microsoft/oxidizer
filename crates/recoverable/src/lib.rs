@@ -22,15 +22,15 @@
 //! # Core Types
 //!
 //! - [`RecoveryInfo`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
-//! - [`Recoverable`]: A trait for types that can determine their recoverability.
+//! - [`Recovery`]: A trait for types that can determine their recoverability.
 //! - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
 //!
 //! # Examples
 //!
-//! ## Recoverable Error
+//! ## Recovery Error
 //!
 //! ```rust
-//! use recoverable::{Recoverable, RecoveryInfo, RecoveryKind};
+//! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 //!
 //! #[derive(Debug)]
 //! enum DatabaseError {
@@ -39,7 +39,7 @@
 //!     TableNotFound,
 //! }
 //!
-//! impl Recoverable for DatabaseError {
+//! impl Recovery for DatabaseError {
 //!     fn recovery(&self) -> RecoveryInfo {
 //!         match self {
 //!             // Transient failure - might succeed if retried
@@ -381,7 +381,7 @@ impl RecoveryInfo {
 /// Basic implementation for a simple error type:
 ///
 /// ```rust
-/// use recoverable::{Recoverable, RecoveryInfo};
+/// use recoverable::{Recovery, RecoveryInfo};
 ///
 /// #[derive(Debug)]
 /// enum DatabaseError {
@@ -390,7 +390,7 @@ impl RecoveryInfo {
 ///     TableNotFound,
 /// }
 ///
-/// impl Recoverable for DatabaseError {
+/// impl Recovery for DatabaseError {
 ///     fn recovery(&self) -> RecoveryInfo {
 ///         match self {
 ///             DatabaseError::ConnectionTimeout => RecoveryInfo::retry(),
@@ -400,7 +400,7 @@ impl RecoveryInfo {
 ///     }
 /// }
 /// ```
-pub trait Recoverable {
+pub trait Recovery {
     /// Returns the recovery information for this condition.
     ///
     /// Return appropriate recovery information based on the internal state of the type
@@ -409,11 +409,11 @@ pub trait Recoverable {
     /// # Examples
     ///
     /// ```rust
-    /// use recoverable::{Recoverable, RecoveryInfo, RecoveryKind};
+    /// use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
     ///
     /// struct MyError;
     ///
-    /// impl Recoverable for MyError {
+    /// impl Recovery for MyError {
     ///     fn recovery(&self) -> RecoveryInfo {
     ///         RecoveryInfo::retry()
     ///     }
@@ -425,16 +425,16 @@ pub trait Recoverable {
     fn recovery(&self) -> RecoveryInfo;
 }
 
-impl Recoverable for RecoveryInfo {
+impl Recovery for RecoveryInfo {
     fn recovery(&self) -> RecoveryInfo {
         self.clone()
     }
 }
 
-impl<R, E> Recoverable for Result<R, E>
+impl<R, E> Recovery for Result<R, E>
 where
-    R: Recoverable,
-    E: Recoverable,
+    R: Recovery,
+    E: Recovery,
 {
     fn recovery(&self) -> RecoveryInfo {
         match self {
@@ -549,8 +549,8 @@ mod tests {
 
     #[test]
     fn assert_result_implements_recover() {
-        assert_impl_all!(Result<TestType, TestType>: Recoverable);
-        assert_not_impl_all!(Result<TestType, String>: Recoverable);
+        assert_impl_all!(Result<TestType, TestType>: Recovery);
+        assert_not_impl_all!(Result<TestType, String>: Recovery);
     }
 
     #[test]
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn recover_trait_implementations() {
-        // RecoveryInfo implements Recoverable
+        // RecoveryInfo implements Recovery
         assert_eq!(RecoveryInfo::retry().recovery().kind(), RecoveryKind::Retry);
 
         assert_eq!(
@@ -584,10 +584,10 @@ mod tests {
         );
     }
 
-    // Result implements Recoverable
+    // Result implements Recovery
     #[derive(Debug)]
     struct TestType;
-    impl Recoverable for TestType {
+    impl Recovery for TestType {
         fn recovery(&self) -> RecoveryInfo {
             RecoveryInfo::unknown()
         }

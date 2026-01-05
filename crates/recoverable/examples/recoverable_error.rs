@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example demonstrating how to use the Recoverable trait with error types.
+//! Example demonstrating how to use the `Recovery` trait with error types.
 //!
-//! This example shows how to implement the Recoverable trait for custom error types
+//! This example shows how to implement the `Recovery` trait for custom error types
 //! and use `RecoveryInfo` to classify errors as transient or permanent.
 
 use std::error::Error;
 use std::fmt::Display;
 use std::time::Duration;
 
-use recoverable::{Recoverable, RecoveryInfo, RecoveryKind};
+use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 fn main() {
     handle_network_error(&NetworkError::DnsResolutionFailed);
@@ -29,7 +29,7 @@ enum NetworkError {
     ServiceUnavailable { retry_after: Option<Duration> },
 }
 
-impl Recoverable for NetworkError {
+impl Recovery for NetworkError {
     fn recovery(&self) -> RecoveryInfo {
         match self {
             Self::DnsResolutionFailed => RecoveryInfo::retry(),
