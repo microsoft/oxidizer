@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 
+#![allow(missing_docs, clippy::unwrap_used, reason = "sample code")]
+
 //! Tower interoperability examples.
 //!
 //! Shows three ways to combine layered and Tower services:
