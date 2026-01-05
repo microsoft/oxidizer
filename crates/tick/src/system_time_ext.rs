@@ -38,12 +38,18 @@ fn to_timestamp_saturating(system_time: SystemTime) -> jiff::Timestamp {
     match Timestamp::try_from(system_time) {
         Ok(timestamp) => timestamp,
         Err(_) => {
-            match system_time.duration_since(SystemTime::UNIX_EPOCH) {
-                Ok(_) => Timestamp::MAX,
-                Err(_) => Timestamp::MIN, // earlier than UNIX_EPOCH, so this must be Timestamp::MIN
+            if after_unix_epoch(system_time) {
+                Timestamp::MAX
+            } else {
+                Timestamp::MIN
             }
         }
     }
+}
+
+#[cfg(any(feature = "fmt", test))]
+fn after_unix_epoch(system_time: SystemTime) -> bool {
+    system_time.duration_since(SystemTime::UNIX_EPOCH).is_ok()
 }
 
 mod sealed {
@@ -74,8 +80,14 @@ mod tests {
     fn display_out_of_range() {
         let time = SystemTime::from(Timestamp::MAX) + Duration::from_secs(12345);
         assert_eq!(time.display_iso_8601().to_string(), "9999-12-30T22:00:00.999999999Z");
+    }
 
-        let time = SystemTime::from(Timestamp::MIN) - Duration::from_secs(12345);
-        assert_eq!(time.display_iso_8601().to_string(), "-009999-01-02T01:59:59Z");
+    #[test]
+    fn after_unix_epoch_ok() {
+        let now = SystemTime::now();
+        assert!(after_unix_epoch(now));
+
+        let past = SystemTime::UNIX_EPOCH - Duration::from_secs(12345);
+        assert!(!after_unix_epoch(past));
     }
 }
