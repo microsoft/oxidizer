@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 
+#![allow(missing_docs, reason = "Benchmarks don't require documentation")]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Intercept, Service, Stack};
 
-pub fn entry(c: &mut Criterion) {
+fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("intercept");
 
     let service = Execute::new(|v| async move { v });

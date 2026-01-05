@@ -1,5 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 
+#![allow(
+    missing_docs,
+    clippy::unwrap_used,
+    reason = "Benchmarks don't require documentation and should fail fast on errors"
+)]
+
 use std::future::poll_fn;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -15,8 +21,7 @@ use tower::{ServiceBuilder, service_fn};
 use tower_layer::Layer;
 use tower_service::Service as TowerService;
 
-#[expect(clippy::missing_panics_doc, reason = "No idea why this warning is coming out in a benchmark!")]
-pub fn entry(c: &mut Criterion) {
+fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("tower");
 
     // Execute
