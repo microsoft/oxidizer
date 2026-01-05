@@ -152,6 +152,7 @@ pub mod closure;
 pub mod registry;
 
 pub mod affinity;
+pub mod traits;
 
 #[doc(inline)]
 pub use core::ThreadAware;
