@@ -3,4 +3,5 @@
 
 //! Traits for thread-aware types.
 
+#[doc(inline)]
 pub use crate::core::ThreadAware;
