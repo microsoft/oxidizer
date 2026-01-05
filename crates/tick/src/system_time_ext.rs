@@ -27,29 +27,25 @@ impl SystemTimeExt for SystemTime {
     #[cfg(any(feature = "fmt", test))]
     fn display_iso_8601(&self) -> impl std::fmt::Display {
         // jiff's Timestamp implements Display that outputs ISO 8601 format
-        to_timestamp_saturating(*self)
+        to_timestamp(*self)
     }
 }
 
 #[cfg(any(feature = "fmt", test))]
-fn to_timestamp_saturating(system_time: SystemTime) -> jiff::Timestamp {
-    use jiff::Timestamp;
-
-    match Timestamp::try_from(system_time) {
+fn to_timestamp(system_time: SystemTime) -> jiff::Timestamp {
+    match jiff::Timestamp::try_from(system_time) {
         Ok(timestamp) => timestamp,
-        Err(_) => {
-            if after_unix_epoch(system_time) {
-                Timestamp::MAX
-            } else {
-                Timestamp::MIN
-            }
-        }
+        Err(_) => to_timestamp_fallback(system_time),
     }
 }
 
 #[cfg(any(feature = "fmt", test))]
-fn after_unix_epoch(system_time: SystemTime) -> bool {
-    system_time.duration_since(SystemTime::UNIX_EPOCH).is_ok()
+fn to_timestamp_fallback(system_time: SystemTime) -> jiff::Timestamp {
+    if system_time.duration_since(SystemTime::UNIX_EPOCH).is_ok() {
+        jiff::Timestamp::MAX
+    } else {
+        jiff::Timestamp::MIN
+    }
 }
 
 mod sealed {
@@ -83,11 +79,11 @@ mod tests {
     }
 
     #[test]
-    fn after_unix_epoch_ok() {
+    fn to_timestamp_fallback_ok() {
         let now = SystemTime::now();
-        assert!(after_unix_epoch(now));
+        assert_eq!(to_timestamp_fallback(now), jiff::Timestamp::MAX);
 
         let past = SystemTime::UNIX_EPOCH - Duration::from_secs(12345);
-        assert!(!after_unix_epoch(past));
+        assert_eq!(to_timestamp_fallback(past), jiff::Timestamp::MIN);
     }
 }
