@@ -35,12 +35,12 @@ impl SystemTimeExt for SystemTime {
 fn to_timestamp(system_time: SystemTime) -> jiff::Timestamp {
     match jiff::Timestamp::try_from(system_time) {
         Ok(timestamp) => timestamp,
-        Err(_) => to_timestamp_fallback(system_time),
+        Err(_) => to_timestamp_min_max(system_time),
     }
 }
 
 #[cfg(any(feature = "fmt", test))]
-fn to_timestamp_fallback(system_time: SystemTime) -> jiff::Timestamp {
+fn to_timestamp_min_max(system_time: SystemTime) -> jiff::Timestamp {
     if system_time.duration_since(SystemTime::UNIX_EPOCH).is_ok() {
         jiff::Timestamp::MAX
     } else {
@@ -81,9 +81,9 @@ mod tests {
     #[test]
     fn to_timestamp_fallback_ok() {
         let now = SystemTime::now();
-        assert_eq!(to_timestamp_fallback(now), jiff::Timestamp::MAX);
+        assert_eq!(to_timestamp_min_max(now), jiff::Timestamp::MAX);
 
         let past = SystemTime::UNIX_EPOCH - Duration::from_secs(12345);
-        assert_eq!(to_timestamp_fallback(past), jiff::Timestamp::MIN);
+        assert_eq!(to_timestamp_min_max(past), jiff::Timestamp::MIN);
     }
 }

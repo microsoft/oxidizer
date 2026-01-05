@@ -6,7 +6,7 @@ use std::time::Duration;
 use super::{Clock, Delay, Timeout};
 
 /// Extensions for the [`Future`] trait.
-pub trait FutureExt: Future + sealed::Sealed {
+pub trait FutureExt: Future {
     /// Applies a timeout to the future.
     ///
     /// This extension uses a [`Clock`] to control the passage of time and enables
@@ -39,11 +39,6 @@ pub trait FutureExt: Future + sealed::Sealed {
 }
 
 impl<T: Future> FutureExt for T {}
-
-mod sealed {
-    pub trait Sealed {}
-    impl<T: Future> Sealed for T {}
-}
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
