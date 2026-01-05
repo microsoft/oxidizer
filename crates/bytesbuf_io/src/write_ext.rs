@@ -30,11 +30,11 @@ pub trait WriteExt: Write {
     /// let mut sink = get_sink();
     ///
     /// sink.prepare_and_write(100, |mut buf| {
-    ///         buf.put_slice(*b"Hello, world!");
-    ///         Ok::<_, Infallible>(buf.consume_all())
-    ///     })
-    ///     .await
-    ///     .unwrap();
+    ///     buf.put_slice(*b"Hello, world!");
+    ///     Ok::<_, Infallible>(buf.consume_all())
+    /// })
+    /// .await
+    /// .unwrap();
     /// # }));
     /// ```
     async fn prepare_and_write<F, E>(&mut self, min_capacity: usize, prepare_fn: F) -> Result<(), crate::Error>

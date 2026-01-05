@@ -4,10 +4,9 @@
 use std::convert::Infallible;
 use std::future;
 
-use bytesbuf::{BytesBuf, BytesView};
-
 use bytesbuf::mem::testing::TransparentMemory;
 use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
+use bytesbuf::{BytesBuf, BytesView};
 
 use crate::{Read, Write};
 
