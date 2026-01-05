@@ -208,29 +208,29 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7RNcoP3blXnG4CHqkinKPcBG0KvcQDgsaxXGxhnbuGo0h6JYWSBgmR0aWNrZTAuMS4x
- [__link0]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
- [__link1]: https://docs.rs/tick/0.1.1/tick/?search=Clock
- [__link10]: https://docs.rs/tick/0.1.1/tick/?search=FutureExt
- [__link11]: https://docs.rs/tick/0.1.1/tick/?search=SystemTimeExt
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7RNcoP3blXnG4CHqkinKPcBG0KvcQDgsaxXGxhnbuGo0h6JYWSBgmR0aWNrZTAuMS4y
+ [__link0]: https://docs.rs/tick/0.1.2/tick/?search=ClockControl
+ [__link1]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link10]: https://docs.rs/tick/0.1.2/tick/?search=FutureExt
+ [__link11]: https://docs.rs/tick/0.1.2/tick/?search=SystemTimeExt
  [__link12]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
  [__link13]: https://crates.io/crates/jiff
  [__link14]: https://crates.io/crates/chrono
  [__link15]: https://crates.io/crates/time
- [__link16]: https://docs.rs/tick/0.1.1/tick/?search=Clock
- [__link17]: https://docs.rs/tick/0.1.1/tick/?search=Clock::instant
- [__link18]: https://docs.rs/tick/0.1.1/tick/?search=Stopwatch
+ [__link16]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link17]: https://docs.rs/tick/0.1.2/tick/?search=Clock::instant
+ [__link18]: https://docs.rs/tick/0.1.2/tick/?search=Stopwatch
  [__link19]: https://tokio.rs/
- [__link2]: https://docs.rs/tick/0.1.1/tick/?search=Clock
- [__link20]: https://docs.rs/tick/0.1.1/tick/?search=Clock::new_tokio
- [__link21]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
+ [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link20]: https://docs.rs/tick/0.1.2/tick/?search=Clock::new_tokio
+ [__link21]: https://docs.rs/tick/0.1.2/tick/?search=ClockControl
  [__link22]: https://serde.rs/
- [__link23]: https://docs.rs/tick/0.1.1/tick/fmt/index.html
+ [__link23]: https://docs.rs/tick/0.1.2/tick/fmt/index.html
  [__link24]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
- [__link3]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
- [__link4]: https://docs.rs/tick/0.1.1/tick/?search=Stopwatch
- [__link5]: https://docs.rs/tick/0.1.1/tick/?search=Delay
- [__link6]: https://docs.rs/tick/0.1.1/tick/?search=PeriodicTimer
- [__link7]: https://docs.rs/tick/0.1.1/tick/?search=Error
- [__link8]: https://docs.rs/tick/0.1.1/tick/fmt/index.html
- [__link9]: https://docs.rs/tick/0.1.1/tick/runtime/index.html
+ [__link3]: https://docs.rs/tick/0.1.2/tick/?search=ClockControl
+ [__link4]: https://docs.rs/tick/0.1.2/tick/?search=Stopwatch
+ [__link5]: https://docs.rs/tick/0.1.2/tick/?search=Delay
+ [__link6]: https://docs.rs/tick/0.1.2/tick/?search=PeriodicTimer
+ [__link7]: https://docs.rs/tick/0.1.2/tick/?search=Error
+ [__link8]: https://docs.rs/tick/0.1.2/tick/fmt/index.html
+ [__link9]: https://docs.rs/tick/0.1.2/tick/runtime/index.html
