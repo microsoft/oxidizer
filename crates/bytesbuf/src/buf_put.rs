@@ -13,6 +13,20 @@ use crate::{BytesBuf, BytesView};
 impl BytesBuf {
     /// Appends a slice of bytes to the buffer.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(32);
+    ///
+    /// buf.put_slice(*b"Hello, ");
+    /// buf.put_slice(*b"world!");
+    ///
+    /// assert_eq!(buf.consume_all(), b"Hello, world!");
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
@@ -53,6 +67,25 @@ impl BytesBuf {
     ///
     /// This reuses the existing capacity of the view being appended.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use bytesbuf::BytesView;
+    /// use bytesbuf::mem::Memory;
+    /// # use bytesbuf::mem::GlobalPool;
+    ///
+    /// # let memory = GlobalPool::new();
+    /// let mut buf = memory.reserve(16);
+    ///
+    /// // Create a view with its own memory.
+    /// let header = BytesView::copied_from_slice(b"HDR", &memory);
+    ///
+    /// buf.put_slice(*b"data");
+    /// buf.put_bytes(header); // Zero-copy append
+    ///
+    /// assert_eq!(buf.consume_all(), b"dataHDR");
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
@@ -62,6 +95,20 @@ impl BytesBuf {
 
     /// Appends a `u8` to the buffer.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(8);
+    ///
+    /// buf.put_byte(0xCA);
+    /// buf.put_byte(0xFE);
+    ///
+    /// assert_eq!(buf.consume_all(), &[0xCA, 0xFE]);
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
@@ -70,6 +117,26 @@ impl BytesBuf {
     }
 
     /// Appends multiple repetitions of a `u8` to the buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(16);
+    ///
+    /// // Write a header followed by zero-padding.
+    /// buf.put_slice(*b"HDR:");
+    /// buf.put_byte_repeated(0x00, 12);
+    ///
+    /// let data = buf.consume_all();
+    /// assert_eq!(data.len(), 16);
+    /// assert_eq!(
+    ///     data.first_slice(),
+    ///     b"HDR:\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+    /// );
+    /// ```
     ///
     /// # Panics
     ///
@@ -105,6 +172,22 @@ impl BytesBuf {
 
     /// Appends a number of type `T` in little-endian representation to the buffer.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(16);
+    ///
+    /// buf.put_num_le(0x1234_u16);
+    /// buf.put_num_le(0xDEAD_BEEF_u32);
+    ///
+    /// let data = buf.consume_all();
+    /// // Little-endian: least significant byte first.
+    /// assert_eq!(data.first_slice(), &[0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE]);
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
@@ -116,6 +199,22 @@ impl BytesBuf {
 
     /// Appends a number of type `T` in big-endian representation to the buffer.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(16);
+    ///
+    /// buf.put_num_be(0xCAFE_u16);
+    /// buf.put_num_be(0xBABE_u16);
+    ///
+    /// let data = buf.consume_all();
+    /// // Big-endian: most significant byte first.
+    /// assert_eq!(data, &[0xCA, 0xFE, 0xBA, 0xBE]);
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
@@ -126,6 +225,23 @@ impl BytesBuf {
     }
 
     /// Appends a number of type `T` in native-endian representation to the buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(16);
+    ///
+    /// buf.put_num_ne(0xABCD_u16);
+    /// buf.put_num_ne(0x1234_5678_9ABC_DEF0_u64);
+    ///
+    /// let mut view = buf.consume_all();
+    /// // Reading back in native-endian gives the original values.
+    /// assert_eq!(view.get_num_ne::<u16>(), 0xABCD);
+    /// assert_eq!(view.get_num_ne::<u64>(), 0x1234_5678_9ABC_DEF0);
+    /// ```
     ///
     /// # Panics
     ///
@@ -141,11 +257,11 @@ impl BytesBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TransparentTestMemory;
+    use crate::mem::testing::TransparentMemory;
 
     #[test]
     fn put_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         let data = [1u8, 2, 3, 4, 5];
@@ -162,7 +278,7 @@ mod tests {
 
     #[test]
     fn put_slice_empty() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         buf.put_slice([]);
@@ -173,7 +289,7 @@ mod tests {
 
     #[test]
     fn put_view_single_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         let data = [10_u8, 20, 30, 40, 50];
@@ -193,7 +309,7 @@ mod tests {
 
     #[test]
     fn put_view_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         let data_part1 = [10_u8, 20];
@@ -216,7 +332,7 @@ mod tests {
 
     #[test]
     fn put_view_empty() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         let view = BytesView::new();
@@ -229,7 +345,7 @@ mod tests {
 
     #[test]
     fn put_view_peeked_from_self() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(100);
 
         let data = [1u8, 2, 3, 4, 5];
@@ -252,7 +368,7 @@ mod tests {
 
     #[test]
     fn put_byte() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(10);
 
         buf.put_byte(0xAB);
@@ -269,7 +385,7 @@ mod tests {
 
     #[test]
     fn put_bytes() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(10);
 
         buf.put_byte_repeated(0xFF, 5);
@@ -285,7 +401,7 @@ mod tests {
 
     #[test]
     fn put_bytes_into_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = BytesBuf::new();
 
         // Result: 5
@@ -306,7 +422,7 @@ mod tests {
 
     #[test]
     fn put_num() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut buf = memory.reserve(16);
 
         buf.put_num_le(0x1234_5678_u32);

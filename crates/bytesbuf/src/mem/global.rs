@@ -12,11 +12,15 @@ use std::{iter, ptr};
 use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use new_zealand::nz;
 
+use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
-use crate::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, BytesBuf, Memory};
+use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory};
 
-/// A memory pool for general-purpose memory used for storage/processing of byte sequences.
-#[doc = include_str!("../doc/snippets/choosing_memory_provider.md")]
+/// A memory pool that obtains memory from the Rust global allocator.
+///
+/// For clarity, the pool itself is not in any way global - rather the word "global" in the name
+/// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
+#[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
 #[derive(Clone, Debug)]
 pub struct GlobalPool {
     inner: Arc<GlobalPoolInner>,
@@ -301,6 +305,7 @@ unsafe impl BlockRefDynamic for BlockMeta {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     #![allow(clippy::indexing_slicing, reason = "panic is fine in tests")]
@@ -310,7 +315,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::MemoryShared;
+    use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
 
@@ -342,7 +347,7 @@ mod tests {
 
     #[test]
     fn piece_by_piece() {
-        const SEQUENCE_SIZE_BYTES: BlockSize = 1000;
+        const LEN_BYTES: BlockSize = 1000;
 
         // We grab a block of memory and split the single block into multiple views piece by piece.
         let memory = GlobalPool::new();
@@ -355,7 +360,7 @@ mod tests {
             #[expect(clippy::cast_possible_truncation, reason = "intentionally truncating")]
             let value = views.len() as u8;
 
-            buf.put_byte_repeated(value, (SEQUENCE_SIZE_BYTES as usize).min(buf.remaining_capacity()));
+            buf.put_byte_repeated(value, (LEN_BYTES as usize).min(buf.remaining_capacity()));
 
             // Sanity check against silly mutations.
             debug_assert!(!buf.is_empty());
@@ -363,7 +368,7 @@ mod tests {
             views.push(buf.consume_all());
         }
 
-        let expected_count = BLOCK_SIZE_BYTES.get().div_ceil(SEQUENCE_SIZE_BYTES);
+        let expected_count = BLOCK_SIZE_BYTES.get().div_ceil(LEN_BYTES);
         assert_eq!(views.len(), expected_count as usize);
 
         assert!(!views.is_empty());
@@ -380,14 +385,14 @@ mod tests {
     fn release_on_other_thread() {
         let memory = GlobalPool::new();
 
-        let mut sb = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
-        sb.put_byte_repeated(42, BLOCK_SIZE_BYTES.get() as usize);
+        let mut sub = memory.reserve(BLOCK_SIZE_BYTES.get() as usize);
+        sub.put_byte_repeated(42, BLOCK_SIZE_BYTES.get() as usize);
 
-        let sequence = sb.consume_all();
+        let data = sub.consume_all();
 
         thread::spawn({
             move || {
-                drop(sequence);
+                drop(data);
 
                 assert!(memory.inner.block_pool.lock().unwrap().is_empty());
             }
@@ -405,20 +410,20 @@ mod tests {
 
         let memory = GlobalPool::new();
 
-        let mut sb = memory.reserve(SIZE_10MB);
+        let mut buf = memory.reserve(SIZE_10MB);
 
-        sb.put_slice(pattern.as_slice());
+        buf.put_slice(pattern.as_slice());
 
-        let sequence = sb.consume_all();
+        let message = buf.consume_all();
 
         // Verify the sequence contains the expected pattern
-        assert_eq!(sequence.len(), SIZE_10MB);
-        assert_eq!(sequence, pattern.as_slice());
+        assert_eq!(message.len(), SIZE_10MB);
+        assert_eq!(message, pattern.as_slice());
     }
 
     #[test]
     #[cfg(not(miri))] // Miri runtime scales with memory access size, so this takes forever.
-    fn two_large_sequences_different_patterns() {
+    fn two_large_views_different_patterns() {
         const SIZE_10MB: usize = 10 * 1024 * 1024;
 
         let pattern1 = testing_aids::repeating_incrementing_bytes().take(SIZE_10MB).collect::<Vec<_>>();
@@ -437,14 +442,14 @@ mod tests {
         let mut sb2 = memory.reserve(SIZE_10MB);
         sb2.put_slice(pattern2.as_slice());
 
-        let sequence1 = sb1.consume_all();
-        let sequence2 = sb2.consume_all();
+        let view1 = sb1.consume_all();
+        let view2 = sb2.consume_all();
 
-        // Verify both sequences have correct size
-        assert_eq!(sequence1.len(), SIZE_10MB);
-        assert_eq!(sequence2.len(), SIZE_10MB);
+        // Verify both views have correct size
+        assert_eq!(view1.len(), SIZE_10MB);
+        assert_eq!(view2.len(), SIZE_10MB);
 
-        assert_eq!(sequence1, pattern1.as_slice());
-        assert_eq!(sequence2, pattern2.as_slice());
+        assert_eq!(view1, pattern1.as_slice());
+        assert_eq!(view2, pattern2.as_slice());
     }
 }

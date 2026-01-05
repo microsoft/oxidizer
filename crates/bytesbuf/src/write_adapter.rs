@@ -3,7 +3,8 @@
 
 use std::io::Write;
 
-use crate::{BytesBuf, Memory};
+use crate::BytesBuf;
+use crate::mem::Memory;
 
 /// Adapter that implements `std::io::Write` for [`BytesBuf`].
 ///
@@ -47,13 +48,13 @@ mod tests {
     use new_zealand::nz;
 
     use super::*;
-    use crate::{FixedBlockTestMemory, TransparentTestMemory};
+    use crate::mem::testing::{FixedBlockMemory, TransparentMemory};
 
     #[test]
     fn smoke_test_write_and_verify_data() {
         let test_data = b"Hello, world! This is a test.";
 
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut builder = memory.reserve(100);
 
         {
@@ -66,13 +67,13 @@ mod tests {
             assert_eq!(bytes_written, test_data.len());
         }
 
-        let sequence = builder.consume_all();
-        assert_eq!(sequence, test_data.as_slice());
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
     }
 
     #[test]
     fn existing_content_is_preserved() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut builder = memory.reserve(100);
 
         // Add some initial content to the builder
@@ -88,16 +89,16 @@ mod tests {
         }
 
         // Verify both initial and additional data are present
-        let sequence = builder.consume_all();
+        let data = builder.consume_all();
         let expected = b"Initial content - Additional data";
-        assert_eq!(sequence, expected.as_slice());
+        assert_eq!(data, expected.as_slice());
     }
 
     #[test]
     fn sufficient_capacity_not_extended() {
         let test_data = b"Small data"; // Much smaller than 100 bytes
 
-        let memory = FixedBlockTestMemory::new(nz!(1024));
+        let memory = FixedBlockMemory::new(nz!(1024));
         let mut builder = memory.reserve(100);
 
         let initial_capacity = builder.capacity();
@@ -115,7 +116,7 @@ mod tests {
         assert_eq!(builder.capacity(), initial_capacity);
 
         // Verify the data is there
-        let sequence = builder.consume_all();
-        assert_eq!(sequence, test_data.as_slice());
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
     }
 }

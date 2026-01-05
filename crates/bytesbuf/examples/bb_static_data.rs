@@ -6,7 +6,8 @@ use std::io::Write;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytesbuf::{BytesView, HasMemory, Memory, MemoryShared, TransparentTestMemory};
+use bytesbuf::BytesView;
+use bytesbuf::mem::{HasMemory, Memory, MemoryShared};
 
 // We often want to write static fragments as part of network communications.
 const HEADER_PREFIX: &[u8] = b"Unix-Milliseconds: ";
@@ -104,6 +105,6 @@ impl Connection {
 impl HasMemory for Connection {
     fn memory(&self) -> impl MemoryShared {
         // This is a wrong way to implement this trait! Only to make the example compile.
-        TransparentTestMemory::new()
+        bytesbuf::mem::testing::TransparentMemory::new()
     }
 }

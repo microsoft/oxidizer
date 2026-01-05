@@ -35,11 +35,11 @@ mod tests {
     use new_zealand::nz;
 
     use super::*;
-    use crate::FixedBlockTestMemory;
+    use crate::mem::testing::FixedBlockMemory;
 
     #[test]
     fn buf_compat() {
-        let memory = FixedBlockTestMemory::new(nz!(25));
+        let memory = FixedBlockMemory::new(nz!(25));
 
         // 25 x 4
         let mut buf = memory.reserve(100);
@@ -47,28 +47,28 @@ mod tests {
 
         let mut bytes = buf.consume_all();
 
-        assert_eq!(bytes.remaining(), 100);
+        assert_eq!(Buf::remaining(&bytes), 100);
 
-        let chunk = bytes.chunk();
+        let chunk = Buf::chunk(&bytes);
         assert_eq!(chunk.len(), 25);
         assert_eq!(chunk, &[0x44; 25]);
 
-        bytes.advance(20);
+        Buf::advance(&mut bytes, 20);
 
-        let chunk = bytes.chunk();
+        let chunk = Buf::chunk(&bytes);
         assert_eq!(chunk.len(), 5);
         assert_eq!(chunk, &[0x44; 5]);
 
-        bytes.advance(5);
+        Buf::advance(&mut bytes, 5);
 
-        let chunk = bytes.chunk();
+        let chunk = Buf::chunk(&bytes);
         assert_eq!(chunk.len(), 25);
         assert_eq!(chunk, &[0x44; 25]);
 
-        bytes.advance(5);
+        Buf::advance(&mut bytes, 5);
 
         let mut io_slices = [IoSlice::new(&[]); 4];
-        let n = bytes.chunks_vectored(&mut io_slices);
+        let n = Buf::chunks_vectored(&bytes, &mut io_slices);
 
         // We have already advanced past the first 30 bytes
         // but the remaining 70 should still be here for us as 20 + 25 + 25.

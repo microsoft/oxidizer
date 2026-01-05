@@ -3,8 +3,8 @@
 
 [package]
 name = "bytesbuf"
-description = "Manipulate sequences of bytes for efficient I/O."
-version = "0.1.2"
+description = "Types for creating and manipulating byte sequences."
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -15,6 +15,9 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -31,10 +34,12 @@ all-features = true
 
 [features]
 default = []
-fakes = []
+# Interoperability with the `bytes` crate.
+bytes-compat = ["dep:bytes"]
+test-util = []
 
 [dependencies]
-bytes = { workspace = true, features = ["std"] }
+bytes = { workspace = true, features = ["std"], optional = true }
 infinity_pool.workspace = true
 new_zealand.workspace = true
 nm.workspace = true
@@ -43,8 +48,8 @@ smallvec = { workspace = true, features = ["const_new", "union"] }
 
 [dev-dependencies]
 alloc_tracker.workspace = true
+bytes = { workspace = true, features = ["std"] }
 criterion.workspace = true
-libc.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
 testing_aids.workspace = true
@@ -56,6 +61,12 @@ workspace = true
 [[bench]]
 name = "buf"
 harness = false
+required-features = ["test-util"]
+
+[[bench]]
+name = "bytesbuf_vs_bytes"
+harness = false
+required-features = ["test-util"]
 
 [[bench]]
 name = "global_pool"
@@ -64,3 +75,16 @@ harness = false
 [[bench]]
 name = "view"
 harness = false
+required-features = ["test-util"]
+
+[[example]]
+name = "bb_has_memory_forwarding"
+required-features = ["test-util"]
+
+[[example]]
+name = "bb_has_memory_optimizing"
+required-features = ["test-util"]
+
+[[example]]
+name = "bb_static_data"
+required-features = ["test-util"]
