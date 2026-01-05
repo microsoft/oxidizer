@@ -6,30 +6,12 @@ use std::sync::Arc;
 use crate::Service;
 use crate::service::DynService;
 
-/// Extension trait that adds type erasure capabilities to any [`Service`].
+/// Extension trait for converting services to [`DynamicService`].
 ///
-/// This trait provides a convenient way to convert any service into a [`DynamicService`],
-/// which erases the underlying concrete type. This is particularly useful when
-/// working with complex service compositions or when you need to store services of
-/// different types.
+/// Provides type erasure for services, useful when working with complex service
+/// compositions or storing services of different types.
 pub trait DynamicServiceExt<In, Out>: Sized {
-    /// Converts the service into a type-erased version that hides the concrete type.
-    ///
-    /// This method consumes the service and returns a [`DynamicService`] that wraps
-    /// the original service. The dynamic service implements the same [`Service`] trait,
-    /// but with the concrete type erased, allowing it to be used in contexts where the
-    /// underlying implementation type needs to be hidden.
-    ///
-    /// # Type Requirements
-    ///
-    /// - `In` must be `Send + 'static` to support async execution across threads
-    /// - `Out` must be `Send + 'static` for the same reason
-    /// - The service itself must be `'static`
-    ///
-    /// # Performance
-    ///
-    /// Type erasure introduces some overhead compared to concrete types.
-    /// For most applications, this overhead is negligible.
+    /// Converts this service into a type-erased [`DynamicService`].
     fn into_dynamic(self) -> DynamicService<In, Out>;
 }
 
@@ -42,49 +24,14 @@ where
     }
 }
 
-/// A type-erased wrapper for [`Service`] that hides the concrete type.
+/// Type-erased wrapper for [`Service`] that hides the concrete type.
 ///
-/// `DynamicService` erases the underlying service implementation type, allowing you to work
-/// with services of different concrete types through a uniform interface. This is particularly
-/// useful when dealing with complex service compositions involving multiple layers of middleware,
-/// where the resulting type can become unwieldy or when you need to store services of different
-/// types in collections.
+/// Use `DynamicService` when working with complex service compositions where the
+/// concrete type becomes unwieldy, or when storing services of different types in
+/// collections.
 ///
-/// # Type Erasure
-///
-/// When you compose services with multiple layers of middleware, the resulting type can become
-/// deeply nested and complex. For example:
-///
-/// ```text
-/// Logging<Timeout<Retry<RateLimit<DatabaseService>>>>
-/// ```
-///
-/// `DynamicService` allows you to erase this complexity:
-///
-/// ```rust
-/// use layered::{DynamicService, DynamicServiceExt, Service};
-///
-/// // Instead of working with the complex concrete type, use DynamicService
-/// let service: DynamicService<String, String> = build_complex_service().into_dynamic();
-///
-/// # fn build_complex_service() -> impl Service<String, Out = String> {
-/// #     layered::Execute::new(|val| async move { val })
-/// # }
-/// ```
-///
-/// # When to Use
-///
-/// - **Complex service stacks**: When your service composition involves many layers
-/// - **Service collections**: When you need to store different service types in vectors or maps
-/// - **API boundaries**: When you want to hide implementation details from consumers
-/// - **Conditional service selection**: When you need to choose between different service
-///   implementations at runtime
-///
-/// # Performance
-///
-/// Type erasure introduces some overhead compared to concrete types. For most
-/// applications, this overhead is negligible compared to the actual work performed by
-/// the service (database queries, network calls, etc.).
+/// Type erasure adds some overhead, but it's typically negligible compared to the
+/// actual service work (network calls, database queries, etc.).
 ///
 /// # Examples
 ///

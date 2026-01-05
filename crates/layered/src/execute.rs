@@ -4,19 +4,11 @@ use std::fmt::{Debug, Formatter};
 
 use crate::Service;
 
-/// A service implementation that wraps a function for ad-hoc service creation.
+/// Wraps a function or closure as a [`Service`].
 ///
-/// `Execute` allows you to quickly create a [`Service`] from any function or closure
-/// that takes an input and returns the future. This is particularly useful for:
-///
-/// - Converting lambdas into services without defining custom types
-/// - Prototyping and testing service implementations
-/// - Creating simple input handlers inline
-/// - Wrapping existing async functions as services
+/// Use `Execute` to turn any async function into a service without defining a custom type.
 ///
 /// # Examples
-///
-/// Creating a service from a simple async function:
 ///
 /// ```rust
 /// # use layered::{Execute, Service};
@@ -31,8 +23,6 @@ use crate::Service;
 /// # }
 /// ```
 ///
-/// Creating a service from a closure:
-///
 /// ```rust
 /// # use layered::{Execute, Service};
 /// # async fn example() {
@@ -45,12 +35,7 @@ use crate::Service;
 pub struct Execute<E>(E);
 
 impl<E> Execute<E> {
-    /// Creates a new `Execute` service from a function or closure.
-    ///
-    /// The provided function `e` must:
-    /// - Take an input of type `In`
-    /// - Return a future that produces an output of type `Out`
-    /// - Be `Send + Sync + 'static` for thread safety
+    /// Creates a new service from a function or closure.
     ///
     /// # Examples
     ///

@@ -1,17 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Custom Layer Example
+//! Custom middleware layer.
 //!
-//! Demonstrates how to define a custom middleware layer that adds logging functionality and
-//! how to compose it with other layers in an execution stack.
+//! Shows how to define and compose custom middleware layers.
 
 use layered::Execute;
 use layered::prelude::*;
 
 #[tokio::main]
 async fn main() {
-    // Create an execution stack with multiple logging layers.
-    // Input flow: layer-1 -> layer-2 -> core service
+    // Stack multiple logging layers: layer-1 -> layer-2 -> core service
     let execution_stack = (
         Logging::layer("layer-1"),
         Logging::layer("layer-2"),
@@ -21,33 +19,33 @@ async fn main() {
         }),
     );
 
-    // Build a service and execute an input.
+    // Build and execute
     let service = execution_stack.build();
     let _output = service.execute("Hello, World!".to_string()).await;
 }
 
-/// A logging middleware that wraps an inner service.
+/// Logging middleware that wraps a service.
 #[derive(Debug)]
 pub struct Logging<S> {
     inner: S,
     id: &'static str,
 }
 
-/// A layer for creating logging middleware.
+/// Layer for creating logging middleware.
 #[derive(Debug)]
 pub struct LoggingLayer {
     id: &'static str,
 }
 
 impl Logging<()> {
-    /// Creates a new logging layer with the specified identifier.
+    /// Creates a logging layer with the given identifier.
     #[must_use]
     pub fn layer(id: &'static str) -> LoggingLayer {
         LoggingLayer { id }
     }
 }
 
-/// Service implementation that logs before and after execution.
+/// Logs before and after service execution.
 impl<S, In: Send, Out> Service<In> for Logging<S>
 where
     S: Service<In, Out = Out>,
@@ -63,7 +61,7 @@ where
     }
 }
 
-/// Layer implementation for service composition.
+/// Wraps services with logging.
 impl<S> Layer<S> for LoggingLayer {
     type Service = Logging<S>;
 

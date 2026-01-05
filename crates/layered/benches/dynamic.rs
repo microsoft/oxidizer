@@ -3,7 +3,7 @@
 use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use layered::{DynamicServiceExt, Execute, Intercept, Service, ServiceBuilder};
+use layered::{DynamicServiceExt, Execute, Intercept, Service, Stack};
 use oxidizer_benchmarking::BenchmarkGroupExt;
 
 #[global_allocator]

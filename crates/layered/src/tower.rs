@@ -1,48 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Tower service interoperability for Oxidizer services.
+//! Tower interoperability for layered services.
 //!
-//! This module enables seamless interoperability between Oxidizer's native service trait
-//! and the Tower ecosystem of services and middleware. The main adapter type provides
-//! bidirectional conversion between service types, allowing:
+//! Use Tower services and middleware with layered services through the [`Adapter`] type.
+//! Provides bidirectional conversion between Tower and layered service traits.
 //!
-//! - Tower services to be used as Oxidizer services
-//! - Oxidizer services to be used as Tower services
-//! - Tower middleware layers to be applied to Oxidizer services
+//! # Requirements
 //!
-//! **Note**: This tower adapter is particularly useful for Oxidizer-based services that
-//! do not implement the Tower `Service` trait natively, enabling them to work seamlessly
-//!  with the Tower's rich ecosystem of middleware and utilities.
-//!
-//! # Adapter Constraints
-//!
-//! The `Adapter<S>` provides bidirectional conversion with specific constraints for each direction:
-//!
-//! ## Oxidizer → Tower Direction
-//!
-//! When wrapping an Oxidizer service to implement Tower's `Service` trait:
-//!
-//! - **Service**: Must implement `Service<Req, Out = Result<T, E>> + Clone + 'static`
-//! - **Types**: Request, response, and error types must be `Send + 'static`
-//! - **Behavior**: No backpressure - services are always ready to accept requests
-//!
-//! ## Tower → Oxidizer Direction
-//!
-//! When wrapping a Tower service to implement Oxidizer's `Service` trait:
-//!
-//! - **Service**: Must implement `tower_service::Service<In> + Send + Sync + Clone`
-//! - **Future**: The service's future must be `Send`
-//! - **Behavior**: Properly handles Tower's backpressure via `poll_ready()`
-//!
-//! ## Key Requirements
-//!
-//! - All types must be `Send` for async compatibility
 //! - Services must be `Clone` for concurrent usage
-//! - Oxidizer services must return `Result<T, E>` when used with Tower
+//! - All types must be `Send` for async compatibility
+//! - Layered services must return `Result<T, E>` when used with Tower
+//! - Tower's backpressure (`poll_ready`) is handled automatically
 //!
 //! # Examples
 //!
-//! Converting an Oxidizer service to work with Tower middleware:
+//! Use a layered service with Tower middleware:
 //!
 //! ```rust
 //! use std::time::Duration;
@@ -52,44 +24,30 @@
 //! use tower::ServiceBuilder;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create an Oxidizer service
 //! let service = Execute::new(|req: String| async move {
 //!     Ok::<String, std::io::Error>(format!("Processed: {}", req))
 //! });
 //!
-//! // Wrap it for use with Tower middleware
 //! let tower_service = ServiceBuilder::new().service(Adapter(service));
-//!
-//! // The result can be used with Tower's ecosystem
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! Using Tower middleware with Oxidizer services in an execution stack:
+//! Use Tower layers in a layered stack:
 //!
 //! ```rust
-//! use std::time::Duration;
-//!
 //! use layered::tower::tower_layer;
-//! use layered::{Execute, Service, ServiceBuilder};
-//!
+//! use layered::{Execute, Service, Stack};
 //! use tower_layer::Identity;
 //!
 //! async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create an Oxidizer service
-//! let base_service = Execute::new(|req: String| async move {
-//!     Ok::<String, std::io::Error>(format!("Processed: {}", req))
-//! });
+//! let service = (
+//!     tower_layer(Identity::default()),
+//!     Execute::new(|req: String| async move {
+//!         Ok::<String, std::io::Error>(format!("Processed: {}", req))
+//!     }),
+//! ).build();
 //!
-//! let execution_stack = (
-//!     tower_layer(Identity::default()), // No-op layer for demonstration
-//!     base_service,
-//! );
-//!
-//! // Build the service with the layers applied
-//! let service = execution_stack.build();
-//!
-//! // Use the service
 //! let result = service.execute("request".to_string()).await;
 //! # Ok(())
 //! # }
@@ -103,18 +61,11 @@ use tower_layer::Layer;
 
 use crate::Service;
 
-/// Bidirectional adapter between Oxidizer and Tower service traits.
+/// Bidirectional adapter between layered and Tower service traits.
 ///
-/// This adapter automatically implements the appropriate service trait based on the
-/// wrapped service type:
-/// - When wrapping an Oxidizer service, it implements Tower's [`Service`][tower_service::Service] trait
-/// - When wrapping a Tower service, it implements Oxidizer's [`Service`] trait
-///
-/// The adapter handles the differences between the two service models:
-///
-/// - Tower services have explicit backpressure via `poll_ready()`
-/// - Oxidizer services are always ready and use async execution
-/// - Both support cloning for concurrent usage
+/// Wraps a service to convert between layered's [`Service`] and Tower's
+/// [`tower_service::Service`][tower_service::Service]. Handles backpressure
+/// and async execution differences automatically.
 #[derive(Debug, Clone)]
 pub struct Adapter<S>(pub S);
 
@@ -160,11 +111,7 @@ where
     }
 }
 
-/// Creates a layer that applies Tower layers to Oxidizer services.
-///
-/// This function provides a convenient way to apply Tower middleware layers
-/// to Oxidizer services by wrapping the Tower layer in an adapter that handles
-/// the service trait conversions.
+/// Wraps a Tower layer for use with layered services.
 ///
 /// # Examples
 ///
@@ -172,21 +119,15 @@ where
 /// use layered::tower::tower_layer;
 /// use tower::layer::util::Identity;
 ///
-/// // Apply a simple identity layer (no-op for example)
 /// let identity_layer = tower_layer(Identity::new());
 /// ```
 pub fn tower_layer<L>(tower_layer: L) -> AdapterLayer<L> {
     AdapterLayer(tower_layer)
 }
 
-/// A layer adapter that applies Tower layers to Oxidizer services.
+/// Layer adapter that applies Tower layers to layered services.
 ///
-/// This adapter enables Tower middleware layers to be applied to Oxidizer services
-/// by handling the necessary service trait conversions. The layer works by:
-///
-/// 1. Wrapping the Oxidizer service in an `Adapter` to make it Tower-compatible
-/// 2. Applying the Tower layer to the adapted service
-/// 3. Wrapping the result back in an `Adapter` for Oxidizer compatibility
+/// Wraps a Tower layer to handle service trait conversions automatically.
 #[derive(Debug, Clone)]
 pub struct AdapterLayer<L>(L);
 

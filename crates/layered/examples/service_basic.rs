@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Basic Example
+//! Basic service with middleware.
 //!
-//! Demonstrates how we can build a simple service consisting of a single middleware
-//! and a root service.
+//! Shows a simple service with intercept middleware for logging.
 
 use layered::prelude::*;
 use layered::{Execute, Intercept};

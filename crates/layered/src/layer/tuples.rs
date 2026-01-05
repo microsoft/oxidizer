@@ -2,9 +2,9 @@
 
 use tower_layer::Layer;
 
-use super::ServiceBuilder;
+use super::Stack;
 
-impl<L1, S> ServiceBuilder for (L1, S)
+impl<L1, S> Stack for (L1, S)
 where
     L1: Layer<S>,
 {
@@ -17,7 +17,7 @@ where
     }
 }
 
-impl<L1, L2, S> ServiceBuilder for (L1, L2, S)
+impl<L1, L2, S> Stack for (L1, L2, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<S>,
@@ -31,7 +31,7 @@ where
     }
 }
 
-impl<L1, L2, L3, S> ServiceBuilder for (L1, L2, L3, S)
+impl<L1, L2, L3, S> Stack for (L1, L2, L3, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -46,7 +46,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, S> ServiceBuilder for (L1, L2, L3, L4, S)
+impl<L1, L2, L3, L4, S> Stack for (L1, L2, L3, L4, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -62,7 +62,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, S> ServiceBuilder for (L1, L2, L3, L4, L5, S)
+impl<L1, L2, L3, L4, L5, S> Stack for (L1, L2, L3, L4, L5, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -79,7 +79,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, S)
+impl<L1, L2, L3, L4, L5, L6, S> Stack for (L1, L2, L3, L4, L5, L6, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -97,7 +97,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, L7, S)
+impl<L1, L2, L3, L4, L5, L6, L7, S> Stack for (L1, L2, L3, L4, L5, L6, L7, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -116,7 +116,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, L7, L8, S)
+impl<L1, L2, L3, L4, L5, L6, L7, L8, S> Stack for (L1, L2, L3, L4, L5, L6, L7, L8, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -136,7 +136,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, L7, L8, L9, S)
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, S> Stack for (L1, L2, L3, L4, L5, L6, L7, L8, L9, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -157,7 +157,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, S)
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, S> Stack for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -179,7 +179,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, S)
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, S> Stack for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -202,7 +202,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, S> ServiceBuilder for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, S)
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, S> Stack for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -226,8 +226,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, S> ServiceBuilder
-    for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, S)
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, S> Stack for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, S)
 where
     L1: Layer<L2::Service>,
     L2: Layer<L3::Service>,
@@ -251,7 +250,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, S> ServiceBuilder
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, S> Stack
     for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, S)
 where
     L1: Layer<L2::Service>,
@@ -278,7 +277,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L15, S> ServiceBuilder
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L15, S> Stack
     for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L15, S)
 where
     L1: Layer<L2::Service>,
@@ -306,7 +305,7 @@ where
     }
 }
 
-impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L15, L16, S> ServiceBuilder
+impl<L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L15, L16, S> Stack
     for (L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L15, L16, S)
 where
     L1: Layer<L2::Service>,

@@ -2,7 +2,7 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use layered::{Execute, Intercept, Service, ServiceBuilder};
+use layered::{Execute, Intercept, Service, Stack};
 
 pub fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("intercept");

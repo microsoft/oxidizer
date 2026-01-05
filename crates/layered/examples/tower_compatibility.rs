@@ -1,18 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Tower Compatibility Example
+//! Tower interoperability examples.
 //!
-//! Demonstrates three approaches to service composition:
-//!
-//! 1. Pure Oxidizer execution stack with Tower execution model: Used when you want to produce
-//!    Tower services but prefer Oxidizer's middleware composition model. Note that this approach
-//!    requires polling the service for readiness before calling it.
-//!
-//! 2. Oxidizer with `tower_layer()` adapter: Used when you want to use Tower layers but prefer
-//!    Oxidizer's native execution model without the need for polling.
-//!
-//! 3. Tower `ServiceBuilder` with Oxidizer layers: Used when you want or are required\
-//!    to use Tower's `ServiceBuilder` for middleware composition.
+//! Shows three ways to combine layered and Tower services:
+//! - Layered stack with Tower execution (requires polling)
+//! - Layered stack with `tower_layer()` adapter (no polling)
+//! - Tower `ServiceBuilder` with layered layers
 
 use std::future::poll_fn;
 
@@ -24,17 +17,17 @@ use tower_service::Service as TowerService;
 
 #[tokio::main]
 async fn main() {
-    println!("=== Oxidizer with Tower Adapter Example ===");
+    println!("=== Layered with Tower Execution ===");
     example_oxidizer().await;
 
-    println!("\n=== Oxidizer Native Example ===");
+    println!("\n=== Layered with tower_layer() ===");
     example_oxidizer_native().await;
 
-    println!("\n=== Tower ServiceBuilder Example ===");
+    println!("\n=== Tower ServiceBuilder ===");
     example_tower().await;
 }
 
-// Oxidizer execution stack with Tower layers (requires polling before Tower service can be called)
+// Layered stack with Tower execution model (requires polling)
 async fn example_oxidizer() {
     let execution_stack = (
         GlobalConcurrencyLimitLayer::new(1),
@@ -49,7 +42,7 @@ async fn example_oxidizer() {
     service.call("hello world from Oxidizer".to_string()).await.unwrap();
 }
 
-// Oxidizer execution stack with tower_layer() adapter (no polling needed)
+// Layered stack with tower_layer() adapter (no polling needed)
 async fn example_oxidizer_native() {
     let execution_stack = (
         tower_layer(GlobalConcurrencyLimitLayer::new(1)),
@@ -65,7 +58,7 @@ async fn example_oxidizer_native() {
     service.execute("hello world from Oxidizer Native".to_string()).await.unwrap();
 }
 
-// Tower ServiceBuilder with Oxidizer layers
+// Tower ServiceBuilder with layered layers
 async fn example_tower() {
     let mut service = tower::ServiceBuilder::new()
         .concurrency_limit(10)

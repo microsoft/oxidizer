@@ -1,27 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 
-/// Core trait for building composable, asynchronous services.
+/// An async function `In → Out` that processes inputs.
 ///
-/// The [`Service`] trait represents an asynchronous operation that transforms an input into an output.
-/// It forms the foundation of service architecture, enabling you to build modular,
-/// composable systems with cross-cutting concerns like timeouts, logging, retries, and rate limiting.
+/// This trait is the foundation for building composable services.
+/// Implement it directly for custom services, or use [`Execute`][crate::Execute]
+/// to wrap closures.
 ///
-/// See the [crate level documentation][crate] for more details on how to implement custom services and layers.
+/// See the [crate documentation][crate] for usage examples and layer composition.
 #[cfg_attr(any(test, feature = "dynamic-service"), dynosaur::dynosaur(pub DynService = dyn(box) Service, bridge(none)))]
 pub trait Service<In>: Send + Sync {
     /// The output type returned by this service.
     type Out;
 
-    /// Executes the service with the given `input`.
+    /// Processes the input and returns the output.
     ///
-    /// This is the core method where your service logic lives. It should:
-    ///
-    /// - Process the incoming input
-    /// - Perform any necessary work (database queries, network calls, etc.)
-    /// - Return the appropriate output
-    ///
-    /// Returns a future that resolves to the output. The future must be [`Send`]
-    /// to ensure it can be moved between threads during async execution.
+    /// The returned future must be [`Send`] for compatibility with multi-threaded
+    /// async runtimes.
     ///
     /// # Examples
     ///
@@ -34,7 +28,7 @@ pub trait Service<In>: Send + Sync {
     ///     type Out = String;
     ///
     ///     async fn execute(&self, input: String) -> Self::Out {
-    ///         input // Echo the input back
+    ///         input
     ///     }
     /// }
     /// ```

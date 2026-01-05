@@ -6,19 +6,16 @@ use std::sync::Arc;
 
 use crate::Service;
 
-/// Middleware for intercepting and modifying service inputs and outputs.
+/// Middleware for observing and modifying service inputs and outputs.
 ///
-/// `Intercept` allows you to wrap a service with custom logic that can observe
-/// or transform requests and responses as they pass through. This is useful
-/// for debugging, logging, metrics collection, request/response validation,
-/// and implementing cross-cutting concerns.
+/// Useful for logging, debugging, metrics, validation, and other cross-cutting concerns.
 ///
 /// # Examples
 ///
 /// Simple usage that just observes inputs and outputs without modification:
 ///
 /// ```rust
-/// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+/// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let execution_stack = (
 ///     Intercept::layer()
@@ -35,7 +32,7 @@ use crate::Service;
 /// Advanced usage of `Intercept` allows you to modify and observe inputs and outputs:
 ///
 /// ```rust
-/// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+/// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let execution_stack = (
 ///     Intercept::<String, String, _>::layer()
@@ -64,16 +61,13 @@ pub struct Intercept<In, Out, S> {
 
 /// Builder for creating `Intercept` middleware.
 ///
-/// `InterceptLayer` provides a fluent API for configuring interception and
-/// modification behavior before applying it to a service. The layer can be
-/// configured with multiple handlers that execute in registration order.
-///
-/// To create an `InterceptLayer`, use the `Intercept::layer()` method.
+/// Provides a fluent API for configuring input and output observers and modifiers.
+/// Create with `Intercept::layer()`.
 ///
 /// # Examples
 ///
 /// ```rust
-/// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+/// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let execution_stack = (
 ///     Intercept::layer(), // Create a new interception layer
@@ -95,14 +89,10 @@ pub struct InterceptLayer<In, Out> {
 impl<In, Out> Intercept<In, Out, ()> {
     /// Creates a new `InterceptLayer` for building interception middleware.
     ///
-    /// This is the entry point for creating interception middleware. Use the
-    /// returned layer to configure inspection behavior, then apply it to
-    /// a service using the `Layer` trait.
-    ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer(), // Create a new interception layer, no observers yet
@@ -132,15 +122,9 @@ where
 
     /// Executes the wrapped service with interception and modification.
     ///
-    /// The execution order is:
-    /// 1. Invoke input observers
-    /// 2. Apply input modifications (can short-circuit with early return)
-    /// 3. Execute the wrapped service
-    /// 4. Invoke output observers
-    /// 5. Apply output modifications
-    ///
-    /// Input modifications are applied in registration order and can prevent
-    /// the service from executing by returning a `ControlFlow::Break`.
+    /// Execution order: input observers → input modifications → service execution
+    /// → output observers → output modifications. Input modifications can short-circuit
+    /// execution by returning `ControlFlow::Break`.
     async fn execute(&self, mut input: In) -> Self::Out {
         match self.inner.before_execute(input) {
             ControlFlow::Break(output) => return output,
@@ -188,16 +172,14 @@ where
 }
 
 impl<In, Out> InterceptLayer<In, Out> {
-    /// Adds an observer function for incoming requests.
+    /// Adds an observer for incoming inputs.
     ///
-    /// The function will be called with a reference to each input before any
-    /// input modifications are applied. Multiple observers can be registered
-    /// and will execute in registration order.
+    /// Called before input modifications. Multiple observers execute in registration order.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer()
@@ -219,16 +201,14 @@ impl<In, Out> InterceptLayer<In, Out> {
         self
     }
 
-    /// Adds an observer function for outgoing responses.
+    /// Adds an observer for outgoing outputs.
     ///
-    /// The function will be called with a reference to each output before any
-    /// output modifications are applied. Multiple observers can be registered
-    /// and will execute in registration order.
+    /// Called before output modifications. Multiple observers execute in registration order.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer()
@@ -250,17 +230,15 @@ impl<In, Out> InterceptLayer<In, Out> {
         self
     }
 
-    /// Adds a transformation function for incoming requests.
+    /// Adds a transformation for incoming inputs.
     ///
-    /// The function will be called to transform each input before the service
-    /// executes. Multiple modifications can be registered and will be applied
-    /// in registration order. Each modification receives the output of the
-    /// previous one.
+    /// Transforms inputs before service execution. Multiple modifications apply
+    /// in registration order, each receiving the previous output.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer()
@@ -290,17 +268,15 @@ impl<In, Out> InterceptLayer<In, Out> {
         self
     }
 
-    /// Adds a transformation function for outgoing responses.
+    /// Adds a transformation for outgoing outputs.
     ///
-    /// The function will be called to transform each output after the service
-    /// executes. Multiple modifications can be registered and will be applied
-    /// in registration order. Each modification receives the output of the
-    /// previous one.
+    /// Transforms outputs after service execution. Multiple modifications apply
+    /// in registration order, each receiving the previous output.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer()
@@ -324,15 +300,12 @@ impl<In, Out> InterceptLayer<In, Out> {
 }
 
 impl<In: Debug, Out> InterceptLayer<In, Out> {
-    /// Adds debug logging for incoming requests.
-    ///
-    /// This is a convenience method that adds an input observer which prints
-    /// the input using the `dbg!` macro. The input type must implement `Debug`.
+    /// Adds debug logging for incoming inputs using `dbg!`.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer().debug_input(), // print input with dbg!
@@ -352,15 +325,12 @@ impl<In: Debug, Out> InterceptLayer<In, Out> {
 }
 
 impl<In, Out: Debug> InterceptLayer<In, Out> {
-    /// Adds debug logging for outgoing responses.
-    ///
-    /// This is a convenience method that adds an output observer which prints
-    /// the output using the `dbg!` macro. The output type must implement `Debug`.
+    /// Adds debug logging for outgoing outputs using `dbg!`.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use layered::{Execute, ServiceBuilder, Intercept, Service};
+    /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
     ///     Intercept::layer().debug_output(), // print outputs with dbg!
@@ -503,7 +473,7 @@ mod tests {
     use tower_service::Service as TowerService;
 
     use super::*;
-    use crate::{Execute, Layer, ServiceBuilder};
+    use crate::{Execute, Layer, Stack};
 
     #[test]
     pub fn ensure_types() {

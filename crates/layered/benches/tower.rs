@@ -9,7 +9,7 @@ use std::task::Poll;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::tower::{Adapter, tower_layer};
-use layered::{Execute, Service, ServiceBuilder as OxServiceBuilder};
+use layered::{Execute, Service, Stack as OxStack};
 use pin_project_lite::pin_project;
 use tower::{ServiceBuilder, service_fn};
 use tower_layer::Layer;
