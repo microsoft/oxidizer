@@ -31,13 +31,13 @@ mod read_futures;
 mod write;
 mod write_ext;
 
-pub use error::*;
-pub use read::*;
-pub use read_ext::*;
+pub use error::{Error, Result};
+pub use read::Read;
+pub use read_ext::{ReadExt, ReadInspectDecision};
 #[cfg(feature = "futures-stream")]
-pub use read_futures::*;
-pub use write::*;
-pub use write_ext::*;
+pub use read_futures::ReadAsFuturesStream;
+pub use write::Write;
+pub use write_ext::WriteExt;
 
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;
