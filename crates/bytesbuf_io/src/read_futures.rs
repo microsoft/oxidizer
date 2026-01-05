@@ -67,7 +67,7 @@ where
     }
 }
 
-impl<S> futures::Stream for ReadAsFuturesStream<S>
+impl<S> futures_core::Stream for ReadAsFuturesStream<S>
 where
     S: Read + Debug,
 {

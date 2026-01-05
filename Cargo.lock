@@ -109,6 +109,7 @@ version = "0.1.0"
 dependencies = [
  "bytesbuf",
  "futures",
+ "futures-core",
  "mutants",
  "new_zealand",
  "ohno",

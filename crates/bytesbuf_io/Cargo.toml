@@ -22,19 +22,23 @@ homepage.workspace = true
 repository.workspace = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["bytesbuf::*", "ohno::*"]
+allowed_external_types = [
+    "bytesbuf::*",
+    "ohno::*",
+    "futures_core::stream::Stream",
+]
 
 [package.metadata.docs.rs]
 all-features = true
 
 [features]
 default = []
-futures-stream = ["dep:futures"]
+futures-stream = ["dep:futures-core"]
 test-util = ["bytesbuf/test-util"]
 
 [dependencies]
 bytesbuf = { workspace = true }
-futures = { workspace = true, optional = true }
+futures-core = { workspace = true, optional = true }
 ohno = { workspace = true }
 trait-variant = { workspace = true }
 
