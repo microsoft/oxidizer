@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn to_timestamp_fallback_ok() {
-        let now = SystemTime::now();
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(12345);
         assert_eq!(to_timestamp_min_max(now), jiff::Timestamp::MAX);
 
         let past = SystemTime::UNIX_EPOCH - Duration::from_secs(12345);
