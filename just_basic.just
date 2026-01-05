@@ -26,7 +26,10 @@ docs:
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
-    cargo doc {{ target_package }} --no-deps --all-features --locked
+    # Simulate the way docs.rs builds our documentation.
+    $env:RUSTDOCFLAGS = "--cfg docsrs"
+
+    cargo +$env:RUST_NIGHTLY doc {{ target_package }} --no-deps --all-features --locked
 
 # Run all stand-alone example binaries to ensure they complete with exit code 0.
 [script]
