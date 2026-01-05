@@ -62,7 +62,6 @@ mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
-pub use crate::SystemTimeExt;
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
