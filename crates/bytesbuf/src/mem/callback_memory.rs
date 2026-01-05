@@ -5,12 +5,44 @@ use std::any::type_name;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::{BytesBuf, Memory};
+use crate::BytesBuf;
+use crate::mem::Memory;
 
-/// Implements [`MemoryShared`][crate::MemoryShared] by delegating to a closure.
+/// Implements [`MemoryShared`][crate::mem::MemoryShared] by delegating to a closure.
 ///
 /// This can be used to construct wrapping memory providers that add logic or configuration
 /// on top of an existing memory provider.
+///
+/// # Examples
+///
+/// Configure an inner memory provider with additional parameters:
+///
+/// ```
+/// use bytesbuf::mem::{CallbackMemory, GlobalPool, Memory};
+/// # use bytesbuf::BytesBuf;
+/// # #[derive(Clone)]
+/// # struct IoContext {
+/// #     pool: GlobalPool,
+/// # }
+/// # impl IoContext {
+/// #     fn reserve_with_config(&self, min_len: usize, _align: bool) -> BytesBuf {
+/// #         self.pool.reserve(min_len)
+/// #     }
+/// # }
+///
+/// // Create a callback memory that configures the inner provider.
+/// # let io_context = IoContext { pool: GlobalPool::new() };
+/// let memory = CallbackMemory::new(move |min_len| {
+///     // Apply custom configuration when reserving memory.
+///     let page_aligned = true;
+///     io_context.reserve_with_config(min_len, page_aligned)
+/// });
+///
+/// let buf = memory.reserve(64);
+/// assert!(buf.capacity() >= 64);
+/// ```
+///
+/// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
 pub struct CallbackMemory<FReserve>
 where
     FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
@@ -85,6 +117,7 @@ where
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{self, AtomicUsize};
@@ -92,7 +125,8 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::{MemoryShared, TransparentTestMemory};
+    use crate::mem::MemoryShared;
+    use crate::mem::testing::TransparentMemory;
 
     assert_impl_all!(CallbackMemory<fn(usize) -> BytesBuf>: MemoryShared);
 
@@ -105,7 +139,7 @@ mod tests {
 
             move |min_bytes| {
                 callback_called_times.fetch_add(1, atomic::Ordering::SeqCst);
-                TransparentTestMemory::new().reserve(min_bytes)
+                TransparentMemory::new().reserve(min_bytes)
             }
         });
 
@@ -123,7 +157,7 @@ mod tests {
 
             move |min_bytes| {
                 callback_called_times.fetch_add(1, atomic::Ordering::SeqCst);
-                TransparentTestMemory::new().reserve(min_bytes)
+                TransparentMemory::new().reserve(min_bytes)
             }
         });
 
@@ -140,7 +174,7 @@ mod tests {
 
     #[test]
     fn debug_output_contains_type_and_field_info() {
-        let provider = CallbackMemory::new(|min_bytes| TransparentTestMemory::new().reserve(min_bytes));
+        let provider = CallbackMemory::new(|min_bytes| TransparentMemory::new().reserve(min_bytes));
 
         // Call the original provider to help code coverage.
         _ = Memory::reserve(&provider, 50);

@@ -116,8 +116,56 @@ struct BlockRefVTableInner {
     meta: Option<MetaFn>,
 }
 
+/// Function table that implements [`BlockRef`] for a specific memory provider.
+///
 /// Wraps a specific memory provider's [`BlockRefDynamic`] or [`BlockRefDynamicWithMeta`]
 /// implementation into a form required to construct a [`BlockRef`].
+///
+/// # Examples
+///
+/// Create a vtable from a type implementing [`BlockRefDynamicWithMeta`]:
+///
+/// ```
+/// # use std::ptr::NonNull;
+/// # use std::any::Any;
+/// # use std::sync::atomic::{AtomicUsize, Ordering};
+/// # use bytesbuf::mem::{BlockRefDynamic, BlockRefDynamicWithMeta};
+/// use bytesbuf::mem::{BlockRef, BlockRefVTable};
+/// #
+/// # struct MyBlock {
+/// #     ref_count: AtomicUsize,
+/// #     meta: NonNull<dyn Any>,
+/// # }
+/// #
+/// # // SAFETY: Implementation is thread-safe via atomic operations.
+/// # unsafe impl BlockRefDynamic for MyBlock {
+/// #     type State = Self;
+/// #
+/// #     fn clone(state: NonNull<Self::State>) -> NonNull<Self::State> {
+/// #         unsafe { state.as_ref() }.ref_count.fetch_add(1, Ordering::Relaxed);
+/// #         state
+/// #     }
+/// #
+/// #     fn drop(state: NonNull<Self::State>) {
+/// #         unsafe { state.as_ref() }.ref_count.fetch_sub(1, Ordering::Release);
+/// #     }
+/// # }
+/// #
+/// # // SAFETY: Implementation is thread-safe via atomic operations.
+/// # unsafe impl BlockRefDynamicWithMeta for MyBlock {
+/// #     fn meta(state: NonNull<Self::State>) -> NonNull<dyn Any> {
+/// #         unsafe { state.as_ref() }.meta
+/// #     }
+/// # }
+///
+/// // Create a vtable at compile time from a BlockRefDynamicWithMeta implementor.
+/// const MY_BLOCK_VTABLE: BlockRefVTable<MyBlock> = BlockRefVTable::from_trait_with_meta();
+/// ```
+///
+/// For a complete implementation example, see `examples/bb_basic.rs` in the repository.
+///
+/// Use [`from_trait()`][Self::from_trait] instead if your implementation does not
+/// expose block metadata.
 #[derive(Debug)]
 pub struct BlockRefVTable<T> {
     inner: BlockRefVTableInner,
@@ -168,8 +216,7 @@ fn wrap_meta<T: BlockRefDynamicWithMeta>(state_ptr: OpaqueStatePtr) -> NonNull<d
     T::meta(state_ptr.cast())
 }
 
-/// Implements the dynamic logic inside a [`BlockRef`] and can be used to
-/// create a [`BlockRefVTable`].
+/// Implements [`BlockRefVTable`] via a trait, without publishing block metadata.
 ///
 /// This is the minimal that required to implement a [`BlockRef`] for a memory provider.
 ///
@@ -213,8 +260,7 @@ pub unsafe trait BlockRefDynamic {
     fn drop(state_ptr: NonNull<Self::State>);
 }
 
-/// Implements the dynamic logic inside a [`BlockRef`] and can be used to
-/// create a [`BlockRefVTable`] that provides metadata to callers.
+/// Implements [`BlockRefVTable`] via a trait.
 ///
 /// This is an extension of [`BlockRefDynamic`] that adds the ability to
 /// retrieve metadata about the memory block.
@@ -234,6 +280,7 @@ pub unsafe trait BlockRefDynamicWithMeta: BlockRefDynamic {
     fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn Any>;
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{self, AtomicUsize};
