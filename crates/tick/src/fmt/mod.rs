@@ -27,6 +27,8 @@
 //!
 //! # Examples
 //!
+//! ## Using format types
+//!
 //! ```
 //! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
 //!
@@ -43,6 +45,17 @@
 //! assert_eq!(time.to_string(), "951786000");
 //!
 //! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Using `SystemTimeExt`
+//!
+//! ```
+//! use std::time::{Duration, SystemTime};
+//! use tick::SystemTimeExt;
+//!
+//! let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
+//! println!("Time: {}", time.display_iso_8601());
+//! // Output: Time: 1970-01-01T01:00:00Z
 //! ```
 
 mod iso_8601;

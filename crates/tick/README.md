@@ -75,12 +75,16 @@ in production and tests, with zero runtime overhead when `test-util` is disabled
 * [`Stopwatch`][__link4] - Measures elapsed time.
 * [`Delay`][__link5] - Delays the execution for a specified duration.
 * [`PeriodicTimer`][__link6] - Schedules a task to run periodically.
-* [`FutureExt`][__link7] - Extensions for the `Future` trait.
-* [`Error`][__link8] - Represents an error that can occur when working with time. Provides limited
+* [`Error`][__link7] - Represents an error that can occur when working with time. Provides limited
   introspection capabilities.
-* [`fmt`][__link9] - Utilities for formatting `SystemTime` into various formats. Available when
+* [`fmt`][__link8] - Utilities for formatting `SystemTime` into various formats. Available when
   the `fmt` feature is enabled.
-* [`runtime`][__link10] - Infrastructure for integrating time primitives into async runtimes.
+* [`runtime`][__link9] - Infrastructure for integrating time primitives into async runtimes.
+
+## Extensions
+
+* [`FutureExt`][__link10] - Extensions for the `Future` trait, providing timeout functionality.
+* [`SystemTimeExt`][__link11] - Extensions for [`SystemTime`][__link12].
 
 ## Machine-Centric vs. Human-Centric Time
 
@@ -94,7 +98,7 @@ When working with time, two different use cases are considered:
   Dealing with human-centric time involves significant ambiguity.
 
 This crate is designed for machine-centric time. For human-centric time manipulation,
-consider using other crates such as [jiff][__link11], [chrono][__link12], or [time][__link13]. The time primitives in
+consider using other crates such as [jiff][__link13], [chrono][__link14], or [time][__link15]. The time primitives in
 this crate are designed for easy interoperability with these crates. See the `time_interop*`
 examples for more details.
 
@@ -110,7 +114,7 @@ type, which is exposed when the `test-util` feature is enabled.
 
 ### Use `Clock` to retrieve absolute time
 
-The clock provides absolute time as `SystemTime`. See [`Clock`][__link14] documentation for detailed
+The clock provides absolute time as `SystemTime`. See [`Clock`][__link16] documentation for detailed
 information.
 
 ```rust
@@ -129,7 +133,7 @@ assert!(time1 <= time2);
 
 ### Use `Clock` to retrieve relative time
 
-The clock provides relative time via [`Clock::instant`][__link15] and [`Stopwatch`][__link16].
+The clock provides relative time via [`Clock::instant`][__link17] and [`Stopwatch`][__link18].
 
 ```rust
 use std::time::{Duration, Instant};
@@ -184,18 +188,18 @@ timer
 
 This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-* **`tokio`** - Integration with the [Tokio][__link17] runtime. Enables
-  [`Clock::new_tokio`][__link18] for creating clocks that use Tokio’s time facilities.
-* **`test-util`** - Enables the [`ClockControl`][__link19] type for controlling the passage of time
+* **`tokio`** - Integration with the [Tokio][__link19] runtime. Enables
+  [`Clock::new_tokio`][__link20] for creating clocks that use Tokio’s time facilities.
+* **`test-util`** - Enables the [`ClockControl`][__link21] type for controlling the passage of time
   in tests. This allows you to pause time, advance it manually, or automatically advance
   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
-* **`serde`** - Adds serialization and deserialization support via [serde][__link20].
-* **`fmt`** - Enables the [`fmt`][__link21] module with utilities for formatting `SystemTime` into
+* **`serde`** - Adds serialization and deserialization support via [serde][__link22].
+* **`fmt`** - Enables the [`fmt`][__link23] module with utilities for formatting `SystemTime` into
   various formats (e.g., ISO 8601, RFC 2822).
 
 ## Additional Examples
 
-The [time examples][__link22]
+The [time examples][__link24]
 contain additional examples of how to use the time primitives.
 
 
@@ -204,27 +208,29 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGye19xWMtftNG5SBR1lSQd0HG1O5g9a9CyQOG5sh2LWD3CBTYWSBgmR0aWNrZTAuMS4x
- [__link0]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
- [__link1]: https://docs.rs/tick/0.1.1/tick/?search=Clock
- [__link10]: https://docs.rs/tick/0.1.1/tick/runtime/index.html
- [__link11]: https://crates.io/crates/jiff
- [__link12]: https://crates.io/crates/chrono
- [__link13]: https://crates.io/crates/time
- [__link14]: https://docs.rs/tick/0.1.1/tick/?search=Clock
- [__link15]: https://docs.rs/tick/0.1.1/tick/?search=Clock::instant
- [__link16]: https://docs.rs/tick/0.1.1/tick/?search=Stopwatch
- [__link17]: https://tokio.rs/
- [__link18]: https://docs.rs/tick/0.1.1/tick/?search=Clock::new_tokio
- [__link19]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
- [__link2]: https://docs.rs/tick/0.1.1/tick/?search=Clock
- [__link20]: https://serde.rs/
- [__link21]: https://docs.rs/tick/0.1.1/tick/fmt/index.html
- [__link22]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
- [__link3]: https://docs.rs/tick/0.1.1/tick/?search=ClockControl
- [__link4]: https://docs.rs/tick/0.1.1/tick/?search=Stopwatch
- [__link5]: https://docs.rs/tick/0.1.1/tick/?search=Delay
- [__link6]: https://docs.rs/tick/0.1.1/tick/?search=PeriodicTimer
- [__link7]: https://docs.rs/tick/0.1.1/tick/?search=FutureExt
- [__link8]: https://docs.rs/tick/0.1.1/tick/?search=Error
- [__link9]: https://docs.rs/tick/0.1.1/tick/fmt/index.html
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7RNcoP3blXnG4CHqkinKPcBG0KvcQDgsaxXGxhnbuGo0h6JYWSBgmR0aWNrZTAuMS4y
+ [__link0]: https://docs.rs/tick/0.1.2/tick/?search=ClockControl
+ [__link1]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link10]: https://docs.rs/tick/0.1.2/tick/?search=FutureExt
+ [__link11]: https://docs.rs/tick/0.1.2/tick/?search=SystemTimeExt
+ [__link12]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
+ [__link13]: https://crates.io/crates/jiff
+ [__link14]: https://crates.io/crates/chrono
+ [__link15]: https://crates.io/crates/time
+ [__link16]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link17]: https://docs.rs/tick/0.1.2/tick/?search=Clock::instant
+ [__link18]: https://docs.rs/tick/0.1.2/tick/?search=Stopwatch
+ [__link19]: https://tokio.rs/
+ [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link20]: https://docs.rs/tick/0.1.2/tick/?search=Clock::new_tokio
+ [__link21]: https://docs.rs/tick/0.1.2/tick/?search=ClockControl
+ [__link22]: https://serde.rs/
+ [__link23]: https://docs.rs/tick/0.1.2/tick/fmt/index.html
+ [__link24]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
+ [__link3]: https://docs.rs/tick/0.1.2/tick/?search=ClockControl
+ [__link4]: https://docs.rs/tick/0.1.2/tick/?search=Stopwatch
+ [__link5]: https://docs.rs/tick/0.1.2/tick/?search=Delay
+ [__link6]: https://docs.rs/tick/0.1.2/tick/?search=PeriodicTimer
+ [__link7]: https://docs.rs/tick/0.1.2/tick/?search=Error
+ [__link8]: https://docs.rs/tick/0.1.2/tick/fmt/index.html
+ [__link9]: https://docs.rs/tick/0.1.2/tick/runtime/index.html
