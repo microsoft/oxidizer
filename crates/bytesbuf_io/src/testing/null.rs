@@ -278,6 +278,9 @@ mod tests {
         let stream_memory = null_stream.memory();
         let _buf = stream_memory.reserve(10);
 
-        assert!(callback_called.load(Ordering::SeqCst), "Custom memory callback should have been called");
+        assert!(
+            callback_called.load(Ordering::SeqCst),
+            "Custom memory callback should have been called"
+        );
     }
 }
