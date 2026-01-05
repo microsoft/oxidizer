@@ -38,7 +38,7 @@ impl Pending {
     /// # Errors
     ///
     /// This call never fails (because it never completes).
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
+    #[cfg_attr(coverage_nightly, coverage(off))] // Contains intentionally unreachable code.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "API compatibility between trait and inherent fn")]
     pub async fn read_at_most_into(&mut self, _len: usize, _into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         future::pending::<()>().await;
@@ -50,7 +50,7 @@ impl Pending {
     /// # Errors
     ///
     /// This call never fails (because it never completes).
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
+    #[cfg_attr(coverage_nightly, coverage(off))] // Contains intentionally unreachable code.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "API compatibility between trait and inherent fn")]
     pub async fn read_more_into(&mut self, _into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         future::pending::<()>().await;
@@ -62,7 +62,7 @@ impl Pending {
     /// # Errors
     ///
     /// This call never fails (because it never completes).
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
+    #[cfg_attr(coverage_nightly, coverage(off))] // Contains intentionally unreachable code.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "API compatibility between trait and inherent fn")]
     pub async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
         future::pending::<()>().await;
@@ -74,7 +74,7 @@ impl Pending {
     /// # Errors
     ///
     /// This call never fails (because it never completes).
-    #[cfg_attr(test, mutants::skip)] // This does nothing, pointless to mutate.
+    #[cfg_attr(coverage_nightly, coverage(off))] // Contains intentionally unreachable code.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "API compatibility between trait and inherent fn")]
     pub async fn write(&mut self, _sequence: BytesView) -> Result<(), Infallible> {
         future::pending::<()>().await;
