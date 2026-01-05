@@ -17,7 +17,7 @@
 //!
 //! The recovery information describes whether recovering from an operation might help, not whether
 //! the operation succeeded or failed. Both successful operations and permanent failures
-//! should use [`RecoveryInfo::never`][RecoveryInfo::never] since recovery won't change the outcome.
+//! should use [`RecoveryInfo::never`][RecoveryInfo::never] since recovery is not necessary or desirable.
 //!
 //! # Core Types
 //!
@@ -87,7 +87,7 @@ use std::time::Duration;
 // conventions because setters are used much more frequently than getters in typical usage patterns.
 // The `get_` prefix on getters helps distinguish them from their corresponding setters.
 
-/// Represents the recovery information associated with an operation or condition.
+/// The recovery information associated with an operation or condition.
 ///
 /// This type describes how an operation can be recovered from, if at all. It provides
 /// various ways to create recovery information for different scenarios, such as unknown conditions,
@@ -101,14 +101,13 @@ use std::time::Duration;
 /// let recovery = RecoveryInfo::retry();
 /// assert_eq!(recovery.kind(), RecoveryKind::Retry);
 /// ```
-#[derive(Debug, PartialEq, Clone, Eq)]
-#[non_exhaustive]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub struct RecoveryInfo {
     kind: RecoveryKind,
     delay: Option<Duration>,
 }
 
-/// Represents the kind of recovery that can be attempted.
+/// Kind of recovery that can be attempted.
 ///
 /// To retrieve the recovery kind from a `RecoveryInfo` instance, use the [`RecoveryInfo::kind`] method.
 ///
@@ -124,15 +123,26 @@ pub struct RecoveryInfo {
 #[non_exhaustive]
 pub enum RecoveryKind {
     /// The condition is unknown.
+    ///
+    /// Handling should be determined on a case-by-case basis. For example,
+    /// unclassified network errors might warrant retrying. Consider an
+    /// optimistic/pessimistic approach based on your application's requirements.
     Unknown,
 
-    /// The condition is temporary and may resolve quickly with recovery.
+    /// The condition is temporary and may resolve with recovery.
+    ///
+    /// Retry the operation with backoff, respecting any [`RecoveryInfo::delay`] hint.
     Retry,
 
     /// The condition is permanent and recovery won't help.
+    ///
+    /// Do not retry; propagate the error as a terminal failure.
     Never,
 
-    /// Indicates a service-wide unavailability or significant degradation.
+    /// Service-wide unavailability or significant degradation.
+    ///
+    /// Retrying has a low chance of success. Consider circuit-breaker patterns,
+    /// failing fast, or falling back to cached data.
     Unavailable,
 }
 
