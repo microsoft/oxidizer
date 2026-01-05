@@ -25,7 +25,7 @@ jobs:
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
-          rust-toolchain: RUST_MSRV
+          rust-toolchain: RUST_MSRV, RUST_NIGHTLY
           cargo-tools: CARGO_NEXTEST_VERSION, CARGO_HACK_VERSION
 
       # execute
@@ -37,8 +37,8 @@ jobs:
       - name: Docs
         if: success() || failure()
         env:
-          RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --verbose --workspace --all-features
+          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
+        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace --all-features
       - name: Doc Tests
         if: success() || failure()
         run: cargo test --doc --verbose --workspace --all-features
@@ -70,9 +70,6 @@ jobs:
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
-      - name: Docs
-        if: success() || failure()
-        run: cargo doc --no-deps --workspace --all-features
       - name: Readmes
         if: success() || failure()
         run: cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
