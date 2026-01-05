@@ -94,6 +94,7 @@ impl Default for FakeWrite {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Write for FakeWrite {
     type Error = Infallible;
 
@@ -103,6 +104,7 @@ impl Write for FakeWrite {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for FakeWrite {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
@@ -110,6 +112,7 @@ impl Memory for FakeWrite {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for FakeWrite {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
@@ -146,7 +149,12 @@ impl FakeWriteBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use bytesbuf::mem::CallbackMemory;
     use testing_aids::async_test;
 
     use super::*;
@@ -177,5 +185,46 @@ mod tests {
             assert_eq!(contents.get_byte(), 3);
             assert_eq!(contents.len(), 0);
         });
+    }
+
+    #[test]
+    fn default_returns_working_instance() {
+        async_test(async || {
+            let mut write_stream = FakeWrite::default();
+
+            write_stream
+                .prepare_and_write(10, |mut buf| {
+                    buf.put_byte(42);
+                    Ok::<BytesView, Infallible>(buf.consume_all())
+                })
+                .await
+                .unwrap();
+
+            assert_eq!(write_stream.contents().len(), 1);
+
+            let mut contents = write_stream.into_contents();
+            assert_eq!(contents.get_byte(), 42);
+        });
+    }
+
+    #[test]
+    fn memory_returns_configured_provider() {
+        let callback_called = Arc::new(AtomicBool::new(false));
+
+        let custom_memory = OpaqueMemory::new(CallbackMemory::new({
+            let callback_called = Arc::clone(&callback_called);
+            move |min_bytes| {
+                callback_called.store(true, Ordering::SeqCst);
+                TransparentMemory::new().reserve(min_bytes)
+            }
+        }));
+
+        let write_stream = FakeWrite::builder().memory(custom_memory).build();
+
+        // Get memory from stream and use it
+        let stream_memory = write_stream.memory();
+        let _buf = stream_memory.reserve(10);
+
+        assert!(callback_called.load(Ordering::SeqCst), "Custom memory callback should have been called");
     }
 }

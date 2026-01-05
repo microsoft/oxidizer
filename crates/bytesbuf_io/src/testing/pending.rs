@@ -116,6 +116,7 @@ impl Default for Pending {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for Pending {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
@@ -123,6 +124,7 @@ impl Memory for Pending {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for Pending {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
@@ -130,6 +132,7 @@ impl HasMemory for Pending {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Read for Pending {
     type Error = Infallible;
 
@@ -149,6 +152,7 @@ impl Read for Pending {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Write for Pending {
     type Error = Infallible;
 
@@ -188,7 +192,15 @@ impl PendingBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::pin::pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll, Waker};
+
+    use bytesbuf::mem::CallbackMemory;
+
     use super::*;
 
     #[test]
@@ -201,5 +213,91 @@ mod tests {
         let memory = stream.memory();
         let reserved2 = memory.reserve(123);
         assert!(reserved2.capacity() >= 123);
+    }
+
+    #[test]
+    fn default_returns_working_instance() {
+        let stream = Pending::default();
+
+        // Verify it can reserve memory
+        let buffer = stream.reserve(100);
+        assert!(buffer.remaining_capacity() >= 100);
+
+        // Verify memory() works
+        let stream_memory = stream.memory();
+        let buffer2 = stream_memory.reserve(50);
+        assert!(buffer2.remaining_capacity() >= 50);
+    }
+
+    #[test]
+    fn memory_returns_configured_provider() {
+        let callback_called = Arc::new(AtomicBool::new(false));
+
+        let custom_memory = OpaqueMemory::new(CallbackMemory::new({
+            let callback_called = Arc::clone(&callback_called);
+            move |min_bytes| {
+                callback_called.store(true, Ordering::SeqCst);
+                TransparentMemory::new().reserve(min_bytes)
+            }
+        }));
+
+        let pending_stream = Pending::builder().memory(custom_memory).build();
+
+        // Get memory from stream and use it
+        let stream_memory = pending_stream.memory();
+        let _buf = stream_memory.reserve(10);
+
+        assert!(callback_called.load(Ordering::SeqCst), "Custom memory callback should have been called");
+    }
+
+    #[test]
+    fn read_at_most_into_returns_pending_on_first_poll() {
+        let mut stream = Pending::new();
+        let buffer = BytesBuf::new();
+
+        let mut future = pin!(stream.read_at_most_into(100, buffer));
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        let result = future.as_mut().poll(&mut cx);
+        assert!(matches!(result, Poll::Pending), "read_at_most_into should return Pending on first poll");
+    }
+
+    #[test]
+    fn read_more_into_returns_pending_on_first_poll() {
+        let mut stream = Pending::new();
+        let buffer = BytesBuf::new();
+
+        let mut future = pin!(stream.read_more_into(buffer));
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        let result = future.as_mut().poll(&mut cx);
+        assert!(matches!(result, Poll::Pending), "read_more_into should return Pending on first poll");
+    }
+
+    #[test]
+    fn read_any_returns_pending_on_first_poll() {
+        let mut stream = Pending::new();
+
+        let mut future = pin!(stream.read_any());
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        let result = future.as_mut().poll(&mut cx);
+        assert!(matches!(result, Poll::Pending), "read_any should return Pending on first poll");
+    }
+
+    #[test]
+    fn write_returns_pending_on_first_poll() {
+        let mut stream = Pending::new();
+        let data = BytesView::default();
+
+        let mut future = pin!(stream.write(data));
+        let waker = Waker::noop();
+        let mut cx = Context::from_waker(waker);
+
+        let result = future.as_mut().poll(&mut cx);
+        assert!(matches!(result, Poll::Pending), "write should return Pending on first poll");
     }
 }

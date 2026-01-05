@@ -128,6 +128,7 @@ impl Default for Null {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Read for Null {
     type Error = Infallible;
 
@@ -147,6 +148,7 @@ impl Read for Null {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Write for Null {
     type Error = Infallible;
 
@@ -156,6 +158,7 @@ impl Write for Null {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for Null {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
@@ -163,6 +166,7 @@ impl HasMemory for Null {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for Null {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
@@ -200,7 +204,12 @@ impl NullBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use bytesbuf::mem::CallbackMemory;
     use testing_aids::execute_or_terminate_process;
 
     use super::*;
@@ -228,5 +237,47 @@ mod tests {
                 s.write(buffer.consume_all()).await.unwrap();
             });
         });
+    }
+
+    #[test]
+    fn default_returns_working_instance() {
+        execute_or_terminate_process(|| {
+            futures::executor::block_on(async {
+                let mut s = Null::default();
+
+                // Verify it can reserve memory
+                let buffer = s.reserve(100);
+                assert!(buffer.remaining_capacity() >= 100);
+
+                // Verify read operations work
+                let (bytes_read, _) = s.read_at_most_into(10, BytesBuf::new()).await.unwrap();
+                assert_eq!(bytes_read, 0);
+
+                // Verify write operations work
+                let empty_view = BytesView::default();
+                s.write(empty_view).await.unwrap();
+            });
+        });
+    }
+
+    #[test]
+    fn memory_returns_configured_provider() {
+        let callback_called = Arc::new(AtomicBool::new(false));
+
+        let custom_memory = OpaqueMemory::new(CallbackMemory::new({
+            let callback_called = Arc::clone(&callback_called);
+            move |min_bytes| {
+                callback_called.store(true, Ordering::SeqCst);
+                TransparentMemory::new().reserve(min_bytes)
+            }
+        }));
+
+        let null_stream = Null::builder().memory(custom_memory).build();
+
+        // Get memory from stream and use it
+        let stream_memory = null_stream.memory();
+        let _buf = stream_memory.reserve(10);
+
+        assert!(callback_called.load(Ordering::SeqCst), "Custom memory callback should have been called");
     }
 }

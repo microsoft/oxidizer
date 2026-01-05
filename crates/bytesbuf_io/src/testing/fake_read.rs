@@ -169,6 +169,7 @@ impl FakeRead {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Read for FakeRead {
     type Error = Infallible;
 
@@ -188,6 +189,7 @@ impl Read for FakeRead {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl Memory for FakeRead {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
@@ -195,6 +197,7 @@ impl Memory for FakeRead {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Trivial forwarder.
 impl HasMemory for FakeRead {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn memory(&self) -> impl MemoryShared {
@@ -256,6 +259,7 @@ impl FakeReadBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use bytesbuf::mem::GlobalPool;
     use new_zealand::nz;
@@ -385,5 +389,34 @@ mod tests {
             assert_eq!(payload.get_byte(), b'!');
             assert_eq!(payload.len(), 0);
         });
+    }
+
+    #[test]
+    fn memory_returns_configured_provider() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use bytesbuf::mem::{CallbackMemory, OpaqueMemory};
+        use bytesbuf::mem::testing::TransparentMemory;
+
+        let callback_called = Arc::new(AtomicBool::new(false));
+
+        let custom_memory = OpaqueMemory::new(CallbackMemory::new({
+            let callback_called = Arc::clone(&callback_called);
+            move |min_bytes| {
+                callback_called.store(true, Ordering::SeqCst);
+                TransparentMemory::new().reserve(min_bytes)
+            }
+        }));
+
+        let memory = GlobalPool::new();
+        let contents = BytesView::copied_from_slice(b"test", &memory);
+        let read_stream = FakeRead::builder().contents(contents).memory(custom_memory).build();
+
+        // Get memory from stream and use it
+        let stream_memory = read_stream.memory();
+        let _buf = stream_memory.reserve(10);
+
+        assert!(callback_called.load(Ordering::SeqCst), "Custom memory callback should have been called");
     }
 }

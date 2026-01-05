@@ -123,6 +123,7 @@ impl<S> Debug for ReadAsFuturesStream<S>
 where
     S: Read + Debug,
 {
+    #[cfg_attr(coverage_nightly, coverage(off))] // No API contract to test.
     #[cfg_attr(test, mutants::skip)] // We have no contract to test.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
@@ -133,14 +134,17 @@ where
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::convert::Infallible;
     use std::pin::pin;
     use std::task::Waker;
 
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::testing::TransparentMemory;
+    use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
     use futures::{Stream, StreamExt};
     use new_zealand::nz;
-    use testing_aids::async_test;
+    use testing_aids::{YieldFuture, async_test};
 
     use super::*;
     use crate::ReadExt;
@@ -206,5 +210,145 @@ mod tests {
 
         let read_future = pin!(inner.read_any());
         assert!(read_future.poll(&mut cx).is_pending());
+    }
+
+    /// A Read implementation that yields on first poll then returns data.
+    /// This is used to test that `ReadAsFuturesStream` correctly handles `Poll::Pending`.
+    #[derive(Debug)]
+    struct YieldThenRead {
+        inner: FakeRead,
+    }
+
+    impl Memory for YieldThenRead {
+        fn reserve(&self, min_bytes: usize) -> BytesBuf {
+            self.inner.reserve(min_bytes)
+        }
+    }
+
+    impl HasMemory for YieldThenRead {
+        fn memory(&self) -> impl MemoryShared {
+            self.inner.memory()
+        }
+    }
+
+    impl crate::Read for YieldThenRead {
+        type Error = Infallible;
+
+        async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+            YieldFuture::default().await;
+            self.inner.read_at_most_into(len, into).await
+        }
+
+        async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+            YieldFuture::default().await;
+            self.inner.read_more_into(into).await
+        }
+
+        async fn read_any(&mut self) -> Result<BytesBuf, Self::Error> {
+            YieldFuture::default().await;
+            self.inner.read_any().await
+        }
+    }
+
+    #[test]
+    fn pending_on_first_poll_then_returns_result() {
+        async_test(async || {
+            let memory = GlobalPool::new();
+            let contents = BytesView::copied_from_slice(b"Hello", &memory);
+            let inner = YieldThenRead {
+                inner: FakeRead::builder().contents(contents).build(),
+            };
+
+            let mut futures_stream = ReadAsFuturesStream::new(inner);
+
+            // First poll should be Pending due to YieldFuture
+            let waker = Waker::noop();
+            let mut cx = task::Context::from_waker(waker);
+            let poll_result = futures_stream.as_mut().poll_next(&mut cx);
+            assert!(matches!(poll_result, task::Poll::Pending));
+
+            // Second poll should return the actual data
+            let poll_result = futures_stream.as_mut().poll_next(&mut cx);
+            if let task::Poll::Ready(Some(Ok(mut data))) = poll_result {
+                assert_eq!(data.len(), 5);
+                assert_eq!(data.get_byte(), b'H');
+                assert_eq!(data.get_byte(), b'e');
+                assert_eq!(data.get_byte(), b'l');
+                assert_eq!(data.get_byte(), b'l');
+                assert_eq!(data.get_byte(), b'o');
+            } else {
+                panic!("Expected Ready(Some(Ok(_)))");
+            }
+        });
+    }
+
+    /// A Read implementation that always returns an error.
+    #[derive(Debug)]
+    struct ErroringRead {
+        memory: TransparentMemory,
+    }
+
+    impl Default for ErroringRead {
+        fn default() -> Self {
+            Self {
+                memory: TransparentMemory::new(),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestError(String);
+
+    impl fmt::Display for TestError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl std::error::Error for TestError {}
+
+    impl Memory for ErroringRead {
+        fn reserve(&self, min_bytes: usize) -> BytesBuf {
+            self.memory.reserve(min_bytes)
+        }
+    }
+
+    impl HasMemory for ErroringRead {
+        fn memory(&self) -> impl MemoryShared {
+            self.memory.clone()
+        }
+    }
+
+    impl crate::Read for ErroringRead {
+        type Error = TestError;
+
+        async fn read_at_most_into(&mut self, _len: usize, _into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+            Err(TestError("read_at_most_into error".to_string()))
+        }
+
+        async fn read_more_into(&mut self, _into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
+            Err(TestError("read_more_into error".to_string()))
+        }
+
+        async fn read_any(&mut self) -> Result<BytesBuf, Self::Error> {
+            Err(TestError("read_any error".to_string()))
+        }
+    }
+
+    #[test]
+    fn passes_through_error_from_inner() {
+        async_test(async || {
+            let inner = ErroringRead::default();
+            let mut futures_stream = ReadAsFuturesStream::new(inner);
+
+            let result = futures_stream.next().await;
+
+            match result {
+                Some(Err(TestError(msg))) => {
+                    assert_eq!(msg, "read_any error");
+                }
+                _ => panic!("Expected Some(Err(TestError(_)))"),
+            }
+        });
     }
 }
