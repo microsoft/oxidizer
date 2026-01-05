@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.2] - 2026-01-05
+
+- ✨ Features
+
+  - implement display extension for SystemTime
+
 ## [0.1.1] - 2025-12-29
 
 - 🐛 Bug Fixes
