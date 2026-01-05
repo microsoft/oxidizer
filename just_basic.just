@@ -4,7 +4,7 @@
 build PROFILE='dev':
     cargo build {{ target_package }} --profile {{ PROFILE }} --all-features --all-targets --locked
 
-# Run unit and integration tests with extra standard libbrary debug assertions enabled.
+# Run unit and integration tests with extra standard library debug assertions enabled.
 [script]
 careful FILTER="":
     $ErrorActionPreference = "Stop"
