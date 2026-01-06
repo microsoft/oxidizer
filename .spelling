@@ -199,6 +199,7 @@ profiler
 PullRequest
 RDME
 recoverability
+recoverable
 Redis
 reentrancy
 relocations
