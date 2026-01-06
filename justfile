@@ -17,8 +17,8 @@ target_package := if package == "" { "--workspace" } else { "-p " + package }
 _default:
     @just --list
 
-import 'just_basic.just'
-import 'just_coverage.just'
-import 'just_format.just'
-import 'just_setup.just'
-import 'just_spelling.just'
+import 'justfiles/basic.just'
+import 'justfiles/coverage.just'
+import 'justfiles/format.just'
+import 'justfiles/setup.just'
+import 'justfiles/spelling.just'
