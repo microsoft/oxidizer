@@ -1,10 +1,31 @@
 # Changelog
 
-## [0.9.0] - 2025-12-16
+## [0.9.1] - 2026-01-06
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
+- 🔄 Continuous Integration
+
+  - Add spell checker ([#158](https://github.com/microsoft/oxidizer/pull/158))
+
+## [0.9.0] - 2025-12-17
 
 - ✨ Features
 
-  - Better serialization and perf.
+  - Better serialization and perf. ([#133](https://github.com/microsoft/oxidizer/pull/133))
+
+## [0.8.0] - 2025-12-16
 
 - 🔄 Continuous Integration
 
@@ -29,7 +50,7 @@
   - Major improvements in the data_privacy crate ([#50](https://github.com/microsoft/oxidizer/pull/50))
   - Introduce the ohno and ohno_macros crates ([#53](https://github.com/microsoft/oxidizer/pull/53))
   - Introduce the #[classified] macro ([#48](https://github.com/microsoft/oxidizer/pull/48))
-  - Make RedactionEngine cloneable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
+  - Make RedactionEngine clonable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
 
 - 📚 Documentation
 

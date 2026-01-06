@@ -238,15 +238,15 @@ fn open_file(path: &str) -> Result<String, MyError> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6HS9SqShsaSGz42vAKwc2RWG7_xPji8SZ7NG3f-jaQ9sVJTYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6HS9SqShsaSGz42vAKwc2RWG7_xPji8SZ7NG3f-jaQ9sVJTYWSCgmRvaG5vZTAuMi4xgmtvaG5vX21hY3Jvc2UwLjIuMQ
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
- [__link10]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
- [__link11]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
- [__link12]: https://docs.rs/ohno/0.2.0/ohno/?search=Enrichable
- [__link2]: https://docs.rs/ohno/0.2.0/ohno/?search=ErrorExt
- [__link3]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
- [__link4]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
+ [__link10]: https://docs.rs/ohno_macros/0.2.1/ohno_macros/?search=enrich_err
+ [__link11]: https://docs.rs/ohno_macros/0.2.1/ohno_macros/?search=enrich_err
+ [__link12]: https://docs.rs/ohno/0.2.1/ohno/?search=Enrichable
+ [__link2]: https://docs.rs/ohno/0.2.1/ohno/?search=ErrorExt
+ [__link3]: https://docs.rs/ohno/0.2.1/ohno/?search=OhnoCore
+ [__link4]: https://docs.rs/ohno/0.2.1/ohno/?search=OhnoCore
  [__link5]: https://doc.rust-lang.org/stable/std/?search=error::Error
  [__link6]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug

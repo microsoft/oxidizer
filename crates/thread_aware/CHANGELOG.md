@@ -1,10 +1,42 @@
 # Changelog
 
-## [0.6.0] - 2025-12-12
+## [0.7.0] - 2026-01-06
+
+- ✨ Features
+
+  - Make std::sync::Arc not implement ThreadAware ([#149](https://github.com/microsoft/oxidizer/pull/149))
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
+- 🔄 Continuous Integration
+
+  - Add spell checker ([#158](https://github.com/microsoft/oxidizer/pull/158))
 
 - 🧩 Miscellaneous
 
-  - Shouldn't have been renamed due to stuttering in re-exports.
+  - remove non-existing feature ([#159](https://github.com/microsoft/oxidizer/pull/159))
+
+## [0.6.0] - 2025-12-15
+
+- ✔️ Tasks
+
+  - thread_aware does not need to depend on mutants ([#129](https://github.com/microsoft/oxidizer/pull/129))
+  - Add tests for missing mutants ([#126](https://github.com/microsoft/oxidizer/pull/126))
+
+- 🧩 Miscellaneous
+
+  - Shouldn't have been renamed due to stuttering in re-exports. ([#125](https://github.com/microsoft/oxidizer/pull/125))
 
 ## [0.5.0] - 2025-12-11
 

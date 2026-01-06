@@ -1,9 +1,16 @@
 # Changelog
 
-## [0.2.0] - 2025-12-30
+## [0.2.1] - 2026-01-06
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+## [0.2.0] - 2026-01-02
 
 - ✨ Features
 
+  - Next iteration of bytesbuf tinkering ([#171](https://github.com/microsoft/oxidizer/pull/171))
   - continued bytesbuf tidying ([#132](https://github.com/microsoft/oxidizer/pull/132))
   - Replace BytesBuf::inspect() with peek() that returns BytesView ([#128](https://github.com/microsoft/oxidizer/pull/128))
 
@@ -23,16 +30,7 @@
 
 - 🧩 Miscellaneous
 
-  - bytes is optional dep
-  - Native implementation of From<Vec<u8>>
-  - Independent implementation of static_slice.into() BytesView
-  - toml uipdate
-  - Readme update
-  - Format
-  - Improve doctests
-  - Add ::mem and ::mem::testing modules to bytesbuf for better API documentation structure
-  - Better summary sentences in API docs
-  - Gate test utilities in bytesbuf behind test-util feature flag
+  - Add bytesbuf vs bytes benchmark suite for read/write operations ([#162](https://github.com/microsoft/oxidizer/pull/162))
 
 ## [0.1.2] - 2025-12-10
 

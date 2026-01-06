@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.0] - 2026-01-06
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
+- 🔄 Continuous Integration
+
+  - Add spell checker ([#158](https://github.com/microsoft/oxidizer/pull/158))
+
+## [0.6.0] - 2025-12-15
+
+- 🧩 Miscellaneous
+
+  - Shouldn't have been renamed due to stuttering in re-exports. ([#125](https://github.com/microsoft/oxidizer/pull/125))
+
 ## [0.5.0] - 2025-12-11
 
 - ✔️ Tasks

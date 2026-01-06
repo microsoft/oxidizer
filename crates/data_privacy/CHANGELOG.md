@@ -1,10 +1,35 @@
 # Changelog
 
-## [0.10.0] - 2025-12-16
+## [0.10.1] - 2026-01-06
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
+- 🔄 Continuous Integration
+
+  - Add spell checker ([#158](https://github.com/microsoft/oxidizer/pull/158))
+
+## [0.10.0] - 2025-12-17
 
 - ✨ Features
 
-  - Better serialization and perf.
+  - Better serialization and perf. ([#133](https://github.com/microsoft/oxidizer/pull/133))
+
+- 🐛 Bug Fixes
+
+  - Strip links in readme.md generation because cargo-rdme has problems with link comprehension ([#146](https://github.com/microsoft/oxidizer/pull/146))
+
+## [0.9.0] - 2025-12-16
 
 - 🧩 Miscellaneous
 
@@ -73,7 +98,7 @@
 
 - ✨ Features
 
-  - Make RedactionEngine cloneable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
+  - Make RedactionEngine clonable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
 
 - 📚 Documentation
 
