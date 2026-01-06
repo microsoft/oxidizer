@@ -1,6 +1,7 @@
 # Development environment setup
 
 The standard development environment is a Windows PC, with Windows Subsystem for Linux (WSL) used for Linux development.
+After following this guide, you will be able to execute all the local PC development tooling associated with this repository.
 
 > 💡 Development on a Linux or Mac PC is possible, though "at your own risk" - it is not expected that people verify compatibility with "Linux/Mac as primary workstation" scenarios when committing changes to the repo.
 
