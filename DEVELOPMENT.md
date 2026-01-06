@@ -11,7 +11,6 @@ The following software must be present on the PC:
   * Select: ☑️ Add LLVM to the system PATH for the current user
 * [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) with components:
   * Workload: Desktop development with C++
-  * Individual Components: C++ Clang Compiler for Windows
 * [Latest version of Visual Studio Code](https://code.visualstudio.com/Download) with extensions:
   * C/C++ (ms-vscode.cpptools)
   * rust-analyzer (rust-lang.rust-analyzer)
