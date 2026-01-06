@@ -165,9 +165,22 @@ multiple_crate_versions = "allow"
 missing_crate_level_docs = "warn"
 unescaped_backticks = "warn"
 
+# A bit of debugging support for release builds.
 [profile.release]
 debug = "line-tables-only"
 
+# Best perf possible for benchmarks
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+
+# Best debugging experience possible for test builds. Even though this is the default, we specify it explicitly,
+# otherwise it appears that cargo-llvm-cov assumes different defaults which leads to only minimal debug info in
+# coverage builds.
+[profile.test]
+debug = "full"
+
+# No debug info for mutation testing to speed up compilation
 [profile.mutants]
 inherits = "test"
 debug = "none"
