@@ -37,7 +37,7 @@
             "**/*.ps1",
             "**/*.env",
             "justfile",
-            "*.just"
+            "**/*.just"
         ],
         "exclude": [
             "target"
