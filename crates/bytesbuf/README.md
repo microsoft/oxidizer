@@ -128,7 +128,7 @@ from the following list:
    or test code with no framework), you can create your own instance via [`GlobalPool::new()`][__link19].
 
 Once you have a memory provider, you can reserve memory from it by calling
-[`Memory::reserve()`][__link20] on it. This returns a [`BytesBuf`][__link21] with at least the requested
+[`Memory::reserve`][__link20] on it. This returns a [`BytesBuf`][__link21] with at least the requested
 number of bytes of memory capacity.
 
 ```rust
@@ -177,7 +177,7 @@ using the fundamental methods that underpin the convenience methods:
 See `examples/bb_slice_by_slice_write.rs` for an example of how to use these methods.
 
 If you do not know exactly how much memory you need in advance, you can extend the [`BytesBuf`][__link35]
-capacity on demand by calling [`BytesBuf::reserve()`][__link36]. You can use [`remaining_capacity()`][__link37]
+capacity on demand by calling [`BytesBuf::reserve`][__link36]. You can use [`remaining_capacity()`][__link37]
 to identify how much unused memory capacity is available.
 
 ```rust
@@ -236,7 +236,7 @@ let final_contents = buf.consume_all();
 ```
 
 If you already have a [`BytesView`][__link41] that you want to write into a [`BytesBuf`][__link42], call
-[`BytesBuf::put_bytes()`][__link43]. This is a highly efficient zero-copy operation
+[`BytesBuf::put_bytes`][__link43]. This is a highly efficient zero-copy operation
 that reuses the memory capacity of the view you are appending.
 
 ```rust
@@ -470,67 +470,67 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG49D8RruQIE8GwgpxEsyod4nG_0iVUF-Z1CbG8k9bXXtSjKnYWSBgmhieXRlc2J1ZmUwLjIuMA
- [__link0]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link1]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link10]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::advance
- [__link11]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::first_slice
- [__link12]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::first_slice
- [__link13]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::first_slice
- [__link14]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link15]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::Memory
- [__link16]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory
- [__link17]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory::memory
- [__link18]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::GlobalPool
- [__link19]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::GlobalPool::new
- [__link2]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link20]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::Memory::reserve
- [__link21]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link22]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link23]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link24]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link25]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::put_num_le
- [__link26]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::put_slice
- [__link27]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::put_byte
- [__link28]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::put_byte_repeated
- [__link29]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::put_bytes
- [__link3]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::get_num_le
- [__link30]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link31]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
- [__link32]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::advance
- [__link33]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
- [__link34]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
- [__link35]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link36]: `BytesBuf::reserve()`
- [__link37]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf::remaining_capacity
- [__link38]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link39]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link4]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::get_byte
- [__link40]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link41]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link42]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link43]: `BytesBuf::put_bytes()`
- [__link44]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory
- [__link45]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory
- [__link46]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link47]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link48]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory
- [__link49]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link5]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::copy_to_slice
- [__link50]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesBuf
- [__link51]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory
- [__link52]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::HasMemory
- [__link53]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=mem::GlobalPool
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG17I6KBhF_gWG_fYq5pD_uFsG4vXDDft6FntG0Ctt49jGiUjYWSBgmhieXRlc2J1ZmUwLjIuMQ
+ [__link0]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link1]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link10]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::advance
+ [__link11]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::first_slice
+ [__link12]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::first_slice
+ [__link13]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::first_slice
+ [__link14]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link15]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::Memory
+ [__link16]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory
+ [__link17]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory::memory
+ [__link18]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::GlobalPool
+ [__link19]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::GlobalPool::new
+ [__link2]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link20]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::Memory::reserve
+ [__link21]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link22]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link23]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link24]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link25]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::put_num_le
+ [__link26]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::put_slice
+ [__link27]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::put_byte
+ [__link28]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::put_byte_repeated
+ [__link29]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::put_bytes
+ [__link3]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::get_num_le
+ [__link30]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link31]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link32]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::advance
+ [__link33]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link34]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link35]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link36]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::reserve
+ [__link37]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::remaining_capacity
+ [__link38]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link39]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link4]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::get_byte
+ [__link40]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link41]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link42]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link43]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf::put_bytes
+ [__link44]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory
+ [__link45]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory
+ [__link46]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link47]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link48]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory
+ [__link49]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link5]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::copy_to_slice
+ [__link50]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesBuf
+ [__link51]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory
+ [__link52]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::HasMemory
+ [__link53]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=mem::GlobalPool
  [__link54]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link55]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
+ [__link55]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
  [__link56]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link57]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
+ [__link57]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
  [__link58]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
  [__link59]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link6]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::copy_to_uninit_slice
- [__link60]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
+ [__link6]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::copy_to_uninit_slice
+ [__link60]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
  [__link61]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
- [__link62]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link7]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::as_read
- [__link8]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView
- [__link9]: https://docs.rs/bytesbuf/0.2.0/bytesbuf/?search=BytesView::first_slice
+ [__link62]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link7]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::as_read
+ [__link8]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView
+ [__link9]: https://docs.rs/bytesbuf/0.2.1/bytesbuf/?search=BytesView::first_slice

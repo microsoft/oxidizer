@@ -126,7 +126,7 @@
 //!    or test code with no framework), you can create your own instance via [`GlobalPool::new()`].
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
-//! [`Memory::reserve()`] on it. This returns a [`BytesBuf`] with at least the requested
+//! [`Memory::reserve`](crate::mem::Memory::reserve) on it. This returns a [`BytesBuf`] with at least the requested
 //! number of bytes of memory capacity.
 //!
 //! ```
@@ -181,7 +181,7 @@
 //! See `examples/bb_slice_by_slice_write.rs` for an example of how to use these methods.
 //!
 //! If you do not know exactly how much memory you need in advance, you can extend the [`BytesBuf`]
-//! capacity on demand by calling [`BytesBuf::reserve()`]. You can use [`remaining_capacity()`]
+//! capacity on demand by calling [`BytesBuf::reserve`]. You can use [`remaining_capacity()`]
 //! to identify how much unused memory capacity is available.
 //!
 //! ```
@@ -249,7 +249,7 @@
 //! ```
 //!
 //! If you already have a [`BytesView`] that you want to write into a [`BytesBuf`], call
-//! [`BytesBuf::put_bytes()`]. This is a highly efficient zero-copy operation
+//! [`BytesBuf::put_bytes`]. This is a highly efficient zero-copy operation
 //! that reuses the memory capacity of the view you are appending.
 //!
 //! ```
