@@ -1,0 +1,49 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "bytesbuf_io"
+description = "Asynchronous I/O abstractions expressed via `bytesbuf` types."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "io", "zero-copy", "buffers", "performance", "async"]
+categories = [
+    "data-structures",
+    "network-programming",
+    "asynchronous",
+    "filesystem",
+]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["bytesbuf::*", "ohno::*", "futures_core::stream::Stream"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+futures-stream = ["dep:futures-core"]
+test-util = ["bytesbuf/test-util"]
+
+[dependencies]
+bytesbuf = { workspace = true }
+futures-core = { workspace = true, optional = true }
+ohno = { workspace = true }
+trait-variant = { workspace = true }
+
+[dev-dependencies]
+bytesbuf = { workspace = true, features = ["test-util"] }
+futures = { workspace = true }
+mutants = { workspace = true }
+new_zealand = { workspace = true }
+testing_aids = { workspace = true }
+
+[lints]
+workspace = true
