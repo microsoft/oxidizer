@@ -111,6 +111,26 @@ pub struct RecoveryInfo {
 ///
 /// To retrieve the recovery kind from a `RecoveryInfo` instance, use the [`RecoveryInfo::kind`] method.
 ///
+/// # Handling Unknown Variants
+///
+/// This enum is marked `#[non_exhaustive]`, which means new variants may be added in future
+/// versions without a major version bump. When matching on `RecoveryKind`, always include a
+/// wildcard arm that treats unrecognized variants the same as [`RecoveryKind::Unknown`]:
+///
+/// ```rust
+/// use recoverable::{RecoveryInfo, RecoveryKind};
+///
+/// fn should_retry(recovery: &RecoveryInfo) -> bool {
+///     match recovery.kind() {
+///         RecoveryKind::Retry => true,
+///         RecoveryKind::Never => false,
+///         RecoveryKind::Unavailable => false,
+///         // Treat unknown and any future variants conservatively
+///         RecoveryKind::Unknown | _ => false,
+///     }
+/// }
+/// ```
+///
 /// # Examples
 ///
 /// ```rust
