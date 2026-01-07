@@ -64,7 +64,7 @@ use crate::Service;
 /// Bidirectional adapter between layered and Tower service traits.
 ///
 /// Wraps a service to convert between layered's [`Service`] and Tower's
-/// [`tower_service::Service`][tower_service::Service]. Handles backpressure
+/// [`tower_service::Service`]. Handles backpressure
 /// and async execution differences automatically.
 #[derive(Debug, Clone)]
 pub struct Adapter<S>(pub S);

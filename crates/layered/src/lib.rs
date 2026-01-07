@@ -100,6 +100,7 @@
 //!
 //! All services must be [`Send`] + [`Sync`], and returned futures must be [`Send`].
 //! This ensures compatibility with multi-threaded async runtimes like Tokio.
+//!
 //! ## Features
 //!
 //! - **`intercept`** — Enables [`Intercept`] middleware

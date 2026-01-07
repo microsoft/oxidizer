@@ -12,7 +12,7 @@ use crate::Service;
 ///
 /// # Examples
 ///
-/// Simple usage that just observes inputs and outputs without modification:
+/// Simple usage that observes inputs and outputs without modification:
 ///
 /// ```rust
 /// # use layered::{Execute, Stack, Intercept, Service};
@@ -20,7 +20,7 @@ use crate::Service;
 /// let execution_stack = (
 ///     Intercept::layer()
 ///         .on_input(|input| println!("request: {input}"))
-///         .on_output(|output| println!("another response: {output}")),
+///         .on_output(|output| println!("response: {output}")),
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
@@ -36,16 +36,16 @@ use crate::Service;
 /// # async fn example() {
 /// let execution_stack = (
 ///     Intercept::<String, String, _>::layer()
-///         .on_input(|input| println!("request: {input}")) // first, input observers are called
-///         .on_input(|input| println!("another: {input}")) // even multiple ones
+///         .on_input(|input| println!("request: {input}")) // input observers are called first
+///         .on_input(|input| println!("another: {input}")) // multiple observers supported
 ///         .debug_input() // convenience method to print inputs with `dbg!`
-///         .modify_input(|input| input.to_uppercase()) // then, inputs can be modified
-///         .modify_input(|input| input.to_lowercase()) // you can register multiple modifications
-///         .on_output(|output| println!("response: {output}")) // output observers are called first
-///         .on_output(|output| println!("another response: {output}")) // multiple output observers
+///         .modify_input(|input| input.to_uppercase()) // then inputs are modified
+///         .modify_input(|input| input.to_lowercase()) // multiple modifications supported
+///         .on_output(|output| println!("response: {output}")) // output observers called first
+///         .on_output(|output| println!("another response: {output}")) // multiple observers supported
 ///         .debug_output() // convenience method to print outputs with `dbg!`
-///         .modify_output(|output|output.trim().to_string()) // then outputs can be modified
-///         .modify_output(|output| format!("result: {output}")), // multiple modifications are allowed
+///         .modify_output(|output| output.trim().to_string()) // then outputs are modified
+///         .modify_output(|output| format!("result: {output}")), // multiple modifications supported
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
@@ -213,7 +213,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     /// let execution_stack = (
     ///     Intercept::layer()
     ///         .on_output(|output| println!("response: {output}"))
-    ///         .on_output(|output| println!("oh, another: {output}")),
+    ///         .on_output(|output| println!("another response: {output}")),
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
