@@ -6,7 +6,7 @@ name = "layered"
 description = "A foundational service abstraction for building composable, middleware-driven systems."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "service", "middleware", "layer", "oxidizer", "compose"]
+keywords = ["oxidizer", "service", "middleware", "layer", "compose"]
 categories = ["data-structures"]
 
 edition.workspace = true
@@ -24,6 +24,9 @@ tower-service = ["dep:tower-service"]
 
 [package.metadata.docs.rs]
 all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["tower_layer::Layer"]
 
 [dependencies]
 tower-layer = { workspace = true }

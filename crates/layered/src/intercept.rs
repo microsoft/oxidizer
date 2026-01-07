@@ -462,6 +462,7 @@ impl<In, Out> InterceptInner<In, Out> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;

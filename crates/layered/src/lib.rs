@@ -1,5 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/favicon.ico")]
+
 //! # Layered Services
 //!
 //! Build composable async services with stackable middleware.
@@ -134,5 +139,6 @@ pub use intercept::{Intercept, InterceptLayer};
 #[cfg(any(test, feature = "tower-service"))]
 pub mod tower;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 pub(crate) mod testing;
