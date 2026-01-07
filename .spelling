@@ -1,4 +1,4 @@
-286
+294
 0.X.Y
 100k
 10k
@@ -90,6 +90,7 @@ DevOps
 DI
 DLLs
 docs.rs
+docsrs
 docstring
 DotNet
 dSMS
@@ -134,6 +135,7 @@ interoperate
 IOCP
 IP
 Kubernetes
+libc
 libs
 libunwind-devel
 lifecycle
@@ -142,6 +144,7 @@ llvm-cov
 macros
 Macros
 Makefile
+MEMORYSTATUSEX
 metadata
 Metas
 Microservices
@@ -223,6 +226,7 @@ setsockopt
 shareable
 skimmable
 SLAs
+smallvec
 startup
 stderr
 stdlib
@@ -239,6 +243,8 @@ supertrait
 supertraits
 Symcrypt
 sys
+syscall
+sysinfo
 tdnf
 testability
 timestamp
@@ -266,6 +272,7 @@ unregister
 unregistered
 unregisters
 unsized
+untrusted
 UTC
 UTF-8
 v4
@@ -281,6 +288,7 @@ wildcards
 Win32
 winsock
 workflow
+workflows
 workspace
 w.r.t.
 Xamarin

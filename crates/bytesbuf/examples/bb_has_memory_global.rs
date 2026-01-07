@@ -4,7 +4,8 @@
 //! Showcases how to implement the `HasMemory` trait
 //! using the `GlobalPool` implementation strategy.
 
-use bytesbuf::{BytesView, GlobalPool, HasMemory, MemoryShared};
+use bytesbuf::BytesView;
+use bytesbuf::mem::{GlobalPool, HasMemory, MemoryShared};
 
 fn main() {
     // The global memory pool in real-world code would be provided by the application framework.

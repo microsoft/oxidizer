@@ -3,6 +3,7 @@
 Please see each crate's change log below:
 
 - [`bytesbuf`](./crates/bytesbuf/CHANGELOG.md)
+- [`bytesbuf_io`](./crates/bytesbuf_io/CHANGELOG.md)
 - [`data_privacy`](./crates/data_privacy/CHANGELOG.md)
 - [`data_privacy_macros`](./crates/data_privacy_macros/CHANGELOG.md)
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/CHANGELOG.md)

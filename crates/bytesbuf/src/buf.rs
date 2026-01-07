@@ -7,9 +7,10 @@ use std::num::NonZero;
 
 use smallvec::SmallVec;
 
-use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory, MemoryGuard, Span, SpanBuilder};
+use crate::mem::{Block, BlockSize, Memory};
+use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
-/// Assembles byte sequences in reserved memory, exposing them as [`BytesView`]s.
+/// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
 /// The buffer owns some memory capacity into which it allows you to write a sequence of bytes that
 /// you can thereafter extract as one or more [`BytesView`]s over immutable data. Mutation of the
@@ -24,6 +25,8 @@ use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory
 /// A single `BytesBuf` can use memory capacity from any [memory provider], including a
 /// mix of different memory providers. All methods that extend the memory capacity require the caller
 /// to provide a reference to the memory provider to use.
+///
+/// To understand how to obtain access to a memory provider, see [Producing Byte Sequences].
 ///
 /// When data is extracted from the buffer by consuming it (via [`consume()`] or [`consume_all()`]),
 /// ownership of the used memory capacity is transferred to the returned [`BytesView`]. Any leftover
@@ -45,12 +48,35 @@ use crate::{Block, BlockSize, BytesBufWrite, BytesView, MAX_INLINE_SPANS, Memory
 /// consuming capacity as each appended [`BytesView`] brings its own backing memory capacity.
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
-/// [memory provider]: crate::Memory
+/// # Example
+///
+/// ```
+/// # use bytesbuf::mem::{GlobalPool, Memory};
+/// use bytesbuf::BytesBuf;
+///
+/// const HEADER_MAGIC: &[u8] = b"HDR\x00";
+///
+/// # let memory = GlobalPool::new();
+/// let mut buf = memory.reserve(64);
+///
+/// // Build a message from various pieces.
+/// buf.put_slice(HEADER_MAGIC);
+/// buf.put_num_be(1_u16); // Version
+/// buf.put_num_be(42_u32); // Payload length
+/// buf.put_num_be(0xDEAD_BEEF_u64); // Checksum
+///
+/// // Consume the buffered data as an immutable BytesView.
+/// let message = buf.consume_all();
+/// assert_eq!(message.len(), 18);
+/// ```
+///
+/// [memory provider]: crate::mem::Memory
 /// [`reserve()`]: Self::reserve
 /// [`put_bytes()`]: Self::put_bytes
 /// [`consume()`]: Self::consume
 /// [`consume_all()`]: Self::consume_all
 /// [`peek()`]: Self::peek
+/// [Producing Byte Sequences]: crate#producing-byte-sequences
 #[derive(Default)]
 pub struct BytesBuf {
     // The frozen spans are at the front of the sequence being built and have already become
@@ -154,6 +180,26 @@ impl BytesBuf {
     ///
     /// The memory provider may provide more capacity than requested - `additional_bytes` is only a lower bound.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use bytesbuf::BytesBuf;
+    /// # use bytesbuf::mem::GlobalPool;
+    ///
+    /// # let memory = GlobalPool::new();
+    /// let mut buf = BytesBuf::new();
+    ///
+    /// // Must reserve capacity before writing.
+    /// buf.reserve(16, &memory);
+    /// assert!(buf.remaining_capacity() >= 16);
+    ///
+    /// buf.put_num_be(0x1234_5678_u32);
+    ///
+    /// // Can reserve more capacity at any time.
+    /// buf.reserve(100, &memory);
+    /// assert!(buf.remaining_capacity() >= 100);
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if the resulting total buffer capacity would be greater than `usize::MAX`.
@@ -233,6 +279,28 @@ impl BytesBuf {
     /// Functionally similar to [`consume_all()`] except all the data remains in the
     /// buffer and can still be consumed later.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(16);
+    /// buf.put_num_be(0x1234_u16);
+    /// buf.put_num_be(0x5678_u16);
+    ///
+    /// // Peek at the data without consuming it.
+    /// let mut peeked = buf.peek();
+    /// assert_eq!(peeked.get_num_be::<u16>(), 0x1234);
+    /// assert_eq!(peeked.get_num_be::<u16>(), 0x5678);
+    ///
+    /// // Despite consuming from peeked, the buffer still contains all data.
+    /// assert_eq!(buf.len(), 4);
+    ///
+    /// let consumed = buf.consume_all();
+    /// assert_eq!(consumed.len(), 4);
+    /// ```
+    ///
     /// [`consume_all()`]: Self::consume_all
     #[must_use]
     pub fn peek(&self) -> BytesView {
@@ -260,6 +328,25 @@ impl BytesBuf {
     }
 
     /// How many bytes of data are in the buffer, ready to be consumed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(32);
+    /// assert_eq!(buf.len(), 0);
+    ///
+    /// buf.put_num_be(0x1234_5678_u32);
+    /// assert_eq!(buf.len(), 4);
+    ///
+    /// buf.put_slice(*b"Hello");
+    /// assert_eq!(buf.len(), 9);
+    ///
+    /// _ = buf.consume(4);
+    /// assert_eq!(buf.len(), 5);
+    /// ```
     #[must_use]
     #[cfg_attr(debug_assertions, expect(clippy::missing_panics_doc, reason = "only unreachable panics"))]
     pub fn len(&self) -> usize {
@@ -289,6 +376,29 @@ impl BytesBuf {
     /// The total capacity of the buffer.
     ///
     /// This is the total length of the filled bytes and the available bytes regions.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bytesbuf::BytesBuf;
+    /// # use bytesbuf::mem::GlobalPool;
+    ///
+    /// # let memory = GlobalPool::new();
+    /// let mut buf = BytesBuf::new();
+    /// assert_eq!(buf.capacity(), 0);
+    ///
+    /// buf.reserve(100, &memory);
+    /// let initial_capacity = buf.capacity();
+    /// assert!(initial_capacity >= 100);
+    ///
+    /// // Writing does not change capacity.
+    /// buf.put_slice(*b"Hello");
+    /// assert_eq!(buf.capacity(), initial_capacity);
+    ///
+    /// // Consuming reduces capacity (memory is transferred to the BytesView).
+    /// _ = buf.consume(5);
+    /// assert!(buf.capacity() < initial_capacity);
+    /// ```
     #[must_use]
     pub fn capacity(&self) -> usize {
         // Will not overflow - `capacity <= usize::MAX` is a type invariant.
@@ -297,6 +407,33 @@ impl BytesBuf {
 
     /// How many more bytes can be written into the buffer
     /// before its memory capacity is exhausted.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bytesbuf::BytesBuf;
+    /// # use bytesbuf::mem::GlobalPool;
+    ///
+    /// # let memory = GlobalPool::new();
+    /// let mut buf = BytesBuf::new();
+    ///
+    /// buf.reserve(100, &memory);
+    /// let initial_remaining = buf.remaining_capacity();
+    /// assert!(initial_remaining >= 100);
+    ///
+    /// // Writing reduces remaining capacity.
+    /// buf.put_slice(*b"Hello");
+    /// assert_eq!(buf.remaining_capacity(), initial_remaining - 5);
+    ///
+    /// // Reserving more increases remaining capacity.
+    /// buf.reserve(200, &memory);
+    /// assert!(buf.remaining_capacity() >= 200);
+    ///
+    /// // Consuming buffered data does NOT affect remaining capacity.
+    /// let remaining_before_consume = buf.remaining_capacity();
+    /// _ = buf.consume(5);
+    /// assert_eq!(buf.remaining_capacity(), remaining_before_consume);
+    /// ```
     #[cfg_attr(test, mutants::skip)] // Lying about buffer sizes is an easy way to infinite loops.
     pub fn remaining_capacity(&self) -> usize {
         // The remaining capacity is the sum of the remaining capacity of all span builders.
@@ -314,6 +451,30 @@ impl BytesBuf {
     /// Consumes `len` bytes from the beginning of the buffer.
     ///
     /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(32);
+    ///
+    /// buf.put_num_be(0x1111_u16);
+    /// buf.put_num_be(0x2222_u16);
+    ///
+    /// // Consume first part.
+    /// let mut first = buf.consume(2);
+    /// assert_eq!(first.get_num_be::<u16>(), 0x1111);
+    ///
+    /// // Write more data.
+    /// buf.put_num_be(0x3333_u16);
+    ///
+    /// // Consume remaining data.
+    /// let mut rest = buf.consume(4);
+    /// assert_eq!(rest.get_num_be::<u16>(), 0x2222);
+    /// assert_eq!(rest.get_num_be::<u16>(), 0x3333);
+    /// ```
     ///
     /// # Panics
     ///
@@ -411,6 +572,23 @@ impl BytesBuf {
     /// Consumes all bytes in the buffer.
     ///
     /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(32);
+    /// buf.put_slice(*b"Hello, ");
+    /// buf.put_slice(*b"world!");
+    /// buf.put_num_be(0x2121_u16); // "!!"
+    ///
+    /// let message = buf.consume_all();
+    ///
+    /// assert_eq!(message, b"Hello, world!!!");
+    /// assert!(buf.is_empty());
+    /// ```
     pub fn consume_all(&mut self) -> BytesView {
         // SAFETY: Consuming len() bytes from self cannot possibly be out of bounds.
         unsafe { self.consume_checked(self.len()).unwrap_unchecked() }
@@ -475,6 +653,37 @@ impl BytesBuf {
     /// To write to multiple slices concurrently, use [`begin_vectored_write()`].
     #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(64);
+    /// let data_to_write: &[u8] = b"0123456789";
+    ///
+    /// // Write data without assuming the length of first_unfilled_slice().
+    /// let mut written = 0;
+    ///
+    /// while written < data_to_write.len() {
+    ///     let dst = buf.first_unfilled_slice();
+    ///
+    ///     let bytes_to_write = dst.len().min(data_to_write.len() - written);
+    ///
+    ///     for i in 0..bytes_to_write {
+    ///         dst[i].write(data_to_write[written + i]);
+    ///     }
+    ///
+    ///     // SAFETY: We just initialized `bytes_to_write` bytes.
+    ///     unsafe {
+    ///         buf.advance(bytes_to_write);
+    ///     }
+    ///     written += bytes_to_write;
+    /// }
+    ///
+    /// assert_eq!(buf.consume_all(), b"0123456789");
+    /// ```
+    ///
     /// [`advance()`]: Self::advance
     /// [`begin_vectored_write()`]: Self::begin_vectored_write
     pub fn first_unfilled_slice(&mut self) -> &mut [MaybeUninit<u8>] {
@@ -490,6 +699,37 @@ impl BytesBuf {
     ///
     /// The next call to [`first_unfilled_slice()`] will return the next slice of memory that
     /// can be filled with data.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(64);
+    /// let data_to_write: &[u8] = b"0123456789";
+    ///
+    /// // Write data without assuming the length of first_unfilled_slice().
+    /// let mut written = 0;
+    ///
+    /// while written < data_to_write.len() {
+    ///     let dst = buf.first_unfilled_slice();
+    ///
+    ///     let bytes_to_write = dst.len().min(data_to_write.len() - written);
+    ///
+    ///     for i in 0..bytes_to_write {
+    ///         dst[i].write(data_to_write[written + i]);
+    ///     }
+    ///
+    ///     // SAFETY: We just initialized `bytes_to_write` bytes.
+    ///     unsafe {
+    ///         buf.advance(bytes_to_write);
+    ///     }
+    ///     written += bytes_to_write;
+    /// }
+    ///
+    /// assert_eq!(buf.consume_all(), b"0123456789");
+    /// ```
     ///
     /// # Safety
     ///
@@ -552,6 +792,39 @@ impl BytesBuf {
     /// transferred, so the length limit here allows you to project a restricted view of the
     /// available capacity without having to limit the true capacity of the buffer.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::ptr;
+    ///
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(64);
+    /// let capacity = buf.remaining_capacity();
+    ///
+    /// let mut vectored = buf.begin_vectored_write(None);
+    /// let mut slices: Vec<_> = vectored.iter_slices_mut().collect();
+    ///
+    /// // Fill all slices with 0xAE bytes.
+    /// // In practice, these could be filled concurrently by vectored I/O APIs.
+    /// let mut total_written = 0;
+    /// for slice in &mut slices {
+    ///     // SAFETY: Writing valid u8 values to the entire slice.
+    ///     unsafe {
+    ///         ptr::write_bytes(slice.as_mut_ptr(), 0xAE, slice.len());
+    ///     }
+    ///     total_written += slice.len();
+    /// }
+    ///
+    /// // SAFETY: We initialized `total_written` bytes sequentially.
+    /// unsafe {
+    ///     vectored.commit(total_written);
+    /// }
+    ///
+    /// assert_eq!(buf.len(), capacity);
+    /// ```
+    ///
     /// # Panics
     ///
     /// Panics if `max_len` is greater than the remaining capacity of the buffer.
@@ -583,10 +856,10 @@ impl BytesBuf {
         Some(BytesBufVectoredWrite { buf: self, max_len })
     }
 
-    fn iter_available_capacity(&mut self, max_len: Option<usize>) -> BytesBufAvailableIterator<'_> {
+    fn iter_available_capacity(&mut self, max_len: Option<usize>) -> BytesBufRemaining<'_> {
         let next_span_builder_index = if self.span_builders_reversed.is_empty() { None } else { Some(0) };
 
-        BytesBufAvailableIterator {
+        BytesBufRemaining {
             buf: self,
             next_span_builder_index,
             max_len,
@@ -612,6 +885,25 @@ impl BytesBuf {
     ///
     /// The memory capacity of the `BytesBuf` will be automatically extended on demand
     /// with additional capacity from the supplied memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::io::Write;
+    ///
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(32);
+    /// {
+    ///     let mut writer = buf.as_write(&memory);
+    ///     writer.write_all(b"Hello, ")?;
+    ///     writer.write_all(b"world!")?;
+    /// }
+    ///
+    /// assert_eq!(buf.consume_all(), b"Hello, world!");
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     #[inline]
     pub fn as_write<M: Memory>(&mut self, memory: &M) -> impl std::io::Write {
         BytesBufWrite::new(self, memory)
@@ -671,12 +963,15 @@ impl ConsumeManifest {
     }
 }
 
-/// Concurrently writes data into multiple slices of buffer memory capacity.
+/// Coordinates concurrent write operations into a buffer's memory capacity.
 ///
 /// The operation takes exclusive ownership of the `BytesBuf`. During the vectored write,
 /// the remaining capacity of the `BytesBuf` is exposed as `MaybeUninit<u8>` slices
 /// that at the end of the operation must be filled sequentially and in order, without gaps,
 /// in any desired amount (from 0 bytes written to all slices filled).
+///
+/// All slices may be written to concurrently and/or in any order - consistency of the contents
+/// is only required at the moment the write is committed.
 ///
 /// The capacity exposed during the operation can optionally be limited to `max_len` bytes.
 ///
@@ -697,7 +992,7 @@ impl BytesBufVectoredWrite<'_> {
     ///
     /// The slices returned from this iterator have the lifetime of the vectored
     /// write operation itself, allowing them to be mutated concurrently.
-    pub fn iter_slices_mut(&mut self) -> BytesBufAvailableIterator<'_> {
+    pub fn iter_slices_mut(&mut self) -> BytesBufRemaining<'_> {
         self.buf.iter_available_capacity(self.max_len)
     }
 
@@ -756,12 +1051,14 @@ impl BytesBufVectoredWrite<'_> {
     }
 }
 
-/// Iterates over the available capacity of a `BytesBuf` as part of a vectored write
-/// operation, returning a sequence of `MaybeUninit<u8>` slices.
+/// Exposes the remaining memory capacity of a `BytesBuf` for concurrent writes.
+///
+/// This is used during a vectored write operation, iterating over a sequence
+/// of `MaybeUninit<u8>` slices that the caller can concurrently write into.
 ///
 /// The slices may be mutated for as long as the vectored write operation exists.
 #[derive(Debug)]
-pub struct BytesBufAvailableIterator<'a> {
+pub struct BytesBufRemaining<'a> {
     buf: &'a mut BytesBuf,
     next_span_builder_index: Option<usize>,
 
@@ -772,7 +1069,7 @@ pub struct BytesBufAvailableIterator<'a> {
     max_len: Option<usize>,
 }
 
-impl<'a> Iterator for BytesBufAvailableIterator<'a> {
+impl<'a> Iterator for BytesBufRemaining<'a> {
     type Item = &'a mut [MaybeUninit<u8>];
 
     #[cfg_attr(test, mutants::skip)] // This gets mutated into an infinite loop which is not very helpful.
@@ -860,8 +1157,8 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::testing::TestMemoryBlock;
-    use crate::{FixedBlockTestMemory, GlobalPool};
+    use crate::mem::GlobalPool;
+    use crate::mem::testing::{FixedBlockMemory, TestMemoryBlock};
 
     const U64_SIZE: usize = size_of::<u64>();
     const TWO_U64_SIZE: usize = size_of::<u64>() + size_of::<u64>();
@@ -871,7 +1168,7 @@ mod tests {
 
     #[test]
     fn smoke_test() {
-        let memory = FixedBlockTestMemory::new(nz!(1234));
+        let memory = FixedBlockMemory::new(nz!(1234));
 
         let min_length = 1000;
 
@@ -931,7 +1228,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(100));
+        let memory = FixedBlockMemory::new(nz!(100));
 
         // Have 0, desired 10, requesting 10, will get 100.
         buf.reserve(10, &memory);
@@ -964,7 +1261,7 @@ mod tests {
 
     #[test]
     fn append_existing_view() {
-        let memory = FixedBlockTestMemory::new(nz!(1234));
+        let memory = FixedBlockMemory::new(nz!(1234));
 
         let min_length = 1000;
 
@@ -1015,7 +1312,7 @@ mod tests {
     #[test]
     fn consume_all_mixed() {
         let mut buf = BytesBuf::new();
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Reserve some capacity and add initial data.
         buf.reserve(16, &memory);
@@ -1053,7 +1350,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
 
         // Peeking an empty buffer is fine, it is just an empty BytesView in that case.
         let peeked = buf.peek();
@@ -1139,7 +1436,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
 
         buf.reserve(100, &memory);
 
@@ -1182,7 +1479,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(100));
+        let memory = FixedBlockMemory::new(nz!(100));
 
         // Capacity: 0 -> 1000 (10x100)
         buf.reserve(1000, &memory);
@@ -1213,7 +1510,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
         buf.reserve(TWO_U64_SIZE, &memory);
@@ -1268,7 +1565,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
         buf.reserve(TWO_U64_SIZE, &memory);
@@ -1294,7 +1591,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 8 (1x8)
         buf.reserve(U64_SIZE, &memory);
@@ -1330,7 +1627,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
         buf.reserve(THREE_U64_SIZE, &memory);
@@ -1395,7 +1692,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
         buf.reserve(THREE_U64_SIZE, &memory);
@@ -1456,7 +1753,7 @@ mod tests {
     fn vectored_write_max_len_overflow() {
         let mut buf = BytesBuf::new();
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 24 (3x8)
         buf.reserve(THREE_U64_SIZE, &memory);
@@ -1475,7 +1772,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 16 (2x8)
         buf.reserve(TWO_U64_SIZE, &memory);
@@ -1500,7 +1797,7 @@ mod tests {
         assert_eq!(buf.capacity(), 0);
         assert_eq!(buf.remaining_capacity(), 0);
 
-        let memory = FixedBlockTestMemory::new(nz!(8));
+        let memory = FixedBlockMemory::new(nz!(8));
 
         // Capacity: 0 -> 8 (1x8)
         buf.reserve(U64_SIZE, &memory);
@@ -1630,7 +1927,7 @@ mod tests {
 
     #[test]
     fn consume_manifest_correctly_calculated() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
 
         let mut buf = BytesBuf::new();
         buf.reserve(100, &memory);
@@ -1703,7 +2000,7 @@ mod tests {
 
     #[test]
     fn peek_with_frozen_spans_only() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
@@ -1724,7 +2021,7 @@ mod tests {
 
     #[test]
     fn peek_with_partially_filled_span_builder() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
         let mut buf = BytesBuf::new();
 
         buf.reserve(10, &memory);
@@ -1745,7 +2042,7 @@ mod tests {
 
     #[test]
     fn peek_preserves_capacity_of_partial_span_builder() {
-        let memory = FixedBlockTestMemory::new(nz!(20));
+        let memory = FixedBlockMemory::new(nz!(20));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
@@ -1778,7 +2075,7 @@ mod tests {
 
     #[test]
     fn peek_with_mixed_frozen_and_unfrozen() {
-        let memory = FixedBlockTestMemory::new(nz!(10));
+        let memory = FixedBlockMemory::new(nz!(10));
         let mut buf = BytesBuf::new();
 
         buf.reserve(30, &memory);
@@ -1812,7 +2109,7 @@ mod tests {
 
     #[test]
     fn peek_then_consume() {
-        let memory = FixedBlockTestMemory::new(nz!(20));
+        let memory = FixedBlockMemory::new(nz!(20));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
@@ -1843,7 +2140,7 @@ mod tests {
 
     #[test]
     fn peek_multiple_times() {
-        let memory = FixedBlockTestMemory::new(nz!(20));
+        let memory = FixedBlockMemory::new(nz!(20));
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);

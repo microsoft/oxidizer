@@ -46,7 +46,13 @@ if ($crateName -match "-") {
 }
 
 $crateDescription = Read-Host -Prompt "Enter the crate description"
-$crateKeywords = Read-Host -Prompt "Enter comma-separated crate keywords (see https://crates.io/keywords for inspiration)"
+$crateKeywords = Read-Host -Prompt "Enter comma-separated crate keywords (max 5, see https://crates.io/keywords for inspiration)"
+$keywordsList = $crateKeywords.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+if ($keywordsList.Count -gt 5) {
+    Write-Error "Too many keywords. crates.io allows a maximum of 5 keywords, but $($keywordsList.Count) were provided."
+    exit 1
+}
+
 $crateCategories = Read-Host -Prompt "Enter comma-separated crate categories (see https://crates.io/categories for allowed categories)"
 
 # Define paths
