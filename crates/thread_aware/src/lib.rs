@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Essential building blocks for thread-per-core libraries.
 //!
@@ -11,16 +11,18 @@
 //! memory affinities.
 //!
 //! # Theory of Operation
-//! On a high level, this crate enables thread migrations of state via [`ThreadAware`] trait:
+//!
+//! At a high level, this crate enables thread migrations of state via the [`ThreadAware`] trait:
 //! - Runtimes (and similar) can use it to inform types that they were just moved across a thread or NUMA boundary.
 //! - The authors of said types can then act on this information to implement performance optimizations. Such optimizations
 //!   might include re-allocating memory in a new NUMA region, connecting to a thread-local I/O scheduler,
 //!   or detaching from shared, possibly contended memory with the previous thread.
 //!
-//! Similar to `Clone`, there are no exact semantic prescriptions of how types should behave on relocation.
+//! Similar to [`Clone`], there are no exact semantic prescriptions of how types should behave on relocation.
 //! They might continue to share some state (e.g., a common cache) or fully detach from it for performance reasons.
-//! However, like `Clone`, the relocation itself should be mostly transparent and predictable to users.
-//!
+//! The primary goal is performance, so types should aim to minimize contention on synchronization primitives
+//! and cross-NUMA memory access. Like `Clone`, the relocation itself should be mostly transparent and predictable
+//! to users.
 //!
 //! ## Implementing [`ThreadAware`], and `Arc<T, PerCore>`
 //!
@@ -59,7 +61,7 @@
 //!
 //! [`Unaware`] can be used to encapsulate such types, a wrapper that itself implements [`ThreadAware`], but
 //! otherwise does not react to it. You can think of it as a `MoveAsIs<T>`. However, it was
-//! deliberately named `Unaware` to signal that only types which are genuinely unware of their
+//! deliberately named `Unaware` to signal that only types which are genuinely unaware of their
 //! thread relocations (i.e., don't impl [`ThreadAware`]) should be wrapped in such.
 //!
 //! Wrapping types that implement the trait is discouraged, as it will prevent them from properly
@@ -77,12 +79,20 @@
 //! correctly, although they might experience degraded performance through contention of now-shared
 //! resources.
 //!
-//! # Feature Flags
-//! * **`derive`** *(default)* – Re-exports the `#[derive(ThreadAware)]` macro from the companion
+//! ## Provided Implementations
+//!
+//! [`ThreadAware`] is implemented for many standard library types, including primitive types, Vec,
+//! String, Option, Result, tuples, etc. However, it's explicitly not implemented for [`std::sync::Arc`]
+//! as that type implies some level of cross-thread sharing and thus needs special attention when used
+//! from types that implement [`ThreadAware`].
+//!
+//! # Features
+//!
+//! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments: `default-features = false`.
-//! * **`test-util`** – Enables features used for testing.
-//! * **`threads`** – Enables features mainly used by async runtimes for OS interactions.
+//! * **`test-util`**: Enables features used for testing.
+//! * **`threads`**: Enables features mainly used by async runtimes for OS interactions.
 //!
 //! # Examples
 //!
@@ -139,7 +149,6 @@ mod wrappers;
 pub mod closure;
 
 #[cfg(feature = "threads")]
-#[cfg_attr(docsrs, doc(cfg(feature = "threads")))]
 pub mod registry;
 
 pub mod affinity;
@@ -164,7 +173,7 @@ pub use core::ThreadAware;
 /// Unions are not supported and will produce a compile error.
 ///
 /// # Attributes
-/// * `#[thread_aware(skip)]` – Prevents a field from being recursively transferred.
+/// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
 /// Generic type parameters appearing in non-skipped fields automatically receive a
@@ -196,7 +205,6 @@ pub use core::ThreadAware;
 /// }
 /// ```
 #[cfg(feature = "derive")]
-#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use ::thread_aware_macros::ThreadAware;
 pub use cell::storage;
 pub use cell::{Arc, PerCore, PerNuma, PerProcess};

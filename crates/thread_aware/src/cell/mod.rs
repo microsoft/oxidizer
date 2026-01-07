@@ -241,8 +241,8 @@ where
     /// to another processor. The closure behaves like a `RelocateFnOnce` to ensure it captures only values that are safe to
     /// transfer themselves.
     ///
-    /// This function can be used to create a `Arc` of a type that itself doesn't implement [`ThreadAware`] because
-    /// we can ensure that each affinity will get its own, independenty-initialized value:
+    /// This function can be used to create an `Arc` of a type that itself doesn't implement [`ThreadAware`] because
+    /// we can ensure that each affinity will get its own, independently-initialized value:
     ///
     /// ```rust
     /// # use std::sync::{self, Mutex};
@@ -326,12 +326,12 @@ where
 {
     /// Creates a new `Arc` with the given value.
     ///
-    /// The value must implement `ThreadAware` and `Clone`. When transferring to another affinity
+    /// The value must implement [`ThreadAware`] and [`Clone`]. When transferring to another affinity
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
     /// affinity and transferring it to the new affinity.
     ///
-    /// For example, the counter type we implemented in the documentation for [`ThreadAware`] trait
-    /// can be used with new:
+    /// For example, the counter type we implemented in the documentation for the [`ThreadAware`] trait
+    /// can be used with new.
     #[cfg(test)]
     pub(crate) fn with_value(value: T) -> Self {
         let value = sync::Arc::new(value);
@@ -353,7 +353,7 @@ where
 {
     /// Creates a new `Arc` with the given value.
     ///
-    /// The value must implement `Clone`. When transferring to another affinity
+    /// The value must implement [`Clone`]. When transferring to another affinity
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
     /// affinity and transferring it to the new affinity.
     ///
@@ -430,7 +430,7 @@ where
     /// Creates a new `Arc` from the given storage and the current affinity.
     ///
     /// If the resulting `Arc` is transferred to an affinity which does not have data in the storage,
-    /// it will behave like a `sync::Arc`.
+    /// it will behave like a [`sync::Arc`].
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.

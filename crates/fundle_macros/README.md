@@ -1,28 +1,19 @@
 <div align="center">
-  <img src="./logo.png" alt="Fundle Macros Logo" width="128">
+ <img src="./logo.png" alt="Fundle Macros Logo" width="96">
 
 # Fundle Macros
 
 [![crate.io](https://img.shields.io/crates/v/fundle_macros.svg)](https://crates.io/crates/fundle_macros)
 [![docs.rs](https://docs.rs/fundle_macros/badge.svg)](https://docs.rs/fundle_macros)
 [![MSRV](https://img.shields.io/crates/msrv/fundle_macros)](https://crates.io/crates/fundle_macros)
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
 
-* [Summary](#summary)
-* [Macros](#macros)
-  * [`#[bundle]`](#bundle)
-  * [`#[deps]`](#deps)
-  * [`#[newtype]`](#newtype)
-
-## Summary
-
-<!-- cargo-rdme start -->
-
-Macros to support the [`fundle`](https://docs.rs/fundle) crate.
+Macros to support the [`fundle`][__link0] crate.
 
 ## Macros
 
@@ -65,10 +56,10 @@ pub struct DatabaseLogger(Logger);
 
 Generates `Clone`, `From<T: AsRef<Logger>>`, `Deref`, and `DerefMut`.
 
-<!-- cargo-rdme end -->
 
-<div style="font-size: 75%" ><hr/>
+<hr/>
+<sub>
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fundle_macros">source code</a>.
+</sub>
 
-This crate was developed as part of [The Oxidizer Project](https://github.com/microsoft/oxidizer).
-
-</div>
+ [__link0]: https://docs.rs/fundle

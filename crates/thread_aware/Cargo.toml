@@ -16,18 +16,16 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
-
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["thread_aware_macros::ThreadAware"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
-test-util = []
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
@@ -36,6 +34,7 @@ thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
 mutants.workspace = true
+static_assertions.workspace = true
 thread_aware_macros = { workspace = true }
 
 [lints]

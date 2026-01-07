@@ -1,0 +1,110 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: Setup Environment
+description: Configures tool versions, sets up caches, installs Rust and Cargo tools.
+
+inputs:
+  enable-sccache:
+    description: Enable sccache for build caching
+    required: false
+    default: 'false'
+  rust-toolchain:
+    description: Rust toolchain to install. Can be a version (e.g., "stable", "1.70"), multiple (e.g., "stable,nightly"), or environment variable names from constants.toml (e.g., "RUST_MSRV" or "RUST_LATEST,RUST_NIGHTLY"). Leave empty to skip Rust installation.
+    required: false
+    default: ''
+  rust-components:
+    description: Comma-separated list of Rust components to install (e.g., "clippy, rustfmt")
+    required: false
+    default: ''
+  cargo-tools:
+    description: Comma-separated list of cargo tools to install. Can be environment variable names (e.g., "CARGO_HACK_VERSION") which will be expanded to "cargo-hack@<value>", or explicit tool@version pairs (e.g., "cargo-hack@0.6.39")
+    required: false
+    default: ''
+  enable-wild-linker:
+    description: Install Wild linker for faster linking
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Loading Repo Constants
+      shell: bash
+      run: |
+        echo "CARGO_TERM_COLOR=always" >> "$GITHUB_ENV"
+
+        constants_path="${{ github.workspace }}/constants.toml"
+        while IFS= read -r line; do
+          if [[ "$line" =~ ^([A-Z0-9_]+)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+            echo "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}" >> "$GITHUB_ENV"
+          fi
+        done < "$constants_path"
+
+    - name: Processing Tool Versions
+      if: inputs.rust-toolchain != '' || inputs.cargo-tools != ''
+      id: expand
+      shell: bash
+      run: |
+        # Expand Rust Toolchain
+        if [[ -n '${{ inputs.rust-toolchain }}' ]]; then
+          expanded=""
+          IFS=',' read -ra parts <<< '${{ inputs.rust-toolchain }}'
+          for part in "${parts[@]}"; do
+            part=${part// /}
+            if [[ "$part" =~ ^[A-Z0-9_]+$ ]] && [[ -n "${!part}" ]]; then
+              part="${!part}"
+            fi
+            expanded+="${expanded:+,}$part"
+          done
+          echo "toolchain=$expanded" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Expand Cargo Tools
+        if [[ -n '${{ inputs.cargo-tools }}' ]]; then
+          expanded=""
+          IFS=',' read -ra parts <<< '${{ inputs.cargo-tools }}'
+          for tool in "${parts[@]}"; do
+            tool=${tool// /}
+            if [[ "$tool" =~ ^CARGO_([A-Z0-9_]+)_VERSION$ ]]; then
+              name=$(echo "${BASH_REMATCH[1]}" | tr 'A-Z_' 'a-z-')
+              val="${!tool}"
+              [[ -n "$val" ]] && tool="cargo-$name@$val"
+            elif [[ "$tool" =~ ^(.+)@([A-Z0-9_]+)$ ]]; then
+              val="${!BASH_REMATCH[2]}"
+              [[ -n "$val" ]] && tool="${BASH_REMATCH[1]}@$val"
+            fi
+            expanded+="${expanded:+, }$tool"
+          done
+          echo "cargo_tools=$expanded" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Configure Sccache
+      if: inputs.enable-sccache == 'true'
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+    - name: Start Sccache
+      if: inputs.enable-sccache == 'true'
+      uses: mozilla-actions/sccache-action@v0.0.9
+      with:
+        version: ${{ env.SCCACHE_VERSION }}
+
+    - name: Install Rust
+      if: inputs.rust-toolchain != ''
+      uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+      with:
+        toolchain: ${{ steps.expand.outputs.toolchain }}
+        components: ${{ inputs.rust-components }}
+
+    - name: Install Cargo Tools
+      if: inputs.cargo-tools != ''
+      uses: taiki-e/install-action@v2.65.1
+      with:
+        tool: ${{ steps.expand.outputs.cargo_tools }}
+
+    - name: Install Wild Linker
+      if: inputs.enable-wild-linker == 'true'
+      uses: davidlattimore/wild-action@0.7.0

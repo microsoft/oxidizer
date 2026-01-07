@@ -69,33 +69,35 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
         #input
 
         impl #impl_generics ::data_privacy::Classified for #struct_name #ty_generics #where_clause {
-            fn data_class(&self) -> ::data_privacy::DataClass {
-                #data_class.data_class()
+            fn data_class(&self) -> &::data_privacy::DataClass {
+                #data_class.as_ref()
             }
         }
 
         impl #impl_generics ::core::fmt::Debug for #struct_name #ty_generics #where_clause {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_fmt(format_args!("<CLASSIFIED:{}/{}>", data_privacy::Classified::data_class(self).taxonomy(), data_privacy::Classified::data_class(self).name()))
+                let dc = <Self as ::data_privacy::Classified>::data_class(self);
+                write!(f, "<CLASSIFIED:{}/{}>", dc.taxonomy(), dc.name())
             }
         }
 
         impl #impl_generics ::core::fmt::Display for #struct_name #ty_generics #where_clause {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_fmt(format_args!("<CLASSIFIED:{}/{}>", data_privacy::Classified::data_class(self).taxonomy(), data_privacy::Classified::data_class(self).name()))
+                let dc = <Self as ::data_privacy::Classified>::data_class(self);
+                write!(f, "<CLASSIFIED:{}/{}>", dc.taxonomy(), dc.name())
             }
         }
 
         impl #impl_generics ::data_privacy::RedactedDebug for #struct_name #ty_generics #where_clause {
             #[expect(
                 clippy::cast_possible_truncation,
-                reason = "Converting from u64 to usize, value is known to be <= 128"
+                reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
             )]
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                use data_privacy::Classified;
-
+                const STACK_BUFFER_SIZE: usize = 128;
                 let v = &self.0;
-                let mut local_buf = [0u8; 128];
+                let dc = <Self as ::data_privacy::Classified>::data_class(self);
+                let mut local_buf = [0u8; STACK_BUFFER_SIZE];
                 let amount = {
                     let mut cursor = ::std::io::Cursor::new(&mut local_buf[..]);
                     if ::std::io::Write::write_fmt(&mut cursor, format_args!("{v:?}")).is_ok() {
@@ -106,9 +108,9 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                 };
                 if amount <= local_buf.len() {
                     let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
-                    engine.redact(&self.data_class(), s, output)
+                    engine.redact(dc, s, output)
                 } else {
-                    engine.redact(&self.data_class(), format!("{v:?}"), output)
+                    engine.redact(dc, format!("{v:?}"), output)
                 }
             }
         }
@@ -116,13 +118,13 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
         impl #impl_generics ::data_privacy::RedactedDisplay for #struct_name #ty_generics #where_clause {
             #[expect(
                 clippy::cast_possible_truncation,
-                reason = "Converting from u64 to usize, value is known to be <= 128"
+                reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
             )]
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
-                use data_privacy::Classified;
-
+                const STACK_BUFFER_SIZE: usize = 128;
                 let v = &self.0;
-                let mut local_buf = [0u8; 128];
+                let dc = <Self as ::data_privacy::Classified>::data_class(self);
+                let mut local_buf = [0u8; STACK_BUFFER_SIZE];
                 let amount = {
                     let mut cursor = ::std::io::Cursor::new(&mut local_buf[..]);
                     if ::std::io::Write::write_fmt(&mut cursor, format_args!("{v}")).is_ok() {
@@ -133,9 +135,9 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                 };
                 if amount <= local_buf.len() {
                     let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
-                    engine.redact(&self.data_class(), s, output)
+                    engine.redact(dc, s, output)
                 } else {
-                    engine.redact(&self.data_class(), format!("{v}"), output)
+                    engine.redact(dc, format!("{v}"), output)
                 }
             }
         }

@@ -3,27 +3,26 @@
 
 use std::io::Write;
 
-use bytes::BufMut;
+use crate::BytesBuf;
+use crate::mem::Memory;
 
-use crate::{BytesBuf, Memory};
-
-/// Adapts a [`BytesBuf`] to implement the `std::io::Write` trait.
+/// Adapter that implements `std::io::Write` for [`BytesBuf`].
 ///
-/// Instances are created via [`BytesBuf::as_write()`][1].
+/// Create an instance via [`BytesBuf::as_write()`][1].
 ///
 /// The adapter will automatically extend the underlying sequence builder as needed when writing
 /// by allocating additional memory capacity from the memory provider `M`.
 ///
 /// [1]: crate::BytesBuf::as_write
 #[derive(Debug)]
-pub(crate) struct BytesBufWrite<'sb, 'm, M: Memory> {
-    inner: &'sb mut BytesBuf,
+pub(crate) struct BytesBufWrite<'b, 'm, M: Memory> {
+    inner: &'b mut BytesBuf,
     memory: &'m M,
 }
 
-impl<'sb, 'm, M: Memory> BytesBufWrite<'sb, 'm, M> {
+impl<'b, 'm, M: Memory> BytesBufWrite<'b, 'm, M> {
     #[must_use]
-    pub(crate) const fn new(inner: &'sb mut BytesBuf, memory: &'m M) -> Self {
+    pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
         Self { inner, memory }
     }
 }
@@ -32,7 +31,7 @@ impl<M: Memory> Write for BytesBufWrite<'_, '_, M> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.inner.reserve(buf.len(), self.memory);
-        self.inner.put(buf);
+        self.inner.put_slice(buf);
         Ok(buf.len())
     }
 
@@ -43,18 +42,19 @@ impl<M: Memory> Write for BytesBufWrite<'_, '_, M> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use new_zealand::nz;
 
     use super::*;
-    use crate::{FixedBlockTestMemory, TransparentTestMemory};
+    use crate::mem::testing::{FixedBlockMemory, TransparentMemory};
 
     #[test]
     fn smoke_test_write_and_verify_data() {
         let test_data = b"Hello, world! This is a test.";
 
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut builder = memory.reserve(100);
 
         {
@@ -67,18 +67,18 @@ mod tests {
             assert_eq!(bytes_written, test_data.len());
         }
 
-        let sequence = builder.consume_all();
-        assert_eq!(sequence, test_data.as_slice());
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
     }
 
     #[test]
     fn existing_content_is_preserved() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let mut builder = memory.reserve(100);
 
         // Add some initial content to the builder
         let initial_data = b"Initial content";
-        builder.put_slice(initial_data);
+        builder.put_slice(initial_data.as_slice());
 
         {
             let mut write_adapter = builder.as_write(&memory);
@@ -89,16 +89,16 @@ mod tests {
         }
 
         // Verify both initial and additional data are present
-        let sequence = builder.consume_all();
+        let data = builder.consume_all();
         let expected = b"Initial content - Additional data";
-        assert_eq!(sequence, expected.as_slice());
+        assert_eq!(data, expected.as_slice());
     }
 
     #[test]
     fn sufficient_capacity_not_extended() {
         let test_data = b"Small data"; // Much smaller than 100 bytes
 
-        let memory = FixedBlockTestMemory::new(nz!(1024));
+        let memory = FixedBlockMemory::new(nz!(1024));
         let mut builder = memory.reserve(100);
 
         let initial_capacity = builder.capacity();
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(builder.capacity(), initial_capacity);
 
         // Verify the data is there
-        let sequence = builder.consume_all();
-        assert_eq!(sequence, test_data.as_slice());
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
     }
 }

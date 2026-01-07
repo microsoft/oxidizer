@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
 #![cfg_attr(
@@ -11,8 +13,6 @@
         reason = "allow these lints in tests to improve the readability of the tests"
     )
 )]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Primitives for obtaining, working with, and mocking system
 //! time and timers, enabling faster and more robust testing.
@@ -58,12 +58,12 @@
 //! - **Easy async runtime integration** - Provides built-in support for Tokio and can be extended
 //!   to work with other runtimes without tight coupling to any specific implementation.
 //! - **Enables deterministic testing** - With the `test-util` feature, [`ClockControl`] lets you
-//!   manipulate the passage of time—advance it instantly, pause it, or jump forward. No waiting
+//!   manipulate the passage of time: advance it instantly, pause it, or jump forward. No waiting
 //!   for a 1-minute periodic job in your tests.
 //! - **Improves testability** - Time-dependent code becomes fast and reproducible to test
 //!   without relying on wall-clock time.
 //!
-//! The testability features are transparent to consumers—code using [`Clock`] works identically
+//! The testability features are transparent to consuming code, as using [`Clock`] works identically
 //! in production and tests, with zero runtime overhead when `test-util` is disabled.
 //!
 //! # Overview
@@ -76,12 +76,16 @@
 //! - [`Stopwatch`] - Measures elapsed time.
 //! - [`Delay`] - Delays the execution for a specified duration.
 //! - [`PeriodicTimer`] - Schedules a task to run periodically.
-//! - [`FutureExt`] - Extensions for the `Future` trait.
 //! - [`Error`] - Represents an error that can occur when working with time. Provides limited
 //!   introspection capabilities.
 //! - [`fmt`] - Utilities for formatting `SystemTime` into various formats. Available when
 //!   the `fmt` feature is enabled.
 //! - [`runtime`] - Infrastructure for integrating time primitives into async runtimes.
+//!
+//! # Extensions
+//!
+//! - [`FutureExt`] - Extensions for the `Future` trait, providing timeout functionality.
+//! - [`SystemTimeExt`] - Extensions for [`SystemTime`][`std::time::SystemTime`].
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!
@@ -108,7 +112,7 @@
 //! This crate provides a way to control the passage of time in tests via the `ClockControl`
 //! type, which is exposed when the `test-util` feature is enabled.
 //!
-//! > **Important:** Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
+//! > **Important**: Never enable the `test-util` feature for production code. Only use it in your `dev-dependencies`.
 //!
 //! # Examples
 //!
@@ -217,24 +221,24 @@ mod delay;
 mod error;
 
 #[cfg(any(feature = "fmt", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
 pub mod fmt;
 
 mod future_ext;
 mod periodic_timer;
 mod state;
 mod stopwatch;
+mod system_time_ext;
 mod timers;
 
 pub mod runtime;
 pub(crate) mod timeout;
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub use clock_control::ClockControl;
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
+pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;

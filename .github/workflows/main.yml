@@ -10,31 +10,6 @@ on:
   push:
     branches: [ main ]
 
-env:
-  CARGO_TERM_COLOR: always
-
-  # Rust toolchain versions
-  RUST_MSRV: "1.88"                                  # used for testing (ensures the MSRV promise is kept)
-  RUST_LATEST: "1.92"                                # used for static analysis & mutation testing
-  RUST_NIGHTLY: "nightly-2025-11-20"                 # used for coverage and extended analysis
-  RUST_NIGHTLY_EXTERNAL_TYPES: "nightly-2025-08-06"  # used for external type exposure checks
-
-  # Tool versions
-  CARGO_AUDIT_VERSION: "0.22.0"
-  CARGO_CHECK_EXTERNAL_TYPES_VERSION: "0.3.0"
-  CARGO_DENY_VERSION: "0.18.8"
-  CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION: "0.2.0"
-  CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION: "0.2.0"
-  CARGO_HACK_VERSION: "0.6.39"
-  CARGO_LLVM_COV_VERSION: "0.6.21"
-  CARGO_MUTANTS_VERSION: "25.3.1"
-  CARGO_RDME_VERSION: "1.5.0"
-  CARGO_SEMVER_CHECKS_VERSION: "0.45.0"
-  CARGO_SORT_VERSION: "2.0.2"
-  CARGO_UDEPS_VERSION: "0.1.60"
-  CARGO_WORKSPACES_VERSION: "0.4.1"
-  SCCACHE_VERSION: "v0.12.0"
-
 jobs:
   testing:
     runs-on: ${{ matrix.os }}
@@ -42,45 +17,30 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+        uses: actions/checkout@v6.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_MSRV }}
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-hack@${{ env.CARGO_HACK_VERSION }}
+          enable-sccache: true
+          rust-toolchain: RUST_MSRV, RUST_NIGHTLY
+          cargo-tools: CARGO_NEXTEST_VERSION, CARGO_HACK_VERSION
 
       # execute
       - name: Build
         run: cargo hack build --each-feature --workspace --verbose --locked --color always
       - name: Tests
-        run: cargo test --verbose --workspace --all-features
+        if: success() || failure()
+        run: cargo nextest run --verbose --workspace --all-features
       - name: Docs
+        if: success() || failure()
         env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --verbose --workspace --all-features
+          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
+        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace --all-features
       - name: Doc Tests
+        if: success() || failure()
         run: cargo test --doc --verbose --workspace --all-features
 
   static-analysis:
@@ -89,64 +49,158 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          fetch-depth: 2
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }}
-          components: clippy, rustfmt
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}, cargo-rdme@${{ env.CARGO_RDME_VERSION }}, cargo-workspaces@${{ env.CARGO_WORKSPACES_VERSION }}, cargo-ensure-no-default-features@${{ env.CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION }}, cargo-ensure-no-cyclic-deps@${{ env.CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION }}, cargo-deny@${{ env.CARGO_DENY_VERSION }}, cargo-sort@${{ env.CARGO_SORT_VERSION }}, cargo-semver-checks@${{ env.CARGO_SEMVER_CHECKS_VERSION }}
+          enable-sccache: true
+          rust-toolchain: RUST_LATEST
+          rust-components: clippy, rustfmt
+          cargo-tools: CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
 
       # execute
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Audit
-        run: cargo audit
-      - name: Format
+      - name: Source Format
+        if: success() || failure()
         run: cargo fmt -- --check
       - name: Cargo.toml Format
+        if: success() || failure()
         run: cargo sort --check --grouped --workspace
-      - name: Docs
-        run: cargo doc --no-deps --workspace --all-features
-      - name: Rdme
-        run: cargo workspaces exec cargo rdme --check
+      - name: Readmes
+        if: success() || failure()
+        run: cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
       - name: Default Features
+        if: success() || failure()
         run: cargo ensure-no-default-features
       - name: Cyclic Dependencies
+        if: success() || failure()
         run: cargo ensure-no-cyclic-deps
       - name: Dependency Validation
+        if: success() || failure()
         run: cargo deny --all-features --workspace --color always check all
-#      - name: Semver Compatibility
-#        run: cargo semver-checks --all-features --workspace --color always --baseline-rev HEAD^
+
+  spell-check:
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 1
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          rust-toolchain: RUST_LATEST
+          cargo-tools: CARGO_SPELLCHECK_VERSION
+
+      # execute
+      - name: Validate Dictionary
+        run: |
+          FILE=".spelling"
+
+          # Verify the first line is an integer
+          first_line=$(head -n 1 "$FILE")
+          if ! [[ "$first_line" =~ ^[0-9]+$ ]]; then
+            echo "Error: The first line of $FILE must be an integer, but got: '$first_line'"
+            exit 1
+          fi
+          expected_count="$first_line"
+
+          # Check that the number of lines matches the integer
+          actual_count=$(sed '1d' "$FILE" | wc -l | xargs)
+          if [ "$expected_count" -ne "$actual_count" ]; then
+            echo "Error: The number of lines ($actual_count) does not match $expected_count."
+            exit 1
+          fi
+
+          # Verify words are sorted and contain no duplicates
+          # Use LC_ALL=en_US.UTF8 for consistent sorting across environments
+          (
+            sed '1d' $FILE | LC_ALL=en_US.UTF8 sort -uc
+          ) || {
+            echo "Error: Dictionary is not in sorted order or contains duplicates."
+            echo "Expected order:"
+            LC_ALL=en_US.UTF8 sort -u <(sed '1d' $FILE)
+            exit 1
+          }
+
+          echo "Dictionary format is valid ($expected_count words)"
+      - name: Check Spelling
+        run: |
+          if ! cargo spellcheck --cfg spellcheck.toml --code 1
+          then
+              echo ''
+              echo ''
+              echo 'If this is a Rust method/type/variable name, then you should'
+              echo 'enclose it in backticks like this: `MyRustType`.'
+              echo ''
+              echo 'If this is a real word, then you can add it to .spelling'
+              echo '(add the word in sorted order and update the count on line 1)'
+              exit 1
+          fi
+
+  semver:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_LATEST
+          cargo-tools: CARGO_SEMVER_CHECKS_VERSION
+
+      # execute
+      - name: Semver Compatibility
+        id: semver
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo semver-checks --all-features --workspace --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
+
+      # report
+      - name: Prepare Semver Comment
+        if: steps.semver.outcome == 'failure'
+        run: |
+          echo "## ⚠️ Breaking Changes Detected" > semver-comment.txt
+          echo "" >> semver-comment.txt
+          echo '```' >> semver-comment.txt
+          grep -v "^ *Cloning " semver-output.txt | grep -v "^ *Building " | grep -v "^ *Built \[" | grep -v "^ *Parsing " | grep -v "^ *Parsed \[" | grep -v "^ *Checking" | grep -v "^ *Checked \[" | grep -v "^ *Finished \[" | grep -v "^ *Summary " >> semver-comment.txt
+          echo '```' >> semver-comment.txt
+          echo "" >> semver-comment.txt
+          echo "If the breaking changes are intentional then everything is fine - this message is merely informative." >> semver-comment.txt
+          echo "" >> semver-comment.txt
+          echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (\`1.x.x -> 2.x.x\` or \`0.1.x -> 0.2.x\`)." >> semver-comment.txt
+
+      - name: Post Semver Failure Comment
+        if: steps.semver.outcome == 'failure'
+        uses: marocchino/sticky-pull-request-comment@v2.9.4
+        with:
+          header: semver-check
+          path: semver-comment.txt
+
+      - name: Remove Semver Comment on Success
+        if: steps.semver.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@v2.9.4
+        with:
+          header: semver-check
+          delete: true
 
   extended-analysis:
     if: github.event_name == 'pull_request'
-    runs-on: ${{ matrix.os }}
     needs: [testing, static-analysis]
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -154,77 +208,51 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+        uses: actions/checkout@v6.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY }}
-          components: miri
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-udeps@${{ env.CARGO_UDEPS_VERSION }}
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+          cargo-tools: CARGO_UDEPS_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
 
       # execute
       - name: Udeps
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
+      - name: Careful
+        if: success() || failure()
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace --color always --target ${{ runner.os == 'Linux' && 'x86_64-unknown-linux-gnu' || 'x86_64-pc-windows-msvc' }}
       - name: Miri
+        if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
 
   mutation-testing:
     if: github.event_name == 'pull_request'
+    needs: [testing]
     runs-on: ubuntu-latest
-    needs: testing
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }},nightly
-      - name: Installing Wild Linker
-        uses: davidlattimore/wild-action@0.7.0
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          enable-sccache: true
+          enable-wild-linker: true
+          rust-toolchain: RUST_NIGHTLY
+          cargo-tools: CARGO_MUTANTS_VERSION
 
       # execute
-      - name: Generate PR diff
+      - name: Generate PR Diff
         run: git diff origin/main...HEAD >diff.txt
       - name: Mutate Diff
         env:
           DISABLE_T_REX: 1
         timeout-minutes: 45
-        run: cargo +nightly -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
     runs-on: ${{ matrix.os }}
@@ -232,35 +260,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
-      - name: Cache Cargo Dependencies
-        uses: actions/cache@v4.3.0
+        uses: actions/checkout@v6.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-tools-${{ hashFiles('**/Cargo.lock') }}
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY }}
-          components: llvm-tools-preview
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: llvm-tools-preview
+          cargo-tools: CARGO_LLVM_COV_VERSION
 
       # execute
       - name: Generate Coverage (all-features)
@@ -268,7 +278,7 @@ jobs:
       - name: Generate Coverage (no-default-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v5.5.1
+        uses: codecov/codecov-action@v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-all.info,lcov-no-def.info
@@ -303,9 +313,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.0
+        uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 1
       - name: Check License Headers
-        uses: viperproject/check-license-header@v2
+        uses: viperproject/check-license-header@v2.0.3
         with:
           path: .
           config: .github/license-check/config.json
@@ -316,15 +328,13 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
-      - name: Install Rust Nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        uses: actions/checkout@v6.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          toolchain: ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-check-external-types@${{ env.CARGO_CHECK_EXTERNAL_TYPES_VERSION }}
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY_EXTERNAL_TYPES
+          cargo-tools: CARGO_CHECK_EXTERNAL_TYPES_VERSION
 
       # execute
       - name: Check External Type Exposure

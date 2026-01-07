@@ -5,6 +5,9 @@ use crate::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactionEngi
 use core::fmt::{Debug, Display, Formatter};
 use data_privacy::IntoDataClass;
 
+/// Size of the stack-allocated buffer used for formatting before falling back to heap allocation.
+const STACK_BUFFER_SIZE: usize = 128;
+
 /// A wrapper that dynamically classifies a value with a specific data class.
 ///
 /// Use this wrapper in places where the data class of a value cannot be determined statically. When the data class is known
@@ -25,7 +28,7 @@ impl<T> Debug for Sensitive<T> {
 }
 
 impl<T> Sensitive<T> {
-    /// Creates a new instance of `Protected` with the given value and data class.
+    /// Creates a new instance of [`Sensitive`] with the given value and data class.
     pub fn new(value: T, data_class: impl IntoDataClass) -> Self {
         Self {
             value,
@@ -42,7 +45,7 @@ impl<T> Sensitive<T> {
         }
     }
 
-    /// Extracts the wrapped value, consuming the `Sensitive` wrapper.
+    /// Extracts the wrapped value, consuming the [`Sensitive`] wrapper.
     #[must_use]
     pub fn declassify_into(self) -> T {
         self.value
@@ -62,8 +65,8 @@ impl<T> Sensitive<T> {
 }
 
 impl<T> Classified for Sensitive<T> {
-    fn data_class(&self) -> DataClass {
-        self.data_class.clone()
+    fn data_class(&self) -> &DataClass {
+        &self.data_class
     }
 }
 
@@ -73,12 +76,12 @@ where
 {
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "Converting from u64 to usize, value is known to be <= 128"
+        reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
     )]
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
         let v = &self.value;
 
-        let mut local_buf = [0u8; 128];
+        let mut local_buf = [0u8; STACK_BUFFER_SIZE];
         let amount = {
             let mut cursor = std::io::Cursor::new(&mut local_buf[..]);
             if std::io::Write::write_fmt(&mut cursor, format_args!("{v:?}")).is_ok() {
@@ -106,12 +109,12 @@ where
 {
     #[expect(
         clippy::cast_possible_truncation,
-        reason = "Converting from u64 to usize, value is known to be <= 128"
+        reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
     )]
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> std::fmt::Result {
         let v = &self.value;
 
-        let mut local_buf = [0u8; 128];
+        let mut local_buf = [0u8; STACK_BUFFER_SIZE];
         let amount = {
             let mut cursor = std::io::Cursor::new(&mut local_buf[..]);
             if std::io::Write::write_fmt(&mut cursor, format_args!("{v}")).is_ok() {

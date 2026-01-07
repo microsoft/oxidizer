@@ -1,11 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //! Macros for the [`thread_aware`](https://docs.rs/thread_aware) crate.
 //!
 //! # Provided Derives
 //!
-//! * `#[derive(ThreadAware)]` – Auto-implements the `thread_aware::ThreadAware` trait by recursively
+//! * `#[derive(ThreadAware)]`: Auto-implements the `thread_aware::ThreadAware` trait by recursively
 //!   calling `transfer` on each field.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_macros/logo.png")]

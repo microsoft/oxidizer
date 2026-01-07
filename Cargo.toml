@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [workspace]
-resolver = "3"
+resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
@@ -24,10 +24,11 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.1.2" }
-data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.9.0" }
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.8.0" }
-data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.8.0" }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.1" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.1.1" }
+data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.0" }
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
+data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
@@ -37,7 +38,7 @@ testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.0" }
-tick = { path = "crates/tick", default-features = false, version = "0.1.0" }
+tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
 # external dependencies
@@ -64,6 +65,7 @@ mockall = { version = "0.14.0", default-features = false }
 mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }
+num-traits = { version = "0.2.19", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
@@ -74,8 +76,9 @@ quote = { version = "1.0.42", default-features = false }
 rand = { version = "0.9.2", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 regex = { version = "1.12.2", default-features = false }
+rustc-hash = { version = "2.1.0", default-features = false }
 serde = { version = "1.0.228", default-features = false }
-serde_core = { version = "1.0.224", default-features = false }
+serde_core = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
 singleflight-async = { version = "0.2", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
@@ -87,6 +90,7 @@ time-tz = { version = "2.0.0", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
+trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
@@ -103,10 +107,9 @@ trivial_numeric_casts = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
-# Allow cfg attributes for coverage builds and docs.rs builds
+# Allow our special-purpose nonstandard cfg attributes.
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
-    'cfg(docsrs)',
 ] }
 
 [workspace.lints.clippy]
@@ -165,9 +168,26 @@ wildcard_imports = "allow"
 # In a large workspace, duplicate dependencies are inevitable; this lint causes more maintenance burden than practical benefit.
 multiple_crate_versions = "allow"
 
+[workspace.lints.rustdoc]
+missing_crate_level_docs = "warn"
+unescaped_backticks = "warn"
+
+# A bit of debugging support for release builds.
 [profile.release]
 debug = "line-tables-only"
 
+# Best perf possible for benchmarks
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+
+# Best debugging experience possible for test builds. Even though this is the default, we specify it explicitly,
+# otherwise it appears that cargo-llvm-cov assumes different defaults which leads to only minimal debug info in
+# coverage builds.
+[profile.test]
+debug = "full"
+
+# No debug info for mutation testing to speed up compilation
 [profile.mutants]
 inherits = "test"
 debug = "none"

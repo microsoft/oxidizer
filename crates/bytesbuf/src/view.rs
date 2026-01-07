@@ -8,40 +8,71 @@ use std::num::NonZero;
 use std::ops::{Bound, RangeBounds};
 use std::{iter, mem};
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
-use crate::{BlockSize, MAX_INLINE_SPANS, Memory, MemoryGuard, Span};
+use crate::mem::{BlockSize, Memory};
+use crate::{BytesViewReader, MAX_INLINE_SPANS, MemoryGuard, Span};
 
-/// A sequence of immutable bytes that can be inspected and consumed.
+/// A view over a sequence of immutable bytes.
 ///
-/// Note that only the contents of a sequence are immutable - the sequence itself can be
-/// mutated in terms of progressively marking its contents as consumed until it becomes empty.
-/// The typical mechanism for consuming the contents of a `BytesView` is the [`bytes::buf::Buf`][1]
-/// trait that it implements.
+/// Only the contents are immutable - the view itself can be mutated in terms of progressively
+/// marking the byte sequence as consumed until the view becomes empty.
 ///
-/// To create a `BytesView`, use a [`BytesBuf`][3] or clone/slice an existing `BytesView`.
+/// # Creating a `BytesView`
+///
+/// Instances can be created in different ways:
+///
+/// * Use a [`BytesBuf`] to build the byte sequence piece by piece, consuming the buffered data as a new `BytesView` when finished.
+/// * Clone an existing `BytesView` with [`clone()`].
+/// * Take a range of bytes from an existing `BytesView` via [`range()`].
+/// * Combine multiple `BytesView` instances into one via [`from_views()`], [`concat()`] or [`append()`].
+/// * Copy data from a `&[u8]` using [`copied_from_slice()`].
+///
+/// Some of these methods may require you to first [obtain access to a memory provider].
 #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
 ///
-/// [1]: https://docs.rs/bytes/latest/bytes/buf/trait.Buf.html
-/// [3]: crate::BytesBuf
+/// # Example
+///
+/// ```
+/// # let memory = bytesbuf::mem::GlobalPool::new();
+/// use bytesbuf::BytesView;
+///
+/// let mut view = BytesView::copied_from_slice(b"Hello!", &memory);
+///
+/// // Read bytes one at a time until the view is empty.
+/// while !view.is_empty() {
+///     let byte = view.get_byte();
+///     println!("Read byte: {byte}");
+/// }
+///
+/// assert!(view.is_empty());
+/// ```
+///
+/// [`BytesBuf`]: crate::BytesBuf
+/// [`copied_from_slice()`]: Self::copied_from_slice
+/// [`concat()`]: Self::concat
+/// [`append()`]: Self::append
+/// [`range()`]: Self::range
+/// [`from_views()`]: Self::from_views
+/// [`clone()`]: Self::clone
+/// [obtain access to a memory provider]: crate#producing-byte-sequences
 #[derive(Clone, Debug)]
 pub struct BytesView {
-    /// The spans of the sequence, stored in reverse order for efficient consumption
+    /// The spans of the byte sequence, stored in reverse order for efficient consumption
     /// by popping items off the end of the collection.
-    spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>,
+    pub(crate) spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>,
 
     /// We cache the length so we do not have to recalculate it every time it is queried.
     len: usize,
 }
 
 impl BytesView {
-    /// Returns an empty sequence.
+    /// Creates a view over a zero-sized byte sequence.
     ///
-    /// Use a [`BytesBuf`][1] to create a sequence that contains data.
+    /// Use a [`BytesBuf`] to create a view over some actual data.
     ///
-    /// [1]: crate::BytesBuf
+    /// [`BytesBuf`]: crate::BytesBuf
     #[cfg_attr(test, mutants::skip)] // Generates no-op mutations, not useful.
     #[must_use]
     pub const fn new() -> Self {
@@ -56,16 +87,19 @@ impl BytesView {
         spans_reversed.iter().for_each(|span| assert!(!span.is_empty()));
 
         // We can use this to fine-tune the inline span count once we have real-world data.
-        SEQUENCE_CREATED_SPANS.with(|x| x.observe(spans_reversed.len()));
+        VIEW_CREATED_SPANS.with(|x| x.observe(spans_reversed.len()));
 
-        let len = spans_reversed.iter().map(bytes::Buf::remaining).sum();
+        let len = spans_reversed.iter().fold(0_usize, |acc, span: &Span| {
+            acc.checked_add(span.len() as usize)
+                .expect("attempted to create a BytesView larger than usize::MAX bytes")
+        });
 
         Self { spans_reversed, len }
     }
 
-    /// Concatenates a number of spans, yielding a sequence that combines the spans.
+    /// (For testing) Concatenates a number of spans, yielding a view that combines the spans.
     ///
-    /// Later changes made to the input spans will not be reflected in the output sequence.
+    /// Later changes made to the input spans will not be reflected in the resulting view.
     #[cfg(test)]
     pub(crate) fn from_spans<I>(spans: I) -> Self
     where
@@ -77,10 +111,28 @@ impl BytesView {
         Self::from_spans_reversed(spans_reversed)
     }
 
-    /// Concatenates a number of existing sequences, yielding a combined view.
+    /// Concatenates a number of existing byte sequences, yielding a combined view.
     ///
-    /// Later changes made to the input sequences will not be reflected in the output sequence.
-    pub fn from_sequences<I>(sequences: I) -> Self
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let header = BytesView::copied_from_slice(b"HTTP/1.1 ", &memory);
+    /// let status = BytesView::copied_from_slice(b"200 ", &memory);
+    /// let message = BytesView::copied_from_slice(b"OK", &memory);
+    ///
+    /// let response_line = BytesView::from_views([header, status, message]);
+    ///
+    /// assert_eq!(response_line.len(), 15);
+    /// assert_eq!(response_line, b"HTTP/1.1 200 OK");
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting view would be larger than `usize::MAX` bytes.
+    pub fn from_views<I>(views: I) -> Self
     where
         I: IntoIterator<Item = Self>,
         <I as IntoIterator>::IntoIter: iter::DoubleEndedIterator,
@@ -90,86 +142,141 @@ impl BytesView {
         // advance. If we had the span count here, we could avoid some allocations.
 
         // For a given input ABC123.
-        let spans_reversed: SmallVec<_> = sequences
+        let spans_reversed: SmallVec<_> = views
             .into_iter()
-            // We first reverse the sequences: 123ABC.
+            // We first reverse the views: 123ABC.
             .rev()
-            // And from inside each sequence we take the reversed spans: 321CBA.
-            .flat_map(|seq| seq.spans_reversed)
+            // And from inside each view we take the reversed spans: 321CBA.
+            .flat_map(|view| view.spans_reversed)
             // Which become our final SmallVec of spans. Great success!
             .collect();
 
-        // We can use this to fine-tune the inline span count once we have real-world data.
-        SEQUENCE_CREATED_SPANS.with(|x| x.observe(spans_reversed.len()));
-
-        let len = spans_reversed.iter().map(bytes::Buf::remaining).sum();
-
-        Self { spans_reversed, len }
+        Self::from_spans_reversed(spans_reversed)
     }
 
-    /// Shorthand to copy a byte slice into a new `BytesView`, which is a common operation.
+    /// Creates a `BytesView` by copying the contents of a `&[u8]`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # struct TcpConnection;
+    /// # impl TcpConnection {
+    /// #     fn memory(&self) -> impl bytesbuf::mem::Memory { bytesbuf::mem::GlobalPool::new() }
+    /// # }
+    /// # let tcp_connection = TcpConnection;
+    /// use bytesbuf::BytesView;
+    ///
+    /// const CONTENT_TYPE_KEY: &[u8] = b"Content-Type: ";
+    ///
+    /// let header_key = BytesView::copied_from_slice(CONTENT_TYPE_KEY, &tcp_connection.memory());
+    ///
+    /// assert_eq!(header_key.len(), 14);
+    /// ```
+    ///
+    /// # Reusing without copying
+    ///
+    /// There is intentionally no mechanism in the `bytesbuf` crate to reference an existing
+    /// `&[u8]` without copying the contents, even if it has a `'static` lifetime.
+    ///
+    /// The purpose of this limitation is to discourage accidentally involving arbitrary
+    /// memory in high-performance I/O workflows. For efficient I/O processing, data must
+    /// be stored in memory configured according to the needs of the consuming I/O endpoint,
+    /// which is not the case for an arbitrary `&'static [u8]`.
+    ///
+    /// To reuse memory allocations, you need to reuse `BytesView` instances themselves.
+    /// See the `bb_reuse.rs` example in the `bytesbuf` crate for a detailed example.
     #[must_use]
-    pub fn copied_from_slice(bytes: &[u8], memory_provider: &impl Memory) -> Self {
-        let mut buffer = memory_provider.reserve(bytes.len());
-        buffer.put_slice(bytes);
-        buffer.consume_all()
+    pub fn copied_from_slice(bytes: &[u8], memory: &impl Memory) -> Self {
+        let mut buf = memory.reserve(bytes.len());
+        buf.put_slice(bytes);
+        buf.consume_all()
     }
 
     pub(crate) fn into_spans_reversed(self) -> SmallVec<[Span; MAX_INLINE_SPANS]> {
         self.spans_reversed
     }
 
-    /// The number of bytes remaining in the sequence.
+    /// The number of bytes exposed through the view.
+    ///
+    /// Consuming bytes from the view reduces its length.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"Hello", &memory);
+    /// assert_eq!(view.len(), 5);
+    ///
+    /// _ = view.get_byte();
+    /// assert_eq!(view.len(), 4);
+    ///
+    /// _ = view.get_num_le::<u16>();
+    /// assert_eq!(view.len(), 2);
+    /// ```
     #[must_use]
     pub fn len(&self) -> usize {
         // Sanity check.
-        debug_assert_eq!(self.len, self.spans_reversed.iter().map(bytes::Buf::remaining).sum::<usize>());
+        debug_assert_eq!(self.len, self.spans_reversed.iter().map(|x| x.len() as usize).sum::<usize>());
 
         self.len
     }
 
-    /// Whether the sequence is empty.
+    /// Whether the view is of a zero-sized byte sequence.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Creates a memory guard that extends the lifetime of the memory blocks that provide the
-    /// backing memory capacity for this sequence.
+    /// Extends the lifetime of the memory capacity backing this view.
     ///
     /// This can be useful when unsafe code is used to reference the contents of a `BytesView` and it
     /// is possible to reach a condition where the `BytesView` itself no longer exists, even though
-    /// the contents are referenced (e.g. because this is happening in non-Rust code).
+    /// the contents are referenced (e.g. because the remaining references are in non-Rust code).
     pub fn extend_lifetime(&self) -> MemoryGuard {
         MemoryGuard::new(self.spans_reversed.iter().map(Span::block_ref).map(Clone::clone))
     }
 
-    /// Returns a sub-sequence of the sequence without consuming any data in the original.
+    /// Returns a range of the byte sequence.
     ///
-    /// The bounds logic only considers data currently present in the sequence.
-    /// Any data already consumed is not considered part of the sequence.
+    /// The bounds logic only considers data currently present in the view.
+    /// Any data already consumed is not considered part of the view.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    ///
+    /// assert_eq!(view.range(0..5), b"Hello");
+    /// assert_eq!(view.range(7..), b"world!");
+    /// assert_eq!(view.range(..5), b"Hello");
+    /// assert_eq!(view.range(..), b"Hello, world!");
+    /// ```
     ///
     /// # Panics
     ///
-    /// Panics if the provided range is outside the bounds of the sequence.
+    /// Panics if the provided range is outside the bounds of the view.
     #[must_use]
-    pub fn slice<R>(&self, range: R) -> Self
+    pub fn range<R>(&self, range: R) -> Self
     where
         R: RangeBounds<usize>,
     {
-        self.slice_checked(range).expect("provided range out of sequence bounds")
+        self.range_checked(range).expect("provided range out of view bounds")
     }
 
-    /// Returns a sub-sequence of the sequence without consuming any data in the original,
-    /// or `None` if the range is outside the bounds of the sequence.
+    /// Returns a range of the byte sequence or `None` if out of bounds.
     ///
-    /// The bounds logic only considers data currently present in the sequence.
-    /// Any data already consumed is not considered part of the sequence.
+    /// The bounds logic only considers data currently present in the view.
+    /// Any data already consumed is not considered part of the view.
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     #[expect(clippy::too_many_lines, reason = "acceptable for now")]
     #[cfg_attr(test, mutants::skip)] // Mutations include impossible conditions that we cannot test as well as mutations that are functionally equivalent.
-    pub fn slice_checked<R>(&self, range: R) -> Option<Self>
+    pub fn range_checked<R>(&self, range: R) -> Option<Self>
     where
         R: RangeBounds<usize>,
     {
@@ -356,187 +463,380 @@ impl BytesView {
         })
     }
 
-    /// Executes a function `f` on each chunk in the sequence, in order,
-    /// and marks the entire sequence as consumed.
-    pub fn consume_all_chunks<F>(&mut self, mut f: F)
+    /// Executes a function `f` on each slice, consuming them all.
+    ///
+    /// The slices that make up the view are iterated in order,
+    /// providing each to `f`. The view becomes empty after this.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// // Create a multi-slice view by concatenating independent views.
+    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
+    /// # let part2 = BytesView::copied_from_slice(b", ", &memory);
+    /// # let part3 = BytesView::copied_from_slice(b"world!", &memory);
+    /// let mut view = BytesView::from_views([part1, part2, part3]);
+    ///
+    /// view.consume_all_slices(|slice| {
+    ///     println!("Slice of {} bytes: {:?}", slice.len(), slice);
+    /// });
+    ///
+    /// assert!(view.is_empty());
+    /// ```
+    pub fn consume_all_slices<F>(&mut self, mut f: F)
     where
         F: FnMut(&[u8]),
     {
+        // TODO: This fn could just be .into_iter() - we have no real
+        // need for the "consume pattern" here. Iterators are more idiomatic.
         while !self.is_empty() {
-            f(self.chunk());
-            self.advance(self.chunk().len());
+            let slice = self.first_slice();
+            f(slice);
+            self.advance(slice.len());
         }
     }
 
-    /// Consumes the sequence and returns an instance of `Bytes`.
+    /// References the first slice of bytes in the byte sequence.
     ///
-    /// We do not expose `From<BytesView> for Bytes` because this is not guaranteed to be a cheap
-    /// operation and may involve data copying, so `.into_bytes()` must be explicitly called to
-    /// make the conversion obvious.
+    /// Returns an empty slice if the view is over a zero-sized byte sequence.
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
     ///
-    /// # Performance
+    /// # Example
     ///
-    /// This operation is zero-copy if the sequence is backed by a single consecutive
-    /// span of memory.
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
     ///
-    /// If the sequence is backed by multiple spans of memory, the data will be copied
-    /// to a new `Bytes` instance backed by memory capacity from the Rust global allocator.
-    #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn into_bytes(self) -> Bytes {
-        if self.spans_reversed.is_empty() {
-            INTO_BYTES_SHARED.with(|x| x.observe(0));
-
-            Bytes::new()
-        } else if self.spans_reversed.len() == 1 {
-            // We are a single-span sequence, which can always be zero-copy represented.
-            INTO_BYTES_SHARED.with(|x| x.observe(self.len()));
-
-            self.spans_reversed.first().expect("we verified there is one span").to_bytes()
-        } else {
-            // We must copy, as Bytes can only represent consecutive spans of data.
-            let mut bytes = BytesMut::with_capacity(self.len());
-
-            for span in self.spans_reversed.iter().rev() {
-                bytes.extend_from_slice(span);
-            }
-
-            debug_assert_eq!(self.len(), bytes.len());
-
-            INTO_BYTES_COPIED.with(|x| x.observe(self.len()));
-
-            bytes.freeze()
-        }
-    }
-
-    /// Returns the first consecutive chunk of bytes in the byte sequence.
+    /// let mut view = BytesView::copied_from_slice(b"0123456789ABCDEF", &memory);
     ///
-    /// There are no guarantees on the length of each chunk. In a non-empty sequence,
-    /// each chunk may contain anywhere between 1 byte and all bytes of the sequence.
+    /// // Read the first 10 bytes without assuming the length of first_slice().
+    /// let mut ten_bytes = Vec::with_capacity(10);
     ///
-    /// Returns an empty slice if the sequence is empty.
+    /// while ten_bytes.len() < 10 {
+    ///     let slice = view.first_slice();
+    ///
+    ///     let bytes_to_take = slice.len().min(10 - ten_bytes.len());
+    ///
+    ///     ten_bytes.extend_from_slice(&slice[..bytes_to_take]);
+    ///     view.advance(bytes_to_take);
+    /// }
+    ///
+    /// assert_eq!(ten_bytes, b"0123456789");
+    /// ```
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
-    pub fn chunk(&self) -> &[u8] {
+    pub fn first_slice(&self) -> &[u8] {
         self.spans_reversed.last().map_or::<&[u8], _>(&[], |span| span)
     }
 
-    /// Fills an array of `IoSlice` with chunks from the start of the sequence.
+    /// Fills an array with [`IoSlice`]s representing this view.
     ///
-    /// See also [`chunks_as_slices_vectored()`][1] for a version that fills an array of slices
-    /// instead of `IoSlice`.
+    /// Returns the number of elements written into `dst`. If there is not enough space in `dst`
+    /// to represent the entire view, only as many slices as fit will be written.
     ///
-    /// [1]: Self::chunks_as_slices_vectored
+    /// See also [`slices()`] for a version that fills an array of regular slices instead of [`IoSlice`]s.
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::io::IoSlice;
+    ///
+    /// use bytesbuf::BytesView;
+    ///
+    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
+    /// # let part2 = BytesView::copied_from_slice(b"World", &memory);
+    /// let view = BytesView::from_views([part1, part2]);
+    ///
+    /// let mut io_slices = [IoSlice::new(&[]); 4];
+    /// let count = view.io_slices(&mut io_slices);
+    ///
+    /// for i in 0..count {
+    ///     println!(
+    ///         "IoSlice {i}: {} bytes at {:p}",
+    ///         io_slices[i].len(),
+    ///         io_slices[i].as_ptr()
+    ///     );
+    /// }
+    /// ```
+    ///
+    /// [`slices()`]: Self::slices
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
+    pub fn io_slices<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
         if dst.is_empty() {
             return 0;
         }
 
-        // How many chunks can we fill?
-        let chunk_count = self.spans_reversed.len().min(dst.len());
+        // How many slices can we fill?
+        let slice_count = self.spans_reversed.len().min(dst.len());
 
         // Note that IoSlice has a length limit of u32::MAX. Our spans are also limited to u32::MAX
         // by memory manager internal limits (MAX_BLOCK_SIZE), so this is safe.
-        for (i, span) in self.spans_reversed.iter().rev().take(chunk_count).enumerate() {
+        for (i, span) in self.spans_reversed.iter().rev().take(slice_count).enumerate() {
             *dst.get_mut(i).expect("guarded by min()") = IoSlice::new(span);
         }
 
-        chunk_count
+        slice_count
     }
 
-    /// Fills an array of slices with chunks from the start of the sequence.
+    /// Fills an array with byte slices representing this view.
     ///
-    /// This is equivalent to [`chunks_vectored()`][1] but as regular slices, without the `IoSlice`
-    /// wrapper, which can be unnecessary/limiting and is not always desirable.
+    /// Returns the number of elements written into `dst`. If there is not enough space in `dst`
+    /// to represent the entire view, only as many slices as fit will be written.
     ///
-    /// [1]: Self::chunks_vectored
+    /// See also [`io_slices()`] for a version that fills an array of [`IoSlice`]s instead of regular byte slices.
+    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
+    /// # let part2 = BytesView::copied_from_slice(b"World", &memory);
+    /// let view = BytesView::from_views([part1, part2]);
+    ///
+    /// let mut slices: [&[u8]; 4] = [&[]; 4];
+    /// let count = view.slices(&mut slices);
+    ///
+    /// for i in 0..count {
+    ///     println!(
+    ///         "Slice {i}: {} bytes at {:p}",
+    ///         slices[i].len(),
+    ///         slices[i].as_ptr()
+    ///     );
+    /// }
+    /// ```
+    ///
+    /// [`io_slices()`]: Self::io_slices
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn chunks_as_slices_vectored<'a>(&'a self, dst: &mut [&'a [u8]]) -> usize {
+    pub fn slices<'a>(&'a self, dst: &mut [&'a [u8]]) -> usize {
         if dst.is_empty() {
             return 0;
         }
 
-        // How many chunks can we fill?
-        let chunk_count = self.spans_reversed.len().min(dst.len());
+        // How many slices can we fill?
+        let slice_count = self.spans_reversed.len().min(dst.len());
 
-        for (i, span) in self.spans_reversed.iter().rev().take(chunk_count).enumerate() {
+        for (i, span) in self.spans_reversed.iter().rev().take(slice_count).enumerate() {
             *dst.get_mut(i).expect("guarded by min()") = span;
         }
 
-        chunk_count
+        slice_count
     }
 
-    /// Inspects the metadata of the current chunk of memory referenced by `chunk()`.
+    /// Inspects the metadata of the [`first_slice()`].
     ///
-    /// `None` if there is no metadata associated with the chunk or if the sequence is empty.
+    /// `None` if there is no metadata associated with the first slice or
+    /// if the view is over a zero-sized byte sequence.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// # struct PageAlignedMemory;
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello", &memory);
+    ///
+    /// let is_page_aligned = view
+    ///     .first_slice_meta()
+    ///     .is_some_and(|meta| meta.is::<PageAlignedMemory>());
+    ///
+    /// println!("First slice is page-aligned: {is_page_aligned}");
+    /// ```
+    ///
+    /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
+    /// a more detailed example of how to make use of the slice metadata.
+    ///
+    /// [`first_slice()`]: Self::first_slice
     #[must_use]
-    pub fn chunk_meta(&self) -> Option<&dyn Any> {
+    pub fn first_slice_meta(&self) -> Option<&dyn Any> {
         self.spans_reversed.last().and_then(|span| span.block_ref().meta())
     }
 
-    /// Iterates over the metadata of all the chunks in the sequence.
+    /// Iterates over the metadata of all the slices that make up the view.
     ///
-    /// A chunk is any consecutive span of memory that would be returned by `chunk()` at some point
-    /// during the consumption of a [`BytesView`].
+    /// Each slice iterated over is a slice that would be returned by [`first_slice()`]
+    /// at some point during the complete consumption of the data covered by a `BytesView`.
     ///
     /// You may wish to iterate over the metadata to determine in advance which implementation
     /// strategy to use for a function, depending on what the metadata indicates about the
     /// configuration of the memory blocks backing the byte sequence.
-    pub fn iter_chunk_metas(&self) -> BytesViewChunkMetasIterator<'_> {
-        BytesViewChunkMetasIterator::new(self)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// # struct PageAlignedMemory;
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello", &memory);
+    ///
+    /// let all_page_aligned = view
+    ///     .iter_slice_metas()
+    ///     .all(|meta| meta.is_some_and(|m| m.is::<PageAlignedMemory>()));
+    ///
+    /// if all_page_aligned {
+    ///     println!("All slices are page-aligned, using optimized I/O path.");
+    /// }
+    /// ```
+    ///
+    /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
+    /// a more detailed example of how to make use of the slice metadata.
+    ///
+    /// [`first_slice()`]: Self::first_slice
+    pub fn iter_slice_metas(&self) -> BytesViewSliceMetas<'_> {
+        BytesViewSliceMetas::new(self)
     }
 
-    /// Marks the first `count` bytes of the sequence as consumed, dropping them from the sequence.
+    /// Removes the first `count` bytes from the front of the view.
+    ///
+    /// The consumed bytes are dropped from the view, moving any remaining bytes to the front.
+    ///
+    /// If permitted by memory layout considerations and reference counts, the memory capacity
+    /// backing the dropped bytes is released back to the memory provider.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"0123456789ABCDEF", &memory);
+    ///
+    /// // Read the first 10 bytes without assuming the length of first_slice().
+    /// let mut ten_bytes = Vec::with_capacity(10);
+    ///
+    /// while ten_bytes.len() < 10 {
+    ///     let slice = view.first_slice();
+    ///
+    ///     let bytes_to_take = slice.len().min(10 - ten_bytes.len());
+    ///
+    ///     ten_bytes.extend_from_slice(&slice[..bytes_to_take]);
+    ///     view.advance(bytes_to_take);
+    /// }
+    ///
+    /// assert_eq!(ten_bytes, b"0123456789");
+    /// ```
     ///
     /// # Panics
     ///
-    /// Panics if `count` is greater than the number of bytes remaining in the sequence.
+    /// Panics if `count` is greater than the number of bytes remaining.
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     pub fn advance(&mut self, mut count: usize) {
-        self.len = self.len.checked_sub(count).expect("attempted to advance past end of sequence");
+        self.len = self.len.checked_sub(count).expect("attempted to advance past end of the view");
 
         while count > 0 {
             let front = self
                 .spans_reversed
                 .last_mut()
                 .expect("logic error - ran out of spans before advancing over their contents");
-            let remaining = front.remaining();
+            let span_len = front.len() as usize;
 
-            if count < remaining {
-                front.advance(count);
+            if count < span_len {
+                // SAFETY: We must guarantee we advance in-bounds. The if statement guarantees that.
+                unsafe {
+                    front.advance(count);
+                }
                 break;
             }
 
             self.spans_reversed.pop();
-            count = count.checked_sub(remaining).expect("already handled count < remaining case");
+            // Will never overflow because we already handled the count < span_len case.
+            count = count.wrapping_sub(span_len);
         }
     }
 
-    /// Appends another byte sequence to the end of this one.
+    /// Appends another view to the end of this one.
+    ///
+    /// This is a zero-copy operation, reusing the memory capacity of the other view.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut greeting = BytesView::copied_from_slice(b"Hello, ", &memory);
+    /// let name = BytesView::copied_from_slice(b"world!", &memory);
+    ///
+    /// greeting.append(name);
+    ///
+    /// assert_eq!(greeting, b"Hello, world!");
+    /// ```
     ///
     /// # Panics
     ///
-    /// Panics if the resulting sequence would be larger than `usize::MAX` bytes.
+    /// Panics if the resulting view would be larger than `usize::MAX` bytes.
     pub fn append(&mut self, other: Self) {
         self.len = self
             .len
             .checked_add(other.len)
-            .expect("attempted to create a byte sequence larger than usize::MAX bytes");
+            .expect("attempted to create a BytesView larger than usize::MAX bytes");
 
         self.spans_reversed.insert_many(0, other.spans_reversed);
     }
 
-    /// Returns a new byte sequence that concatenates this byte sequence with another.
+    /// Returns a new view that concatenates this view with another.
+    ///
+    /// This is a zero-copy operation, reusing the memory capacity of the other view.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let greeting = BytesView::copied_from_slice(b"Hello, ", &memory);
+    /// let name = BytesView::copied_from_slice(b"world!", &memory);
+    ///
+    /// let message = greeting.concat(name);
+    ///
+    /// // Original view is unchanged.
+    /// assert_eq!(greeting, b"Hello, ");
+    /// // New view contains the concatenation.
+    /// assert_eq!(message, b"Hello, world!");
+    /// ```
     ///
     /// # Panics
     ///
-    /// Panics if the resulting sequence would be larger than `usize::MAX` bytes.
+    /// Panics if the resulting view would be larger than `usize::MAX` bytes.
     #[must_use]
     pub fn concat(&self, other: Self) -> Self {
-        let mut new_sequence = self.clone();
-        new_sequence.append(other);
-        new_sequence
+        let mut new_view = self.clone();
+        new_view.append(other);
+        new_view
+    }
+
+    /// Exposes the instance through the [`Read`][std::io::Read] trait.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use std::io::Read;
+    ///
+    /// use bytesbuf::BytesView;
+    ///
+    /// let mut view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    /// let mut reader = view.as_read();
+    ///
+    /// let mut buffer = [0u8; 5];
+    /// let bytes_read = reader.read(&mut buffer)?;
+    ///
+    /// assert_eq!(bytes_read, 5);
+    /// assert_eq!(&buffer, b"Hello");
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    #[must_use]
+    pub fn as_read(&mut self) -> impl std::io::Read {
+        BytesViewReader::new(self)
     }
 }
 
@@ -546,71 +846,49 @@ impl Default for BytesView {
     }
 }
 
-impl Buf for BytesView {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn remaining(&self) -> usize {
-        self.len()
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn chunk(&self) -> &[u8] {
-        self.chunk()
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
-        self.chunks_vectored(dst)
-    }
-
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn advance(&mut self, cnt: usize) {
-        self.advance(cnt);
-    }
-}
-
 impl PartialEq for BytesView {
     fn eq(&self, other: &Self) -> bool {
         // We do not care about the structure, only the contents.
-        if self.remaining() != other.remaining() {
+        if self.len() != other.len() {
             return false;
         }
 
-        let mut remaining_bytes = self.remaining();
+        let mut remaining_bytes = self.len();
 
-        // The two sequences may have differently sized spans, so we only compare in steps
-        // of the smallest span size offered by either sequences.
+        // The two views may have differently sized spans, so we only compare in steps
+        // of the smallest span size offered by either view.
 
-        // We clone the sequences to create temporary views that we slide over the contents.
+        // We clone the views to create windows that we slide over the contents.
         let mut self_view = self.clone();
         let mut other_view = other.clone();
 
         while remaining_bytes > 0 {
-            let self_chunk = self_view.chunk();
-            let other_chunk = other_view.chunk();
+            let self_slice = self_view.first_slice();
+            let other_slice = other_view.first_slice();
 
-            let chunk_size = NonZero::new(self_chunk.len().min(other_chunk.len()))
-                .expect("both sequences said there are remaining bytes but we got an empty chunk");
+            let comparison_len = NonZero::new(self_slice.len().min(other_slice.len()))
+                .expect("both views said there are remaining bytes but we got an empty slice from at least one of them");
 
-            let self_slice = self_chunk.get(..chunk_size.get()).expect("already checked that remaining > 0");
-            let other_slice = other_chunk.get(..chunk_size.get()).expect("already checked that remaining > 0");
+            let self_slice = self_slice.get(..comparison_len.get()).expect("already checked that remaining > 0");
+            let other_slice = other_slice.get(..comparison_len.get()).expect("already checked that remaining > 0");
 
             if self_slice != other_slice {
                 // Something is different. That is enough for a determination.
                 return false;
             }
 
-            // Advance both sequences by the same amount.
-            self_view.advance(chunk_size.get());
-            other_view.advance(chunk_size.get());
+            // Advance both views by the same amount.
+            self_view.advance(comparison_len.get());
+            other_view.advance(comparison_len.get());
 
             remaining_bytes = remaining_bytes
-                .checked_sub(chunk_size.get())
+                .checked_sub(comparison_len.get())
                 .expect("impossible to consume more bytes from the sequences than are remaining");
         }
 
         debug_assert_eq!(remaining_bytes, 0);
-        debug_assert_eq!(self_view.remaining(), 0);
-        debug_assert_eq!(other_view.remaining(), 0);
+        debug_assert_eq!(self_view.len(), 0);
+        debug_assert_eq!(other_view.len(), 0);
 
         true
     }
@@ -622,22 +900,22 @@ impl PartialEq<&[u8]> for BytesView {
 
         // We do not care about the structure, only the contents.
 
-        if self.remaining() != other.len() {
+        if self.len() != other.len() {
             return false;
         }
 
-        let mut remaining_bytes = self.remaining();
+        let mut remaining_bytes = self.len();
 
         // We clone the sequence to create a temporary view that we slide over the contents.
         let mut self_view = self.clone();
 
         while remaining_bytes > 0 {
-            let self_chunk = self_view.chunk();
-            let chunk_size =
-                NonZero::new(self_chunk.len()).expect("both sequences said there are remaining bytes but we got an empty chunk");
+            let self_slice = self_view.first_slice();
+            let slice_size = NonZero::new(self_slice.len())
+                .expect("both sides of the comparison said there are remaining bytes but we got an empty slice from at least one of them");
 
-            let self_slice = self_chunk.get(..chunk_size.get()).expect("already checked that remaining > 0");
-            let other_slice = other.get(..chunk_size.get()).expect("already checked that remaining > 0");
+            let self_slice = self_slice.get(..slice_size.get()).expect("already checked that remaining > 0");
+            let other_slice = other.get(..slice_size.get()).expect("already checked that remaining > 0");
 
             if self_slice != other_slice {
                 // Something is different. That is enough for a determination.
@@ -645,16 +923,16 @@ impl PartialEq<&[u8]> for BytesView {
             }
 
             // Advance the sequence by the same amount.
-            self_view.advance(chunk_size.get());
-            other = other.get(chunk_size.get()..).expect("guarded by min() above");
+            self_view.advance(slice_size.get());
+            other = other.get(slice_size.get()..).expect("guarded by min() above");
 
             remaining_bytes = remaining_bytes
-                .checked_sub(chunk_size.get())
+                .checked_sub(slice_size.get())
                 .expect("impossible to consume more bytes from the sequences than are remaining");
         }
 
         debug_assert_eq!(remaining_bytes, 0);
-        debug_assert_eq!(self_view.remaining(), 0);
+        debug_assert_eq!(self_view.len(), 0);
         debug_assert_eq!(other.len(), 0);
 
         true
@@ -679,40 +957,40 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
     }
 }
 
-/// Iterator over all `chunk_meta()` results that a [`BytesView`] may return.
+/// Exposes all `first_slice_meta()` values of a [`BytesView`].
 ///
-/// Returned by [`BytesView::iter_chunk_metas()`][BytesView::iter_chunk_metas] and allows you to
-/// inspect the metadata of each chunk in the sequence without first consuming previous chunks.
+/// Returned by [`BytesView::iter_slice_metas()`][BytesView::iter_slice_metas] and allows you to
+/// inspect the metadata of each slice that makes up the view without consuming any part of the view.
 #[must_use]
 #[derive(Debug)]
-pub struct BytesViewChunkMetasIterator<'s> {
-    // This starts off as a clone of the parent sequence, just for ease of implementation.
-    // We consume the parts of the sequence we have already iterated over.
-    sequence: BytesView,
+pub struct BytesViewSliceMetas<'s> {
+    // This starts off as a clone of the view, just for ease of implementation.
+    // We consume the parts of the view we have already iterated over.
+    view: BytesView,
 
-    // We keep a reference to the sequence we are iterating over, even though
+    // We keep a reference to the view we are iterating over, even though
     // the current implementation does not use it (because a future one might).
     _parent: PhantomData<&'s BytesView>,
 }
 
-impl<'s> BytesViewChunkMetasIterator<'s> {
-    pub(crate) fn new(sequence: &'s BytesView) -> Self {
+impl<'s> BytesViewSliceMetas<'s> {
+    pub(crate) fn new(view: &'s BytesView) -> Self {
         Self {
-            sequence: sequence.clone(),
+            view: view.clone(),
             _parent: PhantomData,
         }
     }
 }
 
-impl<'s> Iterator for BytesViewChunkMetasIterator<'s> {
+impl<'s> Iterator for BytesViewSliceMetas<'s> {
     type Item = Option<&'s dyn Any>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.sequence.is_empty() {
+        if self.view.is_empty() {
             return None;
         }
 
-        let meta = self.sequence.chunk_meta();
+        let meta = self.view.first_slice_meta();
 
         // SAFETY: It is normally not possible to return a self-reference from an iterator because
         // next() only has an implicit lifetime for `&self`, which cannot be named in `Item`.
@@ -726,7 +1004,7 @@ impl<'s> Iterator for BytesViewChunkMetasIterator<'s> {
         let meta_with_s = unsafe { mem::transmute::<Option<&dyn Any>, Option<&'s dyn Any>>(meta) };
 
         // Seek forward to the next chunk before we return.
-        self.sequence.advance(self.sequence.chunk().len());
+        self.view.advance(self.view.first_slice().len());
 
         Some(meta_with_s)
     }
@@ -735,20 +1013,13 @@ impl<'s> Iterator for BytesViewChunkMetasIterator<'s> {
 const SPAN_COUNT_BUCKETS: &[Magnitude] = &[0, 1, 2, 4, 8, 16, 32];
 
 thread_local! {
-    static SEQUENCE_CREATED_SPANS: Event = Event::builder()
-        .name("sequence_created_spans")
+    static VIEW_CREATED_SPANS: Event = Event::builder()
+        .name("bytesbuf_view_created_spans")
         .histogram(SPAN_COUNT_BUCKETS)
-        .build();
-
-    static INTO_BYTES_SHARED: Event = Event::builder()
-        .name("sequence_into_bytes_shared")
-        .build();
-
-    static INTO_BYTES_COPIED: Event = Event::builder()
-        .name("sequence_into_bytes_copied")
         .build();
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     #![allow(
@@ -762,68 +1033,76 @@ mod tests {
     use std::thread;
 
     use new_zealand::nz;
-    use static_assertions::assert_impl_all;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
     use testing_aids::assert_panic;
 
     use super::*;
-    use crate::testing::TestMemoryBlock;
-    use crate::{BytesBuf, TransparentTestMemory, std_alloc_block};
+    use crate::BytesBuf;
+    use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
+
+    assert_impl_all!(BytesView: Send, Sync);
+
+    // BytesView intentionally does not implement From<&[u8]> because creating a view
+    // requires a memory provider to ensure optimal memory configuration. Users should
+    // call `BytesView::copied_from_slice()` instead, which makes the memory provider
+    // requirement explicit.
+    assert_not_impl_any!(BytesView: From<&'static [u8]>);
 
     #[test]
     fn smoke_test() {
-        let mut builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
+        let mut span_builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        builder.put_u64(1234);
-        builder.put_u16(16);
+        span_builder.put_slice(&1234_u64.to_ne_bytes());
+        span_builder.put_slice(&16_u16.to_ne_bytes());
 
-        let span1 = builder.consume(nz!(4));
-        let span2 = builder.consume(nz!(3));
-        let span3 = builder.consume(nz!(3));
+        let span1 = span_builder.consume(nz!(4));
+        let span2 = span_builder.consume(nz!(3));
+        let span3 = span_builder.consume(nz!(3));
 
-        assert_eq!(0, builder.remaining_mut());
-        assert_eq!(span1.remaining(), 4);
-        assert_eq!(span2.remaining(), 3);
-        assert_eq!(span3.remaining(), 3);
+        assert_eq!(0, span_builder.remaining_capacity());
+        assert_eq!(span1.len(), 4);
+        assert_eq!(span2.len(), 3);
+        assert_eq!(span3.len(), 3);
 
-        let mut sequence = BytesView::from_spans(vec![span1, span2, span3]);
+        let mut view = BytesView::from_spans(vec![span1, span2, span3]);
 
-        assert!(!sequence.is_empty());
-        assert_eq!(10, sequence.remaining());
+        assert!(!view.is_empty());
+        assert_eq!(10, view.len());
 
-        let slice = sequence.chunk();
+        let slice = view.first_slice();
         assert_eq!(4, slice.len());
 
         // We read 8 bytes here, so should land straight inside span3.
-        assert_eq!(sequence.get_u64(), 1234);
+        assert_eq!(view.get_num_ne::<u64>(), 1234);
 
-        assert_eq!(2, sequence.remaining());
+        assert_eq!(2, view.len());
 
-        let slice = sequence.chunk();
+        let slice = view.first_slice();
         assert_eq!(2, slice.len());
 
-        assert_eq!(sequence.get_u16(), 16);
+        assert_eq!(view.get_num_ne::<u16>(), 16);
 
-        assert_eq!(0, sequence.remaining());
-        assert!(sequence.is_empty());
+        assert_eq!(0, view.len());
+        assert!(view.is_empty());
     }
 
     #[test]
     fn oob_is_panic() {
-        let mut builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
+        let mut span_builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        builder.put_u64(1234);
-        builder.put_u16(16);
+        span_builder.put_slice(&1234_u64.to_ne_bytes());
+        span_builder.put_slice(&16_u16.to_ne_bytes());
 
-        let span1 = builder.consume(nz!(4));
-        let span2 = builder.consume(nz!(3));
-        let span3 = builder.consume(nz!(3));
+        let span1 = span_builder.consume(nz!(4));
+        let span2 = span_builder.consume(nz!(3));
+        let span3 = span_builder.consume(nz!(3));
 
-        let mut sequence = BytesView::from_spans(vec![span1, span2, span3]);
+        let mut view = BytesView::from_spans(vec![span1, span2, span3]);
 
-        assert_eq!(10, sequence.remaining());
+        assert_eq!(10, view.len());
 
-        assert_eq!(sequence.get_u64(), 1234);
-        assert_panic!(_ = sequence.get_u32()); // Reads 4 but only has 2 remaining.
+        assert_eq!(view.get_num_ne::<u64>(), 1234);
+        assert_panic!(_ = view.get_num_ne::<u32>()); // Reads 4 but only has 2 remaining.
     }
 
     #[test]
@@ -842,19 +1121,19 @@ mod tests {
 
         let guard = {
             // SAFETY: We guarantee exclusive access to the memory capacity.
-            let mut builder1 = unsafe { block1.as_ref().to_block() }.into_span_builder();
+            let mut span_builder1 = unsafe { block1.as_ref().to_block() }.into_span_builder();
             // SAFETY: We guarantee exclusive access to the memory capacity.
-            let mut builder2 = unsafe { block2.as_ref().to_block() }.into_span_builder();
+            let mut span_builder2 = unsafe { block2.as_ref().to_block() }.into_span_builder();
 
-            builder1.put_u64(1234);
-            builder2.put_u64(1234);
+            span_builder1.put_slice(&1234_u64.to_ne_bytes());
+            span_builder2.put_slice(&1234_u64.to_ne_bytes());
 
-            let span1 = builder1.consume(nz!(8));
-            let span2 = builder2.consume(nz!(8));
+            let span1 = span_builder1.consume(nz!(8));
+            let span2 = span_builder2.consume(nz!(8));
 
-            let sequence = BytesView::from_spans(vec![span1, span2]);
+            let view = BytesView::from_spans(vec![span1, span2]);
 
-            sequence.extend_lifetime()
+            view.extend_lifetime()
         };
 
         // The sequence was destroyed and all BlockRefs it was holding are gone.
@@ -871,236 +1150,189 @@ mod tests {
     }
 
     #[test]
-    fn from_sequences() {
-        let mut builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
+    fn from_views() {
+        let mut span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        builder.put_u64(1234);
-        builder.put_u64(5678);
+        span_builder.put_slice(&1234_u64.to_ne_bytes());
+        span_builder.put_slice(&5678_u64.to_ne_bytes());
 
-        let span1 = builder.consume(nz!(8));
-        let span2 = builder.consume(nz!(8));
+        let span1 = span_builder.consume(nz!(8));
+        let span2 = span_builder.consume(nz!(8));
 
-        let sequence1 = BytesView::from_spans(vec![span1]);
-        let sequence2 = BytesView::from_spans(vec![span2]);
+        let view1 = BytesView::from_spans(vec![span1]);
+        let view2 = BytesView::from_spans(vec![span2]);
 
-        let mut combined = BytesView::from_sequences(vec![sequence1, sequence2]);
+        let mut combined_view = BytesView::from_views(vec![view1, view2]);
 
-        assert_eq!(16, combined.remaining());
+        assert_eq!(16, combined_view.len());
 
-        assert_eq!(combined.get_u64(), 1234);
-        assert_eq!(combined.get_u64(), 5678);
+        assert_eq!(combined_view.get_num_ne::<u64>(), 1234);
+        assert_eq!(combined_view.get_num_ne::<u64>(), 5678);
     }
 
     #[test]
-    fn empty_sequence() {
-        let sequence = BytesView::default();
+    fn empty_view() {
+        let view = BytesView::default();
 
-        assert!(sequence.is_empty());
-        assert_eq!(0, sequence.remaining());
-        assert_eq!(0, sequence.chunk().len());
-
-        let bytes = sequence.into_bytes();
-        assert_eq!(0, bytes.len());
+        assert!(view.is_empty());
+        assert_eq!(0, view.len());
+        assert_eq!(0, view.first_slice().len());
     }
 
     #[test]
-    fn into_bytes() {
-        let mut builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
-
-        builder.put_u64(1234);
-        builder.put_u64(5678);
-
-        let span1 = builder.consume(nz!(8));
-        let span2 = builder.consume(nz!(8));
-
-        let sequence_single_span = BytesView::from_spans(vec![span1.clone()]);
-        let sequence_multi_span = BytesView::from_spans(vec![span1, span2]);
-
-        let mut bytes = sequence_single_span.clone().into_bytes();
-        assert_eq!(8, bytes.len());
-        assert_eq!(1234, bytes.get_u64());
-
-        let mut bytes = sequence_single_span.into_bytes();
-        assert_eq!(8, bytes.len());
-        assert_eq!(1234, bytes.get_u64());
-
-        let mut bytes = sequence_multi_span.into_bytes();
-        assert_eq!(16, bytes.len());
-        assert_eq!(1234, bytes.get_u64());
-        assert_eq!(5678, bytes.get_u64());
-    }
-
-    #[test]
-    fn thread_safe_type() {
-        assert_impl_all!(BytesView: Send, Sync);
-    }
-
-    #[test]
-    fn slice_from_single_span_sequence() {
-        // A very simple sequence to start with, consisting of just one 100 byte span.
+    fn slice_from_single_span_view() {
+        // A very simple view to start with, consisting of just one 100 byte span.
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = BytesBuf::from_span_builders([span_builder]);
+        let mut buf = BytesBuf::from_span_builders([span_builder]);
 
         for i in 0..100 {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "manually validated range of values is safe"
-            )]
-            sb.put_u8(i as u8);
+            buf.put_byte(i);
         }
 
-        let sequence = sb.consume_all();
+        let view = buf.consume_all();
 
-        let mut sub_sequence = sequence.slice(50..55);
+        let mut sliced_view = view.range(50..55);
 
-        assert_eq!(5, sub_sequence.len());
-        assert_eq!(100, sequence.len());
+        assert_eq!(5, sliced_view.len());
+        assert_eq!(100, view.len());
 
-        assert_eq!(50, sub_sequence.get_u8());
+        assert_eq!(50, sliced_view.get_byte());
 
-        assert_eq!(4, sub_sequence.len());
-        assert_eq!(100, sequence.len());
+        assert_eq!(4, sliced_view.len());
+        assert_eq!(100, view.len());
 
-        assert_eq!(51, sub_sequence.get_u8());
-        assert_eq!(52, sub_sequence.get_u8());
-        assert_eq!(53, sub_sequence.get_u8());
-        assert_eq!(54, sub_sequence.get_u8());
+        assert_eq!(51, sliced_view.get_byte());
+        assert_eq!(52, sliced_view.get_byte());
+        assert_eq!(53, sliced_view.get_byte());
+        assert_eq!(54, sliced_view.get_byte());
 
-        assert_eq!(0, sub_sequence.len());
+        assert_eq!(0, sliced_view.len());
 
-        assert!(sequence.slice_checked(0..101).is_none());
-        assert!(sequence.slice_checked(100..101).is_none());
-        assert!(sequence.slice_checked(101..101).is_none());
+        assert!(view.range_checked(0..101).is_none());
+        assert!(view.range_checked(100..101).is_none());
+        assert!(view.range_checked(101..101).is_none());
     }
 
     #[test]
-    fn slice_from_multi_span_sequence() {
+    fn slice_from_multi_span_view() {
         const SPAN_SIZE: NonZero<BlockSize> = nz!(10);
 
-        // A multi-span sequence, 10 bytes x10.
+        // A multi-span view, 10 bytes x10.
         let span_builders = iter::repeat_with(|| std_alloc_block::allocate(SPAN_SIZE).into_span_builder())
             .take(10)
             .collect::<Vec<_>>();
 
-        let mut sb = BytesBuf::from_span_builders(span_builders);
+        let mut buf = BytesBuf::from_span_builders(span_builders);
 
         for i in 0..100 {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "manually validated range of values is safe"
-            )]
-            sb.put_u8(i as u8);
+            buf.put_byte(i);
         }
 
-        let sequence = sb.consume_all();
+        let view = buf.consume_all();
 
-        let mut first5 = sequence.slice(0..5);
+        let mut first5 = view.range(0..5);
         assert_eq!(5, first5.len());
-        assert_eq!(100, sequence.len());
-        assert_eq!(0, first5.get_u8());
+        assert_eq!(100, view.len());
+        assert_eq!(0, first5.get_byte());
 
-        let mut last5 = sequence.slice(95..100);
+        let mut last5 = view.range(95..100);
         assert_eq!(5, last5.len());
-        assert_eq!(100, sequence.len());
-        assert_eq!(95, last5.get_u8());
+        assert_eq!(100, view.len());
+        assert_eq!(95, last5.get_byte());
 
-        let mut middle5 = sequence.slice(49..54);
+        let mut middle5 = view.range(49..54);
         assert_eq!(5, middle5.len());
-        assert_eq!(100, sequence.len());
-        assert_eq!(49, middle5.get_u8());
-        assert_eq!(50, middle5.get_u8());
-        assert_eq!(51, middle5.get_u8());
-        assert_eq!(52, middle5.get_u8());
-        assert_eq!(53, middle5.get_u8());
+        assert_eq!(100, view.len());
+        assert_eq!(49, middle5.get_byte());
+        assert_eq!(50, middle5.get_byte());
+        assert_eq!(51, middle5.get_byte());
+        assert_eq!(52, middle5.get_byte());
+        assert_eq!(53, middle5.get_byte());
 
-        assert!(sequence.slice_checked(0..101).is_none());
-        assert!(sequence.slice_checked(100..101).is_none());
-        assert!(sequence.slice_checked(101..101).is_none());
+        assert!(view.range_checked(0..101).is_none());
+        assert!(view.range_checked(100..101).is_none());
+        assert!(view.range_checked(101..101).is_none());
     }
 
     #[test]
     fn slice_indexing_kinds() {
         let span_builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
 
-        let mut sb = BytesBuf::from_span_builders([span_builder]);
-        sb.put_u8(0);
-        sb.put_u8(1);
-        sb.put_u8(2);
-        sb.put_u8(3);
-        sb.put_u8(4);
-        sb.put_u8(5);
+        let mut buf = BytesBuf::from_span_builders([span_builder]);
+        buf.put_byte(0);
+        buf.put_byte(1);
+        buf.put_byte(2);
+        buf.put_byte(3);
+        buf.put_byte(4);
+        buf.put_byte(5);
 
-        let sequence = sb.consume_all();
+        let data = buf.consume_all();
 
-        let mut middle_four = sequence.slice(1..5);
+        let mut middle_four = data.range(1..5);
         assert_eq!(4, middle_four.len());
-        assert_eq!(1, middle_four.get_u8());
-        assert_eq!(2, middle_four.get_u8());
-        assert_eq!(3, middle_four.get_u8());
-        assert_eq!(4, middle_four.get_u8());
+        assert_eq!(1, middle_four.get_byte());
+        assert_eq!(2, middle_four.get_byte());
+        assert_eq!(3, middle_four.get_byte());
+        assert_eq!(4, middle_four.get_byte());
 
-        let mut middle_four = sequence.slice(1..=4);
+        let mut middle_four = data.range(1..=4);
         assert_eq!(4, middle_four.len());
-        assert_eq!(1, middle_four.get_u8());
-        assert_eq!(2, middle_four.get_u8());
-        assert_eq!(3, middle_four.get_u8());
-        assert_eq!(4, middle_four.get_u8());
+        assert_eq!(1, middle_four.get_byte());
+        assert_eq!(2, middle_four.get_byte());
+        assert_eq!(3, middle_four.get_byte());
+        assert_eq!(4, middle_four.get_byte());
 
-        let mut last_two = sequence.slice(4..);
+        let mut last_two = data.range(4..);
         assert_eq!(2, last_two.len());
-        assert_eq!(4, last_two.get_u8());
-        assert_eq!(5, last_two.get_u8());
+        assert_eq!(4, last_two.get_byte());
+        assert_eq!(5, last_two.get_byte());
 
-        let mut first_two = sequence.slice(..2);
+        let mut first_two = data.range(..2);
         assert_eq!(2, first_two.len());
-        assert_eq!(0, first_two.get_u8());
-        assert_eq!(1, first_two.get_u8());
+        assert_eq!(0, first_two.get_byte());
+        assert_eq!(1, first_two.get_byte());
 
-        let mut first_two = sequence.slice(..=1);
+        let mut first_two = data.range(..=1);
         assert_eq!(2, first_two.len());
-        assert_eq!(0, first_two.get_u8());
-        assert_eq!(1, first_two.get_u8());
+        assert_eq!(0, first_two.get_byte());
+        assert_eq!(1, first_two.get_byte());
     }
 
     #[test]
     fn slice_checked_with_excluded_start_bound() {
-        use std::ops::Bound;
-
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = BytesBuf::from_span_builders([span_builder]);
-        sb.put_u8(0);
-        sb.put_u8(1);
-        sb.put_u8(2);
-        sb.put_u8(3);
-        sb.put_u8(4);
-        sb.put_u8(5);
-        sb.put_u8(6);
-        sb.put_u8(7);
-        sb.put_u8(8);
+        let mut buf = BytesBuf::from_span_builders([span_builder]);
+        buf.put_byte(0);
+        buf.put_byte(1);
+        buf.put_byte(2);
+        buf.put_byte(3);
+        buf.put_byte(4);
+        buf.put_byte(5);
+        buf.put_byte(6);
+        buf.put_byte(7);
+        buf.put_byte(8);
 
-        let sequence = sb.consume_all();
+        let view = buf.consume_all();
 
         // Test with excluded start bound: (Bound::Excluded(1), Bound::Excluded(5))
         // This should be equivalent to 2..5 (items at indices 2, 3, 4)
-        let sliced = sequence.slice_checked((Bound::Excluded(1), Bound::Excluded(5)));
+        let sliced = view.range_checked((Bound::Excluded(1), Bound::Excluded(5)));
         assert!(sliced.is_some());
         let mut sliced = sliced.unwrap();
         assert_eq!(3, sliced.len());
-        assert_eq!(2, sliced.get_u8());
-        assert_eq!(3, sliced.get_u8());
-        assert_eq!(4, sliced.get_u8());
+        assert_eq!(2, sliced.get_byte());
+        assert_eq!(3, sliced.get_byte());
+        assert_eq!(4, sliced.get_byte());
 
         // Test edge case: excluded start at the last valid index returns empty sequence
-        let sliced = sequence.slice_checked((Bound::Excluded(8), Bound::Unbounded));
+        let sliced = view.range_checked((Bound::Excluded(8), Bound::Unbounded));
         assert!(sliced.is_some());
         assert_eq!(0, sliced.unwrap().len());
 
         // Test edge case: excluded start that would overflow when adding 1
-        let sliced = sequence.slice_checked((Bound::Excluded(usize::MAX), Bound::Unbounded));
+        let sliced = view.range_checked((Bound::Excluded(usize::MAX), Bound::Unbounded));
         assert!(sliced.is_none());
     }
 
@@ -1108,69 +1340,63 @@ mod tests {
     fn slice_oob_is_panic() {
         let span_builder = std_alloc_block::allocate(nz!(1000)).into_span_builder();
 
-        let mut sb = BytesBuf::from_span_builders([span_builder]);
-        sb.put_bytes(0, 100);
+        let mut buf = BytesBuf::from_span_builders([span_builder]);
+        buf.put_byte_repeated(0, 100);
 
-        let sequence = sb.consume_all();
+        let view = buf.consume_all();
 
-        assert_panic!(_ = sequence.slice(0..101));
-        assert_panic!(_ = sequence.slice(0..=100));
-        assert_panic!(_ = sequence.slice(100..=100));
-        assert_panic!(_ = sequence.slice(100..101));
-        assert_panic!(_ = sequence.slice(101..));
-        assert_panic!(_ = sequence.slice(101..101));
-        assert_panic!(_ = sequence.slice(101..=101));
+        assert_panic!(_ = view.range(0..101));
+        assert_panic!(_ = view.range(0..=100));
+        assert_panic!(_ = view.range(100..=100));
+        assert_panic!(_ = view.range(100..101));
+        assert_panic!(_ = view.range(101..));
+        assert_panic!(_ = view.range(101..101));
+        assert_panic!(_ = view.range(101..=101));
     }
 
     #[test]
     fn slice_at_boundary_is_not_panic() {
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = BytesBuf::from_span_builders([span_builder]);
-        sb.put_bytes(0, 100);
+        let mut buf = BytesBuf::from_span_builders([span_builder]);
+        buf.put_byte_repeated(0, 100);
 
-        let sequence = sb.consume_all();
+        let view = buf.consume_all();
 
-        assert_eq!(0, sequence.slice(0..0).len());
-        assert_eq!(1, sequence.slice(0..=0).len());
-        assert_eq!(0, sequence.slice(..0).len());
-        assert_eq!(1, sequence.slice(..=0).len());
-        assert_eq!(0, sequence.slice(100..100).len());
-        assert_eq!(0, sequence.slice(99..99).len());
-        assert_eq!(1, sequence.slice(99..=99).len());
-        assert_eq!(1, sequence.slice(99..).len());
-        assert_eq!(100, sequence.slice(..).len());
+        assert_eq!(0, view.range(0..0).len());
+        assert_eq!(1, view.range(0..=0).len());
+        assert_eq!(0, view.range(..0).len());
+        assert_eq!(1, view.range(..=0).len());
+        assert_eq!(0, view.range(100..100).len());
+        assert_eq!(0, view.range(99..99).len());
+        assert_eq!(1, view.range(99..=99).len());
+        assert_eq!(1, view.range(99..).len());
+        assert_eq!(100, view.range(..).len());
     }
 
     #[test]
     fn slice_empty_is_empty_if_not_oob() {
         let span_builder = std_alloc_block::allocate(nz!(100)).into_span_builder();
 
-        let mut sb = BytesBuf::from_span_builders([span_builder]);
+        let mut buf = BytesBuf::from_span_builders([span_builder]);
 
         for i in 0..100 {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "manually validated range of values is safe"
-            )]
-            sb.put_u8(i as u8);
+            buf.put_byte(i);
         }
 
-        let sequence = sb.consume_all();
+        let view = buf.consume_all();
 
-        let sub_sequence = sequence.slice(50..50);
-        assert_eq!(0, sub_sequence.len());
+        let sub_view = view.range(50..50);
+        assert_eq!(0, sub_view.len());
 
-        // 100 is the index at the end of the sequence - still in-bounds, if at edge.
-        let sub_sequence = sequence.slice(100..100);
-        assert_eq!(0, sub_sequence.len());
-
-        assert!(sequence.slice_checked(101..101).is_none());
+        // 100 is the index at the end of the view - still in-bounds, if at edge.
+        let sub_view = view.range(100..100);
+        assert_eq!(0, sub_view.len());
+        assert!(view.range_checked(101..101).is_none());
     }
 
     #[test]
-    fn consume_all_chunks() {
+    fn consume_all_slices() {
         const SPAN_SIZE: NonZero<BlockSize> = nz!(10);
 
         // A multi-span sequence, 10 bytes x10.
@@ -1178,73 +1404,68 @@ mod tests {
             .take(10)
             .collect::<Vec<_>>();
 
-        let mut sb = BytesBuf::from_span_builders(span_builders);
+        let mut buf = BytesBuf::from_span_builders(span_builders);
 
         for i in 0..100 {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "manually validated range of values is safe"
-            )]
-            sb.put_u8(i as u8);
+            buf.put_byte(i);
         }
 
-        let mut sequence = sb.consume_all();
+        let mut view = buf.consume_all();
 
-        let mut chunk_index = 0;
+        let mut slice_index = 0;
         let mut bytes_consumed = 0;
 
-        sequence.consume_all_chunks(|chunk| {
-            assert_eq!(chunk.len(), 10);
-            bytes_consumed += chunk.len();
+        view.consume_all_slices(|slice| {
+            assert_eq!(slice.len(), 10);
+            bytes_consumed += slice.len();
 
             for i in 0..10 {
-                assert_eq!(chunk_index * 10 + i, chunk[i] as usize);
+                assert_eq!(slice_index * 10 + i, slice[i] as usize);
             }
 
-            chunk_index += 1;
+            slice_index += 1;
         });
 
         assert_eq!(bytes_consumed, 100);
 
-        sequence.consume_all_chunks(|_| unreachable!("sequence should now be empty"));
+        view.consume_all_slices(|_| unreachable!("view should now be empty"));
     }
 
     #[test]
     fn multithreaded_usage() {
-        fn post_to_another_thread(s: BytesView) {
+        fn post_to_another_thread(view: BytesView) {
             thread::spawn(move || {
-                let mut s = s;
-                assert_eq!(s.get_u8(), b'H');
-                assert_eq!(s.get_u8(), b'e');
-                assert_eq!(s.get_u8(), b'l');
-                assert_eq!(s.get_u8(), b'l');
-                assert_eq!(s.get_u8(), b'o');
+                let mut view = view;
+                assert_eq!(view.get_byte(), b'H');
+                assert_eq!(view.get_byte(), b'e');
+                assert_eq!(view.get_byte(), b'l');
+                assert_eq!(view.get_byte(), b'l');
+                assert_eq!(view.get_byte(), b'o');
             })
             .join()
             .unwrap();
         }
 
-        let memory = TransparentTestMemory::new();
-        let s = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let memory = TransparentMemory::new();
+        let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
-        post_to_another_thread(s);
+        post_to_another_thread(view);
     }
 
     #[test]
     fn vectored_read_as_io_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
         let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
-        let sequence = BytesView::from_sequences(vec![segment1.clone(), segment2.clone()]);
+        let view = BytesView::from_views(vec![segment1.clone(), segment2.clone()]);
 
         let mut io_slices = vec![];
-        let ioslice_count = Buf::chunks_vectored(&sequence, &mut io_slices);
+        let ioslice_count = view.io_slices(&mut io_slices);
         assert_eq!(ioslice_count, 0);
 
         let mut io_slices = vec![IoSlice::new(&[]); 4];
-        let ioslice_count = Buf::chunks_vectored(&sequence, &mut io_slices);
+        let ioslice_count = view.io_slices(&mut io_slices);
 
         assert_eq!(ioslice_count, 2);
         assert_eq!(io_slices[0].len(), segment1.len());
@@ -1253,18 +1474,18 @@ mod tests {
 
     #[test]
     fn vectored_read_as_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
         let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
         let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
-        let sequence = BytesView::from_sequences(vec![segment1.clone(), segment2.clone()]);
+        let view = BytesView::from_views(vec![segment1.clone(), segment2.clone()]);
 
         let mut slices: Vec<&[u8]> = vec![];
-        let slice_count = sequence.chunks_as_slices_vectored(&mut slices);
+        let slice_count = view.slices(&mut slices);
         assert_eq!(slice_count, 0);
 
         let mut slices: Vec<&[u8]> = vec![&[]; 4];
-        let slice_count = sequence.chunks_as_slices_vectored(&mut slices);
+        let slice_count = view.slices(&mut slices);
 
         assert_eq!(slice_count, 2);
         assert_eq!(slices[0].len(), segment1.len());
@@ -1272,103 +1493,103 @@ mod tests {
     }
 
     #[test]
-    fn eq_sequence() {
-        let memory = TransparentTestMemory::new();
+    fn eq_view() {
+        let memory = TransparentMemory::new();
 
-        let s1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
-        let s2 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let view2 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
-        assert_eq!(s1, s2);
+        assert_eq!(view1, view2);
 
-        let s3 = BytesView::copied_from_slice(b"Jello, world!", &memory);
+        let view3 = BytesView::copied_from_slice(b"Jello, world!", &memory);
 
-        assert_ne!(s1, s3);
+        assert_ne!(view1, view3);
 
-        let s4 = BytesView::copied_from_slice(b"Hello, world! ", &memory);
+        let view4 = BytesView::copied_from_slice(b"Hello, world! ", &memory);
 
-        assert_ne!(s1, s4);
+        assert_ne!(view1, view4);
 
-        let s5_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let s5_part2 = BytesView::copied_from_slice(b"world!", &memory);
-        let s5 = BytesView::from_sequences([s5_part1, s5_part2]);
+        let view5_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view5_part2 = BytesView::copied_from_slice(b"world!", &memory);
+        let view5 = BytesView::from_views([view5_part1, view5_part2]);
 
-        assert_eq!(s1, s5);
-        assert_ne!(s5, s3);
+        assert_eq!(view1, view5);
+        assert_ne!(view5, view3);
 
-        let s6 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view6 = BytesView::copied_from_slice(b"Hello, ", &memory);
 
-        assert_ne!(s1, s6);
-        assert_ne!(s5, s6);
+        assert_ne!(view1, view6);
+        assert_ne!(view5, view6);
     }
 
     #[test]
     fn eq_slice() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        let s1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
-        assert_eq!(s1, b"Hello, world!".as_slice());
-        assert_ne!(s1, b"Jello, world!".as_slice());
-        assert_ne!(s1, b"Hello, world! ".as_slice());
+        assert_eq!(view1, b"Hello, world!".as_slice());
+        assert_ne!(view1, b"Jello, world!".as_slice());
+        assert_ne!(view1, b"Hello, world! ".as_slice());
 
-        assert_eq!(b"Hello, world!".as_slice(), s1);
-        assert_ne!(b"Jello, world!".as_slice(), s1);
-        assert_ne!(b"Hello, world! ".as_slice(), s1);
+        assert_eq!(b"Hello, world!".as_slice(), view1);
+        assert_ne!(b"Jello, world!".as_slice(), view1);
+        assert_ne!(b"Hello, world! ".as_slice(), view1);
 
-        let s2_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let s2_part2 = BytesView::copied_from_slice(b"world!", &memory);
-        let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
+        let view2_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view2_part2 = BytesView::copied_from_slice(b"world!", &memory);
+        let view2 = BytesView::from_views([view2_part1, view2_part2]);
 
-        assert_eq!(s2, b"Hello, world!".as_slice());
-        assert_ne!(s2, b"Jello, world!".as_slice());
-        assert_ne!(s2, b"Hello, world! ".as_slice());
-        assert_ne!(s2, b"Hello, ".as_slice());
+        assert_eq!(view2, b"Hello, world!".as_slice());
+        assert_ne!(view2, b"Jello, world!".as_slice());
+        assert_ne!(view2, b"Hello, world! ".as_slice());
+        assert_ne!(view2, b"Hello, ".as_slice());
 
-        assert_eq!(b"Hello, world!".as_slice(), s2);
-        assert_ne!(b"Jello, world!".as_slice(), s2);
-        assert_ne!(b"Hello, world! ".as_slice(), s2);
-        assert_ne!(b"Hello, ".as_slice(), s2);
+        assert_eq!(b"Hello, world!".as_slice(), view2);
+        assert_ne!(b"Jello, world!".as_slice(), view2);
+        assert_ne!(b"Hello, world! ".as_slice(), view2);
+        assert_ne!(b"Hello, ".as_slice(), view2);
     }
 
     #[test]
     fn eq_array() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        let s1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
+        let view1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
 
-        assert_eq!(s1, b"Hello, world!");
-        assert_ne!(s1, b"Jello, world!");
-        assert_ne!(s1, b"Hello, world! ");
+        assert_eq!(view1, b"Hello, world!");
+        assert_ne!(view1, b"Jello, world!");
+        assert_ne!(view1, b"Hello, world! ");
 
-        assert_eq!(b"Hello, world!", s1);
-        assert_ne!(b"Jello, world!", s1);
-        assert_ne!(b"Hello, world! ", s1);
+        assert_eq!(b"Hello, world!", view1);
+        assert_ne!(b"Jello, world!", view1);
+        assert_ne!(b"Hello, world! ", view1);
 
-        let s2_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let s2_part2 = BytesView::copied_from_slice(b"world!", &memory);
-        let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
+        let view2_part1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view2_part2 = BytesView::copied_from_slice(b"world!", &memory);
+        let view2 = BytesView::from_views([view2_part1, view2_part2]);
 
-        assert_eq!(s2, b"Hello, world!");
-        assert_ne!(s2, b"Jello, world!");
-        assert_ne!(s2, b"Hello, world! ");
-        assert_ne!(s2, b"Hello, ");
+        assert_eq!(view2, b"Hello, world!");
+        assert_ne!(view2, b"Jello, world!");
+        assert_ne!(view2, b"Hello, world! ");
+        assert_ne!(view2, b"Hello, ");
 
-        assert_eq!(b"Hello, world!", s2);
-        assert_ne!(b"Jello, world!", s2);
-        assert_ne!(b"Hello, world! ", s2);
-        assert_ne!(b"Hello, ", s2);
+        assert_eq!(b"Hello, world!", view2);
+        assert_ne!(b"Jello, world!", view2);
+        assert_ne!(b"Hello, world! ", view2);
+        assert_ne!(b"Hello, ", view2);
     }
 
     #[test]
     fn meta_none() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        let s1 = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let s2 = BytesView::copied_from_slice(b"world!", &memory);
+        let view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view2 = BytesView::copied_from_slice(b"world!", &memory);
 
-        let s = BytesView::from_sequences([s1, s2]);
+        let view = BytesView::from_views([view1, view2]);
 
-        let mut metas_iter = s.iter_chunk_metas();
+        let mut metas_iter = view.iter_slice_metas();
 
         // We have two chunks, both without metadata.
         assert!(matches!(metas_iter.next(), Some(None)));
@@ -1396,14 +1617,14 @@ mod tests {
         // SAFETY: We guarantee exclusive access to the memory capacity.
         let block2 = unsafe { block2.as_ref().to_block() };
 
-        let mut builder = BytesBuf::from_blocks([block1, block2]);
+        let mut buf = BytesBuf::from_blocks([block1, block2]);
 
         // Add enough bytes to make use of both blocks.
-        builder.put_bytes(123, 166);
+        buf.put_byte_repeated(123, 166);
 
-        let s = builder.consume_all();
+        let view = buf.consume_all();
 
-        let mut metas_iter = s.iter_chunk_metas();
+        let mut metas_iter = view.iter_slice_metas();
 
         // NB! There is no requirement that the BytesBuf use the blocks in the order we gave
         // them in. We use white-box knowledge here to know that it actually reverses the order.
@@ -1422,128 +1643,128 @@ mod tests {
 
     #[test]
     fn append_single_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        // Create two single-span sequences
-        let mut s1 = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let s2 = BytesView::copied_from_slice(b"world!", &memory);
+        // Create two single-span views.
+        let mut view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view2 = BytesView::copied_from_slice(b"world!", &memory);
 
-        assert_eq!(s1.len(), 7);
-        assert_eq!(s2.len(), 6);
+        assert_eq!(view1.len(), 7);
+        assert_eq!(view2.len(), 6);
 
-        s1.append(s2);
+        view1.append(view2);
 
-        assert_eq!(s1.len(), 13);
-        assert_eq!(s1, b"Hello, world!");
+        assert_eq!(view1.len(), 13);
+        assert_eq!(view1, b"Hello, world!");
     }
 
     #[test]
     fn append_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        // Create two multi-span sequences (2 spans each)
-        let s1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
-        let s1_part2 = BytesView::copied_from_slice(b"BBB", &memory);
-        let mut s1 = BytesView::from_sequences([s1_part1, s1_part2]);
+        // Create two multi-span views (2 spans each)
+        let view1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
+        let view1_part2 = BytesView::copied_from_slice(b"BBB", &memory);
+        let mut view1 = BytesView::from_views([view1_part1, view1_part2]);
 
-        let s2_part1 = BytesView::copied_from_slice(b"CCC", &memory);
-        let s2_part2 = BytesView::copied_from_slice(b"DDD", &memory);
-        let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
+        let view2_part1 = BytesView::copied_from_slice(b"CCC", &memory);
+        let view2_part2 = BytesView::copied_from_slice(b"DDD", &memory);
+        let view2 = BytesView::from_views([view2_part1, view2_part2]);
 
-        assert_eq!(s1.len(), 6);
-        assert_eq!(s2.len(), 6);
+        assert_eq!(view1.len(), 6);
+        assert_eq!(view2.len(), 6);
 
-        s1.append(s2);
+        view1.append(view2);
 
-        assert_eq!(s1.len(), 12);
-        assert_eq!(s1, b"AAABBBCCCDDD");
+        assert_eq!(view1.len(), 12);
+        assert_eq!(view1, b"AAABBBCCCDDD");
     }
 
     #[test]
-    fn append_empty_sequences() {
-        let memory = TransparentTestMemory::new();
+    fn append_empty_view() {
+        let memory = TransparentMemory::new();
 
-        let mut s1 = BytesView::copied_from_slice(b"Hello", &memory);
-        let s2 = BytesView::new();
+        let mut view1 = BytesView::copied_from_slice(b"Hello", &memory);
+        let view2 = BytesView::new();
 
-        s1.append(s2);
-        assert_eq!(s1.len(), 5);
-        assert_eq!(s1, b"Hello");
+        view1.append(view2);
+        assert_eq!(view1.len(), 5);
+        assert_eq!(view1, b"Hello");
 
-        let mut s3 = BytesView::new();
-        let s4 = BytesView::copied_from_slice(b"world", &memory);
+        let mut view3 = BytesView::new();
+        let view4 = BytesView::copied_from_slice(b"world", &memory);
 
-        s3.append(s4);
-        assert_eq!(s3.len(), 5);
-        assert_eq!(s3, b"world");
+        view3.append(view4);
+        assert_eq!(view3.len(), 5);
+        assert_eq!(view3, b"world");
     }
 
     #[test]
     fn concat_single_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        // Create two single-span sequences
-        let s1 = BytesView::copied_from_slice(b"Hello, ", &memory);
-        let s2 = BytesView::copied_from_slice(b"world!", &memory);
+        // Create two single-span views
+        let view1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let view2 = BytesView::copied_from_slice(b"world!", &memory);
 
-        assert_eq!(s1.len(), 7);
-        assert_eq!(s2.len(), 6);
+        assert_eq!(view1.len(), 7);
+        assert_eq!(view2.len(), 6);
 
-        let s3 = s1.concat(s2);
+        let view3 = view1.concat(view2);
 
-        // Original sequences unchanged
-        assert_eq!(s1.len(), 7);
-        assert_eq!(s1, b"Hello, ");
+        // Original view unchanged
+        assert_eq!(view1.len(), 7);
+        assert_eq!(view1, b"Hello, ");
 
-        // New sequence contains combined data
-        assert_eq!(s3.len(), 13);
-        assert_eq!(s3, b"Hello, world!");
+        // New view contains combined data
+        assert_eq!(view3.len(), 13);
+        assert_eq!(view3, b"Hello, world!");
     }
 
     #[test]
     fn concat_multi_span() {
-        let memory = TransparentTestMemory::new();
+        let memory = TransparentMemory::new();
 
-        // Create two multi-span sequences (2 spans each)
-        let s1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
-        let s1_part2 = BytesView::copied_from_slice(b"BBB", &memory);
-        let s1 = BytesView::from_sequences([s1_part1, s1_part2]);
+        // Create two multi-span views (2 spans each)
+        let view1_part1 = BytesView::copied_from_slice(b"AAA", &memory);
+        let view1_part2 = BytesView::copied_from_slice(b"BBB", &memory);
+        let view1 = BytesView::from_views([view1_part1, view1_part2]);
 
-        let s2_part1 = BytesView::copied_from_slice(b"CCC", &memory);
-        let s2_part2 = BytesView::copied_from_slice(b"DDD", &memory);
-        let s2 = BytesView::from_sequences([s2_part1, s2_part2]);
+        let view2_part1 = BytesView::copied_from_slice(b"CCC", &memory);
+        let view2_part2 = BytesView::copied_from_slice(b"DDD", &memory);
+        let view2 = BytesView::from_views([view2_part1, view2_part2]);
 
-        assert_eq!(s1.len(), 6);
-        assert_eq!(s2.len(), 6);
+        assert_eq!(view1.len(), 6);
+        assert_eq!(view2.len(), 6);
 
-        let s3 = s1.concat(s2);
+        let view3 = view1.concat(view2);
 
-        // Original sequences unchanged
-        assert_eq!(s1.len(), 6);
-        assert_eq!(s1, b"AAABBB");
+        // Original view unchanged
+        assert_eq!(view1.len(), 6);
+        assert_eq!(view1, b"AAABBB");
 
-        // New sequence contains combined data
-        assert_eq!(s3.len(), 12);
-        assert_eq!(s3, b"AAABBBCCCDDD");
+        // New view contains combined data
+        assert_eq!(view3.len(), 12);
+        assert_eq!(view3, b"AAABBBCCCDDD");
     }
 
     #[test]
-    fn concat_empty_sequences() {
-        let memory = TransparentTestMemory::new();
+    fn concat_empty_views() {
+        let memory = TransparentMemory::new();
 
-        let s1 = BytesView::copied_from_slice(b"Hello", &memory);
-        let s2 = BytesView::new();
+        let view1 = BytesView::copied_from_slice(b"Hello", &memory);
+        let view2 = BytesView::new();
 
-        let s3 = s1.concat(s2);
-        assert_eq!(s3.len(), 5);
-        assert_eq!(s3, b"Hello");
+        let view3 = view1.concat(view2);
+        assert_eq!(view3.len(), 5);
+        assert_eq!(view3, b"Hello");
 
-        let s4 = BytesView::new();
-        let s5 = BytesView::copied_from_slice(b"world", &memory);
+        let view4 = BytesView::new();
+        let view5 = BytesView::copied_from_slice(b"world", &memory);
 
-        let s6 = s4.concat(s5);
-        assert_eq!(s6.len(), 5);
-        assert_eq!(s6, b"world");
+        let view6 = view4.concat(view5);
+        assert_eq!(view6.len(), 5);
+        assert_eq!(view6, b"world");
     }
 
     #[test]

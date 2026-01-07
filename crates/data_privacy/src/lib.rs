@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![expect(rustdoc::redundant_explicit_links, reason = "Needed to support cargo-rdme link mapping.")]
 
 //! Mechanisms to classify, manipulate, and redact sensitive data.
 //!
@@ -44,7 +44,7 @@
 //!
 //! This crate is built around two primary traits:
 //!
-//! * The [`Classified`](crate::classified::Classified) trait is used to mark types that hold sensitive data. The trait exposes
+//! * The [`Classified`] trait is used to mark types that hold sensitive data. The trait exposes
 //!   explicit mechanisms to access the data in a safe and auditable way.
 //!
 //! * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
@@ -65,7 +65,7 @@
 //! A taxonomy is defined using the [`taxonomy`] attribute macro. The macro is applied to an enum
 //! declaration. Each variant of the enum represents a data class within the taxonomy.
 //!
-//! [`DataClass`](crate::data_class::DataClass) is a struct that represents a single data class within a taxonomy. The struct
+//! [`DataClass`] is a struct that represents a single data class within a taxonomy. The struct
 //! contains the name of the taxonomy and the name of the data class. You can get a `DataClass` instance for a given data class
 //! by calling the associated `data_class` method on the taxonomy enum.
 //!
@@ -87,9 +87,9 @@
 //!
 //! # Classified Containers
 //!
-//! Types that implement the [`Classified`] trait are said to be classified containers. They encapsulate
+//! Types that implement the [`Classified`] trait are said to be _classified containers_. They encapsulate
 //! an instance of another type. Although containers can be created by hand, they are most commonly created
-//! using the [`classified`](crate::classified) attribute. See the documentation for the attribute to learn how you define your own
+//! using the [`classified`] attribute. See the documentation for the attribute to learn how you define your own
 //! classified type.
 //!
 //! Applications use the classified container types around application
@@ -197,10 +197,8 @@ pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
 #[cfg(feature = "rapidhash")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rapidhash")))]
 pub use redactors::rapidhash_redactor;
 #[cfg(feature = "xxh3")]
-#[cfg_attr(docsrs, doc(cfg(feature = "xxh3")))]
 pub use redactors::xxh3_redactor;
 pub use redactors::{Redactor, simple_redactor};
 pub use sensitive::Sensitive;

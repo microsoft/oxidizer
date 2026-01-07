@@ -4,7 +4,6 @@
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::core::ThreadAware;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
@@ -152,15 +151,9 @@ where
     }
 }
 
-impl<T> ThreadAware for Arc<T> {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::affinity::pinned_affinities;
+    use crate::{ThreadAware, affinity::pinned_affinities};
 
     #[test]
     #[cfg(feature = "threads")]
@@ -342,33 +335,10 @@ mod tests {
         assert_eq!(transferred_err_string, Err("error".to_string()));
     }
 
-    #[test]
-    fn test_arc() {
-        use crate::ThreadAware;
-        use std::sync::Arc;
-
-        let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
-        let destination = affinities[1];
-
-        // Test Arc with simple type
-        let arc_value = Arc::new(42);
-        let arc_clone = Arc::clone(&arc_value);
-        let transferred = arc_value.relocated(source, destination);
-
-        // Arc should maintain reference count and point to the same data
-        assert_eq!(*transferred, 42);
-        assert_eq!(Arc::strong_count(&transferred), 2);
-        assert_eq!(Arc::strong_count(&arc_clone), 2);
-
-        // Test Arc with String
-        let arc_string = Arc::new("hello".to_string());
-        let transferred_string = arc_string.relocated(source, destination);
-        assert_eq!(*transferred_string, "hello".to_string());
-
-        // Test Arc with Vec
-        let arc_vec = Arc::new(vec![1, 2, 3]);
-        let transferred_vec = arc_vec.relocated(source, destination);
-        assert_eq!(*transferred_vec, vec![1, 2, 3]);
-    }
+    // std::sync::Arc<T> a type that introduces sharing across threads and thus is very likely to introduce
+    // contention. The main point of ThreadAware is to prevent contention where possible, so it should not be
+    // implemented for Arc<T>. If a user depends on Arc<T>, they need to take special steps to decide how
+    // to correctly avoid contention rather than things just working out of the box with likely incorrect
+    // behavior (shared synchronization primitives etc).
+    static_assertions::assert_not_impl_any!(std::sync::Arc<i32>: ThreadAware);
 }

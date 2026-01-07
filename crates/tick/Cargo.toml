@@ -4,7 +4,7 @@
 [package]
 name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
-version = "0.1.0"
+version = "0.1.2"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["data-structures"]
@@ -15,16 +15,15 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
-
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "futures_core::stream::Stream",
 ]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []

@@ -16,7 +16,7 @@
 
     {
         "include": [
-            "scripts/repo-template/**/*.rs"
+            "scripts/crate-template/**/*.rs"
         ],
         "license": "./.github/license-check/slash-slash.txt"
     },
@@ -26,7 +26,7 @@
             "scripts/**/*.rs"
         ],
         "exclude": [
-            "scripts/repo-template/**/*.rs"
+            "scripts/crate-template/**/*.rs"
         ],
         "license": "./.github/license-check/hash.txt"
     },
@@ -44,6 +44,8 @@
 
     {
         "include": [
+            "**/*.dic",
+            "**/*.j2",
             "**/*.svg",
             "**/*.png",
             "**/*.ico",
@@ -53,6 +55,7 @@
             "**/*.json",
             "**/*.snap",
             "**/*.stderr",
+            "**/*.graphml",
             "LICENSE",
             "Cargo.lock"
         ]

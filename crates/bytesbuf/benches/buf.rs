@@ -9,8 +9,9 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use bytes::{Buf, BufMut};
-use bytesbuf::{BlockSize, BytesBuf, BytesView, FixedBlockTestMemory};
+use bytesbuf::mem::BlockSize;
+use bytesbuf::mem::testing::{FixedBlockMemory, TransparentMemory};
+use bytesbuf::{BytesBuf, BytesView};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use new_zealand::nz;
 
@@ -33,15 +34,15 @@ const MANY_SPANS: usize = 32;
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
 
-    let memory = FixedBlockTestMemory::new(TEST_SPAN_SIZE);
+    let memory = TransparentMemory::new();
 
-    let test_data_as_seq = BytesView::copied_from_slice(TEST_DATA, &memory);
+    let test_data_as_view = BytesView::copied_from_slice(TEST_DATA, &memory);
 
-    let max_inline = iter::repeat_n(test_data_as_seq.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
-    let max_inline_as_seq = BytesView::from_sequences(max_inline.iter().cloned());
+    let max_inline = iter::repeat_n(test_data_as_view.clone(), MAX_INLINE_SPANS).collect::<Vec<_>>();
+    let max_inline_as_view = BytesView::from_views(max_inline.iter().cloned());
 
-    let many = iter::repeat_n(test_data_as_seq.clone(), MANY_SPANS).collect::<Vec<_>>();
-    let many_as_seq = BytesView::from_sequences(many.iter().cloned());
+    let many = iter::repeat_n(test_data_as_view.clone(), MANY_SPANS).collect::<Vec<_>>();
+    let many_as_view = BytesView::from_views(many.iter().cloned());
 
     let mut group = c.benchmark_group("BytesBuf");
 
@@ -54,81 +55,81 @@ fn entrypoint(c: &mut Criterion) {
     });
 
     group.bench_function("len_empty", |b| {
-        b.iter_batched_ref(BytesBuf::new, |sb| sb.len(), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |buf| buf.len(), BatchSize::SmallInput);
     });
 
     group.bench_function("len_many", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(many_as_view.clone());
+                buf
             },
-            |sb| sb.len(),
+            |buf| buf.len(),
             BatchSize::SmallInput,
         );
     });
 
     group.bench_function("is_empty_empty", |b| {
-        b.iter_batched_ref(BytesBuf::new, |sb| sb.is_empty(), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |buf| buf.is_empty(), BatchSize::SmallInput);
     });
 
     group.bench_function("is_empty_many", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(many_as_view.clone());
+                buf
             },
-            |sb| sb.is_empty(),
+            |buf| buf.is_empty(),
             BatchSize::SmallInput,
         );
     });
 
     group.bench_function("capacity_empty", |b| {
-        b.iter_batched_ref(BytesBuf::new, |sb| sb.capacity(), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |buf| buf.capacity(), BatchSize::SmallInput);
     });
 
     group.bench_function("capacity_many", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(many_as_view.clone());
+                buf
             },
-            |sb| sb.capacity(),
+            |buf| buf.capacity(),
             BatchSize::SmallInput,
         );
     });
 
     group.bench_function("reserve", |b| {
-        b.iter_batched_ref(BytesBuf::new, |sb| sb.reserve(black_box(1), &memory), BatchSize::SmallInput);
+        b.iter_batched_ref(BytesBuf::new, |buf| buf.reserve(black_box(1), &memory), BatchSize::SmallInput);
     });
 
-    let allocs_op = allocs.operation("append_clean");
-    group.bench_function("append_clean", |b| {
+    let allocs_op = allocs.operation("put_view_clean");
+    group.bench_function("put_view_clean", |b| {
         b.iter_batched_ref(
             BytesBuf::new,
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                sb.append(test_data_as_seq.clone());
+                buf.put_bytes(test_data_as_view.clone());
             },
             BatchSize::SmallInput,
         );
     });
 
-    let allocs_op = allocs.operation("append_dirty");
-    group.bench_function("append_dirty", |b| {
+    let allocs_op = allocs.operation("put_view_dirty");
+    group.bench_function("put_view_dirty", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
-                sb.put_u8(123);
-                sb
+                let mut buf = BytesBuf::new();
+                buf.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
+                buf.put_byte(123);
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                sb.append(test_data_as_seq.clone());
+                buf.put_bytes(test_data_as_view.clone());
             },
             BatchSize::SmallInput,
         );
@@ -138,13 +139,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("consume_one_span", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(many_as_view.clone());
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                sb.consume(TEST_SPAN_SIZE.get() as usize)
+                buf.consume(TEST_SPAN_SIZE.get() as usize)
             },
             BatchSize::SmallInput,
         );
@@ -154,13 +155,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("consume_max_inline_spans", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(max_inline_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(max_inline_as_view.clone());
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                sb.consume(TEST_SPAN_SIZE.get() as usize);
+                buf.consume(TEST_SPAN_SIZE.get() as usize);
             },
             BatchSize::SmallInput,
         );
@@ -170,13 +171,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("consume_many_spans", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(many_as_view.clone());
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                sb.consume_all()
+                buf.consume_all()
             },
             BatchSize::SmallInput,
         );
@@ -186,13 +187,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("extend_lifetime", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(test_data_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(test_data_as_view.clone());
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                sb.extend_lifetime()
+                buf.extend_lifetime()
             },
             BatchSize::SmallInput,
         );
@@ -201,17 +202,17 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("vectored_write_one_span");
     group.bench_function("vectored_write_one_span", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(BLOCK_SIZE.get() as usize, &memory);
-                sb
+                let mut buf = BytesBuf::new();
+                buf.reserve(BLOCK_SIZE.get() as usize, &memory);
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                let write = sb.begin_vectored_write(None);
+                let write = buf.begin_vectored_write(None);
 
                 // SAFETY: Yes, I promise I wrote this many bytes.
                 // This is a lie but we do not touch the bytes, so should be a harmless lie.
@@ -226,17 +227,17 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("vectored_write_max_inline_spans");
     group.bench_function("vectored_write_max_inline_spans", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(BLOCK_SIZE.get() as usize * MAX_INLINE_SPANS, &memory);
-                sb
+                let mut buf = BytesBuf::new();
+                buf.reserve(BLOCK_SIZE.get() as usize * MAX_INLINE_SPANS, &memory);
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                let write = sb.begin_vectored_write(None);
+                let write = buf.begin_vectored_write(None);
 
                 // SAFETY: Yes, I promise I wrote this many bytes.
                 // This is a lie but we do not touch the bytes, so should be a harmless lie.
@@ -251,17 +252,17 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("vectored_write_many_spans");
     group.bench_function("vectored_write_many_spans", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(BLOCK_SIZE.get() as usize * MANY_SPANS, &memory);
-                sb
+                let mut buf = BytesBuf::new();
+                buf.reserve(BLOCK_SIZE.get() as usize * MANY_SPANS, &memory);
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                let write = sb.begin_vectored_write(None);
+                let write = buf.begin_vectored_write(None);
 
                 // SAFETY: Yes, I promise I wrote this many bytes.
                 // This is a lie but we do not touch the bytes, so should be a harmless lie.
@@ -277,19 +278,19 @@ fn entrypoint(c: &mut Criterion) {
     // the vectored write API.
     group.bench_function("advance_mut_one_span", |b| {
         const BLOCK_SIZE: NonZero<BlockSize> = nz!(10);
-        let memory = FixedBlockTestMemory::new(BLOCK_SIZE);
+        let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(BLOCK_SIZE.get() as usize, &memory);
-                sb
+                let mut buf = BytesBuf::new();
+                buf.reserve(BLOCK_SIZE.get() as usize, &memory);
+                buf
             },
-            |sb| {
+            |buf| {
                 // SAFETY: Yes, I promise I wrote this many bytes.
                 // This is a lie but we do not touch the bytes, so should be a harmless lie.
                 unsafe {
-                    sb.advance_mut(BLOCK_SIZE.get() as usize);
+                    buf.advance(BLOCK_SIZE.get() as usize);
                 }
             },
             BatchSize::SmallInput,
@@ -300,17 +301,17 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("peek_frozen_all", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.append(many_as_seq.clone());
-                sb
+                let mut buf = BytesBuf::new();
+                buf.put_bytes(many_as_view.clone());
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                let mut peeked = sb.peek();
+                let mut peeked = buf.peek();
 
                 // We just seek to the end, that is all.
-                while peeked.has_remaining() {
-                    peeked.advance(peeked.chunk().len());
+                while !peeked.is_empty() {
+                    peeked.advance(peeked.first_slice().len());
                 }
             },
             BatchSize::SmallInput,
@@ -321,18 +322,18 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("peek_unfrozen_all", |b| {
         b.iter_batched_ref(
             || {
-                let mut sb = BytesBuf::new();
-                sb.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
-                sb.put_u8(123);
-                sb
+                let mut buf = BytesBuf::new();
+                buf.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
+                buf.put_byte(123);
+                buf
             },
-            |sb| {
+            |buf| {
                 let _span = allocs_op.measure_thread();
-                let mut peeked = sb.peek();
+                let mut peeked = buf.peek();
 
                 // We just seek to the end, that is all.
-                while peeked.has_remaining() {
-                    peeked.advance(peeked.chunk().len());
+                while !peeked.is_empty() {
+                    peeked.advance(peeked.first_slice().len());
                 }
             },
             BatchSize::SmallInput,

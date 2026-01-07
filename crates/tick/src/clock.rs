@@ -40,7 +40,7 @@ use crate::timers::TimerKey;
 /// # Clock construction
 ///
 /// The clock requires a runtime to drive the registered timers. This crate provides built-in support
-/// for Tokio via [`Clock::new_tokio`] (available with the `tokio` feature). For other async runtimes,
+/// for Tokio via [`Clock::new_tokio()`] (available with the `tokio` feature). For other async runtimes,
 /// you can use types in the [`runtime`][crate::runtime] module to drive the clock.
 ///
 /// In tests, the clock can be constructed directly using [`ClockControl`][crate::ClockControl] or via [`Clock::new_frozen`][crate::Clock::new_frozen]
@@ -60,8 +60,8 @@ use crate::timers::TimerKey;
 ///
 /// # Cloning and shared state
 ///
-/// Cloning a clock is inexpensive (just an `Arc` clone) and every clone shares the same underlying state,
-/// including registered timers and—when the `test-util` feature is enabled—the controlled passage of time.
+/// Cloning a clock is inexpensive (just an [`Arc`] clone) and every clone shares the same underlying state,
+/// including registered timers and, when the `test-util` feature is enabled, the controlled passage of time.
 /// Any timers you register or time adjustments you perform through one clone are visible to every other clone
 /// created from the same clock.
 ///
@@ -151,7 +151,6 @@ impl Clock {
     ///
     /// Panics if called outside of a Tokio runtime context.
     #[cfg(any(feature = "tokio", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn new_tokio() -> Self {
@@ -213,7 +212,6 @@ impl Clock {
     /// assert_eq!(instance, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen() -> Self {
         crate::ClockControl::new().to_clock()
@@ -242,7 +240,6 @@ impl Clock {
     /// assert_eq!(system_time, clock.system_time());
     /// ```
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_clock()
@@ -283,7 +280,7 @@ impl Clock {
     /// # Type Parameters
     ///
     /// * `T` - The target type that implements [`TryFrom<SystemTime>`]. Common examples include
-    ///   timestamp types from external crates that can be constructed from a `SystemTime`.
+    ///   timestamp types from external crates that can be constructed from a [`SystemTime`].
     ///
     /// # Panics
     ///
@@ -292,12 +289,12 @@ impl Clock {
     /// In practice, this conversion always succeeds because:
     ///
     /// - The system time returned is always within a normalized range in real environments.
-    /// - Target types that implement `TryFrom<SystemTime>` typically support the full valid
+    /// - Target types that implement [`TryFrom<SystemTime>`][TryFrom] typically support the full valid
     ///   range of system time values.
     ///
     /// The only theoretical failure case is in tests using manual time control (via the
     /// `test-util` feature), where time could be moved excessively far into the future,
-    /// potentially exceeding the target type's representable range. This is not a concern
+    /// potentially exceeding the target type's supported range of values. This is not a concern
     /// in production.
     #[expect(
         clippy::match_wild_err_arm,
@@ -319,7 +316,7 @@ impl Clock {
 
     /// Retrieves the current [`Instant`] time.
     ///
-    /// An `Instant` represents a monotonic time point guaranteed to always increase.
+    /// An [`Instant`] represents a monotonic time point guaranteed to always increase.
     /// Unlike [`system_time`][Self::system_time], the instant is not affected by system clock
     /// changes and provides a stable reference point for measuring elapsed time.
     ///

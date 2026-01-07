@@ -9,28 +9,17 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-
-  # Rust toolchain versions
-  RUST_LATEST: "1.91"                                # used for mutation testing
-
-  # Tool versions
-  CARGO_MUTANTS_VERSION: "25.3.1"
-  SCCACHE_VERSION: "v0.12.0"
-
 jobs:
   nightly-gatekeeper:
     runs-on: ubuntu-latest
     outputs:
       should_skip: ${{ steps.check.outputs.should_skip }}
     steps:
-      - uses: actions/checkout@v6.0.0
+      - uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
       - name: Check for changes in last 24 hours
-        id: check
         run: |
           # Check logs for commits in the last 24 hours on the current branch
           if [[ -z $(git log --since="24 hours ago" --pretty=format:"%H") ]]; then
@@ -42,43 +31,31 @@ jobs:
           fi
 
   mutation-testing:
-    needs: nightly-gatekeeper
+    needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     permissions:
       issues: write
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.0
-      - name: Start sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: actions/checkout@v6.0.1
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          version: ${{ env.SCCACHE_VERSION }}
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
-        with:
-          toolchain: ${{ env.RUST_LATEST }},nightly
-      - name: Installing Wild Linker
-        uses: davidlattimore/wild-action@0.7.0
-      - name: Install Cargo Tools
-        uses: taiki-e/install-action@v2.62.62
-        with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          enable-sccache: true
+          enable-wild-linker: true
+          rust-toolchain: RUST_NIGHTLY
+          cargo-tools: CARGO_MUTANTS_VERSION
 
       # execute
       - name: Mutate All
-        id: mutate
-        continue-on-error: true
         env:
           DISABLE_T_REX: 1
-        run: cargo +nightly -Zscript scripts/mutants.rs
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs
 
       - name: Create or Update Issue on Failure
-        if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
+        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -98,7 +75,3 @@ jobs:
               --body "$ISSUE_BODY" \
               --label "bug"
           fi
-
-      - name: Check for Step Failure
-        if: steps.mutate.outcome != 'success' && steps.mutate.outcome != 'skipped'
-        run: exit 1

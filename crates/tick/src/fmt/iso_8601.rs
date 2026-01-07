@@ -5,7 +5,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 
 use crate::Error;
 use crate::fmt::{Rfc2822, UnixSeconds};
@@ -87,12 +87,12 @@ use crate::fmt::{Rfc2822, UnixSeconds};
 pub struct Iso8601(pub(super) Timestamp);
 
 impl Iso8601 {
-    /// The maximum representable value of `Iso8601`.
+    /// The largest value that can be represented by `Iso8601`.
     ///
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
-    /// The minimum representable value of `Iso8601`.
+    /// The smallest value that can be represented by `Iso8601`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
     pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
@@ -149,7 +149,6 @@ impl From<UnixSeconds> for Iso8601 {
 }
 
 #[cfg(any(feature = "serde", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde_core::Serialize for Iso8601 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -160,7 +159,6 @@ impl serde_core::Serialize for Iso8601 {
 }
 
 #[cfg(any(feature = "serde", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde_core::Deserialize<'de> for Iso8601 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -173,15 +171,15 @@ impl<'de> serde_core::Deserialize<'de> for Iso8601 {
 }
 
 fn with_rounded_nanos(timestamp: Timestamp) -> Timestamp {
-    let duration = timestamp.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs();
+    let duration = timestamp.duration_since(Timestamp::UNIX_EPOCH);
     let secs = duration.as_secs();
     let nanos = duration.subsec_nanos();
     let nanos = (nanos / 100) * 100;
-    let duration = Duration::new(secs, nanos);
+    let duration = SignedDuration::new(secs, nanos);
 
     Timestamp::UNIX_EPOCH
         .saturating_add(duration)
-        .expect("this can never fail as we know we are withing a valid range")
+        .expect("this can never fail as we know we are within a valid range")
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -271,5 +269,20 @@ mod tests {
 
         let iso: Iso8601 = SystemTime::UNIX_EPOCH.try_into().unwrap();
         assert_eq!(iso.to_string(), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn ensure_nanos_rounded_when_before_epoch() {
+        let system_time = SystemTime::UNIX_EPOCH - Duration::new(8, 999_999_999);
+        let iso: Iso8601 = system_time.try_into().unwrap();
+
+        assert_eq!(iso.to_string(), "1969-12-31T23:59:51.0000001Z");
+    }
+
+    #[test]
+    fn far_in_the_past() {
+        let iso: Iso8601 = "1601-01-01T00:00:00Z".parse().unwrap();
+        assert_eq!(iso.to_string(), "1601-01-01T00:00:00Z");
+        assert_eq!(SystemTime::from(iso), SystemTime::UNIX_EPOCH - Duration::new(11_644_473_600, 0));
     }
 }

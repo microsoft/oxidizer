@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.8.0] - 2025-12-16
+## [0.9.0] - 2025-12-16
+
+- ✨ Features
+
+  - Better serialization and perf.
 
 - 🔄 Continuous Integration
 
@@ -9,6 +13,7 @@
 
 - 🧩 Miscellaneous
 
+  - Make it to_redacted_string to avoid annoying downstream conflicts. ([#143](https://github.com/microsoft/oxidizer/pull/143))
   - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
 
 ## [0.7.0] - 2025-12-05
@@ -24,7 +29,7 @@
   - Major improvements in the data_privacy crate ([#50](https://github.com/microsoft/oxidizer/pull/50))
   - Introduce the ohno and ohno_macros crates ([#53](https://github.com/microsoft/oxidizer/pull/53))
   - Introduce the #[classified] macro ([#48](https://github.com/microsoft/oxidizer/pull/48))
-  - Make RedactionEngine clonable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
+  - Make RedactionEngine cloneable. ([#13](https://github.com/microsoft/oxidizer/pull/13))
 
 - 📚 Documentation
 

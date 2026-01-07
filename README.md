@@ -1,11 +1,11 @@
 <div align="center">
- <img src="./logo.svg" alt="Oxidizer Logo" width="128" height="128">
+ <img src="./logo.svg" alt="Oxidizer Logo" width="96">
 
 # The Oxidizer Project
 
-[![CI](https://github.com/microsoft/oxidizer/workflows/main/badge.svg)](https://github.com/microsoft/oxidizer/actions)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 </div>
 
@@ -25,8 +25,8 @@ This repository contains a set of crates that help you build robust highly scala
 
 These are the crates built out of this repo:
 
-- [`async_once`](./crates/async_once/README.md) - Async once-cell that executes initialization at most once with parallel follower notification.
-- [`bytesbuf`](./crates/bytesbuf/README.md) - Manipulate sequences of bytes for efficient I/O.
+- [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
+- [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros for the `data_privacy` crate.
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/README.md) - Macros for the `data_privacy` crate.
@@ -59,7 +59,7 @@ The `add-crate` script does the following:
 - Adds an entry for the crate to the top-level [CHANGELOG.md](./CHANGELOG.md) file.
 
 - Prepares a `README.md` file for the crate, setup for use with [
-  `cargo-rdme`](https://docs.rs/cargo-rdme/latest/cargo_rdme/)
+  `cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme)
   with a set of appropriate CI badges.
 
 - Creates an empty `CHANGELOG.md` file for the crate, which will later get populated by the `scripts\release-crate.ps1`
@@ -95,8 +95,8 @@ features. We expect our Rust code to be fully documented in the normal Rust way,
 automation processes:
 
 - The `README.md` file in each crate's directory is auto-generated from the crate-level documentation.
-  We use the [`cargo-rdme`](https://crates.io/crates/cargo-rdme) tool which reads the crate docs, patches links, and
-  then inserts the results into the `README.md` file. A pull request gate ensures the `README.md` file
+  We use the [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) tool which reads the crate docs, resolves intra-doc links, and
+  generates the `README.md` file using a shared template. A pull request gate ensures the `README.md` file
   always reflects the latest crate documentation.
 
 - The `CHANGELOG.md` file in each crate's directory is auto-generated from the commits to a crate's directory by the
@@ -131,7 +131,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   We use [`cargo-hack`](https://crates.io/crates/cargo-hack) to iterate through
   different crate feature combinations to make sure everything builds properly.
 
-- **Testing**. We run `cargo test --all-features` to run every normal test and documentation test in the repo.
+- **Testing**. We run `cargo nextest --all-features` to run every normal test and documentation test in the repo.
 
 - **Code Coverage**. We calculate code coverage for the whole repo using [
   `cargo-llvm-cov`](https://crates.io/crates/cargo-llvm-cov).
@@ -151,10 +151,8 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **Cargo.toml Formatting**. We use [`cargo-sort`](https://crates.io/crates/cargo-sort) to keep Cargo.toml
   files in a consistent format and layout.
 
-- **Dependency Auditing**. We use [`cargo-audit`](https://crates.io/crates/cargo-audit) to be alerted of
-  any security vulnerabilities in our dependencies.
-
-- **Unsafe Verification**. We use Miri to verify that our unsafe code doesn't induce undefined behaviors.
+- **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
+  unsafe code doesn't induce undefined behaviors.
 
 - **External Type Exposure**. We use [`cargo-external-types`](https://crates.io/crates/cargo-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
@@ -193,7 +191,9 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **License Headers**. We ensure all source files have the requisite license header. The headers are described in
   the `.github\license-check` directory.
 
-- **README Content**. We use [`cargo-rdme`](https://github.com/crates/cargo-rdme) to ensure each crate's `README.md`
+- **Spell Checking**. We use [cargo-spellcheck](https://crates.io/crates/cargo-spellcheck) to help our docs have fewer typos.
+
+- **README Content**. We use [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) to ensure each crate's `README.md`
   file matches the crate's current crate-level documentation.
 
 ## Trademarks

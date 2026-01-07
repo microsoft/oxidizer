@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy_macros"
 description = "Macros for the data_privacy crate."
-version = "0.8.0"
+version = "0.9.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
@@ -18,6 +18,9 @@ repository.workspace = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["data_privacy_macros::*"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lib]
 proc-macro = true

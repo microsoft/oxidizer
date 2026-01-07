@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! High-quality error handling for Rust.
 //!
@@ -11,7 +11,7 @@
 //!
 //! # Key Features
 //!
-//! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, `Display`, `Debug` implementations
+//! - [**`#[derive(Error)]`**](#derive-macro): Derive macro for automatic `std::error::Error`, [`Display`](std::fmt::Display), [`Debug`](std::fmt::Debug) implementations
 //! - [**`#[error]`**](#ohnoerror): Attribute macro for creating error types
 //! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
@@ -39,7 +39,7 @@
 //! When applied to a struct or enum containing an [`OhnoCore`] field,
 //! this macro automatically implements [`std::error::Error`], [`std::fmt::Display`], [`std::fmt::Debug`], and [`From`] conversions.
 //!
-//! Note: From<[`std::convert::Infallible`]> is implemented by default and calls via [`unreachable!`] macro.
+//! > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`] macro.
 //!
 //! ```rust
 //! use ohno::{OhnoCore, Error};
@@ -166,7 +166,7 @@
 //!
 //! **Requirements:**
 //! - The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-//! - The error type must implement the [`ohno::Enrichable`] trait (automatically implemented for all ohno error types)
+//! - The error type must implement the [`Enrichable`] trait (automatically implemented for all ohno error types)
 //!
 //! **Supported syntax patterns:**
 //!
@@ -235,7 +235,6 @@ mod error_ext;
 mod source;
 
 #[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
 pub mod test_util;
 
 pub use core::OhnoCore;

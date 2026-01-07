@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //! Macros for the [`thread_aware`](https://docs.rs/thread_aware) crate.
 
 #![doc(
@@ -9,7 +12,6 @@
 #![doc(
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_macros_impl/favicon.ico"
 )]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 // Internal implementation crate (no proc-macro entrypoints).
 // Provides a parameterized function to generate a ThreadAware derive impl

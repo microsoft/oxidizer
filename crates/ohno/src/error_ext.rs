@@ -48,7 +48,7 @@ pub trait ErrorExt: StdError {
 
     /// Returns `true` if the error has a captured backtrace.
     ///
-    /// Convenience method equivalent to checking if backtrace status is `Captured`.
+    /// Convenience method equivalent to checking if backtrace status is [`Captured`](std::backtrace::BacktraceStatus::Captured).
     fn has_backtrace(&self) -> bool {
         self.backtrace().status() == std::backtrace::BacktraceStatus::Captured
     }
