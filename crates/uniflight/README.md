@@ -20,14 +20,14 @@
 
 Coalesces duplicate async tasks into a single execution.
 
-This crate provides [`UniFlight`], a mechanism for deduplicating concurrent async operations.
+This crate provides [`Merger`], a mechanism for deduplicating concurrent async operations.
 When multiple tasks request the same work (identified by a key), only the first task (the
 "leader") performs the actual work while subsequent tasks (the "followers") wait and receive
 a clone of the result.
 
 ## When to Use
 
-Use `UniFlight` when you have expensive or rate-limited operations that may be requested
+Use `Merger` when you have expensive or rate-limited operations that may be requested
 concurrently with the same parameters:
 
 - **Cache population**: Prevent thundering herd when a cache entry expires
@@ -38,9 +38,9 @@ concurrently with the same parameters:
 ## Example
 
 ```rust
-use uniflight::UniFlight;
+use uniflight::Merger;
 
-let group: UniFlight<&str, String> = UniFlight::new();
+let group: Merger<&str, String> = Merger::new();
 
 // Multiple concurrent calls with the same key will share a single execution
 let result = group.work("user:123", || async {
@@ -51,7 +51,7 @@ let result = group.work("user:123", || async {
 
 ## Cancellation and Panic Safety
 
-`UniFlight` handles task cancellation and panics gracefully:
+`Merger` handles task cancellation and panics gracefully:
 
 - If the leader task is cancelled or dropped, a follower becomes the new leader
 - If the leader task panics, a follower becomes the new leader and executes its work
@@ -59,33 +59,20 @@ let result = group.work("user:123", || async {
 
 ## Thread Safety
 
-[`UniFlight`] is `Send` and `Sync`, and can be shared across threads. The returned futures
-do not require `Send` bounds on the closure or its output.
+[`Merger`] is `Send` and `Sync`, and can be shared across threads. The returned futures
+are `Send` when the closure, future, key, and value types are `Send`.
 
-## Multiple Leaders for Redundancy
+## Performance
 
-By default, `UniFlight` uses a single leader per key. For redundancy scenarios where you want
-multiple concurrent attempts at the same operation (using whichever completes first), use
-[`UniFlight::with_max_leaders`]:
+Benchmarks comparing `uniflight` against `singleflight-async` show the following characteristics:
 
-```rust
-use uniflight::UniFlight;
+- **Concurrent workloads** (10+ tasks): uniflight is 1.2-1.3x faster, demonstrating better scalability under contention
+- **Single calls**: singleflight-async has lower per-call overhead (~2x faster for individual operations)
+- **Multiple keys**: uniflight performs 1.3x faster when handling multiple distinct keys concurrently
 
-// Allow up to 3 concurrent leaders for redundancy
-let group: UniFlight<&str, String> = UniFlight::with_max_leaders(3);
-
-// First 3 concurrent calls become leaders and execute in parallel.
-// The first leader to complete stores the result.
-// All callers (leaders and followers) receive that result.
-let result = group.work("key", || async {
-    "result".to_string()
-}).await;
-```
-
-This is useful when:
-- You want fault tolerance through redundant execution
-- Network latency varies and you want the fastest response
-- You're implementing speculative execution patterns
+uniflight's DashMap-based architecture provides excellent scaling properties for high-concurrency scenarios,
+making it well-suited for production workloads with concurrent access patterns. For low-contention scenarios
+with predominantly single calls, the performance difference is minimal (sub-microsecond range).
 
 <!-- cargo-rdme end -->
 

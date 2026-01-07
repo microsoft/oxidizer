@@ -17,11 +17,13 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-event-listener.workspace = true
-parking_lot.workspace = true
+async-once-cell.workspace = true
+dashmap.workspace = true
 
 [dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
 futures-util = { workspace = true, features = ["alloc", "std"] }
+singleflight-async.workspace = true
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = [
     "macros",
@@ -32,6 +34,10 @@ tokio = { workspace = true, features = [
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "comparison"
+harness = false
 
 [[example]]
 name = "cache_population"

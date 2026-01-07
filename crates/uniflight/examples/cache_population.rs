@@ -16,12 +16,12 @@ use std::{
 };
 
 use tick::Clock;
-use uniflight::UniFlight;
+use uniflight::Merger;
 
 #[tokio::main]
 async fn main() {
     // Create a shared UniFlight instance for cache operations
-    let cache_group = Arc::new(UniFlight::<String, String>::new());
+    let cache_group = Arc::new(Merger::<String, String>::new());
 
     // Track how many times the work closure actually executes
     let execution_count = Arc::new(AtomicUsize::new(0));
