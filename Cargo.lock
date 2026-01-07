@@ -104,6 +104,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytesbuf_io"
+version = "0.1.0"
+dependencies = [
+ "bytesbuf",
+ "futures",
+ "futures-core",
+ "mutants",
+ "new_zealand",
+ "ohno",
+ "testing_aids",
+ "trait-variant",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1715,6 +1729,17 @@ dependencies = [
  "sharded-slab",
  "thread_local",
  "tracing-core",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
