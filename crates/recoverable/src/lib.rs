@@ -425,12 +425,6 @@ pub trait Recovery {
     fn recovery(&self) -> RecoveryInfo;
 }
 
-impl Recovery for RecoveryInfo {
-    fn recovery(&self) -> RecoveryInfo {
-        self.clone()
-    }
-}
-
 impl<R, E> Recovery for Result<R, E>
 where
     R: Recovery,
@@ -571,9 +565,6 @@ mod tests {
 
     #[test]
     fn recover_trait_implementations() {
-        // RecoveryInfo implements Recovery
-        assert_eq!(RecoveryInfo::retry().recovery().kind(), RecoveryKind::Retry);
-
         assert_eq!(
             (Ok(TestType) as Result<TestType, TestType>).recovery().kind(),
             RecoveryKind::Unknown
