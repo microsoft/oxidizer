@@ -35,7 +35,7 @@ where
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// use layered::{DynamicService, DynamicServiceExt, Execute, Service};
 ///
 /// async fn example() {

@@ -14,7 +14,7 @@ use crate::Service;
 ///
 /// Simple usage that observes inputs and outputs without modification:
 ///
-/// ```rust
+/// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let execution_stack = (
@@ -31,7 +31,7 @@ use crate::Service;
 ///
 /// Advanced usage of `Intercept` allows you to modify and observe inputs and outputs:
 ///
-/// ```rust
+/// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let execution_stack = (
@@ -66,7 +66,7 @@ pub struct Intercept<In, Out, S> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
 /// let execution_stack = (
@@ -91,7 +91,7 @@ impl<In, Out> Intercept<In, Out, ()> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
@@ -178,7 +178,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
@@ -207,7 +207,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
@@ -237,7 +237,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
@@ -275,7 +275,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
@@ -304,7 +304,7 @@ impl<In: Debug, Out> InterceptLayer<In, Out> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (
@@ -329,7 +329,7 @@ impl<In, Out: Debug> InterceptLayer<In, Out> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
     /// let execution_stack = (

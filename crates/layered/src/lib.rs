@@ -23,7 +23,7 @@
 //!
 //! A [`Service`] transforms an input into an output asynchronously:
 //!
-//! ```rust
+//! ```
 //! use layered::Service;
 //!
 //! struct Greeter;
@@ -39,7 +39,7 @@
 //!
 //! Use [`Execute`] to turn any async function into a service:
 //!
-//! ```rust
+//! ```
 //! use layered::{Execute, Service};
 //!
 //! # async fn example() {
@@ -62,7 +62,7 @@
 //!
 //! A [`Layer`] wraps a service with additional behavior:
 //!
-//! ```rust
+//! ```
 //! use layered::{Execute, Layer, Service, Stack};
 //!
 //! // A simple logging layer

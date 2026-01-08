@@ -10,7 +10,7 @@ use crate::Service;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// # use layered::{Execute, Service};
 /// async fn handle_input(data: String) -> String {
 ///     format!("Processed: {}", data)
@@ -23,7 +23,7 @@ use crate::Service;
 /// # }
 /// ```
 ///
-/// ```rust
+/// ```
 /// # use layered::{Execute, Service};
 /// # async fn example() {
 /// let service = Execute::new(move |x: i32| async move { x * 2 });
@@ -39,7 +39,7 @@ impl<E> Execute<E> {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// # use layered::Execute;
     /// let service = Execute::new(|msg: String| async move { format!("Echo: {}", msg) });
     /// ```

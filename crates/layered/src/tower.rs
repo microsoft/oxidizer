@@ -16,7 +16,7 @@
 //!
 //! Use a layered service with Tower middleware:
 //!
-//! ```rust
+//! ```
 //! use std::time::Duration;
 //!
 //! use layered::tower::Adapter;
@@ -35,7 +35,7 @@
 //!
 //! Use Tower layers in a layered stack:
 //!
-//! ```rust
+//! ```
 //! use layered::tower::tower_layer;
 //! use layered::{Execute, Service, Stack};
 //! use tower_layer::Identity;
@@ -115,7 +115,7 @@ where
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```
 /// use layered::tower::tower_layer;
 /// use tower::layer::util::Identity;
 ///

@@ -8,7 +8,7 @@ use tower_service::Service as TowerService;
 use crate::Service;
 
 #[derive(Clone, Debug)]
-pub struct MockService {
+pub(crate) struct MockService {
     poll_ready_response: Poll<Result<(), String>>,
     call_response: Result<String, String>,
 }

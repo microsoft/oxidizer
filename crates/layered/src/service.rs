@@ -19,7 +19,7 @@ pub trait Service<In>: Send + Sync {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// use layered::Service;
     ///
     /// struct EchoService;
