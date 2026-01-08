@@ -26,6 +26,14 @@ use super::timers::TimerKey;
 ///
 /// > **Note**: The periodic timer is not affected by adjustments to the system clock.
 ///
+/// # Stream Behavior
+///
+/// `PeriodicTimer` implements [`Stream`] and will never complete. The stream produces
+/// a tick every period indefinitely. Use stream combinators like [`StreamExt::take`]
+/// to limit the number of ticks.
+///
+/// [`StreamExt::take`]: https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.take
+///
 /// # Examples
 ///
 /// ## Create a periodic timer
