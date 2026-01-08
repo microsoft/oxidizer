@@ -115,6 +115,19 @@ impl PeriodicTimer {
 impl Stream for PeriodicTimer {
     type Item = ();
 
+    /// Polls the timer for the next tick.
+    ///
+    /// This method returns `Poll::Ready(Some(()))` when the timer ticks, indicating
+    /// that the specified period has elapsed since the last tick (or since the timer
+    /// was created for the first tick).
+    ///
+    /// **Note**: This stream never completes and will never return `Poll::Ready(None)`.
+    /// The timer is designed to run indefinitely, producing a tick every period.
+    /// It is the caller's responsibility to stop polling the timer when it is no longer
+    /// needed, typically by using stream combinators like [`StreamExt::take`] to limit
+    /// the number of ticks.
+    ///
+    /// [`StreamExt::take`]: https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.take
     #[cfg_attr(test, mutants::skip)] // cannot reliably check that poll_tick has been called
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
