@@ -3,7 +3,7 @@
 
 [package]
 name = "layered"
-description = "A foundational service abstraction for building composable, middleware-driven systems."
+description = "Build composable async services with stackable middleware."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "service", "middleware", "layer", "compose"]
