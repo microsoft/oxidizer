@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// Builds a service from a tuple of layers and a root service.
 ///

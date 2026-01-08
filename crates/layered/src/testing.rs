@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};

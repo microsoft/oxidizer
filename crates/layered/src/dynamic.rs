@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::fmt::Debug;
 use std::sync::Arc;

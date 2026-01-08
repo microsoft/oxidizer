@@ -16,34 +16,34 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["tower_layer::Layer", "tower_service::Service"]
+
 [features]
 default = []
 intercept = []
 dynamic-service = ["dep:dynosaur"]
 tower-service = ["dep:tower-service"]
 
-[package.metadata.docs.rs]
-all-features = true
-
-[package.metadata.cargo_check_external_types]
-allowed_external_types = ["tower_layer::Layer"]
-
 [dependencies]
-tower-layer = { workspace = true }
 dynosaur = { workspace = true, optional = true }
+tower-layer = { workspace = true }
 tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
-dynosaur = { workspace = true }
-static_assertions = { workspace = true }
-futures = { workspace = true, features = ["executor"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-criterion = { workspace = true }
 alloc_tracker = { workspace = true }
+criterion = { workspace = true }
+dynosaur = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+mutants = { workspace = true }
+pin-project-lite = { workspace = true }
+static_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["limit", "util"] }
 tower-service = { workspace = true }
-pin-project-lite = { workspace = true }
-mutants = { workspace = true }
 
 [lints]
 workspace = true
