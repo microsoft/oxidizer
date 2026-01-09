@@ -22,6 +22,7 @@ Async
 auditable
 backend
 backends
+backoff
 backtrace
 backtraces
 Backtraces
@@ -148,6 +149,7 @@ metadata
 Metas
 Microservices
 microsoft.com
+middleware
 mimalloc
 Mimalloc
 miri
@@ -196,6 +198,8 @@ Proc
 profiler
 PullRequest
 RDME
+recoverability
+recoverable
 Redis
 reentrancy
 relocations
@@ -271,6 +275,7 @@ unregister
 unregistered
 unregisters
 unsized
+untrusted
 UTC
 UTF-8
 v4

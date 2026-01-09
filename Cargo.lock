@@ -86,7 +86,7 @@ checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 
 [[package]]
 name = "bytesbuf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -101,6 +101,20 @@ dependencies = [
  "static_assertions",
  "testing_aids",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "bytesbuf_io"
+version = "0.1.1"
+dependencies = [
+ "bytesbuf",
+ "futures",
+ "futures-core",
+ "mutants",
+ "new_zealand",
+ "ohno",
+ "testing_aids",
+ "trait-variant",
 ]
 
 [[package]]
@@ -1176,6 +1190,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "recoverable"
+version = "0.1.0"
+dependencies = [
+ "ohno",
+ "static_assertions",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1707,6 +1729,17 @@ dependencies = [
  "sharded-slab",
  "thread_local",
  "tracing-core",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
