@@ -3,7 +3,7 @@
 The standard development environment is a Windows PC, with Windows Subsystem for Linux (WSL) used for Linux development.
 After following this guide, you will be able to execute all the local PC development tooling associated with this repository.
 
-> 💡 Development on a Linux or Mac PC is possible, though "at your own risk" - it is not expected that people verify compatibility with "Linux/Mac as primary workstation" scenarios when committing changes to the repo.
+> 💡 Development on a Linux or Mac system is also possible, though the setup process is not documented here.
 
 The following software must be present on the PC:
 
@@ -16,7 +16,7 @@ The following software must be present on the PC:
   * rust-analyzer (rust-lang.rust-analyzer)
   * WSL (ms-vscode-remote.remote-wsl)
 
-> 💡 Using an IDE other than Visual Studio Code is possible, though "at your own risk" - it is not expected that people verify compatibility with other IDEs when committing changes to the repo.
+> 💡 Using an IDE other than Visual Studio Code is possible, though the setup process is not documented here.
 
 * [Latest version of Git](https://git-scm.com/downloads/win) with components:
   * Git LFS (Large File Storage)
