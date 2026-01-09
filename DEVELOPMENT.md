@@ -5,7 +5,7 @@ After following this guide, you will be able to execute all the local PC develop
 
 > 💡 Development on a Linux or Mac system is also possible, though the setup process is not documented here.
 
-The following software must be present on the PC:
+To run all repository tooling locally, you will need the following prerequisites:
 
 * [Latest version of LLVM](https://github.com/llvm/llvm-project/releases)
   * Select: ☑️ Add LLVM to the system PATH for the current user
