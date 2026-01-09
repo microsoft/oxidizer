@@ -71,7 +71,11 @@ readme-check:
     cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
 
 # Runs unit and integration tests.
+[script]
 test FILTER="":
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
     cargo +$env:RUST_MSRV nextest run {{ target_package }} --no-fail-fast --all-features --locked -- {{ FILTER }}
 
 # Runs inline examples in documentation comments (doctests).
@@ -97,7 +101,11 @@ test-docs FILTER="":
     }
 
 # Same as 'test' but also run one iteration of benchmarks.
+[script]
 test-more FILTER="":
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
     # We separate this from "test" because the benchmark infra is quite slow, so we want to avoid
     # running them for quick iterative testing, only running them in thorough validation workflows.
     cargo +$env:RUST_MSRV nextest run {{ target_package }} --no-fail-fast --all-features --locked --tests --benches -- {{ FILTER }}
