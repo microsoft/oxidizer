@@ -2,6 +2,7 @@
 
 Please see each crate's change log below:
 
+- [`async_once`](./crates/async_once/CHANGELOG.md)
 - [`bytesbuf`](./crates/bytesbuf/CHANGELOG.md)
 - [`bytesbuf_io`](./crates/bytesbuf_io/CHANGELOG.md)
 - [`data_privacy`](./crates/data_privacy/CHANGELOG.md)
@@ -17,3 +18,4 @@ Please see each crate's change log below:
 - [`thread_aware_macros`](./crates/thread_aware_macros/CHANGELOG.md)
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/CHANGELOG.md)
 - [`tick`](./crates/tick/CHANGELOG.md)
+- [`uniflight`](./crates/uniflight/CHANGELOG.md)
