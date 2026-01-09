@@ -9,7 +9,7 @@ The following software must be present on the PC:
 
 * [Latest version of LLVM](https://github.com/llvm/llvm-project/releases)
   * Select: ☑️ Add LLVM to the system PATH for the current user
-* [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) with components:
+* [Visual Studio Build Tools for C++](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with components:
   * Workload: Desktop development with C++
 * [Latest version of Visual Studio Code](https://code.visualstudio.com/Download) with extensions:
   * C/C++ (ms-vscode.cpptools)
@@ -28,6 +28,7 @@ This guide assumes a clean Windows PC in other regards.
 
 # Windows environment setup
 
+1. If you had to install any of the above prerequisites, restart your PC to ensure a complete installation.
 1. Install Rust using [Rustup](https://rustup.rs/), with all default settings.
 1. Execute `cargo install just --locked` to install the Just utility (unless already installed).
 
@@ -44,8 +45,8 @@ After installing the Rust toolchain, we setup repository-specific tooling:
 
 ## Validate Windows environment
 
-1. Execute `cargo build --all-features --all-targets` to build the workspace. Verify that the build is successful.
-1. Execute `cargo test --all-features` to execute all tests in the workspace. Verify that all tests pass.
+1. Execute `just build` to build the workspace. Verify that the build is successful.
+1. Execute `just test` to execute all tests in the workspace. Verify that all tests pass.
 1. Validate that debugging works by opening `crates/tick/examples/basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
 
 # Linux (WSL) environment setup
@@ -54,7 +55,8 @@ The Linux distribution we use for development is **Ubuntu 24.04**, running as a 
 
 1. Install [Ubuntu 24.04.1 LTS](https://apps.microsoft.com/detail/9NZ3KLHXDJP5?hl=en-us&gl=US&ocid=pdpshare) from the Microsoft Store.
 1. Open an Ubuntu terminal (e.g. from the Microsoft Store page, from the Start menu or in Windows Terminal).
-    * You will be asked to create a user account the first time you run Ubuntu. This is a local account unique to the Linux VM and is not related to your account on the host machine.
+    * If you get an error about a required feature not being installed, try first restarting the PC to complete the feature installation.
+1. You will be asked to create a user account the first time you run Ubuntu. This is a local account unique to the Linux VM and is not related to your account on the host machine.
 
 All commands that follow are to be executed in the Ubuntu terminal.
 
@@ -87,12 +89,12 @@ After installing the Rust toolchains, we setup the build target directory for fa
 
 ## Validate Linux (WSL) environment
 
-1. Execute `cargo build --all-features --all-targets` to build the workspace. Verify that the build is successful.
-1. Execute `cargo test --all-features` to execute all tests in the workspace. Verify that all tests pass.
+1. Execute `just build` to build the workspace. Verify that the build is successful.
+1. Execute `just test` to execute all tests in the workspace. Verify that all tests pass.
 
 ## Setup Visual Studio Code integration
 
-Visual Studio Code is also our Linux IDE and requires some additional setup to work with the Linux workspace.
+Visual Studio Code is also our standard Linux IDE and requires some additional setup to work with the Linux workspace.
 
 > ⚠️ While the IDE runs on the Windows desktop, all tooling runs in the Linux VM, including Visual Studio Code extensions. The below steps will instruct you to install the minimum set of required Visual Studio Code extensions for the Linux environment.
 
