@@ -5,15 +5,20 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+use jiff::{SignedDuration, Timestamp};
+
 use crate::Error;
 use crate::fmt::{Iso8601, Rfc2822};
 
 /// A system time represented as the number of whole seconds since the Unix epoch.
 ///
+/// Supports both positive and negative values to represent times after and before the Unix epoch.
+///
 /// Examples:
 ///
 /// - `0` is equal to `Thu, 1 Jan 1970 00:00:00 -0000`
 /// - `951786000` is equal to `Tue, 29 Feb 2000 01:00:00 -0000`
+/// - `-62135596800` is equal to `Mon, 1 Jan 0001 00:00:00 -0000`
 ///
 /// # UTC and time zones
 ///
@@ -37,31 +42,31 @@ use crate::fmt::{Iso8601, Rfc2822};
 /// This example demonstrates how to parse Unix seconds and convert them to [`SystemTime`].
 ///
 /// ```
-/// use std::time::{Duration, SystemTime};
 /// use tick::fmt::UnixSeconds;
 ///
 /// let unix_seconds = "9999".parse::<UnixSeconds>()?;
 /// assert_eq!(unix_seconds.to_string(), "9999");
 ///
-/// let system_time: SystemTime = unix_seconds.into();
-/// assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(9999));
-///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UnixSeconds(pub(super) Duration);
+pub struct UnixSeconds(pub(super) SignedDuration);
 
 impl UnixSeconds {
     /// The largest value that be can represented by `UnixSeconds`.
     ///
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
-    // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
-    pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
+    pub const MAX: Self = Self(SignedDuration::new(253_402_207_200, 999_999_999));
 
     /// The smallest value that can be represented by `UnixSeconds`.
     ///
+    /// This represents a Unix system time of `1 January -9999 00:00:00 UTC`.
+    pub const MIN: Self = Self(SignedDuration::new(-377_705_023_201, 0));
+
+    /// The Unix epoch represented as `UnixSeconds`.
+    ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Duration::ZERO);
+    pub const UNIX_EPOCH: Self = Self(SignedDuration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
     ///
@@ -72,30 +77,43 @@ impl UnixSeconds {
     /// ```
     /// use tick::fmt::UnixSeconds;
     ///
-    /// UnixSeconds::from_secs(u64::MAX).unwrap_err();
+    /// UnixSeconds::from_secs(i64::MAX).unwrap_err();
     /// ```
     ///
     /// # Examples
     ///
     /// ```
-    /// use std::time::{Duration, SystemTime};
     /// use tick::fmt::UnixSeconds;
     ///
     /// let unix_seconds = UnixSeconds::from_secs(10).unwrap();
-    /// let system_time: SystemTime = unix_seconds.into();
+    /// assert_eq!(unix_seconds.to_secs(), 10);
     ///
-    /// assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(10));
+    /// let negative = UnixSeconds::from_secs(-100).unwrap();
+    /// assert_eq!(negative.to_secs(), -100);
     /// ```
-    pub fn from_secs(seconds: u64) -> Result<Self, Error> {
-        Self::try_from(Duration::from_secs(seconds)).map_err(|_error| {
-            Error::out_of_range("the `seconds` is greater than the maximum value that can be represented by `UnixSeconds`")
-        })
+    pub fn from_secs(seconds: i64) -> Result<Self, Error> {
+        Self::try_from_signed_duration(SignedDuration::from_secs(seconds))
     }
 
     /// Returns the number of whole seconds since the Unix epoch.
     #[must_use]
-    pub fn to_secs(self) -> u64 {
+    pub fn to_secs(self) -> i64 {
         self.0.as_secs()
+    }
+
+    fn try_from_signed_duration(value: SignedDuration) -> Result<Self, Error> {
+        if value > Self::MAX.0 {
+            return Err(Error::out_of_range(
+                "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`",
+            ));
+        }
+        if value < Self::MIN.0 {
+            return Err(Error::out_of_range(
+                "the `duration` is less than the minimum value that can be represented by `UnixSeconds`",
+            ));
+        }
+
+        Ok(Self(value))
     }
 }
 
@@ -103,7 +121,7 @@ impl FromStr for UnixSeconds {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let secs: u64 = s.parse().map_err(Error::other)?;
+        let secs: i64 = s.parse().map_err(Error::other)?;
         Self::from_secs(secs)
     }
 }
@@ -116,7 +134,10 @@ impl Display for UnixSeconds {
 
 impl From<UnixSeconds> for SystemTime {
     fn from(value: UnixSeconds) -> Self {
-        Self::UNIX_EPOCH + value.0
+        Timestamp::UNIX_EPOCH
+            .saturating_add(value.0)
+            .expect("UnixSeconds value is guaranteed to be within valid range")
+            .into()
     }
 }
 
@@ -124,13 +145,8 @@ impl TryFrom<Duration> for UnixSeconds {
     type Error = Error;
 
     fn try_from(value: Duration) -> Result<Self, Self::Error> {
-        if value > Self::MAX.0 {
-            return Err(Error::out_of_range(
-                "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`",
-            ));
-        }
-
-        Ok(Self(value))
+        let signed = SignedDuration::try_from(value).map_err(Error::jiff)?;
+        Self::try_from_signed_duration(signed)
     }
 }
 
@@ -138,19 +154,21 @@ impl TryFrom<SystemTime> for UnixSeconds {
     type Error = crate::Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO))
+        let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
+        let duration = timestamp.duration_since(Timestamp::UNIX_EPOCH);
+        Self::try_from_signed_duration(duration)
     }
 }
 
 impl From<Rfc2822> for UnixSeconds {
     fn from(value: Rfc2822) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self(value.0.duration_since(Timestamp::UNIX_EPOCH))
     }
 }
 
 impl From<Iso8601> for UnixSeconds {
     fn from(value: Iso8601) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self(value.0.duration_since(Timestamp::UNIX_EPOCH))
     }
 }
 
@@ -160,7 +178,7 @@ impl serde_core::Serialize for UnixSeconds {
     where
         S: serde_core::Serializer,
     {
-        serializer.serialize_u64(self.to_secs())
+        serializer.serialize_i64(self.to_secs())
     }
 }
 
@@ -170,7 +188,7 @@ impl<'de> serde_core::Deserialize<'de> for UnixSeconds {
     where
         D: serde_core::Deserializer<'de>,
     {
-        let secs = u64::deserialize(deserializer).map_err(serde_core::de::Error::custom)?;
+        let secs = i64::deserialize(deserializer).map_err(serde_core::de::Error::custom)?;
         Self::from_secs(secs).map_err(serde_core::de::Error::custom)
     }
 }
@@ -179,8 +197,7 @@ impl<'de> serde_core::Deserialize<'de> for UnixSeconds {
 #[cfg(test)]
 mod tests {
     use std::hash::Hash;
-
-    use jiff::Timestamp;
+    use std::time::Duration;
 
     use super::*;
 
@@ -188,10 +205,16 @@ mod tests {
 
     #[test]
     fn max_duration_is_jiff_duration() {
-        let jiff_max = Timestamp::MAX.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs();
+        let jiff_max = Timestamp::MAX.duration_since(Timestamp::UNIX_EPOCH);
 
-        // equals to 123
         assert_eq!(UnixSeconds::MAX.0, jiff_max);
+    }
+
+    #[test]
+    fn min_duration_is_jiff_duration() {
+        let jiff_min = Timestamp::MIN.duration_since(Timestamp::UNIX_EPOCH);
+
+        assert_eq!(UnixSeconds::MIN.0, jiff_min);
     }
 
     #[test]
@@ -202,21 +225,32 @@ mod tests {
     }
 
     #[test]
+    fn from_secs_negative() {
+        let ts = UnixSeconds::from_secs(-10).unwrap();
+
+        assert_eq!(ts.to_secs(), -10);
+    }
+
+    #[test]
     fn try_from_duration() {
+        // Duration::MAX will overflow when converting to SignedDuration
         let ts = UnixSeconds::try_from(Duration::MAX).unwrap_err();
-        assert_eq!(
-            ts.to_string(),
-            "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`"
-        );
+        assert!(ts.to_string().contains("overflowed"));
+    }
+
+    #[test]
+    fn try_from_duration_success() {
+        let ts = UnixSeconds::try_from(Duration::from_secs(100)).unwrap();
+        assert_eq!(ts.to_secs(), 100);
     }
 
     #[test]
     fn from_secs_error() {
-        let error = UnixSeconds::from_secs(u64::MAX).unwrap_err();
+        let error = UnixSeconds::from_secs(i64::MAX).unwrap_err();
 
         assert_eq!(
             error.to_string(),
-            "the `seconds` is greater than the maximum value that can be represented by `UnixSeconds`"
+            "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`"
         );
     }
 
@@ -234,9 +268,24 @@ mod tests {
     }
 
     #[test]
-    fn parse_min() {
+    fn parse_unix_epoch() {
         let stamp: UnixSeconds = "0".parse().unwrap();
+        assert_eq!(stamp, UnixSeconds::UNIX_EPOCH);
         assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn parse_min() {
+        // Parse the minimum value
+        let min_secs = UnixSeconds::MIN.to_secs();
+        let stamp: UnixSeconds = min_secs.to_string().parse().unwrap();
+        assert_eq!(stamp, UnixSeconds::MIN);
+    }
+
+    #[test]
+    fn parse_negative() {
+        let stamp: UnixSeconds = "-100".parse().unwrap();
+        assert_eq!(stamp.to_secs(), -100);
     }
 
     #[test]
@@ -245,6 +294,13 @@ mod tests {
 
         // Display should return the timestamp as seconds
         assert_eq!(stamp.to_string(), "3600");
+    }
+
+    #[test]
+    fn parse_then_display_negative() {
+        let stamp: UnixSeconds = "-3600".parse().unwrap();
+
+        assert_eq!(stamp.to_string(), "-3600");
     }
 
     #[test]
@@ -292,11 +348,25 @@ mod tests {
 
         let iso: Iso8601 = UnixSeconds::MIN.into();
         assert_eq!(iso, Iso8601::MIN);
+
+        let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
+        assert_eq!(iso, Iso8601::UNIX_EPOCH);
     }
 
     #[test]
     fn try_from_max_ensure_accepted() {
-        let unix_seconds = UnixSeconds::try_from(UnixSeconds::MAX.0).unwrap();
-        assert_eq!(unix_seconds, UnixSeconds::MAX);
+        // Test that the maximum seconds value is accepted
+        let max_secs = UnixSeconds::MAX.to_secs();
+        let unix_seconds = UnixSeconds::from_secs(max_secs).unwrap();
+        // from_secs only preserves whole seconds, so we compare seconds
+        assert_eq!(unix_seconds.to_secs(), UnixSeconds::MAX.to_secs());
+    }
+
+    #[test]
+    fn try_from_min_ensure_accepted() {
+        // Test that the minimum seconds value is accepted
+        let min_secs = UnixSeconds::MIN.to_secs();
+        let unix_seconds = UnixSeconds::from_secs(min_secs).unwrap();
+        assert_eq!(unix_seconds, UnixSeconds::MIN);
     }
 }

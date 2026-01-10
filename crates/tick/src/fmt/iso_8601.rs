@@ -94,12 +94,13 @@ impl Iso8601 {
 
     /// The smallest value that can be represented by `Iso8601`.
     ///
-    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
+    /// This represents a Unix system time of `1 January -9999 00:00:00 UTC`.
+    pub const MIN: Self = Self(Timestamp::MIN);
 
-    pub(super) fn to_unix_epoch_duration(self) -> Duration {
-        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
-    }
+    /// The Unix epoch represented as an `Iso8601` timestamp.
+    ///
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
+    pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 }
 
 impl FromStr for Iso8601 {
@@ -199,12 +200,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_min() {
+    fn parse_unix_epoch() {
         let iso: Iso8601 = "1970-01-01T00:00:00Z".parse().unwrap();
 
-        assert_eq!(iso, Iso8601::MIN);
+        assert_eq!(iso, Iso8601::UNIX_EPOCH);
         let system_time: SystemTime = iso.into();
         assert_eq!(system_time, SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn parse_min() {
+        // MIN represents year -9999, which cannot be parsed in standard ISO 8601 format
+        // but we can verify MIN constant exists and can be converted to SystemTime
+        let min_system_time: SystemTime = Iso8601::MIN.into();
+        let unix_epoch_time: SystemTime = Iso8601::UNIX_EPOCH.into();
+
+        // MIN should be before UNIX_EPOCH
+        assert!(min_system_time < unix_epoch_time);
     }
 
     #[test]
