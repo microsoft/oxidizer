@@ -249,8 +249,6 @@ jobs:
       - name: Generate PR Diff
         run: git diff origin/main...HEAD >diff.txt
       - name: Mutate Diff
-        env:
-          DISABLE_T_REX: 1
         timeout-minutes: 45
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
