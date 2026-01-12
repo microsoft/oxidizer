@@ -1,9 +1,11 @@
 //! An example demonstrating how to convert errors into `AppError` using the `IntoAppError` trait.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::app::{AppError, IntoAppError};
 
 fn io_operation() -> Result<(), std::io::Error> {
-    Err(std::io::Error::new(std::io::ErrorKind::Other, "simulated I/O error"))
+    Err(std::io::Error::other("simulated I/O error"))
 }
 
 fn do_io_operation() -> Result<(), AppError> {

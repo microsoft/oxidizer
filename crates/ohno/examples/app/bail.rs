@@ -2,6 +2,8 @@
 
 //! Demonstrates early returns using the bail! macro.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::app::AppError;
 use ohno::bail;
 

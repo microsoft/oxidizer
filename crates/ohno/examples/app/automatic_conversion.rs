@@ -2,6 +2,8 @@
 
 //! Demonstrates automatic conversion of errors using the ? operator.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::app::AppError;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 

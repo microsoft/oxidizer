@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Tests for OhWell trait extension methods.
+//! Tests for `IntoAppError` trait implementations.
 
 use ohno::app::{AppError, IntoAppError, Result};
 use ohno::assert_error_message;
@@ -20,7 +20,7 @@ fn result_ohno() {
 #[test]
 fn result_ohno_with() {
     fn parse_with_context(s: &str) -> Result<i32> {
-        s.parse::<i32>().into_app_err_with(|| format!("failed to parse: {}", s))
+        s.parse::<i32>().into_app_err_with(|| format!("failed to parse: {s}"))
     }
 
     let err = parse_with_context("abc").unwrap_err();

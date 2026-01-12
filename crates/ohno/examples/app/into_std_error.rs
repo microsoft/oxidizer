@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Example demonstrating how to transform AppError into a standard error trait object.
+//! Example demonstrating how to transform `AppError` into a standard error trait object.
 
 use ohno::app::AppError;
 
@@ -9,11 +9,11 @@ struct MyLibError;
 
 impl From<AppError> for MyLibError {
     fn from(value: AppError) -> Self {
-        MyLibError::caused_by(value.into_std_error())
+        Self::caused_by(value.into_std_error())
     }
 }
 
-/// Simulates a function that returns an AppError.
+/// Simulates a function that returns an `AppError`.
 fn database_operation() -> Result<(), AppError> {
     Err(AppError::new("connection timeout after 30s"))
 }

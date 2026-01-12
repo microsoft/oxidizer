@@ -2,7 +2,7 @@
 
 //! Demonstrates backtrace capture in errors.
 //!
-//! Run with RUST_BACKTRACE=1 to see the full backtrace.
+//! Run with `RUST_BACKTRACE=1` to see the full backtrace.
 
 use ohno::app::AppError;
 use ohno::app_err;

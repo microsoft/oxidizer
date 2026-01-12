@@ -68,7 +68,7 @@ impl<T> IntoAppError<T> for Option<T> {
 
 /// Specialized implementation for `Result<T, AppError>` to avoid double wrapping.
 impl<T> IntoAppError<T> for Result<T, AppError> {
-    fn into_app_err(self, msg: impl Display) -> Result<T, AppError> {
+    fn into_app_err(self, msg: impl Display) -> Self {
         self.map_err(|mut e| {
             let caller = Location::caller();
             e.add_enrichment(EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
@@ -76,7 +76,7 @@ impl<T> IntoAppError<T> for Result<T, AppError> {
         })
     }
 
-    fn into_app_err_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
+    fn into_app_err_with<F, D>(self, msg_fn: F) -> Self
     where
         F: FnOnce() -> D,
         D: Display,
