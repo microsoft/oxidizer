@@ -261,7 +261,8 @@ impl<In, Out> InterceptLayer<In, Out> {
     }
 
     /// Adds a modification function with control flow for incoming requests.
-    fn input_control_flow<F>(mut self, f: F) -> Self
+    /// Returns `ControlFlow::Break` to short-circuit execution and return early.
+    pub(crate) fn input_control_flow<F>(mut self, f: F) -> Self
     where
         F: Fn(In) -> ControlFlow<Out, In> + Send + Sync + 'static,
     {
@@ -679,5 +680,29 @@ mod tests {
             .modify_input(|s| s)
             .modify_output(|s| s);
         assert!(format!("{layer:?}").contains("InterceptLayer"));
+    }
+
+    #[test]
+    fn short_circuit_layered() {
+        let stack = (
+            Intercept::layer().input_control_flow(|_: String| ControlFlow::Break("rejected".into())),
+            Execute::new(|_: String| async { "should not run".to_string() }),
+        );
+        let svc = stack.build();
+        assert_eq!(block_on(svc.execute("test".into())), "rejected");
+    }
+
+    #[test]
+    fn short_circuit_tower() {
+        let stack = (
+            Intercept::layer().input_control_flow(|_: String| ControlFlow::Break(Ok("rejected".into()))),
+            Execute::new(|_: String| async { Ok::<_, ()>("should not run".into()) }),
+        );
+        let mut svc = stack.build();
+        let res = block_on(async {
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            svc.call("test".into()).await
+        });
+        assert_eq!(res, Ok("rejected".to_string()));
     }
 }
