@@ -63,3 +63,7 @@ path = "examples/app/error_trace.rs"
 [[example]]
 name = "into_std_error"
 path = "examples/app/into_std_error.rs"
+
+[[example]]
+name = "into_app_err"
+path = "examples/app/into_app_err.rs"
