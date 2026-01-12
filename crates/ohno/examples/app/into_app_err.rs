@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! An example demonstrating how to convert errors into `AppError` using the `IntoAppError` trait.
 
 #![expect(clippy::unwrap_used, reason = "example code")]

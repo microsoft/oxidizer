@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Demonstrates simple error construction with `app_err`! and `Error::new()`.
 

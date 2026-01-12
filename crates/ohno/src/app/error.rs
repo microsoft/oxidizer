@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Application-level error type similar to `anyhow::Error`.
 //!
@@ -67,7 +68,7 @@ impl AppError {
     }
 
     /// Returns the source error if this error wraps another error.
-    #[must_use] 
+    #[must_use]
     pub fn source(&self) -> Option<&(dyn StdError + 'static)> {
         StdError::source(&self.inner)
     }
@@ -86,7 +87,7 @@ impl AppError {
     /// let found = err.find_source::<std::io::Error>().unwrap();
     /// assert_eq!(found.kind(), std::io::ErrorKind::NotFound);
     /// ```
-    #[must_use] 
+    #[must_use]
     pub fn find_source<T: StdError + 'static>(&self) -> Option<&T> {
         let mut source = self.source();
         while let Some(err) = source {
@@ -112,7 +113,7 @@ impl AppError {
     }
 
     /// Returns top-level error message.
-    #[must_use] 
+    #[must_use]
     pub fn message(&self) -> String {
         self.inner.message()
     }
@@ -123,7 +124,7 @@ impl AppError {
     /// error types that expect a [`Box<dyn StdError + Send + Sync + 'static>`](Box). This is
     /// useful when you need to integrate with APIs that don't directly support
     /// [`AppError`] but can work with standard error trait objects.
-    #[must_use] 
+    #[must_use]
     pub fn into_std_error(self) -> Box<dyn StdError + Send + Sync + 'static> {
         Box::new(self.inner)
     }
