@@ -39,3 +39,27 @@ tokio = { workspace = true, features = ["macros", "rt", "time", "rt-multi-thread
 
 [lints]
 workspace = true
+
+[[example]]
+name = "automatic_conversion"
+path = "examples/app/automatic_conversion.rs"
+
+[[example]]
+name = "backtrace"
+path = "examples/app/backtrace.rs"
+
+[[example]]
+name = "bail"
+path = "examples/app/bail.rs"
+
+[[example]]
+name = "construction"
+path = "examples/app/construction.rs"
+
+[[example]]
+name = "error_trace"
+path = "examples/app/error_trace.rs"
+
+[[example]]
+name = "into_std_error"
+path = "examples/app/into_std_error.rs"

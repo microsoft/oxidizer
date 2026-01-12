@@ -227,6 +227,7 @@
 #[doc(hidden)]
 extern crate self as ohno;
 
+pub mod app;
 mod backtrace;
 mod core;
 mod enrichable;
