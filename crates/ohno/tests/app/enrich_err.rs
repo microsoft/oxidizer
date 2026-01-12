@@ -2,7 +2,7 @@
 
 //! Tests for adding context to errors.
 
-use ohno::app::{OhWell, Result};
+use ohno::app::{IntoAppError, Result};
 use ohno::app_err;
 use ohno::{EnrichableExt, enrich_err};
 
@@ -40,7 +40,7 @@ fn enrich_err_on_result() {
         Err(app_err!("operation failed"))
     }
 
-    let err = fail().ohwell("additional context").unwrap_err();
+    let err = fail().ohno("additional context").unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("operation failed"));
     assert!(msg.contains("additional context"));

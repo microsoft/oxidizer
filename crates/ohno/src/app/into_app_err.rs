@@ -7,24 +7,24 @@ use crate::Enrichable;
 use super::AppError;
 
 /// Transforms `Result` type into `AppError` with additional message
-pub trait OhWell<T> {
+pub trait IntoAppError<T> {
     /// Adds context message to the error if the result is an error.
-    fn ohwell(self, msg: impl Display) -> Result<T, AppError>;
+    fn ohno(self, msg: impl Display) -> Result<T, AppError>;
 
     /// Adds context message to the error if the result is an error.
     ///
     /// The function `msg_fn` is only called if the result is an error.
-    fn ohwell_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
+    fn ohno_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
         F: FnOnce() -> D,
         D: Display;
 }
 
-impl<T, E> OhWell<T> for Result<T, E>
+impl<T, E> IntoAppError<T> for Result<T, E>
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    fn ohwell(self, msg: impl Display) -> Result<T, AppError> {
+    fn ohno(self, msg: impl Display) -> Result<T, AppError> {
         self.map_err(|e| {
             let caller = std::panic::Location::caller();
             let mut e = AppError::new(e);
@@ -33,7 +33,7 @@ where
         })
     }
 
-    fn ohwell_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
+    fn ohno_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
         F: FnOnce() -> D,
         D: Display,
@@ -47,12 +47,12 @@ where
     }
 }
 
-impl<T> OhWell<T> for Option<T> {
-    fn ohwell(self, msg: impl Display) -> Result<T, AppError> {
+impl<T> IntoAppError<T> for Option<T> {
+    fn ohno(self, msg: impl Display) -> Result<T, AppError> {
         self.ok_or_else(|| AppError::new(msg.to_string()))
     }
 
-    fn ohwell_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
+    fn ohno_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
         F: FnOnce() -> D,
         D: Display,
@@ -61,8 +61,8 @@ impl<T> OhWell<T> for Option<T> {
     }
 }
 
-impl<T> OhWell<T> for Result<T, AppError> {
-    fn ohwell(self, msg: impl Display) -> Result<T, AppError> {
+impl<T> IntoAppError<T> for Result<T, AppError> {
+    fn ohno(self, msg: impl Display) -> Result<T, AppError> {
         self.map_err(|mut e| {
             let caller = std::panic::Location::caller();
             e.add_enrichment(crate::EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
@@ -70,7 +70,7 @@ impl<T> OhWell<T> for Result<T, AppError> {
         })
     }
 
-    fn ohwell_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
+    fn ohno_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
         F: FnOnce() -> D,
         D: Display,
