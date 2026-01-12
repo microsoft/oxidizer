@@ -3,7 +3,7 @@
 //! Tests for OhWell trait extension methods.
 
 use ohno::app::{AppError, OhWell, Result};
-use ohno::{assert_error_message};
+use ohno::assert_error_message;
 
 #[test]
 fn result_ohwell() {
@@ -20,8 +20,7 @@ fn result_ohwell() {
 #[test]
 fn result_ohwell_with() {
     fn parse_with_context(s: &str) -> Result<i32> {
-        s.parse::<i32>()
-            .ohwell_with(|| format!("failed to parse: {}", s))
+        s.parse::<i32>().ohwell_with(|| format!("failed to parse: {}", s))
     }
 
     let err = parse_with_context("abc").unwrap_err();

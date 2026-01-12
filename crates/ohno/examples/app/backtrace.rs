@@ -5,10 +5,10 @@
 //! Run with RUST_BACKTRACE=1 to see the full backtrace.
 
 use ohno::app::AppError;
-use ohno::welp;
+use ohno::app_err;
 
 fn level3() -> Result<(), AppError> {
-    Err(welp!("error at deepest level"))
+    Err(app_err!("error at deepest level"))
 }
 
 fn level2() -> Result<(), AppError> {

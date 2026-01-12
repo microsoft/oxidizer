@@ -53,12 +53,12 @@
 //!   }
 //!   ```
 //!
-//! - **In-Place Construction**: Use `welp!` macro to construct errors in place
+//! - **In-Place Construction**: Use `app_err!` macro to construct errors in place
 //!   ```no_run
-//!   use ohno::{AppError, welp};
+//!   use ohno::{AppError, app_err};
 //!
 //!   let code = 42;
-//!   let err = welp!("failed with code {code}");
+//!   let err = app_err!("failed with code {code}");
 //!   ```
 //!
 //! - **Error Chaining**: Walk error chains to find specific error types
@@ -71,13 +71,13 @@
 //!   }
 //!   ```
 
-mod bail;
 mod error;
+mod macros;
 mod ohwell_trait;
-pub mod welp;
 
 pub use error::AppError;
 pub use ohwell_trait::OhWell;
+//pub use app_err_macro::app_err;
 
 /// A type alias for `Result<T, ohno::AppError>`.
 ///

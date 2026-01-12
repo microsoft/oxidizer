@@ -38,10 +38,7 @@ macro_rules! assert_error_message {
             }
             if let Some(remainder) = error_string.strip_prefix(expected) {
                 // backtrace, caused by, or error trace indicators
-                if remainder.starts_with("\n\nBacktrace:\n")
-                    || remainder.starts_with("\ncaused by: ")
-                    || remainder.starts_with("\n> ")
-                {
+                if remainder.starts_with("\n\nBacktrace:\n") || remainder.starts_with("\ncaused by: ") || remainder.starts_with("\n> ") {
                     return ();
                 }
             }

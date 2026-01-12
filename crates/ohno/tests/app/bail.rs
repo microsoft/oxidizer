@@ -55,11 +55,7 @@ fn bail_with_error_ident() {
     let err = fail().unwrap_err();
     assert_error_message!(err, "config.toml");
 
-    let io_err = err
-        .source()
-        .unwrap()
-        .downcast_ref::<std::io::Error>()
-        .unwrap();
+    let io_err = err.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
     assert!(io_err.kind() == std::io::ErrorKind::NotFound);
 }
 
@@ -72,10 +68,6 @@ fn bail_with_expr() {
     let err = fail().unwrap_err();
     assert_error_message!(err, "test error");
 
-    let io_err = err
-        .source()
-        .unwrap()
-        .downcast_ref::<std::io::Error>()
-        .unwrap();
+    let io_err = err.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
     assert!(io_err.kind() == std::io::ErrorKind::Other);
 }

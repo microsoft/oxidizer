@@ -1,23 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Demonstrates simple error construction with welp! and Error::new().
+//! Demonstrates simple error construction with app_err! and Error::new().
 
 use ohno::app::AppError;
-use ohno::welp;
+use ohno::app_err;
 
 fn main() {
     let err = AppError::new("database connection failed");
     println!("Error::new(): {err}\n");
 
-    // Using welp! with format arguments
+    // Using app_err! with format arguments
     let user_id = 42;
-    let err = welp!("user {user_id} not found");
-    println!("welp! with format: {err}");
+    let err = app_err!("user {user_id} not found");
+    println!("app_err! with format: {err}");
 
-    // Using welp! with a IO error as the source
-    let err = welp!(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "file missing"
-    ));
-    println!("welp! with source: {err}");
+    // Using app_err! with a IO error as the source
+    let err = app_err!(std::io::Error::new(std::io::ErrorKind::NotFound, "file missing"));
+    println!("app_err! with source: {err}");
 }

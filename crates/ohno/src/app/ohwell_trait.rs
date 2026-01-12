@@ -12,7 +12,7 @@ pub trait OhWell<T> {
     fn ohwell(self, msg: impl Display) -> Result<T, AppError>;
 
     /// Adds context message to the error if the result is an error.
-    /// 
+    ///
     /// The function `msg_fn` is only called if the result is an error.
     fn ohwell_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
@@ -28,8 +28,7 @@ where
         self.map_err(|e| {
             let caller = std::panic::Location::caller();
             let mut e = AppError::new(e);
-            e.add_enrichment(
-            crate::EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
+            e.add_enrichment(crate::EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
             e
         })
     }
@@ -42,8 +41,7 @@ where
         self.map_err(|e| {
             let caller = std::panic::Location::caller();
             let mut e = AppError::new(e);
-            e.add_enrichment(
-            crate::EnrichmentEntry::new(msg_fn().to_string(), caller.file(), caller.line()));
+            e.add_enrichment(crate::EnrichmentEntry::new(msg_fn().to_string(), caller.file(), caller.line()));
             e
         })
     }
@@ -67,10 +65,9 @@ impl<T> OhWell<T> for Result<T, AppError> {
     fn ohwell(self, msg: impl Display) -> Result<T, AppError> {
         self.map_err(|mut e| {
             let caller = std::panic::Location::caller();
-            e.add_enrichment(
-            crate::EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
+            e.add_enrichment(crate::EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
             e
-    })
+        })
     }
 
     fn ohwell_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
@@ -80,9 +77,8 @@ impl<T> OhWell<T> for Result<T, AppError> {
     {
         self.map_err(|mut e| {
             let caller = std::panic::Location::caller();
-            e.add_enrichment(
-            crate::EnrichmentEntry::new(msg_fn().to_string(), caller.file(), caller.line()));
+            e.add_enrichment(crate::EnrichmentEntry::new(msg_fn().to_string(), caller.file(), caller.line()));
             e
-    })
+        })
     }
 }
