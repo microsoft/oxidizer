@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Demonstrates adding context to errors using error_trace.
+//! Demonstrates adding context to errors using `error_trace`.
 
 use ohno::app::AppError;
 use ohno::{bail, enrich_err};

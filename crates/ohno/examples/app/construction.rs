@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Demonstrates simple error construction with app_err! and Error::new().
+//! Demonstrates simple error construction with `app_err`! and `Error::new()`.
 
 use ohno::app::AppError;
 use ohno::app_err;

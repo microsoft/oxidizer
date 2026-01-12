@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Tests for AppError::into_std_error method.
+//! Tests for `AppError::into_std_error` method.
 
 use ohno::{app::AppError, assert_error_message};
 

@@ -84,7 +84,7 @@ fn enrich_err_macro_with_multiple_params() {
         Ok(())
     }
 
-    assert!(perform_operation("save", 123, false).is_ok());
+    perform_operation("save", 123, false).unwrap();
 
     let err = perform_operation("delete", 456, true).unwrap_err();
     let msg = err.to_string();
