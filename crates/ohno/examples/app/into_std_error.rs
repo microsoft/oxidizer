@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Example demonstrating how to transform `AppError` into a standard error trait object.
 
