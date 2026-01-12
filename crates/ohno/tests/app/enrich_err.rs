@@ -40,7 +40,7 @@ fn enrich_err_on_result() {
         Err(app_err!("operation failed"))
     }
 
-    let err = fail().ohno("additional context").unwrap_err();
+    let err = fail().into_app_err("additional context").unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("operation failed"));
     assert!(msg.contains("additional context"));
