@@ -39,12 +39,10 @@ use crate::Service;
 ///     Intercept::<String, String, _>::layer()
 ///         .on_input(|input| println!("request: {input}")) // input observers are called first
 ///         .on_input(|input| println!("another: {input}")) // multiple observers supported
-///         .debug_input() // convenience method to print inputs with `dbg!`
 ///         .modify_input(|input| input.to_uppercase()) // then inputs are modified
 ///         .modify_input(|input| input.to_lowercase()) // multiple modifications supported
 ///         .on_output(|output| println!("response: {output}")) // output observers called first
 ///         .on_output(|output| println!("another response: {output}")) // multiple observers supported
-///         .debug_output() // convenience method to print outputs with `dbg!`
 ///         .modify_output(|output| output.trim().to_string()) // then outputs are modified
 ///         .modify_output(|output| format!("result: {output}")), // multiple modifications supported
 ///     Execute::new(|input: String| async move { input }),
@@ -298,56 +296,6 @@ impl<In, Out> InterceptLayer<In, Out> {
     {
         self.modify_output.push(ModifyOutput(Arc::new(f)));
         self
-    }
-}
-
-impl<In: Debug, Out> InterceptLayer<In, Out> {
-    /// Adds debug logging for incoming inputs using `dbg!`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use layered::{Execute, Stack, Intercept, Service};
-    /// # async fn example() {
-    /// let stack = (
-    ///     Intercept::layer().debug_input(), // print input with dbg!
-    ///     Execute::new(|input: String| async move { input }),
-    /// );
-    ///
-    /// let service = stack.build();
-    /// let response = service.execute("input".to_string()).await;
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn debug_input(self) -> Self {
-        self.on_input(|input| {
-            dbg!(input);
-        })
-    }
-}
-
-impl<In, Out: Debug> InterceptLayer<In, Out> {
-    /// Adds debug logging for outgoing outputs using `dbg!`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use layered::{Execute, Stack, Intercept, Service};
-    /// # async fn example() {
-    /// let stack = (
-    ///     Intercept::layer().debug_output(), // print outputs with dbg!
-    ///     Execute::new(|input: String| async move { input }),
-    /// );
-    ///
-    /// let service = stack.build();
-    /// let response = service.execute("input".to_string()).await;
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn debug_output(self) -> Self {
-        self.on_output(|output| {
-            dbg!(output);
-        })
     }
 }
 
@@ -660,16 +608,6 @@ mod tests {
             Poll::Ready(Ok(())) => (),
             _ => panic!("Expected Poll::Ready(Ok(())), got {result:?}"),
         }
-    }
-
-    #[test]
-    fn debug_input_output() {
-        let stack = (
-            Intercept::layer().debug_input().debug_output(),
-            Execute::new(|s: String| async move { s }),
-        );
-        let svc = stack.build();
-        let _ = block_on(svc.execute("test".into()));
     }
 
     #[test]
