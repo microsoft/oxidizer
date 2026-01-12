@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "Benchmarks don't require documentation")]
 

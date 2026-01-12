@@ -84,9 +84,9 @@ thiserror = { version = "2.0.17", default-features = false }
 time = { version = "0.3.37", default-features = false }
 time-tz = { version = "2.0.0", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
+tower = { version = "0.5.2", default-features = false }
 tower-layer = { version = "0.3.3", default-features = false }
 tower-service = { version = "0.3.3", default-features = false }
-tower = { version = "0.5.2", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }

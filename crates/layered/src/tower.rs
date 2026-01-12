@@ -65,7 +65,7 @@ use crate::Service;
 /// Bidirectional adapter between layered and Tower service traits.
 ///
 /// Wraps a service to convert between layered's [`Service`] and Tower's
-/// [`tower_service::Service`]. Handles backpressure
+/// [`tower_service::Service`]. Handles back-pressure
 /// and async execution differences automatically.
 #[derive(Debug, Clone)]
 pub struct Adapter<S>(pub S);
@@ -83,7 +83,7 @@ where
 
     #[cfg_attr(test, mutants::skip)] // causes unkillable mutants
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Oxidizer services don't have backpressure - they're always ready to accept requests
+        // Oxidizer services don't have back-pressure - they're always ready to accept requests
         Poll::Ready(Ok(()))
     }
 
@@ -104,7 +104,7 @@ where
         let mut clone = self.0.clone();
 
         async move {
-            // Wait for the Tower service to be ready (handle backpressure)
+            // Wait for the Tower service to be ready (handle back-pressure)
             poll_fn(|cx| clone.poll_ready(cx)).await?;
             // Execute the request
             clone.call(input).await

@@ -16,11 +16,11 @@
 //! ## Why not Tower?
 //!
 //! [Tower](https://docs.rs/tower) predates `async fn` in traits, requiring manual `Future` types
-//! or boxing and `poll_ready` backpressure semantics. Tower's `&mut self` also requires cloning
+//! or boxing and `poll_ready` back-pressure semantics. Tower's `&mut self` also requires cloning
 //! for concurrent requests. This crate uses `async fn` with `&self`, enabling simpler middleware
 //! and natural concurrency. Tower interop is available via the `tower-service` feature.
 //!
-//! ## Quickstart
+//! ## Quick Start
 //!
 //! A [`Service`] transforms an input into an output asynchronously:
 //!
