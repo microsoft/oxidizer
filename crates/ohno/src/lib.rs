@@ -16,6 +16,7 @@
 //! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
 //! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
+//! - [**`AppError`**](app::AppError): Application-level error type similar to `anyhow::Error`
 //!
 //! # Quick Start
 //!
@@ -219,6 +220,20 @@
 //!         .map_err(MyError::caused_by)
 //! }
 //! // Error output will include: "failed to open file (at src/main.rs:42)"
+//! ```
+//!
+//! # `AppError`
+//!
+//! For applications that need a simple, catch-all error type, use [`app::AppError`]. It 
+//! automatically captures backtraces and can wrap any error type.
+//!
+//! ```rust
+//! use ohno::app::{AppError, Result};
+//!
+//! fn process() -> Result<()> {
+//!     std::fs::read_to_string("file.txt")?; // Automatically converts errors
+//!     Ok(())
+//! }
 //! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno/logo.png")]
