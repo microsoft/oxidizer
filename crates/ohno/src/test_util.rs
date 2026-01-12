@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Expected error to be")]
+    #[should_panic(expected = "left : expected message\nright: actual message")]
     fn test_assert_error_message_mismatch() {
         let error = MyTestError::caused_by("actual message");
         assert_error_message!(error, "expected message");

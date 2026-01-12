@@ -2,15 +2,12 @@
 
 //! Application-level error handling.
 //!
-//! `ohno::AppError` provides a simple, ergonomic error type for applications that need
+//! [`AppError`] provides a simple, ergonomic error type for applications that need
 //! flexible error handling without defining custom error types for every error case.
-//!
-//! This module is similar to `anyhow` but built on top of ohno's error handling
-//! infrastructure, providing automatic backtrace capture and error context.
 //!
 //! # Examples
 //!
-//! - **Simple Error Type**: `Error` wraps any error implementing `std::error::Error`
+//! - **Simple Error Type**: [`AppError`] wraps any error implementing [`std::error::Error`]
 //!   ```no_run
 //!   use std::io::Error as IoError;
 //!   use ohno::app::AppError;
@@ -33,29 +30,35 @@
 //!   println!("{}", err.backtrace());
 //!   ```
 //!
-//! - **Error Context**: Add contextual information to errors using `error_trace`
-//!   ```no_run
-//!   use ohno::{app::Result, error_trace, AppError};
+//! - **Conversion with additional context**: Converts an error into [`AppError`] with additional
+//!   context using [`IntoAppError`]
 //!
-//!   #[error_trace("failed to read config")]
-//!   fn read_config() -> Result<()> {
-//!       Err(AppError::new("disk error"))
-//!   }
 //!   ```
+//!   use ohno::app::{Result, AppError, IntoAppError};
 //!
-//! - **Early Returns**: Use `bail!` macro for convenient early returns
-//!   ```no_run
-//!   use ohno::{app::Result, bail};
-//!
-//!   fn validate(value: i32) -> Result<()> {
-//!       if value < 0 { bail!("invalid input"); }
+//!   fn read_config(path: &str) -> Result<()> {
+//!       let config = std::fs::read_to_string(path).into_app_err("failed to read config")?;
+//!       // ...
 //!       Ok(())
 //!   }
 //!   ```
 //!
-//! - **In-Place Construction**: Use `app_err!` macro to construct errors in place
+//! - **Early Returns**: Use [`bail!`](crate::bail) macro for convenient early returns
 //!   ```no_run
-//!   use ohno::{AppError, app_err};
+//!   use ohno::app::Result;
+//!   use ohno::bail;
+//!
+//!   fn validate(value: i32) -> Result<()> {
+//!       if value < 0 {
+//!           bail!("invalid input");
+//!       }
+//!       Ok(())
+//!   }
+//!   ```
+//!
+//! - **In-Place Construction**: Use [`app_err!`](crate::app_err) macro to construct errors in place
+//!   ```
+//!   use ohno::app_err;
 //!
 //!   let code = 42;
 //!   let err = app_err!("failed with code {code}");
@@ -63,26 +66,26 @@
 //!
 //! - **Error Chaining**: Walk error chains to find specific error types
 //!   ```no_run
-//!   use ohno::{AppError, app::OhWell};
+//!   use ohno::app::AppError;
 //!
-//!   let err = AppError::new("wrapper error");
-//!   if let Some(io_err) = err.find_source::<std::io::Error>() {
-//!       println!("Found IO error: {}", io_err);
+//!   fn handle_error(err: &AppError) {
+//!     if let Some(io_err) = err.find_source::<std::io::Error>() {
+//!        println!("Found IO error: {io_err}");
+//!     }
 //!   }
 //!   ```
 
 mod error;
-mod macros;
 mod into_app_err;
+mod macros;
 
 pub use error::AppError;
 pub use into_app_err::IntoAppError;
-//pub use app_err_macro::app_err;
 
-/// A type alias for `Result<T, ohno::AppError>`.
+/// A type alias for [`Result<T, AppError>`](std::result::Result).
 ///
 /// This is a convenience alias to simplify function signatures.
-/// Instead of writing `Result<T, ohno::AppError>`, you can write `ohno::app::Result<T>`.
+/// Instead of writing [`Result<T, AppError>`](std::result::Result), you can write [`Result<T>`](Result).
 ///
 /// # Examples
 ///
