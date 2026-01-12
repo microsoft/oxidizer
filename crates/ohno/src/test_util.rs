@@ -32,20 +32,22 @@ macro_rules! assert_error_message {
         let error_string = $error.to_string();
         let expected: &str = $expected;
 
-        if error_string == expected {
-            // Exact match, success
-        } else {
-            // Check if it starts with the expected message followed by backtrace
-            let starts_with = format!("{expected}\n\nBacktrace:\n");
-
-            assert!(
-                error_string.starts_with(&starts_with),
-                "Expected error to be '{}' or start with '{}', but got: '{}'",
-                expected,
-                starts_with,
-                error_string
-            );
-        }
+        let test = move || {
+            if error_string == expected {
+                return ();
+            }
+            if let Some(remainder) = error_string.strip_prefix(expected) {
+                // backtrace, caused by, or error trace indicators
+                if remainder.starts_with("\n\nBacktrace:\n")
+                    || remainder.starts_with("\ncaused by: ")
+                    || remainder.starts_with("\n> ")
+                {
+                    return ();
+                }
+            }
+            panic!("left : {expected}\nright: {error_string}");
+        };
+        test();
     }};
 }
 
