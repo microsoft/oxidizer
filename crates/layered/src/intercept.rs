@@ -660,4 +660,24 @@ mod tests {
             _ => panic!("Expected Poll::Ready(Ok(())), got {result:?}"),
         }
     }
+
+    #[test]
+    fn debug_input_output() {
+        let stack = (
+            Intercept::layer().debug_input().debug_output(),
+            Execute::new(|s: String| async move { s }),
+        );
+        let svc = stack.build();
+        let _ = block_on(svc.execute("test".into()));
+    }
+
+    #[test]
+    fn debug_impls() {
+        let layer = Intercept::<String, String, ()>::layer()
+            .on_input(|_| {})
+            .on_output(|_| {})
+            .modify_input(|s| s)
+            .modify_output(|s| s);
+        assert!(format!("{layer:?}").contains("InterceptLayer"));
+    }
 }

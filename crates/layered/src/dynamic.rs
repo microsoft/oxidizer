@@ -107,4 +107,12 @@ mod tests {
 
         assert_eq!(block_on(dynamic_service.execute(42)), 42);
     }
+
+    #[test]
+    fn clone_and_debug() {
+        let svc: DynamicService<i32, i32> = Execute::new(|v| async move { v }).into_dynamic();
+        let cloned = svc.clone();
+        assert_eq!(block_on(cloned.execute(1)), 1);
+        assert_eq!(format!("{svc:?}"), "DynamicService");
+    }
 }

@@ -92,3 +92,15 @@ impl<E> Debug for Execute<E> {
         f.debug_struct("Execute").finish_non_exhaustive()
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug() {
+        let svc = Execute::new(|x: i32| async move { x });
+        assert!(format!("{svc:?}").contains("Execute"));
+    }
+}

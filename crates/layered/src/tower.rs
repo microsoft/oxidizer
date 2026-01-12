@@ -254,4 +254,14 @@ mod tests {
 
         assert_eq!(result, Err("service unavailable".to_string()));
     }
+
+    #[test]
+    fn tower_layer_adapter() {
+        use crate::{Execute, Stack};
+        use tower_layer::Identity;
+
+        let stack = (tower_layer(Identity::new()), Execute::new(|x: i32| async move { Ok::<_, ()>(x) }));
+        let svc = stack.build();
+        assert_eq!(block_on(svc.execute(42)), Ok(42));
+    }
 }

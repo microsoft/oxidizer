@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, coverage(off))]
+
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
