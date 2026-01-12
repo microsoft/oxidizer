@@ -7,12 +7,12 @@ use crate::{Enrichable, EnrichmentEntry};
 
 use super::AppError;
 
-/// Transforms `Result` type into `AppError` with additional message
-/// 
-/// For converting an error into `AppError` without additional context, use `?` operator directly.
+/// Transforms [`Result`] and [`Option`] types into [`AppError`] with additional message.
+///
+/// For converting an error into [`AppError`] without additional context, use the `?` operator directly.
 pub trait IntoAppError<T> {
     /// Adds context message to the error.
-    /// 
+    ///
     /// The message is converted to string only if the result is an error.
     fn into_app_err(self, msg: impl Display) -> Result<T, AppError>;
 

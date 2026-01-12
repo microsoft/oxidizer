@@ -1,22 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Application-level error type similar to anyhow::Error.
+//! Application-level error type similar to `anyhow::Error`.
 //!
-//! `Error` provides a simple, ergonomic error type for applications that need
+//! [`AppError`] provides a simple, ergonomic error type for applications that need
 //! flexible error handling without defining custom error types for every error case.
 //!
 //! # Examples
 //!
+//! Use [`AppError::new`] to create an error from a string message or any error type:
+//!
 //! ```rust
 //! use ohno::app::AppError;
 //!
-//! fn read_config() -> Result<String, AppError> {
-//!     let contents = std::fs::read_to_string("config.txt")
-//!         .map_err(AppError::new)?;
-//!     Ok(contents)
-//! }
+//! // Create from a string message
+//! let error = AppError::new("something went wrong");
+//!
+//! // Create from any std::error::Error
+//! let io_error = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
 //! ```
-
+//!
+//! Propagate errors using the `?` operator:
+//!
+//! ```rust
+//! use ohno::app::AppError;
+//!
+//! fn from_io_error(path: &str) -> Result<(), AppError> {
+//!    let _ = std::fs::read_to_string(path)?;
+//!    Ok(())
+//! }
 use std::backtrace::Backtrace;
 use std::error::Error as StdError;
 use std::fmt;
@@ -33,53 +44,17 @@ struct Inner {
 
 /// Application-level error type that wraps any error.
 ///
-/// `Error` is designed for use in applications where you need a simple,
-/// catch-all error type. It's similar to `anyhow::Error` but built on top
-/// of ohno's error handling infrastructure.
+/// [`AppError`] is designed for use in applications where you need a simple,
+/// catch-all error type.
 ///
 /// This type automatically captures backtraces and provides error context
-/// through the underlying `OhnoCore`.
-///
-/// # Examples
-///
-/// ```rust
-/// use ohno::app::AppError;
-///
-/// // Create from a string message
-/// let error = AppError::new("something went wrong");
-///
-/// // Create from any std::error::Error
-/// let io_error = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
-/// ```
+/// through the underlying [`OhnoCore`].
 pub struct AppError {
     inner: Inner,
 }
 
 impl AppError {
-    /// Creates a new `Error` from any type that can be converted into an error.
-    ///
-    /// This accepts:
-    /// - String literals (`&str`)
-    /// - Owned strings (`String`)
-    /// - Any type implementing `std::error::Error + Send + Sync + 'static`
-    ///
-    /// A backtrace is automatically captured at the point of creation.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ohno::app::AppError;
-    ///
-    /// // From a string
-    /// let error1 = AppError::new("operation failed");
-    ///
-    /// // From an IO error
-    /// let io_error = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
-    /// let error2 = io_error;
-    ///
-    /// // From a formatted string
-    /// let error3 = AppError::new(format!("failed to process item {}", 42));
-    /// ```
+    /// Creates a new [`AppError`] from any type that can be converted into an error.
     pub fn new<E>(error: E) -> Self
     where
         E: Into<Box<dyn StdError + Send + Sync>>,
@@ -92,17 +67,6 @@ impl AppError {
     }
 
     /// Returns the source error if this error wraps another error.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ohno::app::AppError;
-    ///
-    /// let io_error = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
-    /// let error = io_error;
-    ///
-    /// assert!(error.source().is_some());
-    /// ```
     pub fn source(&self) -> Option<&(dyn StdError + 'static)> {
         StdError::source(&self.inner)
     }
@@ -116,12 +80,10 @@ impl AppError {
     /// ```rust
     /// use ohno::app::AppError;
     ///
-    /// let io_error = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
-    /// let error = io_error;
+    /// let err = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
     ///
-    /// let found = error.find_source::<std::io::Error>();
-    /// assert!(found.is_some());
-    /// assert_eq!(found.unwrap().kind(), std::io::ErrorKind::NotFound);
+    /// let found = err.find_source::<std::io::Error>().unwrap();
+    /// assert_eq!(found.kind(), std::io::ErrorKind::NotFound);
     /// ```
     pub fn find_source<T: StdError + 'static>(&self) -> Option<&T> {
         let mut source = self.source();
@@ -143,15 +105,6 @@ impl AppError {
     /// Controlled by environment variables:
     /// - `RUST_BACKTRACE=1` enables basic backtrace
     /// - `RUST_BACKTRACE=full` enables full backtrace with all frames
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ohno::app::AppError;
-    ///
-    /// let error = AppError::new("test error");
-    /// let _backtrace = error.backtrace();
-    /// ```
     pub fn backtrace(&self) -> &Backtrace {
         self.inner.backtrace()
     }
@@ -163,10 +116,10 @@ impl AppError {
 
     /// Converts this error into a boxed trait object.
     ///
-    /// This is an escape hatch that allows you to compose `AppError` with other
-    /// error types that expect a `Box<dyn StdError + Send + Sync + 'static>`. This is
+    /// This is an escape hatch that allows you to compose [`AppError`] with other
+    /// error types that expect a [`Box<dyn StdError + Send + Sync + 'static>`](Box). This is
     /// useful when you need to integrate with APIs that don't directly support
-    /// `AppError` but can work with standard error trait objects.
+    /// [`AppError`] but can work with standard error trait objects.
     pub fn into_std_error(self) -> Box<dyn StdError + Send + Sync + 'static> {
         Box::new(self.inner)
     }
