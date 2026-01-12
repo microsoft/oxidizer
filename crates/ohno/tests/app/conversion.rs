@@ -3,16 +3,13 @@
 //! Tests for automatic error conversion with ? operator.
 
 use ohno::app::Result;
+use ohno::app_err;
 use ohno::assert_error_message;
-use ohno::welp;
 
 #[test]
 fn question_mark_on_io_error() {
     fn read_file() -> Result<String> {
-        let err = Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
+        let err = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
         err?;
         Ok("abc".to_string())
     }
@@ -21,11 +18,7 @@ fn question_mark_on_io_error() {
     let err = result.unwrap_err();
     assert_error_message!(err, "file not found");
     err.find_source::<std::io::Error>().unwrap();
-    let _ = err
-        .source()
-        .unwrap()
-        .downcast_ref::<std::io::Error>()
-        .unwrap();
+    let _ = err.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
 }
 
 #[test]
@@ -37,18 +30,14 @@ fn question_mark_on_parse_error() {
     let err = parse_number().unwrap_err();
     assert_error_message!(err, "invalid digit found in string");
     err.find_source::<std::num::ParseIntError>().unwrap();
-    let _ = err
-        .source()
-        .unwrap()
-        .downcast_ref::<std::num::ParseIntError>()
-        .unwrap();
+    let _ = err.source().unwrap().downcast_ref::<std::num::ParseIntError>().unwrap();
 }
 
 #[test]
 fn question_mark_on_constructed_error() {
     fn validate(value: i32) -> Result<i32> {
         if value < 0 {
-            Err(welp!("negative: {}", value))?;
+            Err(app_err!("negative: {}", value))?;
         }
         Ok(value)
     }
@@ -63,10 +52,10 @@ fn question_mark_on_constructed_error() {
 fn question_mark_in_validation_chain() {
     fn process(x: i32) -> Result<i32> {
         if x < 0 {
-            Err(welp!("value cannot be negative"))?;
+            Err(app_err!("value cannot be negative"))?;
         }
         if x > 100 {
-            Err(welp!("value too large"))?;
+            Err(app_err!("value too large"))?;
         }
         Ok(x * 2)
     }
