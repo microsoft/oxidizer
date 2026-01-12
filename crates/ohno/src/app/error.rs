@@ -74,19 +74,6 @@ impl AppError {
     }
 
     /// Finds the first source error of the specified type in the error chain.
-    ///
-    /// Walks through the error's source chain and returns the first error that matches type `T`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ohno::app::AppError;
-    ///
-    /// let err = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
-    ///
-    /// let found = err.find_source::<std::io::Error>().unwrap();
-    /// assert_eq!(found.kind(), std::io::ErrorKind::NotFound);
-    /// ```
     #[must_use]
     pub fn find_source<T: StdError + 'static>(&self) -> Option<&T> {
         let mut source = self.source();
@@ -118,12 +105,7 @@ impl AppError {
         self.inner.message()
     }
 
-    /// Converts this error into a boxed trait object.
-    ///
-    /// This is an escape hatch that allows you to compose [`AppError`] with other
-    /// error types that expect a [`Box<dyn StdError + Send + Sync + 'static>`](Box). This is
-    /// useful when you need to integrate with APIs that don't directly support
-    /// [`AppError`] but can work with standard error trait objects.
+    /// Converts this error into a boxed trait object for API compatibility.
     #[must_use]
     pub fn into_std_error(self) -> Box<dyn StdError + Send + Sync + 'static> {
         Box::new(self.inner)
