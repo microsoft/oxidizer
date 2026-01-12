@@ -15,7 +15,7 @@
 
 ## Layered Services
 
-Build composable async services with stackable middleware.
+Build composable async services with layered middleware.
 
 This crate provides the [`Service`][__link0] trait and a layer system for adding cross-cutting
 concerns like timeouts, retries, and logging.
@@ -107,14 +107,14 @@ let result = service.execute(21).await;
 
 ### Thread Safety
 
-All services must be [`Send`][__link5] + [`Sync`][__link6], and returned futures must be [`Send`][__link7].
+All services must implement [`Send`][__link5] and [`Sync`][__link6], and returned futures must be [`Send`][__link7].
 This ensures compatibility with multi-threaded async runtimes like Tokio.
 
 ### Features
 
-* **`intercept`** — Enables [`Intercept`][__link8] middleware
-* **`dynamic-service`** — Enables [`DynamicService`][__link9] for type erasure
-* **`tower-service`** — Enables Tower interoperability via the [`tower`][__link10] module
+* **`intercept`**: Enables [`Intercept`][__link8] middleware
+* **`dynamic-service`**: Enables [`DynamicService`][__link9] for type erasure
+* **`tower-service`**: Enables Tower interoperability via the [`tower`][__link10] module
 
 
 <hr/>
@@ -122,7 +122,7 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-4PSCYPRVTDG8kSSXH175HHG9daIrTZPJd4G-W0C5ykx5V1YWSBgmdsYXllcmVkZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6qZXt9_449_G5ohe8xKV2tFG_jqaO0Wkg3dGzoZHPbDsz1cYWSBgmdsYXllcmVkZTAuMS4w
  [__link0]: https://docs.rs/layered/0.1.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
  [__link10]: https://docs.rs/layered/0.1.0/layered/tower/index.html

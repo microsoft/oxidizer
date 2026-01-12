@@ -11,7 +11,7 @@
 //! - Services must be `Clone` for concurrent usage
 //! - All types must be `Send` for async compatibility
 //! - Layered services must return `Result<T, E>` when used with Tower
-//! - Tower's backpressure (`poll_ready`) is handled automatically
+//! - Tower's back-pressure (`poll_ready`) is handled automatically
 //!
 //! # Examples
 //!
@@ -64,7 +64,7 @@ use crate::Service;
 
 /// Bidirectional adapter between layered and Tower service traits.
 ///
-/// Wraps a service to convert between layered's [`Service`] and Tower's
+/// Wraps a service to convert between `layered`'s [`Service`] and Tower's
 /// [`tower_service::Service`]. Handles back-pressure
 /// and async execution differences automatically.
 #[derive(Debug, Clone)]

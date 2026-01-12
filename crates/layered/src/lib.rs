@@ -8,7 +8,7 @@
 
 //! # Layered Services
 //!
-//! Build composable async services with stackable middleware.
+//! Build composable async services with layered middleware.
 //!
 //! This crate provides the [`Service`] trait and a layer system for adding cross-cutting
 //! concerns like timeouts, retries, and logging.
@@ -104,14 +104,14 @@
 //!
 //! ## Thread Safety
 //!
-//! All services must be [`Send`] + [`Sync`], and returned futures must be [`Send`].
+//! All services must implement [`Send`] and [`Sync`], and returned futures must be [`Send`].
 //! This ensures compatibility with multi-threaded async runtimes like Tokio.
 //!
 //! ## Features
 //!
-//! - **`intercept`** — Enables [`Intercept`] middleware
-//! - **`dynamic-service`** — Enables [`DynamicService`] for type erasure
-//! - **`tower-service`** — Enables Tower interoperability via the [`tower`] module
+//! - **`intercept`**: Enables [`Intercept`] middleware
+//! - **`dynamic-service`**: Enables [`DynamicService`] for type erasure
+//! - **`tower-service`**: Enables Tower interoperability via the [`tower`] module
 
 mod service;
 pub use service::Service;
