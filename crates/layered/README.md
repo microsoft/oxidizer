@@ -40,7 +40,7 @@ impl Service<String> for Greeter {
     type Out = String;
 
     async fn execute(&self, name: String) -> Self::Out {
-        format!("Hello, {}!", name)
+        format!("Hello, {name}!")
     }
 }
 ```
@@ -51,7 +51,7 @@ Use [`Execute`][__link3] to turn any async function into a service:
 use layered::{Execute, Service};
 
 let greeter = Execute::new(|name: String| async move {
-    format!("Hello, {}!", name)
+    format!("Hello, {name}!")
 });
 
 assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
@@ -84,14 +84,14 @@ impl<S> Layer<S> for LogLayer {
 
 struct LogService<S>(S);
 
-impl<S, In: Send + std::fmt::Debug> Service<In> for LogService<S>
+impl<S, In: Send + std::fmt::Display> Service<In> for LogService<S>
 where
     S: Service<In>,
 {
     type Out = S::Out;
 
     async fn execute(&self, input: In) -> Self::Out {
-        println!("Input: {:?}", input);
+        println!("Input: {input}");
         self.0.execute(input).await
     }
 }
@@ -122,7 +122,7 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6qZXt9_449_G5ohe8xKV2tFG_jqaO0Wkg3dGzoZHPbDsz1cYWSBgmdsYXllcmVkZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzJtJrZVyApYG61Etog82u5CG8YRisc2odPYG-_MVLrG5Ab5YWSBgmdsYXllcmVkZTAuMS4w
  [__link0]: https://docs.rs/layered/0.1.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
  [__link10]: https://docs.rs/layered/0.1.0/layered/tower/index.html

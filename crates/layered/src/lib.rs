@@ -33,7 +33,7 @@
 //!     type Out = String;
 //!
 //!     async fn execute(&self, name: String) -> Self::Out {
-//!         format!("Hello, {}!", name)
+//!         format!("Hello, {name}!")
 //!     }
 //! }
 //! ```
@@ -45,7 +45,7 @@
 //!
 //! # async fn example() {
 //! let greeter = Execute::new(|name: String| async move {
-//!     format!("Hello, {}!", name)
+//!     format!("Hello, {name}!")
 //! });
 //!
 //! assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
@@ -79,14 +79,14 @@
 //!
 //! struct LogService<S>(S);
 //!
-//! impl<S, In: Send + std::fmt::Debug> Service<In> for LogService<S>
+//! impl<S, In: Send + std::fmt::Display> Service<In> for LogService<S>
 //! where
 //!     S: Service<In>,
 //! {
 //!     type Out = S::Out;
 //!
 //!     async fn execute(&self, input: In) -> Self::Out {
-//!         println!("Input: {:?}", input);
+//!         println!("Input: {input}");
 //!         self.0.execute(input).await
 //!     }
 //! }
