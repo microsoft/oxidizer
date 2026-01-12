@@ -83,7 +83,7 @@ where
 
     #[cfg_attr(test, mutants::skip)] // causes unkillable mutants
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Oxidizer services don't have back-pressure - they're always ready to accept requests
+        // Layered services don't have back-pressure - they're always ready to accept requests
         Poll::Ready(Ok(()))
     }
 
@@ -139,11 +139,11 @@ where
     type Service = Adapter<L::Service>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        // 1. Wrap the Oxidizer service to make it Tower-compatible
+        // 1. Wrap the layered service to make it Tower-compatible
         let tower_adapted = Adapter(inner);
         // 2. Apply the Tower layer
         let tower_layered = self.0.layer(tower_adapted);
-        // 3. Wrap the result back for Oxidizer compatibility
+        // 3. Wrap the result back for compatibility with layered services
         Adapter(tower_layered)
     }
 }
