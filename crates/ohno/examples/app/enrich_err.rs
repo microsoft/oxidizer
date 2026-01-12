@@ -2,6 +2,8 @@
 
 //! Demonstrates adding context to errors using `error_trace`.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::app::AppError;
 use ohno::{bail, enrich_err};
 

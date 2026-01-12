@@ -2,6 +2,8 @@
 
 //! Example demonstrating how to transform `AppError` into a standard error trait object.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::app::AppError;
 
 #[ohno::error]

@@ -4,6 +4,8 @@
 //!
 //! Run with `RUST_BACKTRACE=1` to see the full backtrace.
 
+#![expect(clippy::unwrap_used, reason = "example code")]
+
 use ohno::app::AppError;
 use ohno::app_err;
 

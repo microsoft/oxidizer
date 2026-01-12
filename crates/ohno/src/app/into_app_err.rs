@@ -10,6 +10,7 @@ use super::AppError;
 /// Transforms [`Result`] and [`Option`] types into [`AppError`] with additional message.
 ///
 /// For converting an error into [`AppError`] without additional context, use the `?` operator directly.
+#[expect(clippy::missing_errors_doc, reason = "documentation for errors is not required here")]
 pub trait IntoAppError<T> {
     /// Adds context message to the error.
     ///
