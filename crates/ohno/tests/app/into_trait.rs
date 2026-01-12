@@ -6,7 +6,7 @@ use ohno::app::{AppError, IntoAppError, Result};
 use ohno::assert_error_message;
 
 #[test]
-fn result_ohno() {
+fn result_into_app_err() {
     fn parse_number(s: &str) -> Result<i32> {
         s.parse::<i32>().into_app_err("failed to parse number")
     }
@@ -18,7 +18,7 @@ fn result_ohno() {
 }
 
 #[test]
-fn result_ohno_with() {
+fn result_into_app_err_with() {
     fn parse_with_context(s: &str) -> Result<i32> {
         s.parse::<i32>().into_app_err_with(|| format!("failed to parse: {s}"))
     }
@@ -30,7 +30,7 @@ fn result_ohno_with() {
 }
 
 #[test]
-fn option_ohno() {
+fn option_into_app_err() {
     fn make_error() -> Result<i32> {
         None.into_app_err("value not found")
     }
@@ -41,7 +41,7 @@ fn option_ohno() {
 }
 
 #[test]
-fn option_ohno_with() {
+fn option_into_app_err_with() {
     fn with_context() -> Result<i32> {
         None.into_app_err_with(|| "nothing found")
     }
@@ -52,7 +52,7 @@ fn option_ohno_with() {
 }
 
 #[test]
-fn ohno_on_ohno_error() {
+fn ohno_on_into_app_err_error() {
     fn level1() -> Result<i32> {
         Err(AppError::new("root error"))
     }
