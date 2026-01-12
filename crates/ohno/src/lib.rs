@@ -224,7 +224,7 @@
 //!
 //! # `AppError`
 //!
-//! For applications that need a simple, catch-all error type, use [`app::AppError`]. It 
+//! For applications that need a simple, catch-all error type, use [`app::AppError`]. It
 //! automatically captures backtraces and can wrap any error type.
 //!
 //! ```rust
