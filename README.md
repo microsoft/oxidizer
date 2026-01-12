@@ -35,6 +35,7 @@ These are the crates built out of this repo:
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
+- [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/README.md) - Macros for the `thread_aware` crate.

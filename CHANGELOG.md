@@ -13,6 +13,7 @@ Please see each crate's change log below:
 - [`layered`](./crates/layered/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
+- [`recoverable`](./crates/recoverable/CHANGELOG.md)
 - [`thread_aware`](./crates/thread_aware/CHANGELOG.md)
 - [`thread_aware_macros`](./crates/thread_aware_macros/CHANGELOG.md)
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/CHANGELOG.md)
