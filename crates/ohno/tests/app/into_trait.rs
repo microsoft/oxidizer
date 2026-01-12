@@ -2,13 +2,13 @@
 
 //! Tests for OhWell trait extension methods.
 
-use ohno::app::{AppError, OhWell, Result};
+use ohno::app::{AppError, IntoAppError, Result};
 use ohno::assert_error_message;
 
 #[test]
-fn result_ohwell() {
+fn result_ohno() {
     fn parse_number(s: &str) -> Result<i32> {
-        s.parse::<i32>().ohwell("failed to parse number")
+        s.parse::<i32>().ohno("failed to parse number")
     }
 
     let err = parse_number("xyz").unwrap_err();
@@ -18,9 +18,9 @@ fn result_ohwell() {
 }
 
 #[test]
-fn result_ohwell_with() {
+fn result_ohno_with() {
     fn parse_with_context(s: &str) -> Result<i32> {
-        s.parse::<i32>().ohwell_with(|| format!("failed to parse: {}", s))
+        s.parse::<i32>().ohno_with(|| format!("failed to parse: {}", s))
     }
 
     let err = parse_with_context("abc").unwrap_err();
@@ -30,9 +30,9 @@ fn result_ohwell_with() {
 }
 
 #[test]
-fn option_ohwell() {
+fn option_ohno() {
     fn make_error() -> Result<i32> {
-        None.ohwell("value not found")
+        None.ohno("value not found")
     }
 
     let err = make_error().unwrap_err();
@@ -41,9 +41,9 @@ fn option_ohwell() {
 }
 
 #[test]
-fn option_ohwell_with() {
+fn option_ohno_with() {
     fn with_context() -> Result<i32> {
-        None.ohwell_with(|| "nothing found")
+        None.ohno_with(|| "nothing found")
     }
 
     let err = with_context().unwrap_err();
@@ -52,13 +52,13 @@ fn option_ohwell_with() {
 }
 
 #[test]
-fn ohwell_on_ohwell_error() {
+fn ohno_on_ohno_error() {
     fn level1() -> Result<i32> {
         Err(AppError::new("root error"))
     }
 
     fn level2() -> Result<i32> {
-        level1().ohwell("context added")
+        level1().ohno("context added")
     }
 
     let err = level2().unwrap_err();

@@ -73,10 +73,10 @@
 
 mod error;
 mod macros;
-mod ohwell_trait;
+mod into_app_err;
 
 pub use error::AppError;
-pub use ohwell_trait::OhWell;
+pub use into_app_err::IntoAppError;
 //pub use app_err_macro::app_err;
 
 /// A type alias for `Result<T, ohno::AppError>`.

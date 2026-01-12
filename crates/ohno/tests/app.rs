@@ -10,5 +10,5 @@ mod app {
     mod conversion;
     mod enrich_err;
     mod into_std_error;
-    mod ohwell_trait;
+    mod into_trait;
 }
