@@ -11,7 +11,7 @@ use layered::prelude::*;
 #[tokio::main]
 async fn main() {
     // Stack multiple logging layers: layer-1 -> layer-2 -> core service
-    let execution_stack = (
+    let stack = (
         Logging::layer("layer-1"),
         Logging::layer("layer-2"),
         Execute::new(|input| async move {
@@ -21,7 +21,7 @@ async fn main() {
     );
 
     // Build and execute
-    let service = execution_stack.build();
+    let service = stack.build();
     let _output = service.execute("Hello, World!".to_string()).await;
 }
 

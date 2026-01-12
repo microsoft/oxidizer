@@ -334,3 +334,157 @@ where
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16).layer(service)
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_layer::Identity;
+
+    type I = Identity;
+
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "no need to have 16 different unit tests")]
+    fn stack_tuples() {
+        let _: () = (I::new(), ()).build();
+        let _: () = (I::new(), I::new(), ()).build();
+        let _: () = (I::new(), I::new(), I::new(), ()).build();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), ()).build();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .build();
+    }
+}

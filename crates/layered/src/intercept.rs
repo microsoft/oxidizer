@@ -18,14 +18,14 @@ use crate::Service;
 /// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
-/// let execution_stack = (
+/// let stack = (
 ///     Intercept::layer()
 ///         .on_input(|input| println!("request: {input}"))
 ///         .on_output(|output| println!("response: {output}")),
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = execution_stack.build();
+/// let service = stack.build();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -35,7 +35,7 @@ use crate::Service;
 /// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
-/// let execution_stack = (
+/// let stack = (
 ///     Intercept::<String, String, _>::layer()
 ///         .on_input(|input| println!("request: {input}")) // input observers are called first
 ///         .on_input(|input| println!("another: {input}")) // multiple observers supported
@@ -50,7 +50,7 @@ use crate::Service;
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = execution_stack.build();
+/// let service = stack.build();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -70,12 +70,12 @@ pub struct Intercept<In, Out, S> {
 /// ```
 /// # use layered::{Execute, Stack, Intercept, Service};
 /// # async fn example() {
-/// let execution_stack = (
+/// let stack = (
 ///     Intercept::layer(), // Create a new interception layer
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = execution_stack.build();
+/// let service = stack.build();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -95,12 +95,12 @@ impl<In, Out> Intercept<In, Out, ()> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer(), // Create a new interception layer, no observers yet
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -182,14 +182,14 @@ impl<In, Out> InterceptLayer<In, Out> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer()
     ///         .on_input(|input| println!("processing: {input}"))
     ///         .on_input(|input| println!("another: {input}")),
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -211,14 +211,14 @@ impl<In, Out> InterceptLayer<In, Out> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer()
     ///         .on_output(|output| println!("response: {output}"))
     ///         .on_output(|output| println!("another response: {output}")),
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -241,14 +241,14 @@ impl<In, Out> InterceptLayer<In, Out> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer()
     ///         .modify_input(|input: String| input.trim().to_string())
     ///         .modify_input(|input| input.to_lowercase()),
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -279,14 +279,14 @@ impl<In, Out> InterceptLayer<In, Out> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer()
     ///         .modify_output(|output: String| output.trim().to_string())
     ///         .modify_output(|output| format!("Result: {}", output)),
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -308,12 +308,12 @@ impl<In: Debug, Out> InterceptLayer<In, Out> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer().debug_input(), // print input with dbg!
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -333,12 +333,12 @@ impl<In, Out: Debug> InterceptLayer<In, Out> {
     /// ```
     /// # use layered::{Execute, Stack, Intercept, Service};
     /// # async fn example() {
-    /// let execution_stack = (
+    /// let stack = (
     ///     Intercept::layer().debug_output(), // print outputs with dbg!
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = execution_stack.build();
+    /// let service = stack.build();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -492,7 +492,7 @@ mod tests {
         let called2 = Arc::new(AtomicU16::default());
         let called2_clone = Arc::clone(&called2);
 
-        let execution_stack = (
+        let stack = (
             Intercept::layer()
                 .modify_input(|input: String| format!("{input}1"))
                 .modify_input(|input: String| format!("{input}2"))
@@ -505,7 +505,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = execution_stack.build();
+        let service = stack.build();
         let response = block_on(service.execute("test".to_string()));
         assert_eq!(called_clone.load(Ordering::Relaxed), 1);
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
@@ -521,7 +521,7 @@ mod tests {
         let called2 = Arc::new(AtomicU16::default());
         let called2_clone = Arc::clone(&called2);
 
-        let execution_stack = (
+        let stack = (
             Intercept::layer()
                 .modify_output(|output: String| format!("{output}1"))
                 .modify_output(|output: String| format!("{output}2"))
@@ -534,7 +534,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = execution_stack.build();
+        let service = stack.build();
         let response = block_on(service.execute("test".to_string()));
         assert_eq!(called_clone.load(Ordering::Relaxed), 1);
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
@@ -550,7 +550,7 @@ mod tests {
         let called2 = Arc::new(AtomicU16::default());
         let called2_clone = Arc::clone(&called2);
 
-        let execution_stack = (
+        let stack = (
             Intercept::layer()
                 .modify_input(|input: String| format!("{input}1"))
                 .modify_input(|input: String| format!("{input}2"))
@@ -563,7 +563,7 @@ mod tests {
             Execute::new(|input: String| async move { Ok::<_, String>(input) }),
         );
 
-        let mut service = execution_stack.build();
+        let mut service = stack.build();
         let future = async move {
             poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
             let response = service.call("test".to_string()).await.unwrap();

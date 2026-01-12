@@ -32,7 +32,7 @@ async fn main() {
 
 // Layered stack with Tower execution model (requires polling)
 async fn example_oxidizer() {
-    let execution_stack = (
+    let stack = (
         GlobalConcurrencyLimitLayer::new(1),
         Intercept::layer().on_input(|input| println!("outer input: {input}")),
         GlobalConcurrencyLimitLayer::new(1),
@@ -40,14 +40,14 @@ async fn example_oxidizer() {
         Execute::new(execute),
     );
 
-    let mut service = execution_stack.build();
+    let mut service = stack.build();
     poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
     service.call("hello world from Oxidizer".to_string()).await.unwrap();
 }
 
 // Layered stack with tower_layer() adapter (no polling needed)
 async fn example_oxidizer_native() {
-    let execution_stack = (
+    let stack = (
         tower_layer(GlobalConcurrencyLimitLayer::new(1)),
         Intercept::layer().on_input(|input| println!("outer input: {input}")),
         tower_layer(GlobalConcurrencyLimitLayer::new(1)),
@@ -55,7 +55,7 @@ async fn example_oxidizer_native() {
         Execute::new(execute),
     );
 
-    let service = execution_stack.build();
+    let service = stack.build();
 
     // Direct execution - no polling required
     service.execute("hello world from Oxidizer Native".to_string()).await.unwrap();
