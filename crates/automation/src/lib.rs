@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use ohno::app::{IntoAppError, Result};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -48,14 +48,14 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
         .arg("--no-deps")
         .current_dir(workspace_root.as_ref())
         .output()
-        .context("failed to execute cargo metadata")?;
+        .into_app_err("failed to execute cargo metadata")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("cargo metadata failed: {stderr}");
+        ohno::bail!("cargo metadata failed: {stderr}");
     }
 
-    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).context("failed to parse cargo metadata output")?;
+    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).into_app_err("failed to parse cargo metadata output")?;
 
     Ok(metadata.packages)
 }
@@ -75,7 +75,7 @@ pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
+        ohno::bail!(
             "cargo {} failed with exit code {:?}\nstdout: {}\nstderr: {}",
             args_str,
             output.status.code(),
