@@ -3,10 +3,7 @@
 
 //! Macros for the `app` module.
 
-/// Return early with an error.
-///
-/// This macro provides a convenient way to
-/// return early from a function with an [`AppError`](crate::app::AppError).
+/// Return early with an [`AppError`](crate::app::AppError).
 ///
 /// The macro accepts:
 /// - A string literal: `bail!("error message")`
@@ -39,7 +36,7 @@
 /// }
 /// ```
 ///
-/// Bailing with an error expression:
+/// Bailing with an expression:
 ///
 /// ```rust
 /// use ohno::app::{AppError, Result};
@@ -66,9 +63,6 @@ macro_rules! bail {
 }
 
 /// Construct an [`AppError`](crate::app::AppError) in place.
-///
-/// This macro provides a convenient way to create an [`AppError`](crate::app::AppError) without explicitly
-/// calling [`AppError::new()`](crate::app::AppError::new).
 ///
 /// The macro accepts:
 /// - A string literal: `app_err!("error message")`
