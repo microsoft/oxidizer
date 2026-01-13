@@ -57,7 +57,7 @@
 //!
 //! # Thread-Aware Scoping
 //!
-//! `Merger` supports thread-aware scoping via a [`Strategy`](thread_aware::storage::Strategy)
+//! `Merger` supports thread-aware scoping via a [`Strategy`]
 //! type parameter. This controls how the internal state is partitioned across threads/NUMA nodes:
 //!
 //! - [`PerProcess`] (default): Single global state, maximum deduplication
