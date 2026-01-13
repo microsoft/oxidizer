@@ -41,6 +41,7 @@ thread_aware = { path = "crates/thread_aware", default-features = false, version
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.0" }
 tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
+wing = { path = "crates/wing", default-features = false, version = "0.1.0" }
 
 # external dependencies
 alloc_tracker = { version = "0.5.9", default-features = false }

@@ -1,0 +1,36 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "wing"
+description = "A generic future spawner compatible with any async runtime"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "async", "runtime", "futures"]
+categories = ["Asynchronous"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["test-util", "tokio"]
+test-util = []
+tokio = ["dep:tokio"]
+
+[dependencies]
+futures = { workspace = true, features = ["executor"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"], optional = true }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true
