@@ -8,13 +8,13 @@ edition = "2024"
 
 [dependencies]
 automation = { path = "../crates/automation" }
-anyhow = "1.0"
+ohno = { path = "../crates/ohno" }
 argh = "0.1"
 ---
 
 use std::path::Path;
 
-use anyhow::Result;
+use ohno::app::Result;
 use argh::FromArgs;
 
 /// Check external types in all workspace library crates.
