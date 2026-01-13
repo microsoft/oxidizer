@@ -54,11 +54,7 @@ criterion = { version = "0.7.0", default-features = false }
 dashmap = { version = "6.1", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
-<<<<<<< HEAD
-event-listener = { version = "5.4.0", default-features = false }
-=======
 dynosaur = { version = "0.3.0", default-features = false }
->>>>>>> ac521838007a2f9da47dd02dc2edbe3cbd0cbc18
 futures = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
