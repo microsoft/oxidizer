@@ -55,6 +55,24 @@
 //! # }
 //! ```
 //!
+//! # Thread-Aware Scoping
+//!
+//! `Merger` supports thread-aware scoping via a [`Strategy`](thread_aware::storage::Strategy)
+//! type parameter. This controls how the internal state is partitioned across threads/NUMA nodes:
+//!
+//! - [`PerProcess`] (default): Single global state, maximum deduplication
+//! - [`PerNuma`]: Separate state per NUMA node, NUMA-local memory access
+//! - [`PerCore`]: Separate state per core, no deduplication (useful for already-partitioned work)
+//!
+//! ```
+//! use uniflight::{Merger, PerNuma};
+//!
+//! # async fn example() {
+//! // NUMA-aware merger - each NUMA node gets its own deduplication scope
+//! let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
+//! # }
+//! ```
+//!
 //! # Cancellation and Panic Safety
 //!
 //! `Merger` handles task cancellation and panics gracefully:
@@ -101,60 +119,137 @@ use std::{
 
 use async_once_cell::OnceCell;
 use dashmap::{DashMap, Entry::{Occupied, Vacant}};
+use thread_aware::{
+    Arc as TaArc,
+    ThreadAware,
+    affinity::{MemoryAffinity, PinnedAffinity},
+    storage::Strategy,
+};
+
+// Re-export strategies for convenience
+pub use thread_aware::{PerCore, PerNuma, PerProcess};
 
 /// Represents a class of work and creates a space in which units of work
 /// can be executed with duplicate suppression.
-pub struct Merger<K, T> {
-    mapping: Arc<DashMap<K, Weak<OnceCell<T>>>>,
+///
+/// The `S` type parameter controls the thread-aware scoping strategy:
+/// - [`PerProcess`]: Single global scope (default, maximum deduplication)
+/// - [`PerNuma`]: Per-NUMA-node scope (NUMA-local memory access)
+/// - [`PerCore`]: Per-core scope (no deduplication)
+pub struct Merger<K, T, S: Strategy = PerProcess> {
+    inner: TaArc<DashMap<K, Weak<OnceCell<T>>>, S>,
 }
 
-impl<K, T> Debug for Merger<K, T> {
+impl<K, T, S: Strategy> Debug for Merger<K, T, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Merger")
-            .field("mapping", &format_args!("DashMap<...>"))
+            .field("inner", &format_args!("DashMap<...>"))
             .finish()
     }
 }
 
-impl<K, T> Default for Merger<K, T>
-where
-    K: Hash + Eq,
-{
-    fn default() -> Self {
+impl<K, T, S: Strategy> Clone for Merger<K, T, S> {
+    fn clone(&self) -> Self {
         Self {
-            mapping: Arc::new(DashMap::new()),
+            inner: self.inner.clone(),
         }
     }
 }
 
-impl<K, T> Merger<K, T>
+impl<K, T, S> Default for Merger<K, T, S>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+    S: Strategy + Send + Sync,
 {
-    /// Creates a new `Merger` instance.
+    fn default() -> Self {
+        Self {
+            inner: TaArc::new(DashMap::new),
+        }
+    }
+}
+
+impl<K, T> Merger<K, T, PerProcess>
+where
+    K: Hash + Eq + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+{
+    /// Creates a new `Merger` instance with process-wide (global) scope.
+    ///
+    /// This is the default strategy providing maximum deduplication across all threads.
     #[inline]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<K, T> Merger<K, T, PerNuma>
+where
+    K: Hash + Eq + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+{
+    /// Creates a new `Merger` instance with per-NUMA-node scope.
+    ///
+    /// Each NUMA node gets its own deduplication scope, keeping all memory accesses
+    /// local to the node for better performance on multi-socket systems.
+    #[inline]
+    #[must_use]
+    pub fn new_per_numa() -> Self {
+        Self::default()
+    }
+}
+
+impl<K, T> Merger<K, T, PerCore>
+where
+    K: Hash + Eq + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+{
+    /// Creates a new `Merger` instance with per-core scope.
+    ///
+    /// Each core gets its own deduplication scope. This provides no cross-core
+    /// deduplication but eliminates all contention. Useful when work is already
+    /// partitioned by core.
+    #[inline]
+    #[must_use]
+    pub fn new_per_core() -> Self {
+        Self::default()
+    }
+}
+
+impl<K, T, S: Strategy> Merger<K, T, S>
+where
+    K: Hash + Eq,
+{
     /// Returns the number of in-flight operations.
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.mapping.len()
+        self.inner.len()
     }
 
     /// Returns `true` if there are no in-flight operations.
     #[cfg(test)]
     fn is_empty(&self) -> bool {
-        self.mapping.is_empty()
+        self.inner.is_empty()
     }
 }
 
-impl<K, T> Merger<K, T>
+impl<K, T, S> ThreadAware for Merger<K, T, S>
+where
+    S: Strategy,
+{
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        Self {
+            inner: self.inner.relocated(source, destination),
+        }
+    }
+}
+
+impl<K, T, S> Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync,
     T: Clone + Send + Sync,
+    S: Strategy + Send + Sync,
 {
     /// Execute and return the value for a given function, making sure that only one
     /// operation is in-flight at a given moment. If a duplicate call comes in,
@@ -170,33 +265,34 @@ where
     /// let result = merger.work("my-key", || async { 42 }).await;
     /// # }
     /// ```
-    pub fn work<Q, F, Fut>(&self, key: &Q, func: F) -> impl Future<Output = T> + Send + use<Q, F, Fut, K, T>
+    pub fn work<Q, F, Fut>(&self, key: &Q, func: F) -> impl Future<Output = T> + Send + use<Q, F, Fut, K, T, S>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
         F: FnOnce() -> Fut + Send,
         Fut: Future<Output = T> + Send,
     {
-        let cell = self.get_or_create_cell(key);
+        // Clone the TaArc - the async block owns this clone
+        let inner = self.inner.clone();
+        let cell = Self::get_or_create_cell(&inner, key);
         let owned_key = key.to_owned();
-        let mapping = Arc::clone(&self.mapping);
         async move {
             let result = cell.get_or_init(func()).await.clone();
             drop(cell); // Release our Arc before cleanup check
             // Remove entry if no one else is using it (weak can't upgrade)
-            mapping.remove_if(owned_key.borrow(), |_, weak| weak.upgrade().is_none());
+            inner.remove_if(owned_key.borrow(), |_, weak| weak.upgrade().is_none());
             result
         }
     }
 
     /// Gets an existing `OnceCell` for the key, or creates a new one.
-    fn get_or_create_cell<Q>(&self, key: &Q) -> Arc<OnceCell<T>>
+    fn get_or_create_cell<Q>(map: &DashMap<K, Weak<OnceCell<T>>>, key: &Q) -> Arc<OnceCell<T>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
     {
         // Fast path: check if entry exists and is still valid
-        if let Some(entry) = self.mapping.get(key)
+        if let Some(entry) = map.get(key)
             && let Some(cell) = entry.value().upgrade()
         {
             return cell;
@@ -207,7 +303,7 @@ where
         let weak = Arc::downgrade(&cell);
 
         // Use Entry enum to atomically check-and-return or insert
-        match self.mapping.entry(key.to_owned()) {
+        match map.entry(key.to_owned()) {
             Occupied(mut entry) => {
                 // Entry exists - check if still alive
                 if let Some(existing) = entry.get().upgrade() {

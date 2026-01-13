@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for `UniFlight::work()`.
+//! Integration tests for [`Merger::work()`].
 
 use std::{
     sync::{
@@ -175,8 +175,7 @@ async fn leader_panic_in_spawned_task() {
     });
 
     // Wait for the spawned task to panic
-    let spawn_result = handle.await;
-    assert!(spawn_result.is_err());
+    handle.await.unwrap_err();
 
     // The follower should succeed - Rust's drop semantics ensure the mutex is released
     let result = fut_follower.await;
@@ -189,21 +188,70 @@ async fn debug_impl() {
     let group: Merger<String, String> = Merger::new();
 
     // Test Debug on empty group
-    let debug_str = format!("{:?}", group);
+    let debug_str = format!("{group:?}");
     assert!(debug_str.contains("Merger"));
 
-    // Create a pending work item to populate the mapping with a BroadcastOnce
+    // Create a pending work item to populate the mapping
     let fut = group.work("key", || async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         "Result".to_string()
     });
 
     // Debug should still work with entries in the mapping
-    let debug_str = format!("{:?}", group);
+    let debug_str = format!("{group:?}");
     assert!(debug_str.contains("Merger"));
-    // The mapping is a DashMap
+    // The inner storage is a DashMap
     assert!(debug_str.contains("DashMap"));
 
     // Complete the work
     assert_eq!(fut.await, "Result");
+}
+
+#[tokio::test]
+async fn per_numa_strategy() {
+    use uniflight::PerNuma;
+
+    let group: Merger<String, String, PerNuma> = Merger::new_per_numa();
+    let result = group
+        .work("key", || async { "Result".to_string() })
+        .await;
+    assert_eq!(result, "Result");
+}
+
+#[tokio::test]
+async fn per_core_strategy() {
+    use uniflight::PerCore;
+
+    let group: Merger<String, String, PerCore> = Merger::new_per_core();
+    let result = group
+        .work("key", || async { "Result".to_string() })
+        .await;
+    assert_eq!(result, "Result");
+}
+
+#[tokio::test]
+async fn clone_shares_state() {
+    let group1 = Merger::new();
+    let group2 = group1.clone();
+
+    let call_counter = AtomicUsize::default();
+
+    // Start work on clone 1
+    let fut1 = group1.work("key", || async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        call_counter.fetch_add(1, AcqRel);
+        "Result".to_string()
+    });
+
+    // Clone 2 should join the same work
+    let fut2 = group2.work("key", || async {
+        call_counter.fetch_add(1, AcqRel);
+        "Unreachable".to_string()
+    });
+
+    let (r1, r2) = tokio::join!(fut1, fut2);
+    assert_eq!(r1, "Result");
+    assert_eq!(r2, "Result");
+    // Work should only execute once
+    assert_eq!(call_counter.load(Acquire), 1);
 }

@@ -19,6 +19,7 @@ repository.workspace = true
 [dependencies]
 async-once-cell.workspace = true
 dashmap.workspace = true
+thread_aware.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
