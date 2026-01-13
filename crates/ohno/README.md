@@ -220,7 +220,7 @@ fn open_file(path: &str) -> Result<String, MyError> {
 // Error output will include: "failed to open file (at src/main.rs:42)"
 ```
 
-## `AppError`
+## AppError
 
 For applications that need a simple, catch-all error type, use [`app::AppError`][__link14]. It
 automatically captures backtraces and can wrap any error type.
@@ -235,17 +235,17 @@ fn process() -> Result<()> {
 ```
 
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEGzS0hDJsYFcHG2Nx4o8OUMUpG4ZXh_5SYVkvG4C3DdrBXL-uYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEG8VzlgcwZoaHG1lpW_HjUJBtG0CPpcKgZaBLGyhb9wtav2vDYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
  [__link11]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
  [__link12]: https://docs.rs/ohno_macros/0.2.0/ohno_macros/?search=enrich_err
  [__link13]: https://docs.rs/ohno/0.2.0/ohno/?search=Enrichable
- [__link14]: https://docs.rs/ohno/0.2.0/ohno/?search=app::AppError
+ [__link14]: https://docs.rs/ohno/0.2.0/ohno/app/index.html
  [__link2]: https://docs.rs/ohno/0.2.0/ohno/?search=ErrorExt
  [__link3]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
- [__link4]: https://docs.rs/ohno/0.2.0/ohno/?search=app::AppError
+ [__link4]: https://docs.rs/ohno/0.2.0/ohno/app/index.html
  [__link5]: https://docs.rs/ohno/0.2.0/ohno/?search=OhnoCore
  [__link6]: https://doc.rust-lang.org/stable/std/?search=error::Error
  [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
