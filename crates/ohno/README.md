@@ -1,4 +1,17 @@
-# ohno ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![ohno on crates.io](https://img.shields.io/crates/v/ohno)](https://crates.io/crates/ohno) [![ohno on docs.rs](https://docs.rs/ohno/badge.svg)](https://docs.rs/ohno) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer) ![Rust Version: 1.88.0](https://img.shields.io/badge/rustc-1.88.0-orange.svg)
+<div align="center">
+ <img src="./logo.png" alt="Ohno Logo" width="96">
+
+# Ohno
+
+[![crate.io](https://img.shields.io/crates/v/ohno.svg)](https://crates.io/crates/ohno)
+[![docs.rs](https://docs.rs/ohno/badge.svg)](https://docs.rs/ohno)
+[![MSRV](https://img.shields.io/crates/msrv/ohno)](https://crates.io/crates/ohno)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+
+</div>
 
 High-quality error handling for Rust.
 
@@ -235,7 +248,12 @@ fn process() -> Result<()> {
 ```
 
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEG8VzlgcwZoaHG1lpW_HjUJBtG0CPpcKgZaBLGyhb9wtav2vDYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+<hr/>
+<sub>
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
+</sub>
+
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8VzlgcwZoaHG1lpW_HjUJBtG0CPpcKgZaBLGyhb9wtav2vDYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
