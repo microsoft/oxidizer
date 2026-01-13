@@ -7,6 +7,7 @@
 mod app {
     mod app_err;
     mod bail;
+    mod base;
     mod chain;
     mod construction;
     mod conversion;
