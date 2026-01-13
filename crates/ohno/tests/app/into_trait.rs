@@ -62,10 +62,15 @@ fn ohno_on_into_app_err_error() {
         level1().into_app_err("context added")
     }
 
-    let err = level2().unwrap_err();
+    fn level3() -> Result<i32> {
+        level2().into_app_err_with(|| "more context added")
+    }
+
+    let err = level3().unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("root error"));
-    assert!(msg.contains("context added"));
+    assert!(msg.contains("root error"), "{msg}");
+    assert!(msg.contains("> context added"), "{msg}");
+    assert!(msg.contains("> more context added"), "{msg}");
 }
 
 #[test]
