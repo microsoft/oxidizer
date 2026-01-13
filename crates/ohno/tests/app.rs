@@ -3,6 +3,7 @@
 
 //! App module tests.
 
+#[cfg(feature = "test-util")]
 mod app {
     mod app_err;
     mod bail;
