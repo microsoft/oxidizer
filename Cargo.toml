@@ -32,8 +32,10 @@ data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-f
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
+layered = { path = "crates/layered", default-features = false, version = "0.1.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
+recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
@@ -52,7 +54,11 @@ criterion = { version = "0.7.0", default-features = false }
 dashmap = { version = "6.1", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
+<<<<<<< HEAD
 event-listener = { version = "5.4.0", default-features = false }
+=======
+dynosaur = { version = "0.3.0", default-features = false }
+>>>>>>> ac521838007a2f9da47dd02dc2edbe3cbd0cbc18
 futures = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
@@ -88,6 +94,9 @@ thiserror = { version = "2.0.17", default-features = false }
 time = { version = "0.3.37", default-features = false }
 time-tz = { version = "2.0.0", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
+tower = { version = "0.5.2", default-features = false }
+tower-layer = { version = "0.3.3", default-features = false }
+tower-service = { version = "0.3.3", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
