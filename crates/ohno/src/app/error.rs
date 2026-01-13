@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Application-level error type similar to `anyhow::Error`.
+//! Application-level error type for general application errors.
 //!
 //! [`AppError`] provides a simple, ergonomic error type for applications that need
 //! flexible error handling without defining custom error types for every error case.

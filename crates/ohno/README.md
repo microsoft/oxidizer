@@ -12,7 +12,7 @@ into one ergonomic crate for comprehensive error handling.
 * [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 * [**`ErrorExt`**][__link2]: Trait that provides additional methods for ohno error types, it’s implemented automatically for all ohno error types
 * [**`OhnoCore`**][__link3]: Core error type that wraps source errors, captures backtraces, and holds enrichment entries
-* [**`AppError`**][__link4]: Application-level error type similar to `anyhow::Error`
+* [**`AppError`**][__link4]: Application-level error type for general application errors
 
 ## Quick Start
 
@@ -235,7 +235,7 @@ fn process() -> Result<()> {
 ```
 
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEG1Tq2q-u1GnHG5aCRR9YhKN9G5ECQuzedLhBGwhLI7Uo0uo2YWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEGzS0hDJsYFcHG2Nx4o8OUMUpG4ZXh_5SYVkvG4C3DdrBXL-uYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
