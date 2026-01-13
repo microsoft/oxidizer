@@ -1,17 +1,4 @@
-<div align="center">
- <img src="./logo.png" alt="Uniflight Logo" width="96">
-
-# Uniflight
-
-[![crate.io](https://img.shields.io/crates/v/uniflight.svg)](https://crates.io/crates/uniflight)
-[![docs.rs](https://docs.rs/uniflight/badge.svg)](https://docs.rs/uniflight)
-[![MSRV](https://img.shields.io/crates/msrv/uniflight)](https://crates.io/crates/uniflight)
-[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
-[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
-<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
-
-</div>
+# uniflight ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![uniflight on crates.io](https://img.shields.io/crates/v/uniflight)](https://crates.io/crates/uniflight) [![uniflight on docs.rs](https://docs.rs/uniflight/badge.svg)](https://docs.rs/uniflight) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer) ![Rust Version: 1.88.0](https://img.shields.io/badge/rustc-1.88.0-orange.svg)
 
 Coalesces duplicate async tasks into a single execution.
 
@@ -98,23 +85,18 @@ Benchmarks comparing `uniflight` against `singleflight-async`:
 
 |Benchmark|uniflight|singleflight-async|Winner|
 |---------|---------|------------------|------|
-|Single call|723 ns|664 ns|~equal|
-|10 concurrent tasks|50 µs|56 µs|uniflight 1.1x|
-|100 concurrent tasks|177 µs|190 µs|uniflight 1.1x|
-|10 keys × 10 tasks|176 µs|230 µs|uniflight 1.3x|
-|Sequential reuse|757 ns|1.0 µs|uniflight 1.3x|
+|Single call|777 ns|691 ns|~equal|
+|10 concurrent tasks|58 µs|57 µs|~equal|
+|100 concurrent tasks|218 µs|219 µs|~equal|
+|10 keys × 10 tasks|186 µs|270 µs|uniflight 1.4x|
+|Sequential reuse|799 ns|759 ns|~equal|
 
 uniflight’s `DashMap`-based architecture scales well under contention, making it
 well-suited for high-concurrency workloads. For single-call scenarios, both libraries
 perform similarly (sub-microsecond).
 
 
-<hr/>
-<sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
-</sub>
-
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4rQxRqzWASPG-1iTT3PvBVBG6_OsurRzxT0GwQvs0pj2ro6YWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEG4LesgjATyplG19XnTih3LPaG769pKvyUwBfG7yCiQP8BUYRYWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.1.0/uniflight/?search=Merger::work
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow

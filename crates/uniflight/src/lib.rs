@@ -97,11 +97,11 @@
 //!
 //! | Benchmark | uniflight | singleflight-async | Winner |
 //! |-----------|-----------|-------------------|--------|
-//! | Single call | 723 ns | 664 ns | ~equal |
-//! | 10 concurrent tasks | 50 µs | 56 µs | uniflight 1.1x |
-//! | 100 concurrent tasks | 177 µs | 190 µs | uniflight 1.1x |
-//! | 10 keys × 10 tasks | 176 µs | 230 µs | uniflight 1.3x |
-//! | Sequential reuse | 757 ns | 1.0 µs | uniflight 1.3x |
+//! | Single call | 777 ns | 691 ns | ~equal |
+//! | 10 concurrent tasks | 58 µs | 57 µs | ~equal |
+//! | 100 concurrent tasks | 218 µs | 219 µs | ~equal |
+//! | 10 keys × 10 tasks | 186 µs | 270 µs | uniflight 1.4x |
+//! | Sequential reuse | 799 ns | 759 ns | ~equal |
 //!
 //! uniflight's `DashMap`-based architecture scales well under contention, making it
 //! well-suited for high-concurrency workloads. For single-call scenarios, both libraries
@@ -169,18 +169,63 @@ where
     }
 }
 
+impl<K, T, S> Merger<K, T, S>
+where
+    K: Hash + Eq + Send + Sync + 'static,
+    T: Clone + Send + Sync + 'static,
+    S: Strategy + Send + Sync,
+{
+    /// Creates a new `Merger` instance.
+    ///
+    /// The scoping strategy is determined by the type parameter `S`:
+    /// - [`PerProcess`] (default): Process-wide scope, maximum deduplication
+    /// - [`PerNuma`]: Per-NUMA-node scope, NUMA-local memory access
+    /// - [`PerCore`]: Per-core scope, no cross-core deduplication
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use uniflight::{Merger, PerNuma, PerCore};
+    ///
+    /// // Default (PerProcess) - type can be inferred
+    /// let global: Merger<String, String> = Merger::new();
+    ///
+    /// // NUMA-local scope
+    /// let numa: Merger<String, String, PerNuma> = Merger::new();
+    ///
+    /// // Per-core scope
+    /// let core: Merger<String, String, PerCore> = Merger::new();
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl<K, T> Merger<K, T, PerProcess>
 where
     K: Hash + Eq + Send + Sync + 'static,
     T: Clone + Send + Sync + 'static,
 {
-    /// Creates a new `Merger` instance with process-wide (global) scope.
+    /// Creates a new `Merger` with process-wide scoping (default).
     ///
-    /// This is the default strategy providing maximum deduplication across all threads.
+    /// All threads share a single deduplication scope, providing maximum
+    /// work deduplication across the entire process.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use uniflight::Merger;
+    ///
+    /// let merger = Merger::<String, String, _>::new_per_process();
+    /// ```
     #[inline]
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new_per_process() -> Self {
+        Self {
+            inner: TaArc::new(DashMap::new),
+        }
     }
 }
 
@@ -189,14 +234,24 @@ where
     K: Hash + Eq + Send + Sync + 'static,
     T: Clone + Send + Sync + 'static,
 {
-    /// Creates a new `Merger` instance with per-NUMA-node scope.
+    /// Creates a new `Merger` with per-NUMA-node scoping.
     ///
-    /// Each NUMA node gets its own deduplication scope, keeping all memory accesses
-    /// local to the node for better performance on multi-socket systems.
+    /// Each NUMA node gets its own deduplication scope, ensuring memory
+    /// locality for cached results while still deduplicating within each node.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use uniflight::Merger;
+    ///
+    /// let merger = Merger::<String, String, _>::new_per_numa();
+    /// ```
     #[inline]
     #[must_use]
     pub fn new_per_numa() -> Self {
-        Self::default()
+        Self {
+            inner: TaArc::new(DashMap::new),
+        }
     }
 }
 
@@ -205,15 +260,24 @@ where
     K: Hash + Eq + Send + Sync + 'static,
     T: Clone + Send + Sync + 'static,
 {
-    /// Creates a new `Merger` instance with per-core scope.
+    /// Creates a new `Merger` with per-core scoping.
     ///
-    /// Each core gets its own deduplication scope. This provides no cross-core
-    /// deduplication but eliminates all contention. Useful when work is already
-    /// partitioned by core.
+    /// Each core gets its own deduplication scope. This is useful when work
+    /// is already partitioned by core and cross-core deduplication is not needed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use uniflight::Merger;
+    ///
+    /// let merger = Merger::<String, String, _>::new_per_core();
+    /// ```
     #[inline]
     #[must_use]
     pub fn new_per_core() -> Self {
-        Self::default()
+        Self {
+            inner: TaArc::new(DashMap::new),
+        }
     }
 }
 

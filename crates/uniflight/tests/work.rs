@@ -23,7 +23,7 @@ fn unreachable_future() -> std::future::Pending<String> {
 
 #[tokio::test]
 async fn direct_call() {
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
     let result = group
         .work("key", || async {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -37,7 +37,7 @@ async fn direct_call() {
 async fn parallel_call() {
     let call_counter = AtomicUsize::default();
 
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
     let futures = FuturesUnordered::new();
     for _ in 0..10 {
         futures.push(group.work("key", || async {
@@ -55,7 +55,7 @@ async fn parallel_call() {
 async fn parallel_call_seq_await() {
     let call_counter = AtomicUsize::default();
 
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
     let mut futures = Vec::new();
     for _ in 0..10 {
         futures.push(group.work("key", || async {
@@ -73,7 +73,7 @@ async fn parallel_call_seq_await() {
 
 #[tokio::test]
 async fn call_with_static_str_key() {
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
     let result = group
         .work("key", || async {
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -85,7 +85,7 @@ async fn call_with_static_str_key() {
 
 #[tokio::test]
 async fn call_with_static_string_key() {
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
     let result = group
         .work("key", || async {
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -99,7 +99,7 @@ async fn call_with_static_string_key() {
 async fn call_with_custom_key() {
     #[derive(Clone, PartialEq, Eq, Hash)]
     struct K(i32);
-    let group = Merger::new();
+    let group = Merger::<K, String, _>::new_per_process();
     let result = group
         .work(&K(1), || async {
             tokio::time::sleep(Duration::from_millis(1)).await;
@@ -111,7 +111,7 @@ async fn call_with_custom_key() {
 
 #[tokio::test]
 async fn late_wait() {
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
     let fut_early = group.work("key", || async {
         tokio::time::sleep(Duration::from_millis(20)).await;
         "Result".to_string()
@@ -124,7 +124,7 @@ async fn late_wait() {
 
 #[tokio::test]
 async fn cancel() {
-    let group = Merger::new();
+    let group = Merger::<String, String, _>::new_per_process();
 
     // the executer cancelled and the other awaiter will create a new future and execute.
     let fut_cancel = group.work(&"key".to_string(), unreachable_future);
@@ -208,10 +208,17 @@ async fn debug_impl() {
 }
 
 #[tokio::test]
-async fn per_numa_strategy() {
-    use uniflight::PerNuma;
+async fn per_process_strategy() {
+    let group = Merger::<String, String, _>::new_per_process();
+    let result = group
+        .work("key", || async { "Result".to_string() })
+        .await;
+    assert_eq!(result, "Result");
+}
 
-    let group: Merger<String, String, PerNuma> = Merger::new_per_numa();
+#[tokio::test]
+async fn per_numa_strategy() {
+    let group = Merger::<String, String, _>::new_per_numa();
     let result = group
         .work("key", || async { "Result".to_string() })
         .await;
@@ -220,9 +227,7 @@ async fn per_numa_strategy() {
 
 #[tokio::test]
 async fn per_core_strategy() {
-    use uniflight::PerCore;
-
-    let group: Merger<String, String, PerCore> = Merger::new_per_core();
+    let group = Merger::<String, String, _>::new_per_core();
     let result = group
         .work("key", || async { "Result".to_string() })
         .await;
@@ -231,7 +236,7 @@ async fn per_core_strategy() {
 
 #[tokio::test]
 async fn clone_shares_state() {
-    let group1 = Merger::new();
+    let group1 = Merger::<String, String, _>::new_per_process();
     let group2 = group1.clone();
 
     let call_counter = AtomicUsize::default();
