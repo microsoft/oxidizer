@@ -29,6 +29,19 @@
 //!    let _ = std::fs::read_to_string(path)?;
 //!    Ok(())
 //! }
+//!
+//! Passing as a reference to [`std::error::Error`]:
+//!
+//! ```rust
+//! use ohno::app::AppError;
+//!
+//! fn handle_error(err: &dyn std::error::Error) {
+//!   println!("Error: {err}");
+//! }
+//!
+//! let app_error = AppError::new("an error occurred");
+//! handle_error(app_error.as_ref());
+//! ```
 use std::backtrace::Backtrace;
 use std::error::Error as StdError;
 use std::fmt;
