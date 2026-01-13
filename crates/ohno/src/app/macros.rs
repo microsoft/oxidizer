@@ -5,7 +5,7 @@
 
 /// Return early with an error.
 ///
-/// This macro is similar to `anyhow::bail!` and provides a convenient way to
+/// This macro provides a convenient way to
 /// return early from a function with an [`AppError`](crate::app::AppError).
 ///
 /// The macro accepts:
