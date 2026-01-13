@@ -27,6 +27,7 @@
 /// # }
 /// ```
 #[macro_export]
+#[cfg_attr(coverage_nightly, coverage(off))] // coverage doesn't handle panics well
 macro_rules! assert_error_message {
     ($error:expr, $expected:expr) => {{
         let error_string = $error.to_string();
