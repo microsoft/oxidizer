@@ -75,7 +75,7 @@
 //!     }
 //!   }
 //!   ```
-//! 
+//!
 //! - **Passing as a reference to [`std::error::Error`]**:
 //!
 //!   ```rust
