@@ -105,7 +105,8 @@ impl AppError {
         self.inner.message()
     }
 
-    /// Converts this error into a boxed trait object for API compatibility.
+    /// Converts error into a `Box<dyn std::error::Error + Send + Sync>` that can be used for
+    /// interoperability with other error handling code.
     #[must_use]
     pub fn into_std_error(self) -> Box<dyn StdError + Send + Sync + 'static> {
         Box::new(self.inner)
