@@ -75,6 +75,19 @@
 //!     }
 //!   }
 //!   ```
+//! 
+//! - **Passing as a reference to [`std::error::Error`]**:
+//!
+//!   ```rust
+//!   use ohno::app::AppError;
+//!
+//!   fn handle_error(err: &dyn std::error::Error) {
+//!       println!("Error: {err}");
+//!   }
+//!
+//!   let app_error = AppError::new("an error occurred");
+//!   handle_error(app_error.as_ref());
+//!   ```
 
 mod error;
 mod into_app_err;

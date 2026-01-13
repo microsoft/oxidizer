@@ -3,6 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![expect(clippy::doc_markdown, reason = "AppError in header doesn't look good with backticks")]
 
 //! High-quality error handling for Rust.
 //!
@@ -16,7 +17,7 @@
 //! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
 //! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
-//! - [**`AppError`**](app::AppError): Application-level error type for general application errors
+//! - [**`AppError`**](app): Application-level error type for general application errors
 //!
 //! # Quick Start
 //!
@@ -222,9 +223,9 @@
 //! // Error output will include: "failed to open file (at src/main.rs:42)"
 //! ```
 //!
-//! # `AppError`
+//! # AppError
 //!
-//! For applications that need a simple, catch-all error type, use [`app::AppError`]. It
+//! For applications that need a simple, catch-all error type, use [`app::AppError`](app). It
 //! automatically captures backtraces and can wrap any error type.
 //!
 //! ```rust

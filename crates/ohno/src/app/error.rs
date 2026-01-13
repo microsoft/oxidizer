@@ -1,47 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Application-level error type for general application errors.
-//!
-//! [`AppError`] provides a simple, ergonomic error type for applications that need
-//! flexible error handling without defining custom error types for every error case.
-//!
-//! # Examples
-//!
-//! Use [`AppError::new`] to create an error from a string message or any error type:
-//!
-//! ```rust
-//! use ohno::app::AppError;
-//!
-//! // Create from a string message
-//! let error = AppError::new("something went wrong");
-//!
-//! // Create from any std::error::Error
-//! let io_error = AppError::new(std::io::Error::from(std::io::ErrorKind::NotFound));
-//! ```
-//!
-//! Propagate errors using the `?` operator:
-//!
-//! ```rust
-//! use ohno::app::AppError;
-//!
-//! fn from_io_error(path: &str) -> Result<(), AppError> {
-//!    let _ = std::fs::read_to_string(path)?;
-//!    Ok(())
-//! }
-//!
-//! Passing as a reference to [`std::error::Error`]:
-//!
-//! ```rust
-//! use ohno::app::AppError;
-//!
-//! fn handle_error(err: &dyn std::error::Error) {
-//!   println!("Error: {err}");
-//! }
-//!
-//! let app_error = AppError::new("an error occurred");
-//! handle_error(app_error.as_ref());
-//! ```
 use std::backtrace::Backtrace;
 use std::error::Error as StdError;
 use std::fmt;
