@@ -8,7 +8,7 @@
 //!
 //! # Examples
 //!
-//! - **Simple Error Type**: [`AppError`] wraps any error implementing [`std::error::Error`]
+//! - **Generic Error Handling**: Use [`AppError`] as a catch-all error type in your application
 //!   ```no_run
 //!   use std::io::Error as IoError;
 //!   use ohno::app::AppError;
