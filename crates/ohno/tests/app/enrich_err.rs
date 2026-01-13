@@ -25,7 +25,7 @@ fn enrich_err_ext_with() {
 }
 
 #[test]
-fn enrich_err_ext_mutltiple_layers() {
+fn enrich_err_ext_multiple_layers() {
     let base = app_err!("timeout");
     let ctx1 = base.enrich("http request");
     let ctx2 = ctx1.enrich_with(|| "api call");
