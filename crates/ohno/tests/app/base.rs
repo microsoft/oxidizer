@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for AppError methods.
+//! Tests for `AppError` methods.
 
 use ohno::{app::AppError, assert_error_message};
 
