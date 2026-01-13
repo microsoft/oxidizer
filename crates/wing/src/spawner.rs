@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Spawner trait for pluggable runtime implementations.
+//! [`Spawner`] trait for plugging in runtime implementations.
 
 /// Trait for spawning async tasks on a runtime.
 pub trait Spawner {

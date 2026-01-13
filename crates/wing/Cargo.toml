@@ -20,8 +20,7 @@ repository.workspace = true
 all-features = true
 
 [features]
-default = ["test-util", "tokio"]
-test-util = []
+default = ["tokio"]
 tokio = ["dep:tokio"]
 
 [dependencies]

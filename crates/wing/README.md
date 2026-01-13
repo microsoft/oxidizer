@@ -9,7 +9,7 @@
 Trait-based async runtime abstraction for spawning tasks.
 
 This crate provides a [`Spawner`] trait that abstracts task spawning across different async runtimes.
-Users can implement `Spawner` for any runtime (tokio, oxidizer, custom runtimes).
+Users can implement `Spawner` for any runtime (Tokio, oxidizer, custom runtimes).
 
 # Design Philosophy
 
@@ -25,11 +25,19 @@ Users can implement `Spawner` for any runtime (tokio, oxidizer, custom runtimes)
 use wing::tokio::TokioSpawner;
 use wing::Spawner;
 
-let spawner = TokioSpawner;
+// TokioSpawner requires a multi-threaded runtime
+let rt = tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .build()
+    .unwrap();
 
-// Spawn and await a task
-let result = spawner.spawn(async { 42 });
-assert_eq!(result, 42);
+rt.block_on(async {
+    let spawner = TokioSpawner;
+
+    // Spawn and await a task
+    let result = spawner.spawn(async { 42 });
+    assert_eq!(result, 42);
+});
 ```
 
 ## Custom Implementation
@@ -53,6 +61,5 @@ impl Spawner for MySpawner {
 # Features
 
 - `tokio` (default): Enables [`tokio::TokioSpawner`] implementation
-- `test-util`: Enables [`testing::MockSpawner`] for testing
 
 <!-- cargo-rdme end -->

@@ -29,8 +29,7 @@ impl Spawner for ThreadSpawner {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let spawner = ThreadSpawner;
 
     println!("Spawning task on std::thread...");

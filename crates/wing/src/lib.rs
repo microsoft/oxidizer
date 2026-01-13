@@ -8,7 +8,7 @@
 //! Trait-based async runtime abstraction for spawning tasks.
 //!
 //! This crate provides a [`Spawner`] trait that abstracts task spawning across different async runtimes.
-//! Users can implement `Spawner` for any runtime (tokio, oxidizer, custom runtimes).
+//! Users can implement `Spawner` for any runtime (Tokio, oxidizer, custom runtimes).
 //!
 //! # Design Philosophy
 //!
@@ -24,11 +24,19 @@
 //! use wing::tokio::TokioSpawner;
 //! use wing::Spawner;
 //!
-//! let spawner = TokioSpawner;
+//! // TokioSpawner requires a multi-threaded runtime
+//! let rt = tokio::runtime::Builder::new_multi_thread()
+//!     .enable_all()
+//!     .build()
+//!     .unwrap();
 //!
-//! // Spawn and await a task
-//! let result = spawner.spawn(async { 42 });
-//! assert_eq!(result, 42);
+//! rt.block_on(async {
+//!     let spawner = TokioSpawner;
+//!
+//!     // Spawn and await a task
+//!     let result = spawner.spawn(async { 42 });
+//!     assert_eq!(result, 42);
+//! });
 //! ```
 //!
 //! ## Custom Implementation
@@ -53,20 +61,15 @@
 //! # Features
 //!
 //! - `tokio` (default): Enables [`tokio::TokioSpawner`] implementation
-//! - `test-util`: Enables [`testing::MockSpawner`] for testing
 
 #![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/rts/logo.png"
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/wing/logo.png"
 )]
 #![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/rts/favicon.ico"
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/wing/favicon.ico"
 )]
 
 mod spawner;
-
-#[cfg(feature = "test-util")]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
-pub mod testing;
 
 #[cfg(feature = "tokio")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]

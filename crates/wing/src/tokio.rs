@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tokio spawner implementation.
+//! Tokio [`Spawner`] implementation.
 
 use crate::Spawner;
 
-/// Spawner implementation for the tokio runtime.
+/// [`Spawner`] implementation for the Tokio runtime.
 ///
-/// Uses `tokio::spawn` to spawn tasks on the tokio runtime.
+/// Spawns tasks using `tokio::spawn` and blocks on the result.
+/// This requires being called from within a Tokio **multi-threaded** runtime context.
 ///
 /// # Examples
 ///
@@ -15,10 +16,23 @@ use crate::Spawner;
 /// use wing::tokio::TokioSpawner;
 /// use wing::Spawner;
 ///
-/// let spawner = TokioSpawner;
-/// let result = spawner.spawn(async { 42 });
-/// assert_eq!(result, 42);
+/// let rt = tokio::runtime::Builder::new_multi_thread()
+///     .enable_all()
+///     .build()
+///     .unwrap();
+///
+/// rt.block_on(async {
+///     let spawner = TokioSpawner;
+///     let result = spawner.spawn(async { 42 });
+///     assert_eq!(result, 42);
+/// });
 /// ```
+///
+/// # Panics
+///
+/// - Panics if called outside of a Tokio runtime context
+/// - Panics if called from within a single-threaded (`current_thread`) runtime
+/// - Panics if the spawned task panics
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TokioSpawner;
 
@@ -27,8 +41,12 @@ impl Spawner for TokioSpawner {
     where
         T: Send + 'static,
     {
-        // Just block on the future directly using futures executor
-        futures::executor::block_on(work)
+        let handle = ::tokio::spawn(work);
+        ::tokio::task::block_in_place(|| {
+            ::tokio::runtime::Handle::current()
+                .block_on(handle)
+                .expect("spawned task panicked")
+        })
     }
 }
 
@@ -36,15 +54,15 @@ impl Spawner for TokioSpawner {
 mod tests {
     use super::*;
 
-    #[test]
-    fn tokio_spawn_with_result() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tokio_spawn_with_result() {
         let spawner = TokioSpawner;
         let result = spawner.spawn(async { 42 });
         assert_eq!(result, 42);
     }
 
-    #[test]
-    fn tokio_spawn_with_string() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tokio_spawn_with_string() {
         let spawner = TokioSpawner;
         let result = spawner.spawn(async { "hello".to_string() });
         assert_eq!(result, "hello");
