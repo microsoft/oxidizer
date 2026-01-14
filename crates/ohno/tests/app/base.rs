@@ -63,6 +63,7 @@ fn backtrace_method() {
 }
 
 #[test]
+#[expect(clippy::redundant_clone, reason = "testing that AppError is cloneable")]
 fn is_cloneable() {
     let app_err = AppError::new("an error occurred");
     let app_err_clone = app_err.clone();
