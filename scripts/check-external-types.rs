@@ -14,7 +14,7 @@ argh = "0.1"
 
 use std::path::Path;
 
-use ohno::Result;
+use ohno::AppError;
 use argh::FromArgs;
 
 /// Check external types in all workspace library crates.
@@ -88,7 +88,7 @@ fn main() {
     }
 }
 
-fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<()> {
+fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<(), AppError> {
     let args = vec![
         format!("+{}", toolchain),
         "check-external-types".to_string(),

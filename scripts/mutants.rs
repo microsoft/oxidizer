@@ -14,7 +14,7 @@ argh = "0.1.12"
 
 use std::path::{Path, PathBuf};
 
-use ohno::Result;
+use ohno::AppError;
 use argh::FromArgs;
 
 const JOBS: u32 = 1;
@@ -134,7 +134,7 @@ fn main() {
     }
 }
 
-fn mutate_group(group: &[String], args: &Args) -> Result<()> {
+fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
     println!("Mutating: {}", group.join(", "));
 
     let mut cargo_args = vec![
