@@ -33,6 +33,7 @@ thread_aware.workspace = true
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 futures-util = { workspace = true, features = ["alloc", "std"] }
+mutants.workspace = true
 singleflight-async.workspace = true
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = [

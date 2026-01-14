@@ -220,10 +220,9 @@ where
     /// ```
     #[inline]
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
     pub fn new_per_process() -> Self {
-        Self {
-            inner: TaArc::new(DashMap::new),
-        }
+        Self::default()
     }
 }
 
@@ -246,10 +245,9 @@ where
     /// ```
     #[inline]
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
     pub fn new_per_numa() -> Self {
-        Self {
-            inner: TaArc::new(DashMap::new),
-        }
+        Self::default()
     }
 }
 
@@ -272,10 +270,9 @@ where
     /// ```
     #[inline]
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: delegates to Default
     pub fn new_per_core() -> Self {
-        Self {
-            inner: TaArc::new(DashMap::new),
-        }
+        Self::default()
     }
 }
 
