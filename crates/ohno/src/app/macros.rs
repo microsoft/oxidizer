@@ -13,10 +13,9 @@
 /// # Examples
 ///
 /// ```rust
-/// use ohno::{AppError, Result};
-/// use ohno::bail;
+/// use ohno::{AppError, bail};
 ///
-/// fn check_value(x: i32) -> Result<()> {
+/// fn check_value(x: i32) -> Result<(), AppError> {
 ///     if x < 0 {
 ///         bail!("value must be non-negative, got {x}");
 ///     }
@@ -25,10 +24,9 @@
 /// ```
 ///
 /// ```rust
-/// use ohno::Result;
-/// use ohno::bail;
+/// use ohno::{AppError, bail};
 ///
-/// fn parse_config(data: &str) -> Result<()> {
+/// fn parse_config(data: &str) -> Result<(), AppError> {
 ///    if data.is_empty() {
 ///        bail!("config data cannot be empty");
 ///    }
@@ -39,10 +37,9 @@
 /// Bailing with an expression:
 ///
 /// ```rust
-/// use ohno::{AppError, Result};
-/// use ohno::bail;
+/// use ohno::{AppError, bail};
 ///
-/// fn read_file(path: &str) -> Result<String> {
+/// fn read_file(path: &str) -> Result<String, AppError> {
 ///     bail!(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
 /// }
 /// ```
@@ -81,10 +78,9 @@ macro_rules! bail {
 /// ```
 ///
 /// ```rust
-/// use ohno::Result;
-/// use ohno::app_err;
+/// use ohno::{AppError, app_err};
 ///
-/// fn validate(x: i32) -> Result<()> {
+/// fn validate(x: i32) -> Result<(), AppError> {
 ///     if x < 0 {
 ///         return Err(app_err!("value must be non-negative, got {x}"));
 ///     }
@@ -95,7 +91,6 @@ macro_rules! bail {
 /// Creating an error from another error type:
 ///
 /// ```rust
-/// use ohno::Result;
 /// use ohno::app_err;
 ///
 /// fn read_file() {

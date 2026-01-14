@@ -234,9 +234,9 @@
 //! Example usage:
 //!
 //! ```rust
-//! use ohno::{AppError, Result};
+//! use ohno::AppError;
 //!
-//! fn process() -> Result<()> {
+//! fn process() -> Result<(), AppError> {
 //!     std::fs::read_to_string("file.txt")?; // Automatically converts errors
 //!     Ok(())
 //! }
