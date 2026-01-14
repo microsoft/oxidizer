@@ -3,7 +3,7 @@
 
 //! Tests for `AppError` methods.
 
-use ohno::{app::AppError, assert_error_message};
+use ohno::{EnrichableExt, app::AppError, assert_error_message};
 
 #[test]
 fn source_none() {
@@ -60,4 +60,20 @@ fn backtrace_method() {
     let app_err = AppError::new("an error occurred");
     let _backtrace = app_err.backtrace();
     // it depends on whether backtraces are enabled in the environment
+}
+
+#[test]
+fn is_cloneable() {
+    let app_err = AppError::new("an error occurred");
+    let app_err_clone = app_err.clone();
+    assert_eq!(app_err.to_string(), app_err_clone.to_string());
+
+    let app_err = app_err.enrich("additional context").enrich("more context");
+    let app_err_str = app_err.to_string();
+    assert!(app_err_str.contains("> additional context"));
+    assert!(app_err_str.contains("> more context"));
+    assert_ne!(app_err_str, app_err_clone.to_string());
+
+    let app_err_clone2 = app_err.clone();
+    assert_eq!(app_err_str, app_err_clone2.to_string());
 }

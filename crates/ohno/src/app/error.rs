@@ -10,7 +10,7 @@ use ohno::{ErrorExt, OhnoCore};
 use crate::Enrichable;
 
 /// Inner error type that implements `ohno::Error`.
-#[derive(ohno::Error)]
+#[derive(ohno::Error, Clone)]
 struct Inner {
     inner: OhnoCore,
 }
@@ -22,6 +22,7 @@ struct Inner {
 ///
 /// This type automatically captures backtraces and provides error context
 /// through the underlying [`OhnoCore`].
+#[derive(Clone)]
 pub struct AppError {
     inner: Inner,
 }
