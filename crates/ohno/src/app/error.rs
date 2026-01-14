@@ -52,9 +52,9 @@ struct Inner {
 ///   context using [`IntoAppError`](crate::IntoAppError).
 ///
 ///   ```
-///   use ohno::{Result, AppError, IntoAppError};
+///   use ohno::{AppError, IntoAppError};
 ///
-///   fn read_config(path: &str) -> Result<()> {
+///   fn read_config(path: &str) -> Result<(), AppError> {
 ///       let config = std::fs::read_to_string(path).into_app_err("failed to read config")?;
 ///       // ...
 ///       Ok(())
@@ -63,10 +63,9 @@ struct Inner {
 ///
 /// - **Early Returns**: Use [`bail!`](crate::bail) macro for convenient early returns
 ///   ```no_run
-///   use ohno::Result;
-///   use ohno::bail;
+///   use ohno::{AppError, bail};
 ///
-///   fn validate(value: i32) -> Result<()> {
+///   fn validate(value: i32) -> Result<(), AppError> {
 ///       if value < 0 {
 ///           bail!("invalid input");
 ///       }
