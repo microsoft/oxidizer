@@ -111,3 +111,15 @@ Validate the setup by executing the following tasks from the task palette (F1):
 1. `Tasks: Run Test Task`
 
 Validate that debugging works by opening `crates/tick/examples/basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
+
+# Before submitting a pull request
+
+Run all essential CI checks locally with a single command:
+
+```sh
+just check-changes
+```
+
+This runs build, tests, clippy, formatting, and other validations in sequence—inspect the `justfile` for the full list of checks. Some checks (e.g., mutation testing) take too long to run locally; review the GitHub pipeline results to address those.
+
+PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format (e.g., `feat: add validation method`, `fix: resolve memory leak`).
