@@ -5,15 +5,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
-//! Trait-based async runtime abstraction for spawning tasks.
+//! Runtime-agnostic async task spawning.
 //!
-//! This crate provides a [`Spawner`] trait that abstracts task spawning across different async runtimes.
-//! Users can implement `Spawner` for any runtime (Tokio, oxidizer, custom runtimes).
+//! This crate provides a [`Spawner`] enum that abstracts task spawning across
+//! different async runtimes without generic infection.
 //!
 //! # Design Philosophy
 //!
-//! - **Trait-based**: Implement [`Spawner`] for your runtime
-//! - **Simple**: Just one method to implement
+//! - **Concrete type**: No generics needed in your code
+//! - **Simple**: Use built-in variants or provide a closure
 //! - **Flexible**: Works with any async runtime
 //!
 //! # Quick Start
@@ -21,43 +21,34 @@
 //! ## Using Tokio
 //!
 //! ```rust
-//! use wing::tokio::TokioSpawner;
 //! use wing::Spawner;
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! let spawner = TokioSpawner;
-//!
-//! // Spawn a fire-and-forget task
+//! let spawner = Spawner::Tokio;
 //! spawner.spawn(async {
 //!     println!("Task running!");
 //! });
 //! # }
 //! ```
 //!
-//! ## Custom Implementation
+//! ## Custom Runtime
 //!
 //! ```rust
 //! use wing::Spawner;
-//! use std::future::Future;
 //!
-//! #[derive(Clone)]
-//! struct MySpawner;
+//! let spawner = Spawner::new_custom(|fut| {
+//!     std::thread::spawn(move || futures::executor::block_on(fut));
+//! });
 //!
-//! impl Spawner for MySpawner {
-//!     fn spawn<T>(&self, work: T)
-//!     where
-//!         T: Future<Output = ()> + Send + 'static,
-//!     {
-//!         // Your implementation here
-//!         std::thread::spawn(move || futures::executor::block_on(work));
-//!     }
-//! }
+//! spawner.spawn(async {
+//!     println!("Running on custom runtime!");
+//! });
 //! ```
 //!
 //! # Features
 //!
-//! - `tokio` (default): Enables [`tokio::TokioSpawner`] implementation
+//! - `tokio` (default): Enables the [`Spawner::Tokio`] variant
 
 #![doc(
     html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/wing/logo.png"
@@ -68,8 +59,4 @@
 
 mod spawner;
 
-#[cfg(feature = "tokio")]
-#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
-pub mod tokio;
-
-pub use spawner::Spawner;
+pub use spawner::{CustomSpawner, Spawner};

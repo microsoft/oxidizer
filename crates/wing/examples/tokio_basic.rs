@@ -3,12 +3,11 @@
 
 //! Basic tokio usage example.
 
-use wing::tokio::TokioSpawner;
 use wing::Spawner;
 
 #[tokio::main]
 async fn main() {
-    let spawner = TokioSpawner;
+    let spawner = Spawner::Tokio;
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // Spawn a task that sends its result through a channel
