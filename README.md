@@ -48,6 +48,9 @@ These are the crates built out of this repo:
 The following sections explain the overall engineering process we use
 in this repo.
 
+To set up a local PC environment capable of exercising all the tooling used by this repo's development processes,
+you can follow the guide in [DEVELOPMENT.md](./DEVELOPMENT.md).
+
 ### Adding New Crates
 
 Adding a new crate to this repo is done by running the `scripts\add-crate.ps1` script.
