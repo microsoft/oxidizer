@@ -49,7 +49,7 @@ struct Inner {
 ///   ```
 ///
 /// - **Conversion with additional context**: Converts an error into [`AppError`] with additional
-///   context using [`IntoAppError`]
+///   context using [`IntoAppError`](crate::IntoAppError).
 ///
 ///   ```
 ///   use ohno::{Result, AppError, IntoAppError};
