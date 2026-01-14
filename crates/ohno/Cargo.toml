@@ -75,3 +75,8 @@ required-features = ["app_err"]
 name = "into_app_err"
 path = "examples/app/into_app_err.rs"
 required-features = ["app_err"]
+
+[[example]]
+name = "app_err_root_cause"
+path = "examples/app/root_cause.rs"
+required-features = ["app_err"]

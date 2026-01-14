@@ -14,4 +14,5 @@ mod app {
     mod enrich_err;
     mod into_std_error;
     mod into_trait;
+    mod root_cause;
 }

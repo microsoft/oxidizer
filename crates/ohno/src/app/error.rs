@@ -129,6 +129,16 @@ impl AppError {
         StdError::source(&self.inner)
     }
 
+    /// Returns the root cause of this error by traversing the error chain.
+    #[must_use]
+    pub fn root_cause(&self) -> &(dyn StdError + 'static) {
+        let mut source: &(dyn StdError + 'static) = &self.inner;
+        while let Some(next) = StdError::source(source) {
+            source = next;
+        }
+        source
+    }
+
     /// Finds the first source error of the specified type in the error chain.
     #[must_use]
     pub fn find_source<T: StdError + 'static>(&self) -> Option<&T> {
