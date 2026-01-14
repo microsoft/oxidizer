@@ -24,11 +24,13 @@ default = ["tokio"]
 tokio = ["dep:tokio"]
 
 [dependencies]
-tokio = { workspace = true, features = ["rt", "rt-multi-thread"], optional = true }
+futures-channel = { workspace = true, features = ["alloc"] }
+tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tick = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 
 [lints]
 workspace = true

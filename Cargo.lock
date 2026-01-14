@@ -49,6 +49,8 @@ name = "arty"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "futures-channel",
+ "tick",
  "tokio",
 ]
 

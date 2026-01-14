@@ -7,13 +7,13 @@
 
 //! Runtime-agnostic async task spawning.
 //!
-//! This crate provides a [`Spawner`] enum that abstracts task spawning across
+//! This crate provides a [`Spawner`] type that abstracts task spawning across
 //! different async runtimes without generic infection.
 //!
 //! # Design Philosophy
 //!
 //! - **Concrete type**: No generics needed in your code
-//! - **Simple**: Use built-in variants or provide a closure
+//! - **Simple**: Use built-in constructors or provide a closure
 //! - **Flexible**: Works with any async runtime
 //!
 //! # Quick Start
@@ -25,7 +25,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! let spawner = Spawner::Tokio;
+//! let spawner = Spawner::tokio();
 //! spawner.spawn(async {
 //!     println!("Task running!");
 //! });
@@ -37,7 +37,7 @@
 //! ```rust
 //! use arty::Spawner;
 //!
-//! let spawner = Spawner::new_custom(|fut| {
+//! let spawner = Spawner::custom(|fut| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
 //! });
 //!
@@ -48,11 +48,11 @@
 //!
 //! # Features
 //!
-//! - `tokio` (default): Enables the [`Spawner::Tokio`] variant
+//! - `tokio` (default): Enables the [`Spawner::tokio`] constructor
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
 mod spawner;
 
-pub use spawner::{CustomSpawner, Spawner};
+pub use spawner::{Canceled, Spawner};

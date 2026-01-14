@@ -15,13 +15,13 @@
 
 Runtime-agnostic async task spawning.
 
-This crate provides a [`Spawner`][__link0] enum that abstracts task spawning across
+This crate provides a [`Spawner`][__link0] type that abstracts task spawning across
 different async runtimes without generic infection.
 
 ## Design Philosophy
 
 * **Concrete type**: No generics needed in your code
-* **Simple**: Use built-in variants or provide a closure
+* **Simple**: Use built-in constructors or provide a closure
 * **Flexible**: Works with any async runtime
 
 ## Quick Start
@@ -31,7 +31,7 @@ different async runtimes without generic infection.
 ```rust
 use arty::Spawner;
 
-let spawner = Spawner::Tokio;
+let spawner = Spawner::tokio();
 spawner.spawn(async {
     println!("Task running!");
 });
@@ -42,7 +42,7 @@ spawner.spawn(async {
 ```rust
 use arty::Spawner;
 
-let spawner = Spawner::new_custom(|fut| {
+let spawner = Spawner::custom(|fut| {
     std::thread::spawn(move || futures::executor::block_on(fut));
 });
 
@@ -53,7 +53,7 @@ spawner.spawn(async {
 
 ## Features
 
-* `tokio` (default): Enables the [`Spawner::Tokio`][__link1] variant
+* `tokio` (default): Enables the [`Spawner::tokio`][__link1] constructor
 
 
 <hr/>
