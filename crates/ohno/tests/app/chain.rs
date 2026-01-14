@@ -3,7 +3,7 @@
 
 //! Tests for error chaining and finding sources.
 
-use ohno::app::AppError;
+use ohno::AppError;
 
 #[test]
 fn find_source() {

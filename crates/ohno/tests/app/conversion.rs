@@ -3,13 +3,11 @@
 
 //! Tests for automatic error conversion with ? operator.
 
-use ohno::app::Result;
-use ohno::app_err;
-use ohno::assert_error_message;
+use ohno::{app_err, assert_error_message, AppError};
 
 #[test]
 fn question_mark_on_io_error() {
-    fn read_file() -> Result<String> {
+    fn read_file() -> Result<String, AppError> {
         let err = Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
         err?;
         Ok("abc".to_string())
@@ -24,7 +22,7 @@ fn question_mark_on_io_error() {
 
 #[test]
 fn question_mark_on_parse_error() {
-    fn parse_number() -> Result<i32> {
+    fn parse_number() -> Result<i32, AppError> {
         Ok("not_a_number".parse()?)
     }
 
@@ -36,7 +34,7 @@ fn question_mark_on_parse_error() {
 
 #[test]
 fn question_mark_on_constructed_error() {
-    fn validate(value: i32) -> Result<i32> {
+    fn validate(value: i32) -> Result<i32, AppError> {
         if value < 0 {
             Err(app_err!("negative: {}", value))?;
         }
@@ -51,7 +49,7 @@ fn question_mark_on_constructed_error() {
 
 #[test]
 fn question_mark_in_validation_chain() {
-    fn process(x: i32) -> Result<i32> {
+    fn process(x: i32) -> Result<i32, AppError> {
         if x < 0 {
             Err(app_err!("value cannot be negative"))?;
         }

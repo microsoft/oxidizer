@@ -5,7 +5,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::app::AppError;
+use ohno::AppError;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 fn validate_and_process(value: i32) -> Result<i32, AppError> {

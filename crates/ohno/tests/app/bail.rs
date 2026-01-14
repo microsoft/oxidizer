@@ -3,7 +3,7 @@
 
 //! Tests for bail! macro for early returns.
 
-use ohno::app::AppError;
+use ohno::AppError;
 use ohno::assert_error_message;
 use ohno::bail;
 

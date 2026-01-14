@@ -3,7 +3,7 @@
 
 //! Macros for the `app` module.
 
-/// Return early with an [`AppError`](crate::app::AppError).
+/// Return early with an [`AppError`](crate::AppError).
 ///
 /// The macro accepts:
 /// - A string literal: `bail!("error message")`
@@ -13,7 +13,7 @@
 /// # Examples
 ///
 /// ```rust
-/// use ohno::app::{AppError, Result};
+/// use ohno::{AppError, Result};
 /// use ohno::bail;
 ///
 /// fn check_value(x: i32) -> Result<()> {
@@ -25,7 +25,7 @@
 /// ```
 ///
 /// ```rust
-/// use ohno::app::Result;
+/// use ohno::Result;
 /// use ohno::bail;
 ///
 /// fn parse_config(data: &str) -> Result<()> {
@@ -39,7 +39,7 @@
 /// Bailing with an expression:
 ///
 /// ```rust
-/// use ohno::app::{AppError, Result};
+/// use ohno::{AppError, Result};
 /// use ohno::bail;
 ///
 /// fn read_file(path: &str) -> Result<String> {
@@ -49,20 +49,20 @@
 #[macro_export]
 macro_rules! bail {
     ($msg:literal $(,)?) => {
-        return Err($crate::app::AppError::new(format!($msg)))
+        return Err($crate::AppError::new(format!($msg)))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        return Err($crate::app::AppError::new(format!($fmt, $($arg)*)))
+        return Err($crate::AppError::new(format!($fmt, $($arg)*)))
     };
     ($err:ident $(,)?) => {
-        return Err($crate::app::AppError::new($err))
+        return Err($crate::AppError::new($err))
     };
     ($err:expr $(,)?) => {
-        return Err($crate::app::AppError::new($err))
+        return Err($crate::AppError::new($err))
     };
 }
 
-/// Construct an [`AppError`](crate::app::AppError) in place.
+/// Construct an [`AppError`](crate::AppError) in place.
 ///
 /// The macro accepts:
 /// - A string literal: `app_err!("error message")`
@@ -72,7 +72,7 @@ macro_rules! bail {
 /// # Examples
 ///
 /// ```rust
-/// use ohno::app::AppError;
+/// use ohno::AppError;
 /// use ohno::app_err;
 ///
 /// // Create an error from a string literal
@@ -80,7 +80,7 @@ macro_rules! bail {
 /// ```
 ///
 /// ```rust
-/// use ohno::app::Result;
+/// use ohno::Result;
 /// use ohno::app_err;
 ///
 /// fn validate(x: i32) -> Result<()> {
@@ -94,7 +94,7 @@ macro_rules! bail {
 /// Creating an error from another error type:
 ///
 /// ```rust
-/// use ohno::app::Result;
+/// use ohno::Result;
 /// use ohno::app_err;
 ///
 /// fn read_file() {
@@ -104,15 +104,15 @@ macro_rules! bail {
 #[macro_export]
 macro_rules! app_err {
     ($msg:literal $(,)?) => {
-        $crate::app::AppError::new(format!($msg))
+        $crate::AppError::new(format!($msg))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        $crate::app::AppError::new(format!($fmt, $($arg)*))
+        $crate::AppError::new(format!($fmt, $($arg)*))
     };
     ($err:ident $(,)?) => {
-        $crate::app::AppError::new($err)
+        $crate::AppError::new($err)
     };
     ($err:expr $(,)?) => {
-        $crate::app::AppError::new($err)
+        $crate::AppError::new($err)
     };
 }

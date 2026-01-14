@@ -5,7 +5,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::app::AppError;
+use ohno::AppError;
 use ohno::bail;
 
 fn validate_age(age: i32) -> Result<(), AppError> {

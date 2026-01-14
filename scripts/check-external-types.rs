@@ -14,7 +14,7 @@ argh = "0.1"
 
 use std::path::Path;
 
-use ohno::app::Result;
+use ohno::Result;
 use argh::FromArgs;
 
 /// Check external types in all workspace library crates.
