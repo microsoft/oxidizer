@@ -3,7 +3,7 @@
 
 //! Example of using a custom spawner with std::thread.
 
-use wing::Spawner;
+use arty::Spawner;
 
 fn main() {
     let spawner = Spawner::new_custom(|fut| {

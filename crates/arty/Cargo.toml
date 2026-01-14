@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [package]
-name = "wing"
+name = "arty"
 description = "A generic future spawner compatible with any async runtime"
 version = "0.1.0"
 readme = "README.md"

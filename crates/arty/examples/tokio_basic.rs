@@ -3,7 +3,7 @@
 
 //! Basic tokio usage example.
 
-use wing::Spawner;
+use arty::Spawner;
 
 #[tokio::main]
 async fn main() {

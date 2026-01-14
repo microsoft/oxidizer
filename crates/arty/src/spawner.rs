@@ -20,7 +20,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// Using Tokio:
 ///
 /// ```rust
-/// use wing::Spawner;
+/// use arty::Spawner;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
@@ -34,7 +34,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// ## Custom Runtime
 ///
 /// ```rust
-/// use wing::Spawner;
+/// use arty::Spawner;
 ///
 /// # fn main() {
 /// let spawner = Spawner::new_custom(|fut| {
@@ -52,7 +52,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// Use a oneshot channel to retrieve a value from the spawned task:
 ///
 /// ```rust
-/// use wing::Spawner;
+/// use arty::Spawner;
 /// use tokio::sync::oneshot;
 ///
 /// # #[tokio::main]
@@ -75,7 +75,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// Send a `Result` through the channel to propagate errors:
 ///
 /// ```rust
-/// use wing::Spawner;
+/// use arty::Spawner;
 /// use tokio::sync::oneshot;
 ///
 /// # #[tokio::main]
@@ -120,7 +120,7 @@ impl Spawner {
     /// # Examples
     ///
     /// ```rust
-    /// use wing::Spawner;
+    /// use arty::Spawner;
     ///
     /// let spawner = Spawner::new_custom(|fut| {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));

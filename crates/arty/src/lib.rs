@@ -21,7 +21,7 @@
 //! ## Using Tokio
 //!
 //! ```rust
-//! use wing::Spawner;
+//! use arty::Spawner;
 //!
 //! # #[tokio::main]
 //! # async fn main() {
@@ -35,7 +35,7 @@
 //! ## Custom Runtime
 //!
 //! ```rust
-//! use wing::Spawner;
+//! use arty::Spawner;
 //!
 //! let spawner = Spawner::new_custom(|fut| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
@@ -51,10 +51,10 @@
 //! - `tokio` (default): Enables the [`Spawner::Tokio`] variant
 
 #![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/wing/logo.png"
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png"
 )]
 #![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/wing/favicon.ico"
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico"
 )]
 
 mod spawner;
