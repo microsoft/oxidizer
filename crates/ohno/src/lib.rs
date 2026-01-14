@@ -227,12 +227,12 @@
 //!
 //! For applications that need a simple, catch-all error type, use [`AppError`]. It
 //! automatically captures backtraces and can wrap any error type.
-//! 
+//!
 //! To avoid accidental usage in libraries, [`AppError`] is only available when the `app_err`
 //! feature is enabled.
 //!
 //! Example usage:
-//! 
+//!
 //! ```rust
 //! use ohno::{AppError, Result};
 //!
