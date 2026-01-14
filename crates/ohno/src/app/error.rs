@@ -22,6 +22,89 @@ struct Inner {
 ///
 /// This type automatically captures backtraces and provides error context
 /// through the underlying [`OhnoCore`].
+///
+/// # Examples
+///
+/// - **Generic Error Handling**: Use [`AppError`] as a catch-all error type in your application
+///   ```no_run
+///   use std::io::Error as IoError;
+///   use ohno::AppError;
+///
+///   fn connect() -> Result<(), IoError> {
+///       Err(IoError::other("network unreachable"))
+///   }
+///   fn main() -> Result<(), AppError> {
+///       connect()?;
+///       // ...
+///       Ok(())
+///   }
+///   ```
+///
+/// - **Automatic Backtraces**: Captures stack traces at error creation time
+///   ```no_run
+///   use ohno::AppError;
+///
+///   let err = AppError::new("something failed");
+///   println!("{}", err.backtrace());
+///   ```
+///
+/// - **Conversion with additional context**: Converts an error into [`AppError`] with additional
+///   context using [`IntoAppError`]
+///
+///   ```
+///   use ohno::{Result, AppError, IntoAppError};
+///
+///   fn read_config(path: &str) -> Result<()> {
+///       let config = std::fs::read_to_string(path).into_app_err("failed to read config")?;
+///       // ...
+///       Ok(())
+///   }
+///   ```
+///
+/// - **Early Returns**: Use [`bail!`](crate::bail) macro for convenient early returns
+///   ```no_run
+///   use ohno::Result;
+///   use ohno::bail;
+///
+///   fn validate(value: i32) -> Result<()> {
+///       if value < 0 {
+///           bail!("invalid input");
+///       }
+///       Ok(())
+///   }
+///   ```
+///
+/// - **In-Place Construction**: Use [`app_err!`](crate::app_err) macro to construct errors in place
+///   ```
+///   use ohno::app_err;
+///
+///   let code = 42;
+///   let err = app_err!("failed with code {code}");
+///   ```
+///
+/// - **Error Chaining**: Walk error chains to find specific error types
+///   ```no_run
+///   use ohno::AppError;
+///
+///   fn handle_error(err: &AppError) {
+///     if let Some(io_err) = err.find_source::<std::io::Error>() {
+///        println!("Found IO error: {io_err}");
+///     }
+///   }
+///   ```
+///
+/// - **Passing as a reference to [`std::error::Error`]**:
+///
+///   ```rust
+///   use ohno::AppError;
+///
+///   fn handle_error(err: &dyn std::error::Error) {
+///       println!("Error: {err}");
+///   }
+///
+///   let app_error = AppError::new("an error occurred");
+///   handle_error(app_error.as_ref());
+///   ```
 #[derive(Clone)]
 pub struct AppError {
     inner: Inner,

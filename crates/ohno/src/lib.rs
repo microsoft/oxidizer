@@ -17,7 +17,7 @@
 //! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
 //! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
-//! - [**`AppError`**](app): Application-level error type for general application errors
+//! - [**`AppError`**](AppError): Application-level error type for general application errors
 //!
 //! # Quick Start
 //!
@@ -225,11 +225,11 @@
 //!
 //! # AppError
 //!
-//! For applications that need a simple, catch-all error type, use [`app::AppError`](app). It
+//! For applications that need a simple, catch-all error type, use [`AppError`]. It
 //! automatically captures backtraces and can wrap any error type.
 //!
 //! ```rust
-//! use ohno::app::{AppError, Result};
+//! use ohno::{AppError, Result};
 //!
 //! fn process() -> Result<()> {
 //!     std::fs::read_to_string("file.txt")?; // Automatically converts errors
@@ -243,7 +243,7 @@
 #[doc(hidden)]
 extern crate self as ohno;
 
-pub mod app;
+mod app;
 mod backtrace;
 mod core;
 mod enrichable;
@@ -256,6 +256,7 @@ pub mod test_util;
 
 pub use core::OhnoCore;
 
+pub use app::{AppError, IntoAppError};
 pub use enrichable::{Enrichable, EnrichableExt};
 pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;

@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use ohno::app::{IntoAppError, Result};
+use ohno::{AppError, IntoAppError};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -41,7 +41,7 @@ pub struct Target {
 }
 
 /// List all workspace packages using `cargo metadata`
-pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMetadata>> {
+pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMetadata>, AppError> {
     let output = Command::new("cargo")
         .arg("metadata")
         .arg("--format-version=1")
@@ -64,7 +64,7 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
 pub const INTERNAL_CRATES: &[&str] = &["automation", "testing_aids"];
 
 /// Run a cargo command and pipe the output to stdout/stderr
-pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
+pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppError> {
     let args: Vec<_> = args.map(|s| s.as_ref().to_string()).collect();
     let args_str = args.join(" ");
 

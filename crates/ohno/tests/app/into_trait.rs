@@ -3,12 +3,12 @@
 
 //! Tests for `IntoAppError` trait implementations.
 
-use ohno::app::{AppError, IntoAppError, Result};
+use ohno::{AppError, IntoAppError};
 use ohno::assert_error_message;
 
 #[test]
 fn result_into_app_err() {
-    fn parse_number(s: &str) -> Result<i32> {
+    fn parse_number(s: &str) -> Result<i32, AppError> {
         s.parse::<i32>().into_app_err("failed to parse number")
     }
 
@@ -20,7 +20,7 @@ fn result_into_app_err() {
 
 #[test]
 fn result_into_app_err_with() {
-    fn parse_with_context(s: &str) -> Result<i32> {
+    fn parse_with_context(s: &str) -> Result<i32, AppError> {
         s.parse::<i32>().into_app_err_with(|| format!("failed to parse: {s}"))
     }
 
@@ -32,7 +32,7 @@ fn result_into_app_err_with() {
 
 #[test]
 fn option_into_app_err() {
-    fn make_error() -> Result<i32> {
+    fn make_error() -> Result<i32, AppError> {
         None.into_app_err("value not found")
     }
 
@@ -43,7 +43,7 @@ fn option_into_app_err() {
 
 #[test]
 fn option_into_app_err_with() {
-    fn with_context() -> Result<i32> {
+    fn with_context() -> Result<i32, AppError> {
         None.into_app_err_with(|| "nothing found")
     }
 
@@ -54,15 +54,15 @@ fn option_into_app_err_with() {
 
 #[test]
 fn ohno_on_into_app_err_error() {
-    fn level1() -> Result<i32> {
+    fn level1() -> Result<i32, AppError> {
         Err(AppError::new("root error"))
     }
 
-    fn level2() -> Result<i32> {
+    fn level2() -> Result<i32, AppError> {
         level1().into_app_err("context added")
     }
 
-    fn level3() -> Result<i32> {
+    fn level3() -> Result<i32, AppError> {
         level2().into_app_err_with(|| "more context added")
     }
 
@@ -75,7 +75,7 @@ fn ohno_on_into_app_err_error() {
 
 #[test]
 fn string_ref() {
-    fn fail() -> Result<i32> {
+    fn fail() -> Result<i32, AppError> {
         let context = String::from("failed operation");
         None.into_app_err(&context)
     }

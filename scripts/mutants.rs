@@ -14,7 +14,7 @@ argh = "0.1.12"
 
 use std::path::{Path, PathBuf};
 
-use ohno::app::Result;
+use ohno::Result;
 use argh::FromArgs;
 
 const JOBS: u32 = 1;

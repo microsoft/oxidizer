@@ -5,7 +5,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::app::{AppError, IntoAppError};
+use ohno::{AppError, IntoAppError};
 
 fn io_operation() -> Result<(), std::io::Error> {
     Err(std::io::Error::other("simulated I/O error"))

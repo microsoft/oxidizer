@@ -3,7 +3,7 @@
 
 //! Tests for `AppError::into_std_error` method.
 
-use ohno::{app::AppError, assert_error_message};
+use ohno::{AppError, assert_error_message};
 
 #[test]
 fn test_into_std_error_preserves_message() {

@@ -3,7 +3,7 @@
 
 //! Tests for `AppError::new` construction.
 
-use ohno::app::AppError;
+use ohno::AppError;
 use ohno::assert_error_message;
 
 #[test]

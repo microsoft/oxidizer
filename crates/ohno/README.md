@@ -235,11 +235,11 @@ fn open_file(path: &str) -> Result<String, MyError> {
 
 ## AppError
 
-For applications that need a simple, catch-all error type, use [`app::AppError`][__link14]. It
+For applications that need a simple, catch-all error type, use [`AppError`][__link14]. It
 automatically captures backtraces and can wrap any error type.
 
 ```rust
-use ohno::app::{AppError, Result};
+use ohno::{AppError, Result};
 
 fn process() -> Result<()> {
     std::fs::read_to_string("file.txt")?; // Automatically converts errors

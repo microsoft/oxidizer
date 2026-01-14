@@ -3,7 +3,7 @@
 
 //! Tests for `AppError` methods.
 
-use ohno::{EnrichableExt, app::AppError, assert_error_message};
+use ohno::{EnrichableExt, AppError, assert_error_message};
 
 #[test]
 fn source_none() {

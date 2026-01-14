@@ -5,7 +5,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::app::AppError;
+use ohno::AppError;
 
 #[ohno::error]
 struct MyLibError;

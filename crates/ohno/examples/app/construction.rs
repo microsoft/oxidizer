@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates simple error construction with `app_err!` and `ohno::app::AppError::new()`.
+//! Demonstrates simple error construction with `app_err!` and `ohno::AppError::new()`.
 
-use ohno::app::AppError;
+use ohno::AppError;
 use ohno::app_err;
 
 fn main() {

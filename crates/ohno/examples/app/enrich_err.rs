@@ -5,7 +5,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::app::AppError;
+use ohno::AppError;
 use ohno::{bail, enrich_err};
 
 #[enrich_err("failed to load data for user {user_id}")]

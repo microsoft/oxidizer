@@ -3,7 +3,7 @@
 
 //! Tests for adding context to errors.
 
-use ohno::app::{IntoAppError, Result};
+use ohno::{IntoAppError, AppError};
 use ohno::app_err;
 use ohno::{EnrichableExt, enrich_err};
 
@@ -37,7 +37,7 @@ fn enrich_err_ext_multiple_layers() {
 
 #[test]
 fn enrich_err_on_result() {
-    fn fail() -> Result<i32> {
+    fn fail() -> Result<i32, AppError> {
         Err(app_err!("operation failed"))
     }
 
@@ -50,7 +50,7 @@ fn enrich_err_on_result() {
 #[test]
 fn enrich_err_macro_with_simple_message() {
     #[enrich_err("failed to process request")]
-    fn fail() -> Result<i32> {
+    fn fail() -> Result<i32, AppError> {
         Err(app_err!("invalid input"))
     }
 
@@ -63,7 +63,7 @@ fn enrich_err_macro_with_simple_message() {
 #[test]
 fn enrich_err_macro_with_format_args() {
     #[enrich_err("failed to parse value: {}", value)]
-    fn parse_value(value: &str) -> Result<i32> {
+    fn parse_value(value: &str) -> Result<i32, AppError> {
         value.parse::<i32>().map_err(|e| app_err!("parse error: {}", e))
     }
 
@@ -78,7 +78,7 @@ fn enrich_err_macro_with_format_args() {
 #[test]
 fn enrich_err_macro_with_multiple_params() {
     #[enrich_err("operation {} failed for user {}", op_name, user_id)]
-    fn perform_operation(op_name: &str, user_id: i32, should_fail: bool) -> Result<()> {
+    fn perform_operation(op_name: &str, user_id: i32, should_fail: bool) -> Result<(), AppError> {
         if should_fail {
             return Err(app_err!("internal error"));
         }
@@ -96,7 +96,7 @@ fn enrich_err_macro_with_multiple_params() {
 #[test]
 fn enrich_err_macro_default_message() {
     #[enrich_err]
-    fn some_operation(should_fail: bool) -> Result<i32> {
+    fn some_operation(should_fail: bool) -> Result<i32, AppError> {
         if should_fail {
             return Err(app_err!("something went wrong"));
         }
