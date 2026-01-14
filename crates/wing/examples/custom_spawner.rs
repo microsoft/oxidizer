@@ -3,41 +3,37 @@
 
 //! Example of implementing a custom spawner using std::thread.
 
-use wing::Spawner;
 use std::thread;
+use wing::Spawner;
 
-/// A spawner that uses std::thread to execute futures in a blocking manner.
+/// A spawner that uses std::thread to execute futures.
 ///
 /// This demonstrates how to integrate with non-async runtimes.
 #[derive(Clone, Copy)]
 struct ThreadSpawner;
 
 impl Spawner for ThreadSpawner {
-    fn spawn<T>(&self, work: impl Future<Output = T> + Send + 'static) -> T
+    fn spawn<T>(&self, work: T)
     where
-        T: Send + 'static,
+        T: Future<Output = ()> + Send + 'static,
     {
-        let (sender, receiver) = std::sync::mpsc::channel();
-
         thread::spawn(move || {
-            // Block on the future using a simple executor
-            let result = futures::executor::block_on(work);
-            let _ = sender.send(result);
+            futures::executor::block_on(work);
         });
-
-        receiver.recv().expect("thread panicked or disconnected")
     }
 }
 
 fn main() {
     let spawner = ThreadSpawner;
+    let (sender, receiver) = std::sync::mpsc::channel();
 
     println!("Spawning task on std::thread...");
-    let result = spawner.spawn(async {
+    spawner.spawn(async move {
         println!("Task running on thread!");
         std::thread::sleep(std::time::Duration::from_millis(100));
-        42
+        sender.send(42).unwrap();
     });
 
+    let result = receiver.recv().expect("thread panicked or disconnected");
     println!("Result: {result}");
 }

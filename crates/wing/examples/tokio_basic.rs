@@ -9,13 +9,15 @@ use wing::Spawner;
 #[tokio::main]
 async fn main() {
     let spawner = TokioSpawner;
+    let (tx, rx) = tokio::sync::oneshot::channel();
 
-    // Spawn and wait for result
+    // Spawn a task that sends its result through a channel
     println!("Spawning task...");
-    let result = spawner.spawn(async {
+    spawner.spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        42
+        tx.send(42).unwrap();
     });
 
+    let result = rx.await.unwrap();
     println!("Task returned: {result}");
 }

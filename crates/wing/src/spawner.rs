@@ -5,8 +5,8 @@
 
 /// Trait for spawning async tasks on a runtime.
 pub trait Spawner {
-    /// Spawns an async task and returns a value.
-    fn spawn<T>(&self, work: impl Future<Output = T> + Send + 'static) -> T
+    /// Spawns an async task
+    fn spawn<T>(&self, work: T)
     where
-        T: Send + 'static;
+        T: Future<Output = ()> + Send + 'static;
 }

@@ -24,36 +24,33 @@
 //! use wing::tokio::TokioSpawner;
 //! use wing::Spawner;
 //!
-//! // TokioSpawner requires a multi-threaded runtime
-//! let rt = tokio::runtime::Builder::new_multi_thread()
-//!     .enable_all()
-//!     .build()
-//!     .unwrap();
+//! # #[tokio::main]
+//! # async fn main() {
+//! let spawner = TokioSpawner;
 //!
-//! rt.block_on(async {
-//!     let spawner = TokioSpawner;
-//!
-//!     // Spawn and await a task
-//!     let result = spawner.spawn(async { 42 });
-//!     assert_eq!(result, 42);
+//! // Spawn a fire-and-forget task
+//! spawner.spawn(async {
+//!     println!("Task running!");
 //! });
+//! # }
 //! ```
 //!
 //! ## Custom Implementation
 //!
 //! ```rust
 //! use wing::Spawner;
+//! use std::future::Future;
 //!
 //! #[derive(Clone)]
 //! struct MySpawner;
 //!
 //! impl Spawner for MySpawner {
-//!     fn spawn<T>(&self, work: impl Future<Output = T> + Send + 'static) -> T
+//!     fn spawn<T>(&self, work: T)
 //!     where
-//!         T: Send + 'static,
+//!         T: Future<Output = ()> + Send + 'static,
 //!     {
 //!         // Your implementation here
-//!         # futures::executor::block_on(work)
+//!         std::thread::spawn(move || futures::executor::block_on(work));
 //!     }
 //! }
 //! ```
