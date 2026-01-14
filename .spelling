@@ -37,6 +37,7 @@ btree_map
 buildable
 bytesbuf
 callee
+cancelled
 C-BITFLAG
 C-CONV
 C-CONV-SPECIFIC

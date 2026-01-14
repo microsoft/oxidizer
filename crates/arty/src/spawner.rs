@@ -121,6 +121,7 @@ impl Spawner {
     /// });
     /// # }
     /// ```
+    #[must_use]
     #[cfg(feature = "tokio")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn tokio() -> Self {
@@ -180,10 +181,7 @@ impl Spawner {
     /// assert_eq!(result.await.unwrap(), 2);
     /// # }
     /// ```
-    pub fn run<T: Send + 'static>(
-        &self,
-        work: impl Future<Output = T> + Send + 'static,
-    ) -> oneshot::Receiver<T> {
+    pub fn run<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.spawn(async move {
             let _ = tx.send(work.await);
