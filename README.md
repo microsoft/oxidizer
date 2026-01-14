@@ -32,6 +32,7 @@ These are the crates built out of this repo:
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`fundle_macros`](crates/fundle_macros/README.md) - Macros for the `fundle` crate.
 - [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Macros for the `fundle` crate.
+- [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
@@ -44,6 +45,9 @@ These are the crates built out of this repo:
 
 The following sections explain the overall engineering process we use
 in this repo.
+
+To set up a local PC environment capable of exercising all the tooling used by this repo's development processes,
+you can follow the guide in [DEVELOPMENT.md](./DEVELOPMENT.md).
 
 ### Adding New Crates
 
