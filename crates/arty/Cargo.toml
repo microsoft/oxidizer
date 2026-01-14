@@ -27,6 +27,7 @@ tokio = ["dep:tokio"]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"], optional = true }
 
 [dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 [lints]
