@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for AppError::root_cause.
+//! Tests for `AppError::root_cause`.
 
 use ohno::{AppError, assert_error_message};
 
