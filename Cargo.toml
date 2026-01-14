@@ -24,6 +24,7 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
+arty = { path = "crates/arty", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.1" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.1.1" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.0" }
@@ -41,7 +42,6 @@ thread_aware = { path = "crates/thread_aware", default-features = false, version
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.0" }
 tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
-arty = { path = "crates/arty", default-features = false, version = "0.1.0" }
 
 # external dependencies
 alloc_tracker = { version = "0.5.9", default-features = false }

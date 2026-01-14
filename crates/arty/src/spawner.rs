@@ -130,7 +130,7 @@ impl Spawner {
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
-        Spawner::Custom(CustomSpawner(Arc::new(f)))
+        Self::Custom(CustomSpawner(Arc::new(f)))
     }
 
     /// Spawns an async task on the runtime.
@@ -140,10 +140,10 @@ impl Spawner {
     pub fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) {
         match self {
             #[cfg(feature = "tokio")]
-            Spawner::Tokio => {
+            Self::Tokio => {
                 ::tokio::spawn(work);
             }
-            Spawner::Custom(c) => (c.0)(Box::pin(work)),
+            Self::Custom(c) => (c.0)(Box::pin(work)),
         }
     }
 }

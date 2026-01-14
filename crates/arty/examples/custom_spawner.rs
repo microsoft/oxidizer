@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Example of using a custom spawner with std::thread.
+//! Example of using a custom spawner with `std::thread`.
 
 use arty::Spawner;
 
@@ -16,7 +16,7 @@ fn main() {
     spawner.spawn(async move {
         println!("Task running on thread!");
         std::thread::sleep(std::time::Duration::from_millis(100));
-        sender.send(42).unwrap();
+        sender.send(42).expect("Failed to send result");
     });
 
     let result = receiver.recv().expect("thread panicked or disconnected");

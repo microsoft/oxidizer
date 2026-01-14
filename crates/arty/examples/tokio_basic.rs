@@ -14,9 +14,9 @@ async fn main() {
     println!("Spawning task...");
     spawner.spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        tx.send(42).unwrap();
+        tx.send(42).expect("Failed to send result");
     });
 
-    let result = rx.await.unwrap();
+    let result = rx.await.expect("Task panicked or sender dropped");
     println!("Task returned: {result}");
 }
