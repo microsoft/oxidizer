@@ -3,7 +3,7 @@
 
 //! Tests for automatic error conversion with ? operator.
 
-use ohno::{app_err, assert_error_message, AppError};
+use ohno::{AppError, app_err, assert_error_message};
 
 #[test]
 fn question_mark_on_io_error() {

@@ -3,8 +3,8 @@
 
 //! Tests for adding context to errors.
 
-use ohno::{IntoAppError, AppError};
 use ohno::app_err;
+use ohno::{AppError, IntoAppError};
 use ohno::{EnrichableExt, enrich_err};
 
 #[test]
