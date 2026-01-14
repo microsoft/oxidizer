@@ -10,6 +10,10 @@
 
   - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
 
+- ✔️ Tasks
+
+  - Bump bytesbuf and bytesbuf_io version numbers to re-trigger publishing ([#188](https://github.com/microsoft/oxidizer/pull/188))
+
 ## [0.2.0] - 2026-01-02
 
 - ✨ Features

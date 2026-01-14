@@ -7,22 +7,41 @@
 
 .DESCRIPTION
     This script automates two main tasks for releasing a Rust crate in a workspace repository:
-    1. Version Bump
-    2. Changelog Generation: It generates a CHANGELOG.md file
+    1. Version Bump: Automatically increment the version (major, minor, or patch) or set a specific version.
+    2. Changelog Generation: It generates a CHANGELOG.md file based on git commit history.
+
+    By default, if neither --version nor --bump is specified, the script will bump the minor version
+    and reset the patch version to 0 (e.g., 1.2.3 -> 1.3.0).
 
 .PARAMETER CrateName
     The name of the crate to release. This should match the folder name inside the 'crates' directory.
 
 .PARAMETER Version
     [Optional] The specific version to set (e.g., "1.2.3"). Can be specified with --version or -v.
+    This parameter is mutually exclusive with --bump.
+
+.PARAMETER Bump
+    [Optional] The version component to bump: 'major', 'minor', or 'patch'. Can be specified with --bump or -b.
+    - major: Increments the major version and resets minor and patch to 0 (e.g., 1.2.3 -> 2.0.0)
+    - minor: Increments the minor version and resets patch to 0 (e.g., 1.2.3 -> 1.3.0)
+    - patch: Increments the patch version (e.g., 1.2.3 -> 1.2.4)
+    This parameter is mutually exclusive with --version.
 
 .EXAMPLE
-    # Increment the version for 'my-crate' and generate its changelog
+    # Increment the minor version for 'my-crate' (default behavior)
     .\release-crate.ps1 "my-crate"
 
 .EXAMPLE
     # Set a specific version for 'my-crate'
     .\release-crate.ps1 my-crate --version "2.5.0"
+
+.EXAMPLE
+    # Bump the major version for 'my-crate'
+    .\release-crate.ps1 my-crate --bump major
+
+.EXAMPLE
+    # Bump the patch version for 'my-crate'
+    .\release-crate.ps1 my-crate -b patch
 #>
 [CmdletBinding()]
 param(
@@ -31,7 +50,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [Alias('v')]
-    [string]$Version
+    [string]$Version,
+
+    [Parameter(Mandatory = $false)]
+    [Alias('b')]
+    [ValidateSet('major', 'minor', 'patch')]
+    [string]$Bump
 )
 
 # --- CONFIGURATION ---
@@ -261,6 +285,7 @@ function Update-CrateVersion {
     param(
         [string]$crateName,
         [string]$version,
+        [string]$bump,
         [string]$crateCargoToml,
         [string]$rootCargoToml
     )
@@ -274,10 +299,27 @@ function Update-CrateVersion {
         while ($versionParts.Count -lt 3) {
             $versionParts += '0'
         }
-        $versionParts[1] = [int]$versionParts[1] + 1
-        $versionParts[2] = '0'
+
+        # Determine which version component to bump
+        $bumpType = if ([string]::IsNullOrEmpty($bump)) { 'minor' } else { $bump }
+
+        switch ($bumpType) {
+            'major' {
+                $versionParts[0] = [int]$versionParts[0] + 1
+                $versionParts[1] = '0'
+                $versionParts[2] = '0'
+            }
+            'minor' {
+                $versionParts[1] = [int]$versionParts[1] + 1
+                $versionParts[2] = '0'
+            }
+            'patch' {
+                $versionParts[2] = [int]$versionParts[2] + 1
+            }
+        }
+
         $newVersion = $versionParts -join '.'
-        Write-Host "✅ Auto-incrementing version from $currentVersion to $newVersion."
+        Write-Host "✅ Incrementing $bumpType version from $currentVersion to $newVersion."
     }
     else {
         $newVersion = $version
@@ -412,6 +454,11 @@ if (-not (Test-ValidCrateName -crateName $CrateName)) {
     Exit 1
 }
 
+if (-not [string]::IsNullOrEmpty($Version) -and -not [string]::IsNullOrEmpty($Bump)) {
+    Write-Error "The --version and --bump options are mutually exclusive. Please specify only one."
+    Exit 1
+}
+
 if (-not (Test-ValidVersion -version $Version)) {
     Write-Error "Invalid version format '$Version'. Version must follow semantic versioning format (e.g., '1.2.3')."
     Exit 1
@@ -472,7 +519,7 @@ if (-not [string]::IsNullOrEmpty($Version)) {
 
 # 6. EXECUTE WORKFLOW
 try {
-    $newVersion = Update-CrateVersion -crateName $CrateName -version $Version -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
+    $newVersion = Update-CrateVersion -crateName $CrateName -version $Version -bump $Bump -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
     if ($null -eq $newVersion) {
         Write-Error "Failed to update crate version. Aborting."
         Exit 1
