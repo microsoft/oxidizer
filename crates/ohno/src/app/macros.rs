@@ -44,7 +44,7 @@
 /// }
 /// ```
 #[macro_export]
-#[cfg_attr(docsrs, doc(cfg(feature = "app_err")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "app-err")))]
 macro_rules! bail {
     ($msg:literal $(,)?) => {
         return Err($crate::AppError::new(format!($msg)))
@@ -98,7 +98,7 @@ macro_rules! bail {
 /// }
 /// ```
 #[macro_export]
-#[cfg_attr(docsrs, doc(cfg(feature = "app_err")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "app-err")))]
 macro_rules! app_err {
     ($msg:literal $(,)?) => {
         $crate::AppError::new(format!($msg))

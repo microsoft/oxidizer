@@ -14,7 +14,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-ohno = { workspace = true, features = ["app_err"] }
+ohno = { workspace = true, features = ["app-err"] }
 
 duct = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"] }

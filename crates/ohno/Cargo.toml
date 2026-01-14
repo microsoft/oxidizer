@@ -23,7 +23,7 @@ allowed_external_types = ["ohno_macros::*"]
 all-features = true
 
 [features]
-app_err = []
+app-err = []
 test-util = []
 
 [dependencies]
@@ -44,39 +44,39 @@ workspace = true
 [[example]]
 name = "app_err_automatic_conversion"
 path = "examples/app/automatic_conversion.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
 name = "app_err_backtrace"
 path = "examples/app/backtrace.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
 name = "bail"
 path = "examples/app/bail.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
 name = "app_err_construction"
 path = "examples/app/construction.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
 name = "app_err_enrichment"
 path = "examples/app/enrich_err.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
 name = "app_err_into_std_error"
 path = "examples/app/into_std_error.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
 name = "into_app_err"
 path = "examples/app/into_app_err.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
 
 [[example]]
-name = "app_err_root_cause"
+name = "app-err_root_cause"
 path = "examples/app/root_cause.rs"
-required-features = ["app_err"]
+required-features = ["app-err"]
