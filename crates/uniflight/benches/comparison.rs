@@ -3,6 +3,13 @@
 
 //! Benchmarks comparing uniflight against singleflight-async.
 
+#![allow(
+    clippy::items_after_statements,
+    clippy::unwrap_used,
+    missing_docs,
+    reason = "Benchmarks have relaxed requirements"
+)]
+
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -179,7 +186,7 @@ fn bench_multiple_keys(c: &mut Criterion) {
                         let merger = Arc::clone(&merger);
                         (0..10).map(move |_| {
                             let merger = Arc::clone(&merger);
-                            let key = format!("key_{}_{key_id}", iteration);
+                            let key = format!("key_{iteration}_{key_id}");
                             tokio::spawn(async move { merger.work(&key, || async { "value".to_string() }).await })
                         })
                     })
@@ -204,7 +211,7 @@ fn bench_multiple_keys(c: &mut Criterion) {
                         let group = Arc::clone(&group);
                         (0..10).map(move |_| {
                             let group = Arc::clone(&group);
-                            let key = format!("key_{}_{key_id}", iteration);
+                            let key = format!("key_{iteration}_{key_id}");
                             tokio::spawn(async move { group.work(key, || async { "value".to_string() }).await })
                         })
                     })
