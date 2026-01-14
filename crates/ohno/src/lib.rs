@@ -227,7 +227,12 @@
 //!
 //! For applications that need a simple, catch-all error type, use [`AppError`]. It
 //! automatically captures backtraces and can wrap any error type.
+//! 
+//! To avoid accidental usage in libraries, [`AppError`] is only available when the `app_err`
+//! feature is enabled.
 //!
+//! Example usage:
+//! 
 //! ```rust
 //! use ohno::{AppError, Result};
 //!
@@ -243,6 +248,7 @@
 #[doc(hidden)]
 extern crate self as ohno;
 
+#[cfg(feature = "app_err")]
 mod app;
 mod backtrace;
 mod core;
@@ -256,6 +262,7 @@ pub mod test_util;
 
 pub use core::OhnoCore;
 
+#[cfg(feature = "app_err")]
 pub use app::{AppError, IntoAppError};
 pub use enrichable::{Enrichable, EnrichableExt};
 pub use enrichment_entry::{EnrichmentEntry, Location};
