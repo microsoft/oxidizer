@@ -238,15 +238,15 @@ fn open_file(path: &str) -> Result<String, MyError> {
 For applications that need a simple, catch-all error type, use [`AppError`][__link14]. It
 automatically captures backtraces and can wrap any error type.
 
-To avoid accidental usage in libraries, [`AppError`][__link15] is only available when the `app_err`
+To avoid accidental usage in libraries, [`AppError`][__link15] is only available when the `app-err`
 feature is enabled.
 
 Example usage:
 
 ```rust
-use ohno::{AppError, Result};
+use ohno::AppError;
 
-fn process() -> Result<()> {
+fn process() -> Result<(), AppError> {
     std::fs::read_to_string("file.txt")?; // Automatically converts errors
     Ok(())
 }
@@ -258,7 +258,7 @@ fn process() -> Result<()> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7EuxLQyn3W4G15hQVi3Q7WdGwf_y9hiAsj-G4fijtmokqpLYWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7xRMk7SDB66G1v2n-Rmf3nUGyeREro-k6dWGzjgBXgBcFi-YWSCgmRvaG5vZTAuMi4wgmtvaG5vX21hY3Jvc2UwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

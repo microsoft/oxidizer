@@ -8,7 +8,7 @@ edition = "2024"
 
 [dependencies]
 automation = { path = "../crates/automation" }
-ohno = { path = "../crates/ohno", features = ["app_err"] }
+ohno = { path = "../crates/ohno", features = ["app-err"] }
 argh = "0.1"
 ---
 
