@@ -118,10 +118,12 @@ use std::{
 };
 
 use async_once_cell::OnceCell;
-use dashmap::{DashMap, Entry::{Occupied, Vacant}};
+use dashmap::{
+    DashMap,
+    Entry::{Occupied, Vacant},
+};
 use thread_aware::{
-    Arc as TaArc,
-    ThreadAware,
+    Arc as TaArc, ThreadAware,
     affinity::{MemoryAffinity, PinnedAffinity},
     storage::Strategy,
 };
@@ -142,17 +144,13 @@ pub struct Merger<K, T, S: Strategy = PerProcess> {
 
 impl<K, T, S: Strategy> Debug for Merger<K, T, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Merger")
-            .field("inner", &format_args!("DashMap<...>"))
-            .finish()
+        f.debug_struct("Merger").field("inner", &format_args!("DashMap<...>")).finish()
     }
 }
 
 impl<K, T, S: Strategy> Clone for Merger<K, T, S> {
     fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
+        Self { inner: self.inner.clone() }
     }
 }
 
@@ -404,10 +402,12 @@ mod tests {
 
         // Multiple concurrent calls should clean up after all complete
         let futures: Vec<_> = (0..10)
-            .map(|_| group.work("key2", || async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                "Result".to_string()
-            }))
+            .map(|_| {
+                group.work("key2", || async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    "Result".to_string()
+                })
+            })
             .collect();
 
         // While in flight, map should have an entry

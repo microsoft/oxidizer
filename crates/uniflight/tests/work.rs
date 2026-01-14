@@ -210,27 +210,21 @@ async fn debug_impl() {
 #[tokio::test]
 async fn per_process_strategy() {
     let group = Merger::<String, String, _>::new_per_process();
-    let result = group
-        .work("key", || async { "Result".to_string() })
-        .await;
+    let result = group.work("key", || async { "Result".to_string() }).await;
     assert_eq!(result, "Result");
 }
 
 #[tokio::test]
 async fn per_numa_strategy() {
     let group = Merger::<String, String, _>::new_per_numa();
-    let result = group
-        .work("key", || async { "Result".to_string() })
-        .await;
+    let result = group.work("key", || async { "Result".to_string() }).await;
     assert_eq!(result, "Result");
 }
 
 #[tokio::test]
 async fn per_core_strategy() {
     let group = Merger::<String, String, _>::new_per_core();
-    let result = group
-        .work("key", || async { "Result".to_string() })
-        .await;
+    let result = group.work("key", || async { "Result".to_string() }).await;
     assert_eq!(result, "Result");
 }
 
