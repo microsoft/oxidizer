@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! In-memory cache implementation using moka.
 //!
 //! This module provides an in-memory cache tier backed by the moka crate,

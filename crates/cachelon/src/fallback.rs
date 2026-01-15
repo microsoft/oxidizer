@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Multi-tier fallback cache implementation.
 //!
 //! This module provides fallback cache tiers that check a primary cache first,
@@ -37,7 +39,7 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// let policy = FallbackPromotionPolicy::<String>::never();
 /// ```
 #[derive(Default)]
-#[allow(clippy::type_complexity, reason = "boxed closure type is necessary")]
+#[expect(clippy::type_complexity, reason = "boxed closure type is necessary")]
 pub enum FallbackPromotionPolicy<V> {
     /// Always promote values to primary cache.
     #[default]
@@ -90,11 +92,21 @@ impl<V> FallbackPromotionPolicy<V> {
     ///
     /// This is the most efficient option when no captured state is needed.
     ///
-    /// ```ignore
+    /// ```
+    /// use cachelon::{Cache, CacheEntry, FallbackPromotionPolicy};
+    /// use tick::Clock;
+    ///
     /// fn should_promote(entry: &CacheEntry<String>) -> bool {
     ///     !entry.value().is_empty()
     /// }
-    /// builder.promotion_policy(FallbackPromotionPolicy::when(should_promote))
+    ///
+    /// let clock = Clock::new_frozen();
+    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
+    /// let cache = Cache::builder::<String, String>(clock)
+    ///     .memory()
+    ///     .with_fallback(l2)
+    ///     .promotion_policy(FallbackPromotionPolicy::when(should_promote))
+    ///     .build();
     /// ```
     pub fn when(predicate: fn(&CacheEntry<V>) -> bool) -> Self {
         Self::When(predicate)
@@ -104,11 +116,20 @@ impl<V> FallbackPromotionPolicy<V> {
     ///
     /// Use this when you need to capture external variables in the predicate.
     ///
-    /// ```ignore
-    /// let min_size = 100;
-    /// builder.promotion_policy(FallbackPromotionPolicy::when_boxed(
-    ///     move |entry| entry.value().len() >= min_size
-    /// ))
+    /// ```
+    /// use cachelon::{Cache, CacheEntry, FallbackPromotionPolicy};
+    /// use tick::Clock;
+    ///
+    /// let min_len = 3;
+    /// let clock = Clock::new_frozen();
+    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
+    /// let cache = Cache::builder::<String, String>(clock)
+    ///     .memory()
+    ///     .with_fallback(l2)
+    ///     .promotion_policy(FallbackPromotionPolicy::when_boxed(
+    ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len
+    ///     ))
+    ///     .build();
     /// ```
     pub fn when_boxed<F>(predicate: F) -> Self
     where

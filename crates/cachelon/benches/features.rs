@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Builder overhead benchmark: InMemoryCache vs CacheBuilder
 //!
 //! Compares the runtime overhead of using InMemoryCache directly versus

@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Extension traits for telemetry recording.
 
 use std::time::Duration;

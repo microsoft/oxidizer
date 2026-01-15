@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Cache telemetry implementation and recording.
 
 use std::time::Duration;
@@ -117,7 +119,7 @@ impl CacheTelemetry {
         record.add_attribute("event", event.as_str());
 
         if let Some(d) = duration {
-            #[allow(clippy::cast_possible_truncation, reason = "duration in nanoseconds unlikely to exceed i64::MAX")]
+            #[expect(clippy::cast_possible_truncation, reason = "duration in nanoseconds unlikely to exceed i64::MAX")]
             record.add_attribute("duration_ns", d.as_nanos() as i64);
         }
 

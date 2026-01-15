@@ -18,7 +18,6 @@ use crate::{CacheEntry, Error};
     any(test, feature = "dynamic-cache"),
     dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))
 )]
-#[allow(unused_variables, reason = "default implementations don't use parameters")]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value from the cache by key.
     fn get(&self, key: &K) -> impl Future<Output = Option<CacheEntry<V>>> + Send;
@@ -54,6 +53,7 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// Default implementation is a no-op.
     fn invalidate(&self, key: &K) -> impl Future<Output = ()> + Send {
+        let _ = key;
         async {}
     }
 

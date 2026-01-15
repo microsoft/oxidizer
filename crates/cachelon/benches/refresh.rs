@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Benchmarks for measuring cache refresh overhead and benefits.
 
 #![allow(missing_docs)]

@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 use std::{
     ops::Deref,
     time::{Duration, Instant},

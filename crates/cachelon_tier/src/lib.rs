@@ -29,7 +29,7 @@
 //!
 //! impl<K, V> CacheTier<K, V> for SimpleCache<K, V>
 //! where
-//!     K: Eq + std::hash::Hash + Send + Sync,
+//!     K: Clone + Eq + std::hash::Hash + Send + Sync,
 //!     V: Clone + Send + Sync,
 //! {
 //!     async fn get(&self, key: &K) -> Option<CacheEntry<V>> {

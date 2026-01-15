@@ -6,7 +6,7 @@
 //! High-performance in-memory cache backed by moka.
 //!
 //! This crate provides [`InMemoryCache`], a concurrent in-memory cache using moka's
-//! TinyLFU eviction algorithm for excellent hit rates. Use [`InMemoryCacheBuilder`]
+//! `TinyLFU` eviction algorithm for excellent hit rates. Use [`InMemoryCacheBuilder`]
 //! to configure capacity, TTL, and TTI without exposing moka types directly.
 //!
 //! # Quick Start

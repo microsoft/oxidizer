@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Mock cache implementation for testing.
 //!
 //! This module provides `MockCache`, a configurable in-memory cache that

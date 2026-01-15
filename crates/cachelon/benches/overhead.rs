@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Benchmark suite measuring the overhead of various cache wrapper layers.
 
 #![allow(missing_docs)]

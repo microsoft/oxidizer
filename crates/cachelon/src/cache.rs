@@ -4,7 +4,7 @@
 
 use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
-#[cfg(any(feature = "tokio"))]
+#[cfg(feature = "tokio")]
 use singleflight_async::SingleFlight;
 use tick::Clock;
 
@@ -69,7 +69,7 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) name: CacheName,
     pub(crate) storage: S,
     pub(crate) clock: Clock,
-    #[cfg(any(feature = "tokio"))]
+    #[cfg(feature = "tokio")]
     coalesce: SingleFlight<K, Option<CacheEntry<V>>>,
     _phantom: PhantomData<(K, V)>,
 }
@@ -111,7 +111,7 @@ where
             name,
             storage,
             clock,
-            #[cfg(any(feature = "tokio"))]
+            #[cfg(feature = "tokio")]
             coalesce: SingleFlight::new(),
             _phantom: PhantomData,
         }
@@ -235,6 +235,10 @@ where
     }
 
     /// Invalidates (removes) a value from the cache, returning an error if the operation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache tier operation fails.
     pub async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
         self.storage.try_invalidate(key).await
     }
@@ -245,6 +249,10 @@ where
     }
 
     /// Returns true if the cache contains a value for the given key, or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache tier operation fails.
     pub async fn try_contains(&self, key: &K) -> Result<bool, Error> {
         Ok(self.try_get(key).await?.is_some())
     }
@@ -255,6 +263,10 @@ where
     }
 
     /// Clears all entries from the cache, returning an error if the operation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache tier operation fails.
     pub async fn try_clear(&self) -> Result<(), Error> {
         self.storage.try_clear().await
     }
@@ -356,7 +368,7 @@ where
     ///
     /// This prevents the "thundering herd" problem where many concurrent cache
     /// misses for the same key overwhelm the backend.
-    #[cfg(any(feature = "tokio"))]
+    #[cfg(feature = "tokio")]
     pub async fn get_coalesced(&self, key: &K) -> Option<CacheEntry<V>>
     where
         K: 'static,

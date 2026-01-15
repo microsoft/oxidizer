@@ -145,7 +145,7 @@ where
         entry.set_cached_at(self.clock.instant());
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         self.telemetry
-            .record(self.name, CacheOperation::Insert, CacheEvent::Ok, timed.duration);
+            .record(self.name, CacheOperation::Insert, CacheEvent::Inserted, timed.duration);
         if let Some(size) = self.inner.len() {
             self.telemetry.record_size(self.name, size);
         }
@@ -157,7 +157,7 @@ where
         match &timed.result {
             Ok(()) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheEvent::Ok, timed.duration);
+                    .record(self.name, CacheOperation::Insert, CacheEvent::Inserted, timed.duration);
                 if let Some(size) = self.inner.len() {
                     self.telemetry.record_size(self.name, size);
                 }
@@ -173,7 +173,7 @@ where
     async fn invalidate(&self, key: &K) {
         let timed = self.clock.timed_async(self.inner.invalidate(key)).await;
         self.telemetry
-            .record(self.name, CacheOperation::Invalidate, CacheEvent::Ok, timed.duration);
+            .record(self.name, CacheOperation::Invalidate, CacheEvent::Invalidated, timed.duration);
         if let Some(size) = self.inner.len() {
             self.telemetry.record_size(self.name, size);
         }
@@ -184,7 +184,7 @@ where
         match &timed.result {
             Ok(()) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Invalidate, CacheEvent::Ok, timed.duration);
+                    .record(self.name, CacheOperation::Invalidate, CacheEvent::Invalidated, timed.duration);
                 if let Some(size) = self.inner.len() {
                     self.telemetry.record_size(self.name, size);
                 }

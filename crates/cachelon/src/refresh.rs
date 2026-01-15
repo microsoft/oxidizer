@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+
 //! Background cache refresh with time-to-refresh (TTR) support.
 //!
 //! This module provides background refresh capabilities for fallback caches,

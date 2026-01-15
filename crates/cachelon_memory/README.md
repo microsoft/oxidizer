@@ -16,7 +16,7 @@
 High-performance in-memory cache backed by moka.
 
 This crate provides [`InMemoryCache`][__link0], a concurrent in-memory cache using moka’s
-TinyLFU eviction algorithm for excellent hit rates. Use [`InMemoryCacheBuilder`][__link1]
+`TinyLFU` eviction algorithm for excellent hit rates. Use [`InMemoryCacheBuilder`][__link1]
 to configure capacity, TTL, and TTI without exposing moka types directly.
 
 ## Quick Start
@@ -49,6 +49,6 @@ assert_eq!(*value.unwrap().value(), 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzjBg-PcMVUYG6vLLH27exIcGxZHwIGIlajCG8YrBdG7oyHbYWSBgm9jYWNoZWxvbl9tZW1vcnllMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGw41hSBSqvsEG_11UjwMNc9AGxqy3ap4bKnGG15ypevZ7Pq3YWSBgm9jYWNoZWxvbl9tZW1vcnllMC4xLjA
  [__link0]: https://docs.rs/cachelon_memory/0.1.0/cachelon_memory/?search=tier::InMemoryCache
  [__link1]: https://docs.rs/cachelon_memory/0.1.0/cachelon_memory/?search=builder::InMemoryCacheBuilder

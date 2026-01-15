@@ -49,7 +49,6 @@ impl CacheOperation {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code, reason = "variants reserved for future telemetry events")]
 pub(crate) enum CacheEvent {
     Hit,
     Expired,

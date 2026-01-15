@@ -43,7 +43,7 @@ mod sealed {
 ///     .memory()
 ///     .build();
 /// ```
-#[allow(private_bounds, reason = "intentionally sealed trait pattern")]
+#[expect(private_bounds, reason = "intentionally sealed trait pattern")]
 pub trait CacheTierBuilder<K, V>: Sealed {
     /// The output tier type produced by this builder.
     type Tier;
@@ -98,17 +98,20 @@ impl<K, V> CacheBuilder<K, V, ()> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use cachelon::{Cache, CacheTier};
+    /// ```
+    /// # #[cfg(feature = "test-util")]
+    /// # fn main() {
+    /// use cachelon::{Cache, MockCache};
     /// use tick::Clock;
     ///
-    /// struct MyCache;
-    /// // Implement CacheTier for MyCache...
-    ///
+    /// let mock = MockCache::<String, i32>::new();
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .storage(MyCache)
+    ///     .storage(mock)
     ///     .build();
+    /// # }
+    /// # #[cfg(not(feature = "test-util"))]
+    /// # fn main() {}
     /// ```
     pub fn storage<S>(self, storage: S) -> CacheBuilder<K, V, S>
     where
@@ -161,22 +164,22 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// # Examples
     ///
     /// ```ignore
-    /// use cachelon::{Cache, service::ServiceAdapter};
-    /// use layered::Service;
+    /// use cachelon::Cache;
     /// use tick::Clock;
+    /// use std::time::Duration;
     ///
-    /// // Assume we have a Redis service
+    /// // Assume we have a Redis service implementing Service<CacheOperation>
     /// let redis_service = RedisService::new(pool);
     ///
-    /// // Wrap with resilience
-    /// let resilient_redis = (
-    ///     Retry::layer(...),
-    ///     Timeout::layer(...),
-    ///     redis_service
-    /// ).build();
+    /// // Wrap with resilience middleware
+    /// let resilient_redis = ServiceBuilder::new()
+    ///     .retry(...)
+    ///     .timeout(...)
+    ///     .service(redis_service);
     ///
     /// // Use as cache storage
-    /// let cache = Cache::builder(clock)
+    /// let clock = Clock::new_frozen();
+    /// let cache = Cache::builder::<String, i32>(clock)
     ///     .from_service(resilient_redis)
     ///     .ttl(Duration::from_secs(300))
     ///     .build();
@@ -310,7 +313,7 @@ where
 /// Created via `CacheBuilder::with_fallback`. When built, produces a `Cache`
 /// wrapping a `FallbackCache` structure.
 #[derive(Debug)]
-#[allow(clippy::struct_field_names, reason = "builder field naming is intentional")]
+#[expect(clippy::struct_field_names, reason = "builder field naming is intentional")]
 pub struct FallbackBuilder<K, V, PB, FB> {
     name: Option<&'static str>,
     primary_builder: PB,
@@ -427,8 +430,8 @@ where
     type Tier = FallbackCache<K, V, PB::Tier, FB::Tier>;
 }
 
-#[allow(private_bounds, reason = "Buildable is an internal trait")]
-#[allow(clippy::type_complexity, reason = "complex type is unavoidable for builder pattern")]
+#[expect(private_bounds, reason = "Buildable is an internal trait")]
+#[expect(clippy::type_complexity, reason = "complex type is unavoidable for builder pattern")]
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,

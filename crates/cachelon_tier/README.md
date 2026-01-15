@@ -39,7 +39,7 @@ struct SimpleCache<K, V>(RwLock<HashMap<K, CacheEntry<V>>>);
 
 impl<K, V> CacheTier<K, V> for SimpleCache<K, V>
 where
-    K: Eq + std::hash::Hash + Send + Sync,
+    K: Clone + Eq + std::hash::Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
     async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
@@ -64,7 +64,7 @@ storage backends.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyPKOgI1l2AfG51wqT28aGS3G-Q4nmtuKu0UG3A0auuR4tkCYWSBgm1jYWNoZWxvbl90aWVyZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2sjvCA6vZ9PG5u_47buEgjWG0vWlyU6p_ipG2WZWcrKVdL3YWSBgm1jYWNoZWxvbl90aWVyZTAuMS4w
  [__link0]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=error::Error
