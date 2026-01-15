@@ -248,4 +248,11 @@ mod tests {
         let result = futures::executor::block_on(spawner.run(async { 42 }));
         assert_eq!(result, 42);
     }
+
+    #[test]
+    fn custom_spawner_debug() {
+        let spawner = Spawner::custom(|_| {});
+        let debug_str = format!("{spawner:?}");
+        assert!(debug_str.contains("CustomSpawner"));
+    }
 }
