@@ -33,7 +33,7 @@ fn bench_single_call(c: &mut Criterion) {
             let merger = Arc::clone(&our_merger);
             async move {
                 let key = format!("key_{}", COUNTER1.fetch_add(1, Ordering::Relaxed));
-                merger.work(&key, || async { "value".to_string() }).await
+                merger.execute(&key, || async { "value".to_string() }).await
             }
         });
     });
@@ -73,7 +73,7 @@ fn bench_concurrent_10(c: &mut Criterion) {
                     .map(|_| {
                         let merger = Arc::clone(&merger);
                         let key = key.clone();
-                        tokio::spawn(async move { merger.work(&key, || async { "value".to_string() }).await })
+                        tokio::spawn(async move { merger.execute(&key, || async { "value".to_string() }).await })
                     })
                     .collect();
 
@@ -129,7 +129,7 @@ fn bench_concurrent_100(c: &mut Criterion) {
                     .map(|_| {
                         let merger = Arc::clone(&merger);
                         let key = key.clone();
-                        tokio::spawn(async move { merger.work(&key, || async { "value".to_string() }).await })
+                        tokio::spawn(async move { merger.execute(&key, || async { "value".to_string() }).await })
                     })
                     .collect();
 
@@ -187,7 +187,7 @@ fn bench_multiple_keys(c: &mut Criterion) {
                         (0..10).map(move |_| {
                             let merger = Arc::clone(&merger);
                             let key = format!("key_{iteration}_{key_id}");
-                            tokio::spawn(async move { merger.work(&key, || async { "value".to_string() }).await })
+                            tokio::spawn(async move { merger.execute(&key, || async { "value".to_string() }).await })
                         })
                     })
                     .collect();
@@ -244,7 +244,7 @@ fn bench_reuse_group(c: &mut Criterion) {
             async move {
                 // Each iteration uses a unique key to avoid caching effects
                 let key = format!("key_{}", COUNTER5.fetch_add(1, Ordering::Relaxed));
-                merger.work(&key, || async { "value".to_string() }).await
+                merger.execute(&key, || async { "value".to_string() }).await
             }
         });
     });

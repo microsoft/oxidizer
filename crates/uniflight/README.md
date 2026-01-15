@@ -39,7 +39,7 @@ let group: Merger<String, String> = Merger::new();
 
 // Multiple concurrent calls with the same key will share a single execution.
 // Note: you can pass &str directly when the key type is String.
-let result = group.work("user:123", || async {
+let result = group.execute("user:123", || async {
     // This expensive operation runs only once, even if called concurrently
     "expensive_result".to_string()
 }).await;
@@ -47,7 +47,7 @@ let result = group.work("user:123", || async {
 
 ## Flexible Key Types
 
-The [`Merger::work`][__link1] method accepts keys using [`Borrow`][__link2] semantics, allowing you to pass
+The [`Merger::execute`][__link1] method accepts keys using [`Borrow`][__link2] semantics, allowing you to pass
 borrowed forms of the key type. For example, with `Merger<String, T>`, you can pass `&str`
 directly without allocating:
 
@@ -55,7 +55,7 @@ directly without allocating:
 let merger: Merger<String, i32> = Merger::new();
 
 // Pass &str directly - no need to call .to_string()
-merger.work("my-key", || async { 42 }).await;
+merger.execute("my-key", || async { 42 }).await;
 ```
 
 ## Thread-Aware Scoping
@@ -114,9 +114,9 @@ perform similarly (sub-microsecond).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4LesgjATyplG19XnTih3LPaG769pKvyUwBfG7yCiQP8BUYRYWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG04a0viCY92EG7dKIcfT3ii0G7aPoi1gqOy7Gxzt8DWyGmp1YWSCgmx0aHJlYWRfYXdhcmVlMC42LjCCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
- [__link1]: https://docs.rs/uniflight/0.1.0/uniflight/?search=Merger::work
+ [__link1]: https://docs.rs/uniflight/0.1.0/uniflight/?search=Merger::execute
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
  [__link3]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=storage::Strategy
  [__link4]: https://docs.rs/thread_aware/0.6.0/thread_aware/?search=PerProcess

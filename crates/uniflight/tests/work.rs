@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for [`Merger::work()`].
+//! Integration tests for [`Merger::execute()`].
 
 use std::{
     sync::{
@@ -25,7 +25,7 @@ fn unreachable_future() -> std::future::Pending<String> {
 async fn direct_call() {
     let group = Merger::<String, String, _>::new_per_process();
     let result = group
-        .work("key", || async {
+        .execute("key", || async {
             tokio::time::sleep(Duration::from_millis(10)).await;
             "Result".to_string()
         })
@@ -40,7 +40,7 @@ async fn parallel_call() {
     let group = Merger::<String, String, _>::new_per_process();
     let futures = FuturesUnordered::new();
     for _ in 0..10 {
-        futures.push(group.work("key", || async {
+        futures.push(group.execute("key", || async {
             tokio::time::sleep(Duration::from_millis(100)).await;
             call_counter.fetch_add(1, AcqRel);
             "Result".to_string()
@@ -58,7 +58,7 @@ async fn parallel_call_seq_await() {
     let group = Merger::<String, String, _>::new_per_process();
     let mut futures = Vec::new();
     for _ in 0..10 {
-        futures.push(group.work("key", || async {
+        futures.push(group.execute("key", || async {
             tokio::time::sleep(Duration::from_millis(100)).await;
             call_counter.fetch_add(1, AcqRel);
             "Result".to_string()
@@ -75,7 +75,7 @@ async fn parallel_call_seq_await() {
 async fn call_with_static_str_key() {
     let group = Merger::<String, String, _>::new_per_process();
     let result = group
-        .work("key", || async {
+        .execute("key", || async {
             tokio::time::sleep(Duration::from_millis(1)).await;
             "Result".to_string()
         })
@@ -87,7 +87,7 @@ async fn call_with_static_str_key() {
 async fn call_with_static_string_key() {
     let group = Merger::<String, String, _>::new_per_process();
     let result = group
-        .work("key", || async {
+        .execute("key", || async {
             tokio::time::sleep(Duration::from_millis(1)).await;
             "Result".to_string()
         })
@@ -101,7 +101,7 @@ async fn call_with_custom_key() {
     struct K(i32);
     let group = Merger::<K, String, _>::new_per_process();
     let result = group
-        .work(&K(1), || async {
+        .execute(&K(1), || async {
             tokio::time::sleep(Duration::from_millis(1)).await;
             "Result".to_string()
         })
@@ -112,11 +112,11 @@ async fn call_with_custom_key() {
 #[tokio::test]
 async fn late_wait() {
     let group = Merger::<String, String, _>::new_per_process();
-    let fut_early = group.work("key", || async {
+    let fut_early = group.execute("key", || async {
         tokio::time::sleep(Duration::from_millis(20)).await;
         "Result".to_string()
     });
-    let fut_late = group.work("key", unreachable_future);
+    let fut_late = group.execute("key", unreachable_future);
     assert_eq!(fut_early.await, "Result");
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(fut_late.await, "Result");
@@ -127,18 +127,18 @@ async fn cancel() {
     let group = Merger::<String, String, _>::new_per_process();
 
     // The executor was cancelled; the other awaiter will create a new future and execute.
-    let fut_cancel = group.work(&"key".to_string(), unreachable_future);
+    let fut_cancel = group.execute(&"key".to_string(), unreachable_future);
     let _ = tokio::time::timeout(Duration::from_millis(10), fut_cancel).await;
-    let fut_late = group.work("key", || async { "Result2".to_string() });
+    let fut_late = group.execute("key", || async { "Result2".to_string() });
     assert_eq!(fut_late.await, "Result2");
 
     // the first executer is slow but not dropped, so the result will be the first ones.
     let begin = tokio::time::Instant::now();
-    let fut_1 = group.work("key", || async {
+    let fut_1 = group.execute("key", || async {
         tokio::time::sleep(Duration::from_millis(2000)).await;
         "Result1".to_string()
     });
-    let fut_2 = group.work(&"key".to_string(), unreachable_future);
+    let fut_2 = group.execute(&"key".to_string(), unreachable_future);
     let (v1, v2) = tokio::join!(fut_1, fut_2);
     assert_eq!(v1, "Result1");
     assert_eq!(v2, "Result1");
@@ -154,7 +154,7 @@ async fn leader_panic_in_spawned_task() {
     let group_clone = Arc::clone(&group);
     let handle = tokio::spawn(async move {
         group_clone
-            .work("key", || async {
+            .execute("key", || async {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 panic!("leader panicked in spawned task");
                 #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
@@ -169,7 +169,7 @@ async fn leader_panic_in_spawned_task() {
     // Second task should become the new leader after the first panics
     let group_clone = Arc::clone(&group);
     let call_counter_ref = &call_counter;
-    let fut_follower = group_clone.work("key", || async {
+    let fut_follower = group_clone.execute("key", || async {
         call_counter_ref.fetch_add(1, AcqRel);
         "Result".to_string()
     });
@@ -192,7 +192,7 @@ async fn debug_impl() {
     assert!(debug_str.contains("Merger"));
 
     // Create a pending work item to populate the mapping
-    let fut = group.work("key", || async {
+    let fut = group.execute("key", || async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         "Result".to_string()
     });
@@ -210,21 +210,21 @@ async fn debug_impl() {
 #[tokio::test]
 async fn per_process_strategy() {
     let group = Merger::<String, String, _>::new_per_process();
-    let result = group.work("key", || async { "Result".to_string() }).await;
+    let result = group.execute("key", || async { "Result".to_string() }).await;
     assert_eq!(result, "Result");
 }
 
 #[tokio::test]
 async fn per_numa_strategy() {
     let group = Merger::<String, String, _>::new_per_numa();
-    let result = group.work("key", || async { "Result".to_string() }).await;
+    let result = group.execute("key", || async { "Result".to_string() }).await;
     assert_eq!(result, "Result");
 }
 
 #[tokio::test]
 async fn per_core_strategy() {
     let group = Merger::<String, String, _>::new_per_core();
-    let result = group.work("key", || async { "Result".to_string() }).await;
+    let result = group.execute("key", || async { "Result".to_string() }).await;
     assert_eq!(result, "Result");
 }
 
@@ -236,14 +236,14 @@ async fn clone_shares_state() {
     let call_counter = AtomicUsize::default();
 
     // Start work on clone 1
-    let fut1 = group1.work("key", || async {
+    let fut1 = group1.execute("key", || async {
         tokio::time::sleep(Duration::from_millis(50)).await;
         call_counter.fetch_add(1, AcqRel);
         "Result".to_string()
     });
 
     // Clone 2 should join the same work
-    let fut2 = group2.work("key", || async {
+    let fut2 = group2.execute("key", || async {
         call_counter.fetch_add(1, AcqRel);
         "Unreachable".to_string()
     });

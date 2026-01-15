@@ -38,7 +38,7 @@ async fn main() {
             let start = clock.instant();
 
             let result = group
-                .work("user:123", || async {
+                .execute("user:123", || async {
                     let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
                     println!("  [Request {i}] I'm the leader! Fetching from database... (execution #{count})");
 

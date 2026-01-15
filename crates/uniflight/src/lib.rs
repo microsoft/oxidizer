@@ -1,10 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// Based on singleflight-async by ihciah
-// Original: https://github.com/ihciah/singleflight-async
-// Licensed under MIT/Apache-2.0
-
 //! Coalesces duplicate async tasks into a single execution.
 //!
 //! This crate provides [`Merger`], a mechanism for deduplicating concurrent async operations.
@@ -32,7 +28,7 @@
 //!
 //! // Multiple concurrent calls with the same key will share a single execution.
 //! // Note: you can pass &str directly when the key type is String.
-//! let result = group.work("user:123", || async {
+//! let result = group.execute("user:123", || async {
 //!     // This expensive operation runs only once, even if called concurrently
 //!     "expensive_result".to_string()
 //! }).await;
@@ -41,7 +37,7 @@
 //!
 //! # Flexible Key Types
 //!
-//! The [`Merger::work`] method accepts keys using [`Borrow`] semantics, allowing you to pass
+//! The [`Merger::execute`] method accepts keys using [`Borrow`] semantics, allowing you to pass
 //! borrowed forms of the key type. For example, with `Merger<String, T>`, you can pass `&str`
 //! directly without allocating:
 //!
@@ -51,7 +47,7 @@
 //! let merger: Merger<String, i32> = Merger::new();
 //!
 //! // Pass &str directly - no need to call .to_string()
-//! merger.work("my-key", || async { 42 }).await;
+//! merger.execute("my-key", || async { 42 }).await;
 //! # }
 //! ```
 //!
@@ -321,10 +317,10 @@ where
     /// # use uniflight::Merger;
     /// # async fn example() {
     /// let merger: Merger<String, i32> = Merger::new();
-    /// let result = merger.work("my-key", || async { 42 }).await;
+    /// let result = merger.execute("my-key", || async { 42 }).await;
     /// # }
     /// ```
-    pub fn work<Q, F, Fut>(&self, key: &Q, func: F) -> impl Future<Output = T> + Send + use<Q, F, Fut, K, T, S>
+    pub fn execute<Q, F, Fut>(&self, key: &Q, func: F) -> impl Future<Output = T> + Send + use<Q, F, Fut, K, T, S>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
@@ -455,14 +451,14 @@ mod tests {
         assert!(group.is_empty());
 
         // Single call should clean up after completion
-        let result = group.work("key1", || async { "Result".to_string() }).await;
+        let result = group.execute("key1", || async { "Result".to_string() }).await;
         assert_eq!(result, "Result");
         assert!(group.is_empty(), "Map should be empty after single call completes");
 
         // Multiple concurrent calls should clean up after all complete
         let futures: Vec<_> = (0..10)
             .map(|_| {
-                group.work("key2", || async {
+                group.execute("key2", || async {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     "Result".to_string()
                 })
@@ -479,9 +475,9 @@ mod tests {
         assert!(group.is_empty(), "Map should be empty after all concurrent calls complete");
 
         // Multiple different keys should all be cleaned up
-        let fut1 = group.work("a", || async { "A".to_string() });
-        let fut2 = group.work("b", || async { "B".to_string() });
-        let fut3 = group.work("c", || async { "C".to_string() });
+        let fut1 = group.execute("a", || async { "A".to_string() });
+        let fut2 = group.execute("b", || async { "B".to_string() });
+        let fut3 = group.execute("c", || async { "C".to_string() });
 
         assert_eq!(group.len(), 3);
 
