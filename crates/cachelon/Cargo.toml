@@ -1,0 +1,152 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cachelon"
+description = "A composable, customizable multi-tier caching library with rich feature support."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "caching", "concurrency"]
+categories = ["caching", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = []
+
+[features]
+default = [
+    "dynamic-cache",
+    "memory",
+    "service",
+    "telemetry",
+    "tokio",
+]
+dynamic-cache = ["dep:dynosaur"]
+telemetry = [
+    "dep:arrayvec",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+]
+test-util = ["cachelon_tier/test-util", "tick/test-util"]
+memory = ["dep:cachelon_memory"]
+service = ["dep:cachelon_service", "dep:layered"]
+tokio = [
+    "dep:fundle",
+    "dep:singleflight-async",
+    "dep:tokio",
+    "tick/tokio",
+]
+
+[dependencies]
+alloc_tracker = { workspace = true }
+arrayvec = { workspace = true, optional = true }
+cachelon_memory = { path = "../cachelon_memory", optional = true }
+cachelon_tier = { path = "../cachelon_tier" }
+cachelon_service = { path = "../cachelon_service", optional = true }
+criterion = { workspace = true }
+dynosaur = { workspace = true, optional = true }
+fundle = { workspace = true, optional = true }
+futures = { workspace = true, features = ["async-await", "executor"] }
+layered = { workspace = true, optional = true }
+ohno = { workspace = true }
+opentelemetry = { workspace = true, optional = true, features = [
+    "metrics",
+    "logs",
+] }
+opentelemetry_sdk = { workspace = true, optional = true, features = [
+    "logs",
+    "metrics",
+] }
+parking_lot = { version = "0.12.5" }
+singleflight-async = { version = "0.2", optional = true }
+tick = { workspace = true, features = [] }
+thread_aware = { workspace = true }
+tokio = { workspace = true, features = ["rt"], optional = true }
+
+[dev-dependencies]
+cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }
+dynosaur = { workspace = true }
+fundle = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
+tick = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt"] }
+tracing-subscriber = { workspace = true }
+
+[[bench]]
+name = "features"
+harness = false
+required-features = []
+
+[[bench]]
+name = "overhead"
+harness = false
+required-features = ["telemetry", "test-util"]
+
+[[bench]]
+name = "refresh"
+harness = false
+required-features = ["telemetry", "test-util"]
+
+[[example]]
+name = "simple"
+required-features = ["memory", "tokio"]
+
+[[example]]
+name = "wrapped"
+required-features = ["memory", "telemetry", "tokio"]
+
+[[example]]
+name = "fallback"
+required-features = ["memory", "telemetry", "tokio"]
+
+[[example]]
+name = "multi_tier"
+required-features = ["memory", "telemetry", "tokio"]
+
+[[example]]
+name = "dynamic"
+required-features = ["dynamic-cache", "memory", "telemetry", "tokio"]
+
+[[example]]
+name = "get_or_insert"
+required-features = ["memory", "tokio"]
+
+[[example]]
+name = "stampede"
+required-features = ["memory", "tokio"]
+
+[[example]]
+name = "refresh"
+required-features = ["memory", "tokio"]
+
+[[example]]
+name = "mock_testing"
+required-features = ["test-util", "tokio"]
+
+[[example]]
+name = "cache_as_service"
+required-features = ["memory", "service", "tokio"]
+
+[[example]]
+name = "service_as_storage"
+required-features = ["service", "tokio"]
+
+[[example]]
+name = "multi_tier_service"
+required-features = ["memory", "service", "tokio"]
+
+[[example]]
+name = "service_middleware_composition"
+required-features = ["memory", "service", "tokio"]
+
+[lints]
+workspace = true

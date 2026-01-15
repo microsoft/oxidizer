@@ -1,0 +1,202 @@
+// Copyright (c) Microsoft Corporation.
+
+//! Integration tests for CacheTier trait default implementations.
+
+use cachelon_tier::{CacheEntry, CacheTier};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    futures::executor::block_on(f)
+}
+
+/// Minimal implementation that only provides required methods
+struct MinimalCache<K, V> {
+    data: Mutex<HashMap<K, CacheEntry<V>>>,
+}
+
+impl<K, V> MinimalCache<K, V> {
+    fn new() -> Self {
+        Self {
+            data: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<K, V> CacheTier<K, V> for MinimalCache<K, V>
+where
+    K: Clone + Eq + std::hash::Hash + Send + Sync,
+    V: Clone + Send + Sync,
+{
+    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
+        self.data.lock().unwrap().get(key).cloned()
+    }
+
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+        self.data.lock().unwrap().insert(key.clone(), entry);
+    }
+}
+
+#[test]
+fn minimal_cachelon_get_miss() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+        let result = cache.get(&"key".to_string()).await;
+        assert!(result.is_none());
+    });
+}
+
+#[test]
+fn minimal_cachelon_get_hit() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.get(&"key".to_string()).await;
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
+    });
+}
+
+#[test]
+fn default_try_get_wraps_get() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+        let result = cache.try_get(&"key".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.try_get(&"key".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    });
+}
+
+#[test]
+fn default_try_insert_wraps_insert() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+        let result = cache.try_insert(&"key".to_string(), CacheEntry::new(42)).await;
+        assert!(result.is_ok());
+        assert!(cache.get(&"key".to_string()).await.is_some());
+    });
+}
+
+#[test]
+fn default_invalidate_does_not_panic() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+
+        // Test passes if this doesn't panic (default impl is no-op)
+        cache.invalidate(&"nonexistent".to_string()).await;
+
+        // Test with existing key
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        cache.invalidate(&"key".to_string()).await;
+    });
+}
+
+#[test]
+fn default_try_invalidate_returns_ok() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+
+        // Should return Ok even for nonexistent keys
+        let result = cache.try_invalidate(&"nonexistent".to_string()).await;
+        assert!(result.is_ok());
+
+        // Should return Ok for existing keys
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.try_invalidate(&"key".to_string()).await;
+        assert!(result.is_ok());
+    });
+}
+
+#[test]
+fn default_clear_does_not_panic() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+
+        // Test passes if this doesn't panic (default impl is no-op)
+        cache.clear().await;
+
+        // Test with entries
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        cache.clear().await;
+    });
+}
+
+#[test]
+fn default_try_clear_returns_ok() {
+    block_on(async {
+        let cache: MinimalCache<String, i32> = MinimalCache::new();
+
+        // Should return Ok for empty cache
+        let result = cache.try_clear().await;
+        assert!(result.is_ok());
+
+        // Should return Ok even with entries
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.try_clear().await;
+        assert!(result.is_ok());
+    });
+}
+
+#[test]
+fn default_len_returns_none() {
+    let cache: MinimalCache<String, i32> = MinimalCache::new();
+    assert!(cache.len().is_none());
+}
+
+#[test]
+fn default_is_empty_returns_none() {
+    let cache: MinimalCache<String, i32> = MinimalCache::new();
+    assert!(cache.is_empty().is_none());
+}
+
+/// Implementation that provides len() to test is_empty() default behavior
+struct CacheWithLen<K, V> {
+    data: Mutex<HashMap<K, CacheEntry<V>>>,
+}
+
+impl<K, V> CacheWithLen<K, V> {
+    fn new() -> Self {
+        Self {
+            data: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<K, V> CacheTier<K, V> for CacheWithLen<K, V>
+where
+    K: Clone + Eq + std::hash::Hash + Send + Sync,
+    V: Clone + Send + Sync,
+{
+    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
+        self.data.lock().unwrap().get(key).cloned()
+    }
+
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+        self.data.lock().unwrap().insert(key.clone(), entry);
+    }
+
+    fn len(&self) -> Option<u64> {
+        Some(self.data.lock().unwrap().len() as u64)
+    }
+}
+
+#[test]
+fn is_empty_uses_len_when_available() {
+    block_on(async {
+        let cache: CacheWithLen<String, i32> = CacheWithLen::new();
+
+        // Empty cache
+        assert_eq!(cache.is_empty(), Some(true));
+        assert_eq!(cache.len(), Some(0));
+
+        // Add entry
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        assert_eq!(cache.is_empty(), Some(false));
+        assert_eq!(cache.len(), Some(1));
+    });
+}

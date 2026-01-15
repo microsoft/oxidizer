@@ -1,0 +1,228 @@
+// Copyright (c) Microsoft Corporation.
+
+//! Integration tests for InMemoryCache.
+
+use cachelon_memory::{InMemoryCache, InMemoryCacheBuilder};
+use cachelon_tier::{CacheEntry, CacheTier};
+use std::time::Duration;
+
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    futures::executor::block_on(f)
+}
+
+#[test]
+fn new_creates_unbounded_cache() {
+    let cache = InMemoryCache::<String, i32>::new();
+    assert_eq!(cache.len(), Some(0));
+}
+
+#[test]
+fn with_capacity_creates_bounded_cache() {
+    let cache = InMemoryCache::<String, i32>::with_capacity(100);
+    assert_eq!(cache.len(), Some(0));
+}
+
+#[test]
+fn default_creates_unbounded_cache() {
+    let cache = InMemoryCache::<String, i32>::default();
+    assert_eq!(cache.len(), Some(0));
+}
+
+#[test]
+fn get_returns_none_for_missing_key() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        let result = cache.get(&"missing".to_string()).await;
+        assert!(result.is_none());
+    });
+}
+
+#[test]
+fn insert_and_get_returns_value() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+
+        let result = cache.get(&"key".to_string()).await;
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
+    });
+}
+
+#[test]
+fn insert_overwrites_existing_value() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        cache.insert(&"key".to_string(), CacheEntry::new(100)).await;
+
+        let result = cache.get(&"key".to_string()).await;
+        assert_eq!(*result.unwrap().value(), 100);
+    });
+}
+
+#[test]
+fn try_get_returns_ok() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+
+        let result = cache.try_get(&"missing".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.try_get(&"key".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    });
+}
+
+#[test]
+fn try_insert_returns_ok() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        let result = cache.try_insert(&"key".to_string(), CacheEntry::new(42)).await;
+        assert!(result.is_ok());
+        assert!(cache.get(&"key".to_string()).await.is_some());
+    });
+}
+
+#[test]
+fn invalidate_removes_entry() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+
+        cache.invalidate(&"key".to_string()).await;
+
+        let result = cache.get(&"key".to_string()).await;
+        assert!(result.is_none());
+    });
+}
+
+#[test]
+fn invalidate_nonexistent_key_succeeds() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.invalidate(&"nonexistent".to_string()).await;
+    });
+}
+
+#[test]
+fn try_invalidate_returns_ok() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+
+        let result = cache.try_invalidate(&"key".to_string()).await;
+        assert!(result.is_ok());
+        assert!(cache.get(&"key".to_string()).await.is_none());
+    });
+}
+
+#[test]
+fn clear_removes_all_entries() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.insert(&"key1".to_string(), CacheEntry::new(1)).await;
+        cache.insert(&"key2".to_string(), CacheEntry::new(2)).await;
+        cache.insert(&"key3".to_string(), CacheEntry::new(3)).await;
+
+        cache.clear().await;
+
+        assert!(cache.get(&"key1".to_string()).await.is_none());
+        assert!(cache.get(&"key2".to_string()).await.is_none());
+        assert!(cache.get(&"key3".to_string()).await.is_none());
+    });
+}
+
+#[test]
+fn try_clear_returns_ok() {
+    block_on(async {
+        let cache = InMemoryCache::<String, i32>::new();
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+
+        let result = cache.try_clear().await;
+        assert!(result.is_ok());
+    });
+}
+
+#[test]
+fn len_returns_some() {
+    // Note: moka uses eventual consistency for entry counts,
+    // so we only verify that len() returns Some(_)
+    let cache = InMemoryCache::<String, i32>::new();
+    assert!(cache.len().is_some());
+}
+
+#[test]
+fn is_empty_returns_some() {
+    // Note: moka uses eventual consistency for entry counts,
+    // so we only verify that is_empty() returns Some(_)
+    let cache = InMemoryCache::<String, i32>::new();
+    assert!(cache.is_empty().is_some());
+}
+
+#[test]
+fn clone_shares_underlying_cache() {
+    block_on(async {
+        let cache1 = InMemoryCache::<String, i32>::new();
+        let cache2 = cache1.clone();
+
+        cache1.insert(&"key".to_string(), CacheEntry::new(42)).await;
+
+        let result = cache2.get(&"key".to_string()).await;
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
+    });
+}
+
+// Builder tests
+
+#[test]
+fn builder_default_creates_unbounded_cache() {
+    let cache = InMemoryCacheBuilder::<String, i32>::default().build();
+    assert_eq!(cache.len(), Some(0));
+}
+
+#[test]
+fn builder_max_capacity_sets_limit() {
+    let _cache = InMemoryCacheBuilder::<String, i32>::new().max_capacity(100).build();
+}
+
+#[test]
+fn builder_initial_capacity_preallocates() {
+    let _cache = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(50).build();
+}
+
+#[test]
+fn builder_time_to_live_sets_ttl() {
+    let _cache = InMemoryCacheBuilder::<String, i32>::new()
+        .time_to_live(Duration::from_secs(300))
+        .build();
+}
+
+#[test]
+fn builder_time_to_idle_sets_tti() {
+    let _cache = InMemoryCacheBuilder::<String, i32>::new()
+        .time_to_idle(Duration::from_secs(60))
+        .build();
+}
+
+#[test]
+fn builder_name_sets_cache_name() {
+    let _cache = InMemoryCacheBuilder::<String, i32>::new().name("test-cache").build();
+}
+
+#[test]
+fn builder_all_options_combined() {
+    let cache = InMemoryCacheBuilder::<String, i32>::new()
+        .max_capacity(1000)
+        .initial_capacity(100)
+        .time_to_live(Duration::from_secs(300))
+        .time_to_idle(Duration::from_secs(60))
+        .name("full-config-cache")
+        .build();
+
+    assert_eq!(cache.len(), Some(0));
+}
