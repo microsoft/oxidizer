@@ -1,6 +1,41 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# Run essential checks before submitting a PR.
+[script]
+check-changes:
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    Write-Host "`n=== Building workspace ===" -ForegroundColor Cyan
+    just build
+
+    Write-Host "`n=== Running tests ===" -ForegroundColor Cyan
+    just test
+
+    Write-Host "`n=== Running doc tests ===" -ForegroundColor Cyan
+    just test-docs
+
+    Write-Host "`n=== Running Clippy ===" -ForegroundColor Cyan
+    just clippy
+
+    Write-Host "`n=== Checking formatting ===" -ForegroundColor Cyan
+    just format-check
+
+    Write-Host "`n=== Checking Cargo.toml sorting ===" -ForegroundColor Cyan
+    cargo sort --check --grouped --workspace
+
+    Write-Host "`n=== Checking READMEs ===" -ForegroundColor Cyan
+    just readme-check
+
+    Write-Host "`n=== Checking spelling ===" -ForegroundColor Cyan
+    just spellcheck
+
+    Write-Host "`n=== Validating dependencies ===" -ForegroundColor Cyan
+    just deny
+
+    Write-Host "`n=== All checks passed! ===" -ForegroundColor Green
+
 build PROFILE='dev':
     cargo build {{ target_package }} --profile {{ PROFILE }} --all-features --all-targets --locked
 
