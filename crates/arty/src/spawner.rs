@@ -9,8 +9,6 @@ use std::sync::Arc;
 
 use futures_channel::oneshot;
 
-pub use oneshot::Canceled;
-
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 
@@ -163,11 +161,13 @@ impl Spawner {
         }
     }
 
-    /// Runs an async task and returns a receiver for its result.
+    /// Runs an async task and returns its result.
     ///
-    /// The task runs independently. Await the returned receiver to get the
-    /// result. If the task panics or is cancelled, the receiver returns
-    /// [`Canceled`].
+    /// The task runs independently.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the spawned task panics before producing a result.
     ///
     /// # Examples
     ///
@@ -177,16 +177,19 @@ impl Spawner {
     /// # #[tokio::main]
     /// # async fn main() {
     /// let spawner = Spawner::tokio();
-    /// let result = spawner.run(async { 1 + 1 });
-    /// assert_eq!(result.await.unwrap(), 2);
+    /// let result = spawner.run(async { 1 + 1 }).await;
+    /// assert_eq!(result, 2);
     /// # }
     /// ```
-    pub fn run<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
+    pub async fn run<T: Send + 'static>(
+        &self,
+        work: impl Future<Output = T> + Send + 'static,
+    ) -> T {
         let (tx, rx) = oneshot::channel();
         self.spawn(async move {
             let _ = tx.send(work.await);
         });
-        rx
+        rx.await.expect("spawned task panicked")
     }
 }
 
@@ -236,8 +239,8 @@ mod tests {
     #[tokio::test]
     async fn tokio_run() {
         let spawner = Spawner::tokio();
-        let rx = spawner.run(async { 42 });
-        assert_eq!(rx.await.unwrap(), 42);
+        let result = spawner.run(async { 42 }).await;
+        assert_eq!(result, 42);
     }
 
     #[test]
@@ -246,7 +249,7 @@ mod tests {
             std::thread::spawn(move || futures::executor::block_on(fut));
         });
 
-        let rx = spawner.run(async { 42 });
-        assert_eq!(futures::executor::block_on(rx).unwrap(), 42);
+        let result = futures::executor::block_on(spawner.run(async { 42 }));
+        assert_eq!(result, 42);
     }
 }
