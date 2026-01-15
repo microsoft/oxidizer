@@ -8,13 +8,13 @@ edition = "2024"
 
 [dependencies]
 automation = { path = "../crates/automation" }
-anyhow = "1.0"
+ohno = { path = "../crates/ohno", features = ["app-err"] }
 argh = "0.1"
 ---
 
 use std::path::Path;
 
-use anyhow::Result;
+use ohno::AppError;
 use argh::FromArgs;
 
 /// Check external types in all workspace library crates.
@@ -88,7 +88,7 @@ fn main() {
     }
 }
 
-fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<()> {
+fn check_external_types(manifest_path: &str, toolchain: &str) -> Result<(), AppError> {
     let args = vec![
         format!("+{}", toolchain),
         "check-external-types".to_string(),

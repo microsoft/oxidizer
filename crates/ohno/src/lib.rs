@@ -3,6 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![expect(clippy::doc_markdown, reason = "AppError in header doesn't look good with backticks")]
 
 //! High-quality error handling for Rust.
 //!
@@ -16,6 +17,7 @@
 //! - [**`#[enrich_err("...")]`**](#error-enrichment): Attribute macro for automatic error enrichment with file and line information.
 //! - [**`ErrorExt`**](ohno::ErrorExt): Trait that provides additional methods for ohno error types, it's implemented automatically for all ohno error types
 //! - [**`OhnoCore`**](OhnoCore): Core error type that wraps source errors, captures backtraces, and holds enrichment entries
+//! - [**`AppError`**](AppError): Application-level error type for general application errors
 //!
 //! # Quick Start
 //!
@@ -220,6 +222,25 @@
 //! }
 //! // Error output will include: "failed to open file (at src/main.rs:42)"
 //! ```
+//!
+//! # AppError
+//!
+//! For applications that need a simple, catch-all error type, use [`AppError`]. It
+//! automatically captures backtraces and can wrap any error type.
+//!
+//! To avoid accidental usage in libraries, [`AppError`] is only available when the `app-err`
+//! feature is enabled.
+//!
+//! Example usage:
+//!
+//! ```rust
+//! use ohno::AppError;
+//!
+//! fn process() -> Result<(), AppError> {
+//!     std::fs::read_to_string("file.txt")?; // Automatically converts errors
+//!     Ok(())
+//! }
+//! ```
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno/favicon.ico")]
@@ -227,6 +248,8 @@
 #[doc(hidden)]
 extern crate self as ohno;
 
+#[cfg(feature = "app-err")]
+mod app;
 mod backtrace;
 mod core;
 mod enrichable;
@@ -239,6 +262,8 @@ pub mod test_util;
 
 pub use core::OhnoCore;
 
+#[cfg(feature = "app-err")]
+pub use app::{AppError, IntoAppError};
 pub use enrichable::{Enrichable, EnrichableExt};
 pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
