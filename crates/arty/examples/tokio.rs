@@ -23,7 +23,7 @@ async fn main() {
     });
 
     // Retrieve a result using run
-    let value = spawner.run(async { 1 + 1 }).await.unwrap();
+    let value = spawner.run(async { 1 + 1 }).await;
     println!("Got result: {value}");
 
     // Wait for background task

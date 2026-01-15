@@ -21,7 +21,7 @@ fn main() {
 
     // Retrieve a result using run
     let rx = spawner.run(async { 1 + 1 });
-    let value = futures::executor::block_on(rx).unwrap();
+    let value = futures::executor::block_on(rx);
     println!("Got result: {value}");
 
     // Wait for background task

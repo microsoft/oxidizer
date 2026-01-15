@@ -55,4 +55,4 @@
 
 mod spawner;
 
-pub use spawner::{Canceled, Spawner};
+pub use spawner::Spawner;

@@ -60,7 +60,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// # #[tokio::main]
 /// # async fn main() {
 /// let spawner = Spawner::tokio();
-/// let value = spawner.run(async { 1 + 1 }).await.unwrap();
+/// let value = spawner.run(async { 1 + 1 }).await;
 /// assert_eq!(value, 2);
 /// # }
 /// ```
@@ -80,8 +80,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 ///     .run(async {
 ///         if true { Ok(42) } else { Err("something went wrong") }
 ///     })
-///     .await
-///     .unwrap();
+///     .await;
 ///
 /// match result {
 ///     Ok(value) => println!("Got {value}"),
@@ -181,10 +180,7 @@ impl Spawner {
     /// assert_eq!(result, 2);
     /// # }
     /// ```
-    pub async fn run<T: Send + 'static>(
-        &self,
-        work: impl Future<Output = T> + Send + 'static,
-    ) -> T {
+    pub async fn run<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> T {
         let (tx, rx) = oneshot::channel();
         self.spawn(async move {
             let _ = tx.send(work.await);

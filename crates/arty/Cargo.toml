@@ -16,12 +16,6 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "futures_channel::oneshot::Canceled",
-    "futures_channel::oneshot::Receiver",
-]
-
 [package.metadata.docs.rs]
 all-features = true
 
