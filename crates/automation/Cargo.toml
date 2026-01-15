@@ -14,7 +14,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-anyhow = { workspace = true, features = ["std"] }
+ohno = { workspace = true, features = ["app-err"] }
+
 duct = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["std"] }

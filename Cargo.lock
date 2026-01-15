@@ -60,8 +60,8 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 name = "automation"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "duct",
+ "ohno",
  "serde",
  "serde_json",
 ]
@@ -92,7 +92,7 @@ checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 
 [[package]]
 name = "bytesbuf"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "data_privacy_macros",
  "derive_more",
