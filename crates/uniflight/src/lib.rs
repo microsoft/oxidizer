@@ -358,6 +358,19 @@ where
         }
 
         // Slow path: need to insert or replace expired entry
+        Self::insert_or_get_existing(map, key)
+    }
+
+    /// Inserts a new cell or returns an existing live cell (handling races).
+    ///
+    /// This is the slow path of `get_or_create_cell`, separated for testability.
+    /// It handles the case where another thread may have inserted a cell between
+    /// our fast-path check and this insertion attempt.
+    fn insert_or_get_existing<Q>(map: &DashMap<K, Weak<OnceCell<T>>>, key: &Q) -> Arc<OnceCell<T>>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
+    {
         let cell = Arc::new(OnceCell::new());
         let weak = Arc::downgrade(&cell);
 
@@ -386,6 +399,55 @@ where
 mod tests {
     use super::*;
     use std::time::Duration;
+    use thread_aware::affinity::pinned_affinities;
+
+    #[test]
+    fn relocated_delegates_to_inner() {
+        let affinities = pinned_affinities(&[2]);
+        let source = affinities[0].into();
+        let destination = affinities[1];
+
+        let merger: Merger<String, String> = Merger::new();
+        let relocated = merger.relocated(source, destination);
+
+        // Verify the relocated merger still works
+        assert!(relocated.is_empty());
+    }
+
+    #[test]
+    fn fast_path_returns_existing() {
+        let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
+        let existing_cell = Arc::new(OnceCell::new());
+        map.insert("key".to_string(), Arc::downgrade(&existing_cell));
+
+        let result = Merger::<String, String>::get_or_create_cell(&map, "key");
+
+        assert!(Arc::ptr_eq(&result, &existing_cell));
+    }
+
+    #[test]
+    fn replaces_expired_entry() {
+        let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
+        let expired_weak = Arc::downgrade(&Arc::new(OnceCell::<String>::new()));
+        map.insert("key".to_string(), expired_weak);
+
+        let result = Merger::<String, String>::get_or_create_cell(&map, "key");
+
+        let entry = map.get("key").unwrap();
+        assert!(Arc::ptr_eq(&result, &entry.value().upgrade().unwrap()));
+    }
+
+    /// Simulates a race where another thread inserted between fast-path check and entry().
+    #[test]
+    fn race_returns_existing() {
+        let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
+        let other_cell = Arc::new(OnceCell::new());
+        map.insert("key".to_string(), Arc::downgrade(&other_cell));
+
+        let result = Merger::<String, String>::insert_or_get_existing(&map, "key");
+
+        assert!(Arc::ptr_eq(&result, &other_cell));
+    }
 
     #[tokio::test]
     async fn cleanup_after_completion() {

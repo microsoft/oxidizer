@@ -126,7 +126,7 @@ async fn late_wait() {
 async fn cancel() {
     let group = Merger::<String, String, _>::new_per_process();
 
-    // the executer cancelled and the other awaiter will create a new future and execute.
+    // The executor was cancelled; the other awaiter will create a new future and execute.
     let fut_cancel = group.work(&"key".to_string(), unreachable_future);
     let _ = tokio::time::timeout(Duration::from_millis(10), fut_cancel).await;
     let fut_late = group.work("key", || async { "Result2".to_string() });
