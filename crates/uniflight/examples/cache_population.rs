@@ -56,7 +56,8 @@ async fn main() {
         handles.push(handle);
 
         // Stagger the requests slightly to see the deduplication in action
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        let clock = Clock::new_tokio();
+        clock.delay(Duration::from_millis(10)).await;
     }
 
     // Wait for all requests to complete
