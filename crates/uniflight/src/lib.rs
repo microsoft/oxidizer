@@ -437,7 +437,7 @@ mod tests {
         assert!(Arc::ptr_eq(&result, &entry.value().upgrade().unwrap()));
     }
 
-    /// Simulates a race where another thread inserted between fast-path check and entry().
+    /// Simulates a race where another thread inserted between fast-path check and `entry()`.
     #[test]
     fn race_returns_existing() {
         let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
