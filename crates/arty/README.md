@@ -61,6 +61,6 @@ spawner.spawn(async {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGy8QLYWQ6TvkGzOuS19rYB8RG4HN5vQgcR69G8qNc7VUYU_3YWSBgmRhcnR5ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGz2vPTqTl9UCG38obYO2K--jG0X7KlikClvvG6i1Pg-T7jGeYWSBgmRhcnR5ZTAuMS4w
  [__link0]: https://docs.rs/arty/0.1.0/arty/?search=Spawner
- [__link1]: https://docs.rs/arty/0.1.0/arty/?search=Spawner::Tokio
+ [__link1]: https://docs.rs/arty/0.1.0/arty/?search=Spawner::tokio
