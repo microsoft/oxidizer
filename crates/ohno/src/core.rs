@@ -45,33 +45,18 @@ pub struct OhnoCore {
 }
 
 impl OhnoCore {
-    /// Creates a new `OhnoCore` with no source (useful when using display override).
-    ///
-    /// Automatically captures a backtrace at the point of creation.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let error = ohno::OhnoCore::new();
-    /// ```
+    /// Creates a new `OhnoCore` with no source. Automatically captures a backtrace.
     #[must_use]
     pub fn new() -> Self {
         Self::from_source(Source::None)
     }
 
-    /// Creates a new `OhnoCore` wrapping an existing error.
-    ///
-    /// The wrapped error becomes the source in the error chain. Backtrace capture
-    /// is disabled assuming the source error already has one.
-    ///
-    /// # Examples
+    /// Creates a new `OhnoCore` wrapping an existing error without capturing backtrace.
     ///
     /// ```rust
-    /// use std::io;
-    ///
     /// use ohno::OhnoCore;
     ///
-    /// let io_error = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+    /// let io_error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
     /// let wrapped = OhnoCore::without_backtrace(io_error);
     /// ```
     pub fn without_backtrace(error: impl Into<Box<dyn StdError + Send + Sync + 'static>>) -> Self {
@@ -95,19 +80,6 @@ impl OhnoCore {
     }
 
     /// Returns the source error if this error wraps another error.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use std::io;
-    ///
-    /// use ohno::OhnoCore;
-    ///
-    /// let io_error = io::Error::new(io::ErrorKind::NotFound, "file.txt");
-    /// let wrapped = OhnoCore::from(io_error);
-    ///
-    /// assert!(wrapped.source().is_some());
-    /// ```
     #[must_use]
     pub fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match &self.data.source {
@@ -118,16 +90,6 @@ impl OhnoCore {
     }
 
     /// Returns whether this error has a captured backtrace.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ohno::OhnoCore;
-    ///
-    /// let error = OhnoCore::from("test error");
-    /// // Backtrace capture depends on RUST_BACKTRACE environment variable
-    /// println!("Has backtrace: {}", error.has_backtrace());
-    /// ```
     #[must_use]
     pub fn has_backtrace(&self) -> bool {
         matches!(self.data.backtrace.status(), BacktraceStatus::Captured)

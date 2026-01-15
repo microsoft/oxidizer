@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use ohno::{AppError, IntoAppError};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -41,21 +41,21 @@ pub struct Target {
 }
 
 /// List all workspace packages using `cargo metadata`
-pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMetadata>> {
+pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMetadata>, AppError> {
     let output = Command::new("cargo")
         .arg("metadata")
         .arg("--format-version=1")
         .arg("--no-deps")
         .current_dir(workspace_root.as_ref())
         .output()
-        .context("failed to execute cargo metadata")?;
+        .into_app_err("failed to execute cargo metadata")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("cargo metadata failed: {stderr}");
+        ohno::bail!("cargo metadata failed: {stderr}");
     }
 
-    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).context("failed to parse cargo metadata output")?;
+    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).into_app_err("failed to parse cargo metadata output")?;
 
     Ok(metadata.packages)
 }
@@ -64,7 +64,7 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
 pub const INTERNAL_CRATES: &[&str] = &["automation", "testing_aids"];
 
 /// Run a cargo command and pipe the output to stdout/stderr
-pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
+pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppError> {
     let args: Vec<_> = args.map(|s| s.as_ref().to_string()).collect();
     let args_str = args.join(" ");
 
@@ -75,7 +75,7 @@ pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        anyhow::bail!(
+        ohno::bail!(
             "cargo {} failed with exit code {:?}\nstdout: {}\nstderr: {}",
             args_str,
             output.status.code(),

@@ -106,7 +106,7 @@
 //! * The application uses the classified container types to wrap sensitive data throughout the application. This ensures the
 //!   sensitive data is not accidentally exposed through telemetry or other means.
 //!
-//! * On startup, the application initializes a [`RedactionEngine`] via [`RedactionEngine::builder()`]. The engine is configured
+//! * On startup, the application initializes a [`RedactionEngine`] via [`RedactionEngine::builder`]. The engine is configured
 //!   with redactors for each data class in the taxonomy. The redactors define how to handle sensitive data for that class.
 //!   For example, for a given data class, a redactor may substitute the original data for a hash value, or it may replace it with asterisks.
 //!
