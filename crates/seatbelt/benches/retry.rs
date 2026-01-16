@@ -13,17 +13,19 @@ use tick::Clock;
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
-pub fn entry(c: &mut Criterion) {
+fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("retry");
     let session = Session::new();
 
     // No retries
     let service = Execute::new(|v: Input| async move { Output::from(v) });
-    group.bench_with_memory(
-        || _ = block_on(service.execute(Input)),
-        "no-retry",
-        &session,
-    );
+    let operation = session.operation("no-retry");
+    group.bench_function("no-retry", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
 
     // With retry
     let options = SeatbeltOptions::new(Clock::new_frozen());
@@ -36,11 +38,13 @@ pub fn entry(c: &mut Criterion) {
     )
         .build();
 
-    group.bench_with_memory(
-        || _ = block_on(service.execute(Input)),
-        "with-retry",
-        &session,
-    );
+    let operation = session.operation("with-retry");
+    group.bench_function("with-retry", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
 
     // With retry and recovery
     let options = SeatbeltOptions::new(Clock::new_frozen());
@@ -55,12 +59,15 @@ pub fn entry(c: &mut Criterion) {
     )
         .build();
 
-    group.bench_with_memory(
-        || _ = block_on(service.execute(Input)),
-        "with-retry-and-recovery",
-        &session,
-    );
+    let operation = session.operation("with-retry-and-recovery");
+    group.bench_function("with-retry-and-recovery", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
 
+    group.finish();
     session.print_to_stdout();
 }
 

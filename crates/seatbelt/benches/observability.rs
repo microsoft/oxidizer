@@ -12,7 +12,6 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
-use oxidizer_benchmarking::BenchmarkGroupExt;
 use seatbelt::SeatbeltOptions;
 use seatbelt::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 use tick::Clock;
@@ -20,17 +19,19 @@ use tick::Clock;
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
-pub fn entry(c: &mut Criterion) {
+fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("observability");
     let session = Session::new();
 
     // No observability
     let service = NoObservability(Execute::new(|v: Input| async move { Output::from(v) }));
-    group.bench_with_memory(
-        || _ = block_on(service.execute(Input)),
-        "no-observability",
-        &session,
-    );
+    let operation = session.operation("no-observability");
+    group.bench_function("no-observability", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
 
     // With observability
     let options = SeatbeltOptions::new(Clock::new_frozen());
@@ -38,11 +39,13 @@ pub fn entry(c: &mut Criterion) {
         &options,
         Execute::new(|v: Input| async move { Output::from(v) }),
     );
-    group.bench_with_memory(
-        || _ = block_on(service.execute(Input)),
-        "observability",
-        &session,
-    );
+    let operation = session.operation("observability");
+    group.bench_function("observability", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
 
     // With observability + listener
     let meter_provider = SdkMeterProvider::builder()
@@ -53,12 +56,15 @@ pub fn entry(c: &mut Criterion) {
         &options,
         Execute::new(|v: Input| async move { Output::from(v) }),
     );
-    group.bench_with_memory(
-        || _ = block_on(service.execute(Input)),
-        "observability-and-listener",
-        &session,
-    );
+    let operation = session.operation("observability-and-listener");
+    group.bench_function("observability-and-listener", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
 
+    group.finish();
     session.print_to_stdout();
 }
 
