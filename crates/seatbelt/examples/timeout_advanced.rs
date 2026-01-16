@@ -7,8 +7,8 @@
 
 use std::time::Duration;
 
-use anyhow::anyhow;
 use layered::{Execute, Service, Stack};
+use ohno::{AppError, app_err};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::SeatbeltOptions;
@@ -21,14 +21,14 @@ const TIMEOUT_DURATION: Duration = Duration::from_millis(20);
 const PROCESSING_DELAY: Duration = Duration::from_secs(1);
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), AppError> {
     // Configure telemetry to see the timeout metrics and logs
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
 
     // Create service options
-    let options: SeatbeltOptions<String, anyhow::Result<()>> = SeatbeltOptions::new(&clock)
+    let options: SeatbeltOptions<String, Result<(), AppError>> = SeatbeltOptions::new(&clock)
         .pipeline_name("my_pipeline")
         .meter_provider(&meter_provider);
 
@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
             .timeout(TIMEOUT_DURATION)
             // Required: create error output for timeouts
             .timeout_error(|args| {
-                anyhow!(
+                app_err!(
                     "timeout occurred, timeout: {}ms",
                     args.timeout().as_millis()
                 )

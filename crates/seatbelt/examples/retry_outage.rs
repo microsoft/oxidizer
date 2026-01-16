@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use http::{Request, Response};
 use layered::{Execute, Service, Stack};
+use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
@@ -24,7 +25,7 @@ const ENDPOINT_WITH_OUTAGE: &str = "https://example.com";
 const ENDPOINT_ALIVE: &str = "https://fallback.example.com";
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();

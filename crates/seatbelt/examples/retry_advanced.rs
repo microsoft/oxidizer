@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use http::{Request, Response};
 use layered::{Execute, Service, Stack};
+use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
@@ -19,7 +20,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();

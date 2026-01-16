@@ -5,12 +5,13 @@
 use std::io::Error;
 
 use layered::{Execute, Service, Stack};
+use ohno::AppError;
 use seatbelt::retry::Retry;
 use seatbelt::{RecoveryInfo, SeatbeltOptions};
 use tick::Clock;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let options = SeatbeltOptions::new(&clock);
 

@@ -42,7 +42,7 @@ futures = { workspace = true }
 [dev-dependencies]
 tick = { workspace = true, features = ["test-util", "tokio"] }
 layered = { workspace = true }
-ohno = { workspace = true }
+ohno = { workspace = true, features = ["app-err"] }
 static_assertions.workspace = true
 mutants.workspace = true
 criterion.workspace = true
@@ -57,7 +57,6 @@ tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 fastrand.workspace = true
 http.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
-ohno = { workspace, features = ["app-err"] }
 
 [[example]]
 name = "timeout"
