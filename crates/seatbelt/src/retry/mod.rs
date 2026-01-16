@@ -107,7 +107,7 @@
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
 //! # use seatbelt::{Backoff, RecoveryInfo, SeatbeltOptions};
-//! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+//! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
 //! let options = SeatbeltOptions::new(&clock).pipeline_name("example");
@@ -117,7 +117,7 @@
 //!         // Required: how to clone inputs for retries
 //!         .clone_input()
 //!         // Required: determine if we should retry based on output
-//!         .recovery_with(|output, _args| match output {
+//!         .recovery_with(|output: &Result<String, String>, _args| match output {
 //!             // These are demonstrative, real code will have more meaningful recovery detection
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(msg) if msg.contains("transient") => RecoveryInfo::retry(),
@@ -145,7 +145,8 @@
 //! ```rust
 //! # use std::time::Duration;
 //! # use tick::Clock;
-//! # use layered::{Execute, Stack};
+//! # use std::io;
+//! # use layered::{Execute, Stack, Service};
 //! # use seatbelt::retry::Retry;
 //! # use seatbelt::{RecoveryInfo, SeatbeltOptions, Backoff};
 //! # async fn example(clock: Clock) -> Result<(), String> {
@@ -156,10 +157,7 @@
 //!     Retry::layer("advanced_retry", &options)
 //!         .clone_input()
 //!         .recovery_with(|output: &Result<String, io::Error>, _args| match output {
-//!             Err(msg) if msg.contains("rate_limit") => {
-//!                 RecoveryInfo::retry().delay(Duration::from_secs(60))
-//!             }
-//!             Err(msg) if msg.contains("timeout") => RecoveryInfo::retry(),
+//!             Err(err) if err.kind() == io::ErrorKind::TimedOut => RecoveryInfo::retry().delay(Duration::from_secs(60)),
 //!             Err(_) => RecoveryInfo::never(),
 //!             Ok(_) => RecoveryInfo::never(),
 //!         })
@@ -168,11 +166,8 @@
 //!         .base_delay(Duration::from_millis(200))
 //!         .backoff(Backoff::Exponential)
 //!         .use_jitter(true)
-//!         // You can extract the delay from the output, or return None to use the
-//!         // one provided by the retry middleware
-//!         .delay_generator(|_output, args| None)
 //!         // Callback called just before the next retry
-//!         .on_retry(|output: Result<String, io::Error>, args| {
+//!         .on_retry(|output, args| {
 //!             println!(
 //!                 "retrying, attempt: {}, delay: {}ms",
 //!                 args.attempt(),
@@ -185,9 +180,10 @@
 //! // Build and execute the service
 //! let service = stack.build();
 //! let result = service.execute("test_timeout".to_string()).await;
-//! # Ok(result)
+//! # let _result = result;
+//! # Ok(())
 //! # }
-//! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
+//! # async fn execute_unreliable_operation(input: String) -> Result<String, io::Error> { Ok(input) }
 //! ```
 //!
 //! ## Incomplete Configuration
