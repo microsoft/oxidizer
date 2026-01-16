@@ -12,7 +12,7 @@ pub enum BacktracePolicy {
     /// Force backtrace capture even if the RUST_BACKTRACE environment variable is not set or set to 0.
     Forced,
     /// Never capture backtraces, regardless of the RUST_BACKTRACE environment variable.
-    Never,
+    Disabled,
 }
 
 /// Builder for creating [`OhnoCore`] instances with custom configurations.

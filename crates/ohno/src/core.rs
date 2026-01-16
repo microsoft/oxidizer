@@ -51,7 +51,7 @@ impl OhnoCore {
                 source: builder.error,
                 backtrace: match builder.backtrace_policy {
                     crate::BacktracePolicy::Auto => Backtrace::capture(),
-                    crate::BacktracePolicy::Never => Backtrace::disabled(),
+                    crate::BacktracePolicy::Disabled => Backtrace::disabled(),
                     crate::BacktracePolicy::Forced => Backtrace::force_capture(),
                 },
                 enrichment: Vec::new(),
@@ -245,7 +245,7 @@ mod tests {
     fn test_caused_by_without_backtrace() {
         let io_error = std::io::Error::other("io error");
         let error = OhnoCore::builder()
-            .backtrace_policy(crate::BacktracePolicy::Never)
+            .backtrace_policy(crate::BacktracePolicy::Disabled)
             .error(io_error)
             .build();
         assert!(matches!(error.data.source, Source::Error(_)));
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn no_backtrace_capture() {
         let error = OhnoCore::builder()
-            .backtrace_policy(crate::BacktracePolicy::Never)
+            .backtrace_policy(crate::BacktracePolicy::Disabled)
             .error("test error without backtrace")
             .build();
         assert!(!error.has_backtrace());

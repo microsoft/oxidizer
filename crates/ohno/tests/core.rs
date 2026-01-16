@@ -112,7 +112,7 @@ fn test_backtrace_capture() {
         .error(io::Error::other("test"))
         .build();
     let error_without_bt = OhnoCore::builder()
-        .backtrace_policy(BacktracePolicy::Never)
+        .backtrace_policy(BacktracePolicy::Disabled)
         .error(io::Error::other("test"))
         .build();
 
