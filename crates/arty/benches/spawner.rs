@@ -25,17 +25,17 @@ fn entry(c: &mut Criterion) {
         b.iter(|| rt.block_on(async { tokio_spawner.spawn(async { 42 }).await }));
     });
 
-    // async-std benchmarks
-    let async_std_spawner = Spawner::custom(|fut| {
-        async_std::task::spawn(fut);
+    // smol benchmarks
+    let smol_spawner = Spawner::custom(|fut| {
+        smol::spawn(fut).detach();
     });
 
-    group.bench_function("async_std_direct", |b| {
-        b.iter(|| async_std::task::block_on(async { async_std::task::spawn(async { 42 }).await }));
+    group.bench_function("smol_direct", |b| {
+        b.iter(|| smol::block_on(async { smol::spawn(async { 42 }).await }));
     });
 
-    group.bench_function("async_std_via_spawner", |b| {
-        b.iter(|| async_std::task::block_on(async { async_std_spawner.spawn(async { 42 }).await }));
+    group.bench_function("smol_via_spawner", |b| {
+        b.iter(|| smol::block_on(async { smol_spawner.spawn(async { 42 }).await }));
     });
 
     group.finish();

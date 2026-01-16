@@ -52,10 +52,17 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
+#[cfg(not(any(feature = "tokio", feature = "custom")))]
+compile_error!("at least one of the `tokio` or `custom` features must be enabled");
+
 #[cfg(feature = "custom")]
 mod custom;
+#[cfg(any(feature = "tokio", feature = "custom"))]
 mod handle;
+#[cfg(any(feature = "tokio", feature = "custom"))]
 mod spawner;
 
+#[cfg(any(feature = "tokio", feature = "custom"))]
 pub use handle::JoinHandle;
+#[cfg(any(feature = "tokio", feature = "custom"))]
 pub use spawner::Spawner;

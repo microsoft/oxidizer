@@ -29,9 +29,9 @@ futures-channel = { workspace = true, features = ["alloc"], optional = true }
 tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]
-async-std = { version = "1.13", features = ["attributes"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
+smol = "2"
 static_assertions.workspace = true
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }

@@ -8,14 +8,14 @@ Compares the overhead of using `Spawner::spawn()` vs calling runtime spawn funct
 |-----------|------|
 | `tokio_direct` | ~12 µs |
 | `tokio_via_spawner` | ~12 µs |
-| `async_std_direct` | ~35 µs |
-| `async_std_via_spawner` | ~21 µs |
+| `smol_direct` | ~2 µs |
+| `smol_via_spawner` | ~2.6 µs |
 
 ## Analysis
 
 **Tokio**: The spawner abstraction has **zero overhead**. Both paths use tokio's `JoinHandle` directly, so the only cost is the match statement which is negligible.
 
-**async-std**: The custom spawner uses a oneshot channel to return results, which is ~14 µs faster than async-std's native `JoinHandle` in this benchmark.
+**smol**: The custom spawner adds ~0.6 µs overhead from the oneshot channel. smol is significantly faster than tokio in this benchmark.
 
 ## Key Takeaway
 
