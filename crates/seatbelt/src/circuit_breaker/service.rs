@@ -177,7 +177,6 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use layered::Execute;
-    use oxidizer_rt::Builtins;
     use tick::ClockControl;
 
     use super::*;
@@ -201,9 +200,10 @@ mod tests {
         assert!(breaker.enable_if.call(&"str".to_string()));
     }
 
-    #[oxidizer_rt::test]
-    async fn circuit_breaker_disabled_no_inner_calls(state: oxidizer_rt::Builtins) {
-        let service = create_ready_circuit_breaker_layer(state.clock())
+    #[tokio::test]
+    async fn circuit_breaker_disabled_no_inner_calls() {
+        let clock = Clock::new_frozen();
+        let service = create_ready_circuit_breaker_layer(&clock)
             .disable()
             .layer(Execute::new(move |v: String| async move { v }));
 
@@ -212,8 +212,8 @@ mod tests {
         assert_eq!(result, "test");
     }
 
-    #[oxidizer_rt::test]
-    async fn passthrough_behavior(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn passthrough_behavior() {
         let clock = Clock::new_frozen();
         let service = create_ready_circuit_breaker_layer(&clock)
             .layer(Execute::new(move |v: String| async move { v }));
@@ -389,8 +389,8 @@ mod tests {
         assert!(closed_called_clone.load(Ordering::SeqCst));
     }
 
-    #[oxidizer_rt::test]
-    async fn execute_end_to_end_with_callbacks(_state: Builtins) {
+    #[tokio::test]
+    async fn execute_end_to_end_with_callbacks() {
         let probing_called = Arc::new(AtomicBool::new(false));
         let opened_called = Arc::new(AtomicBool::new(false));
         let closed_called = Arc::new(AtomicBool::new(false));
@@ -452,9 +452,10 @@ mod tests {
         assert_eq!(result, "success_output");
     }
 
-    #[oxidizer_rt::test]
-    async fn different_partitions_ensure_isolated(builtins: Builtins) {
-        let service = create_ready_circuit_breaker_layer(builtins.clock())
+    #[tokio::test]
+    async fn different_partitions_ensure_isolated() {
+        let clock = Clock::new_frozen();
+        let service = create_ready_circuit_breaker_layer(&clock)
             .partition_key(|input| PartitionKey::from(input.clone()))
             .min_throughput(3)
             .recovery_with(|_, _| RecoveryInfo::retry())

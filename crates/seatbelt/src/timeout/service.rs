@@ -144,18 +144,18 @@ where
     }
 }
 
-#[cfg(not(miri))] // Oxidizer runtime does not support Miri.
+#[cfg(not(miri))] // tokio runtime does not support Miri.
 #[cfg(test)]
 mod tests {
     use layered::{Execute, Stack};
-    use oxidizer_rt::Builtins;
     use tick::ClockControl;
 
     use super::*;
 
-    #[oxidizer_rt::test]
-    async fn no_timeout(state: Builtins) {
-        let options = SeatbeltOptions::new(state.clock().clone());
+    #[tokio::test]
+    async fn no_timeout() {
+        let clock = Clock::new_frozen();
+        let options = SeatbeltOptions::new(clock);
 
         let stack = (
             Timeout::layer("test_timeout", &options)
@@ -171,8 +171,8 @@ mod tests {
         assert_eq!(output, "test input".to_string());
     }
 
-    #[oxidizer_rt::test]
-    async fn timeout(_state: Builtins) {
+    #[tokio::test]
+    async fn timeout() {
         let clock = ClockControl::default()
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
@@ -207,8 +207,8 @@ mod tests {
         assert!(called_clone.load(std::sync::atomic::Ordering::SeqCst));
     }
 
-    #[oxidizer_rt::test]
-    async fn timeout_override_ensure_respected(_state: Builtins) {
+    #[tokio::test]
+    async fn timeout_override_ensure_respected() {
         let clock = ClockControl::default()
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(5000))
@@ -246,34 +246,31 @@ mod tests {
         );
     }
 
-    #[oxidizer_rt::test]
-    async fn no_timeout_if_disabled(state: Builtins) {
-        let control = ClockControl::default();
-        let clock = control.to_clock();
+    #[tokio::test]
+    async fn no_timeout_if_disabled() {
+        let clock = ClockControl::default()
+            .auto_advance_timers(true)
+            .to_clock();
         let stack = (
             Timeout::layer("test_timeout", &SeatbeltOptions::new(&clock))
                 .timeout_output(|_args| "timed out".to_string())
                 .timeout(Duration::from_millis(200))
                 .disable(),
-            Execute::new(move |input| {
+            Execute::new({
                 let clock = clock.clone();
-                async move {
-                    clock.delay(Duration::from_secs(1)).await;
-                    input
+                move |input| {
+                    let clock = clock.clone();
+                    async move {
+                        clock.delay(Duration::from_secs(1)).await;
+                        input
+                    }
                 }
             }),
         );
 
         let service = stack.build();
-        let handle = state
-            .scheduler()
-            .spawn(|_state| async move { service.execute("test input".to_string()).await });
+        let output = service.execute("test input".to_string()).await;
 
-        // this should trigger timeout
-        control.advance_millis(250);
-        state.runtime_ops().unwrap().yield_now().await;
-        control.advance_millis(1000);
-
-        assert_eq!(handle.await, "test input");
+        assert_eq!(output, "test input");
     }
 }

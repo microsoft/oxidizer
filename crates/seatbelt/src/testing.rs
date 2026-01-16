@@ -7,7 +7,7 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use crate::{Recovery, RecoveryInfo};
 
 #[derive(Debug)]
-pub struct MetricTester {
+pub(crate) struct MetricTester {
     exporter: InMemoryMetricExporter,
     provider: SdkMeterProvider,
 }
@@ -139,7 +139,7 @@ fn collect_attributes_for_metric(metric: &Metric) -> impl Iterator<Item = KeyVal
 }
 
 #[derive(Debug)]
-pub struct RecoverableType(RecoveryInfo);
+pub(crate) struct RecoverableType(RecoveryInfo);
 
 impl Recovery for RecoverableType {
     fn recovery(&self) -> RecoveryInfo {

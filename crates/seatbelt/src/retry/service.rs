@@ -295,12 +295,13 @@ mod tests {
         assert!(retry.enable_if.call(&"str".to_string()));
     }
 
-    #[oxidizer_rt::test]
-    async fn retry_disabled_no_inner_calls(state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn retry_disabled_no_inner_calls() {
+        let clock = Clock::new_frozen();
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = std::sync::Arc::clone(&counter);
 
-        let service = create_ready_retry_layer(state.clock(), RecoveryInfo::retry())
+        let service = create_ready_retry_layer(&clock, RecoveryInfo::retry())
             .clone_input_with(move |input, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
@@ -314,12 +315,13 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 
-    #[oxidizer_rt::test]
-    async fn uncloneable_recovery_called(state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn uncloneable_recovery_called() {
+        let clock = Clock::new_frozen();
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = std::sync::Arc::clone(&counter);
 
-        let service = create_ready_retry_layer(state.clock(), RecoveryInfo::retry())
+        let service = create_ready_retry_layer(&clock, RecoveryInfo::retry())
             .clone_input_with(move |_input, _args| None)
             .recovery_with(move |_input, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -333,12 +335,13 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 
-    #[oxidizer_rt::test]
-    async fn no_recovery_ensure_no_additional_retries(state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn no_recovery_ensure_no_additional_retries() {
+        let clock = Clock::new_frozen();
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = std::sync::Arc::clone(&counter);
 
-        let service = create_ready_retry_layer(state.clock(), RecoveryInfo::retry())
+        let service = create_ready_retry_layer(&clock, RecoveryInfo::retry())
             .clone_input_with(move |input, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
@@ -352,8 +355,8 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 
-    #[oxidizer_rt::test]
-    async fn retry_recovery_ensure_retries_exhausted(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn retry_recovery_ensure_retries_exhausted() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = std::sync::Arc::clone(&counter);
@@ -373,8 +376,8 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 5);
     }
 
-    #[oxidizer_rt::test]
-    async fn retry_recovery_ensure_correct_delays(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn retry_recovery_ensure_correct_delays() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let delays = Arc::new(Mutex::new(vec![]));
         let delays_clone = Arc::clone(&delays);
@@ -403,8 +406,8 @@ mod tests {
         );
     }
 
-    #[oxidizer_rt::test]
-    async fn retry_recovery_ensure_correct_attempts(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn retry_recovery_ensure_correct_attempts() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let attempts = Arc::new(Mutex::new(vec![]));
         let attempts_clone = Arc::clone(&attempts);
@@ -451,8 +454,8 @@ mod tests {
         );
     }
 
-    #[oxidizer_rt::test]
-    async fn restore_input_integration_test(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn restore_input_integration_test() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -502,8 +505,8 @@ mod tests {
         assert_eq!(restore_count.load(Ordering::SeqCst), 1); // Restore called once
     }
 
-    #[oxidizer_rt::test]
-    async fn outage_handling_disabled_no_retries(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn outage_handling_disabled_no_retries() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let call_count = Arc::new(AtomicU32::new(0));
         let call_count_clone = Arc::clone(&call_count);
@@ -524,8 +527,8 @@ mod tests {
         assert_eq!(call_count.load(Ordering::SeqCst), 1); // Only original call, no retries
     }
 
-    #[oxidizer_rt::test]
-    async fn outage_handling_enabled_with_retries(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn outage_handling_enabled_with_retries() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let call_count = Arc::new(AtomicU32::new(0));
         let call_count_clone = std::sync::Arc::clone(&call_count);
@@ -557,8 +560,8 @@ mod tests {
         assert_eq!(call_count.load(Ordering::SeqCst), 2); // Original + 1 retry
     }
 
-    #[oxidizer_rt::test]
-    async fn outage_handling_with_recovery_hint(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn outage_handling_with_recovery_hint() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let delays = Arc::new(Mutex::new(vec![]));
         let delays_clone = Arc::clone(&delays);
@@ -589,8 +592,8 @@ mod tests {
         );
     }
 
-    #[oxidizer_rt::test]
-    async fn retries_exhausted_ensure_telemetry_reported(_state: oxidizer_rt::Builtins) {
+    #[tokio::test]
+    async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
         let options = SeatbeltOptions::<String, String>::new(
             ClockControl::default().auto_advance_timers(true).to_clock(),

@@ -6,7 +6,6 @@ use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
-use oxidizer_benchmarking::BenchmarkGroupExt;
 use seatbelt::retry::Retry;
 use seatbelt::{RecoveryInfo, SeatbeltOptions};
 use tick::Clock;
