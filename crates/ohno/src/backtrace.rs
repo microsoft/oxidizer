@@ -40,7 +40,6 @@ impl Backtrace {
     }
 
     /// Force capture a new backtrace.
-    #[cfg(test)]
     pub(crate) fn force_capture() -> Self {
         let bt = StdBacktrace::force_capture();
         Self::from_backtrace(bt)

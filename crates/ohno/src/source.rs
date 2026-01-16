@@ -5,7 +5,7 @@ use std::{error::Error as StdError, sync::Arc};
 
 /// The core error information - either a transparent error, a wrapped error, or none.
 #[derive(Debug, Clone)]
-pub enum Source {
+pub(crate) enum Source {
     /// No source error (used when display provides the message)
     None,
     /// A transparent error that acts as the main error

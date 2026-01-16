@@ -45,6 +45,20 @@ pub struct OhnoCore {
 }
 
 impl OhnoCore {
+    pub(crate) fn from_builder(builder: crate::OhnoCoreBuilder) -> Self {
+        Self {
+            data: Box::new(Inner {
+                source: builder.error,
+                backtrace: match builder.backtrace_policy {
+                    crate::BacktracePolicy::Auto => Backtrace::capture(),
+                    crate::BacktracePolicy::Never => Backtrace::disabled(),
+                    crate::BacktracePolicy::Forced => Backtrace::force_capture(),
+                },
+                enrichment: Vec::new(),
+            }),
+        }
+    }
+
     /// Creates a new `OhnoCore` with no source. Automatically captures a backtrace.
     #[must_use]
     pub fn new() -> Self {

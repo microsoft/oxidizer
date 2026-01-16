@@ -257,6 +257,7 @@ mod enrichable;
 mod enrichment_entry;
 mod error_ext;
 mod source;
+mod builder;
 
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
@@ -269,3 +270,4 @@ pub use enrichable::{Enrichable, EnrichableExt};
 pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
 pub use ohno_macros::{Error, enrich_err, error};
+pub use builder::{OhnoCoreBuilder, BacktracePolicy};
