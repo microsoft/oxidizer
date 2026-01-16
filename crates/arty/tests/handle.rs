@@ -3,7 +3,7 @@
 
 //! Tests for `JoinHandle` implementations.
 
-use arty::{JoinHandle, Spawner};
+use arty::Spawner;
 
 #[cfg(feature = "tokio")]
 #[tokio::test]
