@@ -1,0 +1,109 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seatbelt"
+description = "Resilience and recovery mechanisms for services, applications, and libraries."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "resilience", "tower", "recovery", "retry", "circuit-breaker"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+service = ["dep:layered"]
+telemetry = []
+metrics = ["dep:opentelemetry", "opentelemetry/metrics", "telemetry"]
+logs = ["telemetry", "dep:tracing"]
+# This exposes a common APIs for building resilience middlewares.
+options = ["dep:tick", "telemetry", "service", "metrics", "logs"]
+timeout = ["options"]
+retry = ["options", "dep:fastrand"]
+circuit-breaker = ["options", "dep:fastrand"]
+
+[dependencies]
+recoverable = { workspace = true }
+tick = { workspace = true, optional = true }
+layered = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+fastrand = { workspace = true, optional = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tick = { workspace = true, features = ["test-util", "tokio"] }
+layered = { workspace = true }
+ohno = { workspace = true }
+static_assertions.workspace = true
+mutants.workspace = true
+criterion.workspace = true
+alloc_tracker.workspace = true
+futures = { workspace = true, features = ["executor"] }
+opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+fastrand.workspace = true
+http.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[[example]]
+name = "timeout"
+required-features = ["timeout"]
+
+[[example]]
+name = "timeout_advanced"
+required-features = ["timeout"]
+
+[[example]]
+name = "retry"
+required-features = ["retry"]
+
+[[example]]
+name = "retry_advanced"
+required-features = ["retry"]
+
+[[example]]
+name = "retry_outage"
+required-features = ["retry"]
+
+[[example]]
+name = "resilience_pipeline"
+required-features = ["retry", "timeout"]
+
+[[example]]
+name = "circuit_breaker"
+required-features = ["circuit-breaker"]
+
+[[bench]]
+name = "observability"
+harness = false
+required-features = ["options"]
+
+[[bench]]
+name = "timeout"
+harness = false
+required-features = ["timeout"]
+
+[[bench]]
+name = "retry"
+harness = false
+required-features = ["retry"]
+
+[[bench]]
+name = "circuit_breaker"
+harness = false
+required-features = ["circuit-breaker"]
+
+[lints]
+workspace = true
