@@ -9,12 +9,12 @@ use crate::source::Source;
 /// Policy for capturing backtraces in errors.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BacktracePolicy {
-    /// Automatically decide based on the RUST_BACKTRACE environment variable.
+    /// Automatically decide based on the `RUST_BACKTRACE` environment variable.
     #[default]
     Auto,
-    /// Force backtrace capture even if the RUST_BACKTRACE environment variable is not set or set to 0.
+    /// Force backtrace capture even if the `RUST_BACKTRACE` environment variable is not set or set to 0.
     Forced,
-    /// Never capture backtraces, regardless of the RUST_BACKTRACE environment variable.
+    /// Never capture backtraces, regardless of the `RUST_BACKTRACE` environment variable.
     Disabled,
 }
 
