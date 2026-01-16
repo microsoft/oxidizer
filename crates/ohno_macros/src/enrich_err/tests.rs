@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-
 use quote::quote;
 
 use super::*;
@@ -227,4 +226,3 @@ fn method_with_mut_self_ref_formatting_self_async() {
     let result = impl_enrich_err_attribute(args, input).unwrap();
     assert_formatted_snapshot!(result);
 }
-

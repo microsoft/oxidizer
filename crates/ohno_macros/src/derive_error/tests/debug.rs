@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-
 use syn::{DeriveInput, parse_quote};
 
 use crate::derive_error::generate_debug_impl;
@@ -84,4 +83,3 @@ fn test_generate_debug_impl_with_generics() {
     let result = generate_debug_impl(&input, name, &impl_generics, &ty_generics, where_clause);
     assert_formatted_snapshot!(result);
 }
-

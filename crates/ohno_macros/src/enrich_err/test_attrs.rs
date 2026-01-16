@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-
 use quote::quote;
 
 use super::*;
@@ -296,4 +295,3 @@ fn preserves_all_features_combined() {
     let result = impl_enrich_err_attribute(args, input).unwrap();
     assert_formatted_snapshot!(result);
 }
-

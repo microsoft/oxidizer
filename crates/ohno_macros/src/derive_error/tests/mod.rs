@@ -116,4 +116,3 @@ fn test_ohno_core_middle_position_struct() {
     let result = impl_error_derive(&input).unwrap();
     assert_formatted_snapshot!(result);
 }
-
