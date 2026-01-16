@@ -1,0 +1,15 @@
+---
+source: crates/ohno_macros/src/enrich_err/tests.rs
+expression: format_tokens(result)
+---
+fn test_function(path: &std::path::Path) -> Result<(), OhnoErrorType> {
+    (|| { Ok(()) })()
+        .map_err(|mut e| {
+            let msg = format!("failed to read a file {}", path.as_ref().display());
+            ohno::Enrichable::add_enrichment(
+                &mut e,
+                ohno::EnrichmentEntry::new(msg, file!(), line!()),
+            );
+            e
+        })
+}

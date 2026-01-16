@@ -1,0 +1,21 @@
+---
+source: crates/ohno_macros/src/enrich_err/tests.rs
+expression: format_tokens(result)
+---
+fn test_function(code: i32) -> Result<(), OhnoErrorType> {
+    (|| {
+        if code < 0 {
+            return Err(invalid_code_error());
+        }
+        process_code(code)?;
+        Ok(())
+    })()
+        .map_err(|mut e| {
+            let msg = format!("error code: {code}");
+            ohno::Enrichable::add_enrichment(
+                &mut e,
+                ohno::EnrichmentEntry::new(msg, file!(), line!()),
+            );
+            e
+        })
+}

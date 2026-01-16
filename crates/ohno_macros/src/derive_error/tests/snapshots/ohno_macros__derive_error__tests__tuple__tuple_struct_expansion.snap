@@ -1,0 +1,50 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/tuple.rs
+expression: format_tokens(result)
+---
+impl TupleError {
+    /// Creates a new error with custom fields and default message.
+    pub(crate) fn new(param_0: impl Into<String>) -> Self {
+        Self(param_0.into(), ohno::OhnoCore::default())
+    }
+    /// Creates a new error with custom fields and a specified error.
+    pub(crate) fn caused_by(
+        param_0: impl Into<String>,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self(param_0.into(), ohno::OhnoCore::from(error))
+    }
+}
+impl From<std::convert::Infallible> for TupleError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to Error")
+    }
+}
+impl std::fmt::Display for TupleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.1.format_error(f, stringify!(TupleError), None)
+    }
+}
+impl std::error::Error for TupleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.1.source()
+    }
+}
+impl ohno::Enrichable for TupleError {
+    fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+        self.1.add_enrichment(entry);
+    }
+}
+impl ::core::fmt::Debug for TupleError {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_tuple(stringify!(TupleError)).field(&self.0).field(&self.1).finish()
+    }
+}
+impl ohno::ErrorExt for TupleError {
+    fn message(&self) -> String {
+        self.1.format_message(stringify!(TupleError), None)
+    }
+    fn backtrace(&self) -> &std::backtrace::Backtrace {
+        self.1.backtrace()
+    }
+}

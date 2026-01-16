@@ -1,0 +1,49 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/tuple.rs
+expression: format_tokens(result)
+---
+impl OnlyCoreError {
+    /// Creates a new error with default message.
+    pub(crate) fn new() -> Self {
+        Self(ohno::OhnoCore::default())
+    }
+    /// Creates a new error with a specified error.
+    pub(crate) fn caused_by(
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self(ohno::OhnoCore::from(error))
+    }
+}
+impl From<std::convert::Infallible> for OnlyCoreError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to Error")
+    }
+}
+impl std::fmt::Display for OnlyCoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.format_error(f, stringify!(OnlyCoreError), None)
+    }
+}
+impl std::error::Error for OnlyCoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+impl ohno::Enrichable for OnlyCoreError {
+    fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+        self.0.add_enrichment(entry);
+    }
+}
+impl ::core::fmt::Debug for OnlyCoreError {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_tuple(stringify!(OnlyCoreError)).field(&self.0).finish()
+    }
+}
+impl ohno::ErrorExt for OnlyCoreError {
+    fn message(&self) -> String {
+        self.0.format_message(stringify!(OnlyCoreError), None)
+    }
+    fn backtrace(&self) -> &std::backtrace::Backtrace {
+        self.0.backtrace()
+    }
+}

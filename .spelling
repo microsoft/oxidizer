@@ -1,5 +1,4 @@
 →
-298
 0.X.Y
 100k
 10k
@@ -132,6 +131,7 @@ impls
 infeasible
 inlined
 inlining
+insta
 integrations
 interop
 Interop
