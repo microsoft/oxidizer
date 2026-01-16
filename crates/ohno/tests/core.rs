@@ -81,10 +81,7 @@ fn test_detailed_enrich() {
 
 #[test]
 fn test_with_enrich() {
-    let error = OhnoCore::builder()
-        .error("base")
-        .build()
-        .enrich_with(|| format!("computed: {42}"));
+    let error = OhnoCore::builder().error("base").build().enrich_with(|| "computed: 42");
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));

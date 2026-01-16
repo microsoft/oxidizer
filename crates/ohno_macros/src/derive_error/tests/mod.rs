@@ -86,6 +86,52 @@ fn test_generate_from_implementations_tuple() {
 }
 
 #[test]
+fn test_backtrace_force_attribute() {
+    let input: DeriveInput = parse_quote! {
+        #[derive(Error)]
+        #[backtrace(force)]
+        struct ForcedBacktraceError {
+            #[error]
+            inner: OhnoCore,
+        }
+    };
+
+    let result = impl_error_derive(&input).unwrap();
+    assert_formatted_snapshot!(result);
+}
+
+#[test]
+fn test_backtrace_disabled_attribute() {
+    let input: DeriveInput = parse_quote! {
+        #[derive(Error)]
+        #[backtrace(disabled)]
+        struct DisabledBacktraceError {
+            #[error]
+            inner: OhnoCore,
+        }
+    };
+
+    let result = impl_error_derive(&input).unwrap();
+    assert_formatted_snapshot!(result);
+}
+
+#[test]
+fn test_backtrace_with_multiple_fields() {
+    let input: DeriveInput = parse_quote! {
+        #[derive(Error)]
+        #[backtrace(force)]
+        struct ErrorWithFields {
+            message: String,
+            #[error]
+            inner: OhnoCore,
+        }
+    };
+
+    let result = impl_error_derive(&input).unwrap();
+    assert_formatted_snapshot!(result);
+}
+
+#[test]
 fn test_ohno_core_first_position_struct() {
     let input: DeriveInput = parse_quote! {
         #[derive(Error)]

@@ -4,7 +4,7 @@
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Result};
 
-use crate::derive_error::types::{ErrorFieldRef, FromConfig};
+use crate::derive_error::types::{BacktracePolicy, ErrorFieldRef, FromConfig};
 use crate::utils::bail;
 
 /// Generate From trait implementations for specified types
@@ -12,6 +12,7 @@ pub fn generate_from_implementations(
     input: &DeriveInput,
     error_field: &ErrorFieldRef,
     from_configs: &[FromConfig],
+    backtrace_policy: BacktracePolicy,
 ) -> Result<proc_macro2::TokenStream> {
     if from_configs.is_empty() {
         return Ok(quote! {});
@@ -22,8 +23,8 @@ pub fn generate_from_implementations(
     };
 
     match &data_struct.fields {
-        Fields::Named(_) => generate_from_implementations_named(input, error_field, from_configs),
-        Fields::Unnamed(_) => generate_from_implementations_tuple(input, error_field, from_configs),
+        Fields::Named(_) => generate_from_implementations_named(input, error_field, from_configs, backtrace_policy),
+        Fields::Unnamed(_) => generate_from_implementations_tuple(input, error_field, from_configs, backtrace_policy),
         Fields::Unit => bail!("From implementations not supported for unit structs"),
     }
 }
@@ -33,6 +34,7 @@ fn generate_from_implementations_named(
     input: &DeriveInput,
     error_field: &ErrorFieldRef,
     from_configs: &[FromConfig],
+    backtrace_policy: BacktracePolicy,
 ) -> Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -56,6 +58,8 @@ fn generate_from_implementations_named(
         .filter_map(|field| field.ident.as_ref().filter(|ident| *ident != error_field_name))
         .collect();
 
+    let caused_by_core = backtrace_policy.to_builder_call_with_error();
+
     let from_impls = from_configs.iter().map(|from_config| {
         let from_type = &from_config.from_type;
 
@@ -78,7 +82,7 @@ fn generate_from_implementations_named(
                 fn from(error: #from_type) -> Self {
                     Self {
                         #(#field_defaults,)*
-                        #error_field_access: ohno::OhnoCoreBuilder::new().error(error).build(),
+                        #error_field_access: #caused_by_core,
                     }
                 }
             }
@@ -95,6 +99,7 @@ fn generate_from_implementations_tuple(
     input: &DeriveInput,
     error_field: &ErrorFieldRef,
     from_configs: &[FromConfig],
+    backtrace_policy: BacktracePolicy,
 ) -> Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -113,6 +118,7 @@ fn generate_from_implementations_tuple(
     };
 
     let total_fields = fields.unnamed.len();
+    let caused_by_core = backtrace_policy.to_builder_call_with_error();
 
     let from_impls = from_configs.iter().map(|from_config| {
         let from_type = &from_config.from_type;
@@ -122,7 +128,7 @@ fn generate_from_implementations_tuple(
         let field_defaults: Vec<proc_macro2::TokenStream> = (0..total_fields)
             .map(|i| {
                 if i == error_field_index {
-                    quote! { ohno::OhnoCoreBuilder::new().error(error).build() }
+                    caused_by_core.clone()
                 } else {
                     let field_index_str = i.to_string();
                     if let Some(custom_expr) = from_config.field_expressions.get(&field_index_str) {
@@ -174,7 +180,7 @@ mod tests {
             }
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations(&input, &error_field_ref, &[]).unwrap();
+        let result = generate_from_implementations(&input, &error_field_ref, &[], BacktracePolicy::Auto).unwrap();
         assert!(result.is_empty(), "Expected empty token stream when no from_configs are provided");
     }
 
@@ -187,7 +193,7 @@ mod tests {
             }
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
+        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap();
         assert_formatted_snapshot!(result);
     }
 
@@ -197,7 +203,7 @@ mod tests {
             struct SimpleTupleError(ohno::OhnoCore, String);
         };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
+        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap();
         assert_formatted_snapshot!(result);
     }
 
@@ -214,7 +220,7 @@ mod tests {
         ];
         for input in cases {
             let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-            let err = generate_from_implementations_tuple(input, &error_field_ref, &[cfg_io()]).unwrap_err();
+            let err = generate_from_implementations_tuple(input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
             assert_eq!(err.to_string(), "From implementations for tuple structs only support structs");
         }
     }
@@ -228,7 +234,7 @@ mod tests {
             }
         };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-        let err = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(
             err.to_string(),
             "From implementations for tuple structs only support structs with unnamed fields"
@@ -241,7 +247,7 @@ mod tests {
             struct TupleError(String, ohno::OhnoCore, i32);
         };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(1));
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
+        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap();
         assert_formatted_snapshot!(result);
     }
 
@@ -258,7 +264,7 @@ mod tests {
             from_type: parse_str("std::io::Error").unwrap(),
             field_expressions,
         };
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg]).unwrap();
+        let result = generate_from_implementations(&input, &error_field_ref, &[cfg], BacktracePolicy::Auto).unwrap();
         assert_formatted_snapshot!(result);
     }
 
@@ -268,7 +274,7 @@ mod tests {
             enum NotAStruct { A, B }
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("dummy", proc_macro2::Span::call_site()));
-        let err = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(err.to_string(), "From implementations only support structs");
     }
 
@@ -287,7 +293,7 @@ mod tests {
             from_type: parse_str("std::io::Error").unwrap(),
             field_expressions,
         };
-        let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg]).unwrap();
+        let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg], BacktracePolicy::Auto).unwrap();
         assert_formatted_snapshot!(tokens);
     }
 
@@ -300,7 +306,7 @@ mod tests {
             }
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap();
+        let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap();
         assert_formatted_snapshot!(tokens);
     }
 
@@ -313,7 +319,7 @@ mod tests {
             }
         };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(err.to_string(), "Expected named field for named struct");
     }
 
@@ -323,7 +329,7 @@ mod tests {
             enum NotStruct { A }
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(err.to_string(), "From implementations for named structs only support structs");
     }
 
@@ -333,7 +339,7 @@ mod tests {
             struct TupleStructError(ohno::OhnoCore, String);
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(
             err.to_string(),
             "From implementations for named structs only support structs with named fields"
@@ -346,7 +352,7 @@ mod tests {
             struct UnitStructError;
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let err = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(err.to_string(), "From implementations not supported for unit structs");
     }
 
@@ -356,7 +362,7 @@ mod tests {
             struct MismatchTuple(ohno::OhnoCore, String);
         };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let err = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        let err = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()], BacktracePolicy::Auto).unwrap_err();
         assert_eq!(err.to_string(), "Expected indexed field for tuple struct");
     }
 }

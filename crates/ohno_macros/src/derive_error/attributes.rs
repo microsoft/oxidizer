@@ -4,7 +4,7 @@
 use syn::spanned::Spanned;
 use syn::{DeriveInput, Expr, Ident, Lit, Meta, Result, Type};
 
-use crate::derive_error::types::FromConfig;
+use crate::derive_error::types::{BacktracePolicy, FromConfig};
 use crate::utils::bail;
 
 const FROM_EMPTY_PARENS: &str =
@@ -74,6 +74,43 @@ pub fn has_no_constructors_attribute(input: &DeriveInput) -> bool {
 /// Check if the `no_debug` attribute is present
 pub fn has_no_debug_attribute(input: &DeriveInput) -> bool {
     has_simple_attribute(input, "no_debug")
+}
+
+const BACKTRACE_INVALID_FORM: &str = "backtrace attribute must be in the form #[backtrace(force)] or #[backtrace(disabled)]";
+
+/// Find and parse the backtrace attribute to get the backtrace policy.
+///
+/// Returns `None` if no backtrace attribute is present (uses Auto policy by default).
+pub fn find_backtrace_attribute(input: &DeriveInput) -> Result<BacktracePolicy> {
+    for attr in &input.attrs {
+        if attr.path().is_ident("backtrace") {
+            let Meta::List(meta_list) = &attr.meta else {
+                bail!(attr.span(), BACKTRACE_INVALID_FORM);
+            };
+
+            return parse_backtrace_policy(&meta_list.tokens);
+        }
+    }
+    Ok(BacktracePolicy::default())
+}
+
+fn parse_backtrace_policy(tokens: &proc_macro2::TokenStream) -> Result<BacktracePolicy> {
+    syn::parse::Parser::parse2(
+        |input: syn::parse::ParseStream| {
+            let policy_ident: Ident = input.parse()?;
+            let policy_str = policy_ident.to_string();
+
+            match policy_str.as_str() {
+                "force" => Ok(BacktracePolicy::Force),
+                "disabled" => Ok(BacktracePolicy::Disabled),
+                _ => bail!(
+                    policy_ident.span(),
+                    "unknown backtrace policy '{policy_str}', expected 'force' or 'disabled'",
+                ),
+            }
+        },
+        tokens.clone(),
+    )
 }
 
 /// Parse the from attribute to get types for From trait implementation
@@ -388,6 +425,95 @@ mod tests {
 
         for (input, expected) in cases {
             expect_from_error(&input, expected);
+        }
+    }
+
+    fn expect_backtrace_error(input: &DeriveInput, expected: &str) {
+        let err = find_backtrace_attribute(input).unwrap_err();
+        assert!(
+            err.to_string().contains(expected),
+            "Expected error to contain '{expected}', got '{err}'"
+        );
+    }
+
+    #[test]
+    fn test_find_backtrace_attribute_force() {
+        let input: DeriveInput = parse_quote! {
+            #[backtrace(force)]
+            struct TestError {
+                #[error]
+                inner: OhnoCore,
+            }
+        };
+
+        let policy = find_backtrace_attribute(&input).unwrap();
+        assert_eq!(policy, BacktracePolicy::Force);
+    }
+
+    #[test]
+    fn test_find_backtrace_attribute_disabled() {
+        let input: DeriveInput = parse_quote! {
+            #[backtrace(disabled)]
+            struct TestError {
+                #[error]
+                inner: OhnoCore,
+            }
+        };
+
+        let policy = find_backtrace_attribute(&input).unwrap();
+        assert_eq!(policy, BacktracePolicy::Disabled);
+    }
+
+    #[test]
+    fn test_find_backtrace_attribute_default() {
+        let input: DeriveInput = parse_quote! {
+            struct TestError {
+                #[error]
+                inner: OhnoCore,
+            }
+        };
+
+        let policy = find_backtrace_attribute(&input).unwrap();
+        assert_eq!(policy, BacktracePolicy::Auto);
+    }
+
+    #[test]
+    fn test_find_backtrace_attribute_invalid_forms() {
+        let cases = vec![
+            (
+                parse_quote! {
+                    #[backtrace]
+                    struct TestError {
+                        #[error]
+                        inner: OhnoCore,
+                    }
+                },
+                "backtrace attribute must be in the form",
+            ),
+            (
+                parse_quote! {
+                    #[backtrace(unknown)]
+                    struct TestError {
+                        #[error]
+                        inner: OhnoCore,
+                    }
+                },
+                "unknown backtrace policy 'unknown'",
+            ),
+            (
+                parse_quote! {
+                    #[backtrace = "force"]
+                    struct TestError {
+                        #[error]
+                        inner: OhnoCore,
+                    }
+                },
+                "backtrace attribute must be in the form",
+            ),
+        ];
+
+        for (input, expected) in cases {
+            expect_backtrace_error(&input, expected);
         }
     }
 }

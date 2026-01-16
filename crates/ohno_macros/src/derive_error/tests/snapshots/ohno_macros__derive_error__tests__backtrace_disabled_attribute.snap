@@ -1,0 +1,60 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/mod.rs
+expression: formatted
+---
+impl DisabledBacktraceError {
+    /// Creates a new error with default message.
+    pub(crate) fn new() -> Self {
+        Self {
+            inner: ohno::OhnoCoreBuilder::new()
+                .backtrace_policy(ohno::BacktracePolicy::Disabled)
+                .build(),
+        }
+    }
+    /// Creates a new error with a specified error.
+    pub(crate) fn caused_by(
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self {
+            inner: ohno::OhnoCoreBuilder::new()
+                .backtrace_policy(ohno::BacktracePolicy::Disabled)
+                .error(error)
+                .build(),
+        }
+    }
+}
+impl From<std::convert::Infallible> for DisabledBacktraceError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to Error")
+    }
+}
+impl std::fmt::Display for DisabledBacktraceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.format_error(f, stringify!(DisabledBacktraceError), None)
+    }
+}
+impl std::error::Error for DisabledBacktraceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+impl ohno::Enrichable for DisabledBacktraceError {
+    fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+        self.inner.add_enrichment(entry);
+    }
+}
+impl ::core::fmt::Debug for DisabledBacktraceError {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct(stringify!(DisabledBacktraceError))
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+impl ohno::ErrorExt for DisabledBacktraceError {
+    fn message(&self) -> String {
+        self.inner.format_message(stringify!(DisabledBacktraceError), None)
+    }
+    fn backtrace(&self) -> &std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}

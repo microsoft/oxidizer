@@ -96,6 +96,33 @@
 //! error (if any) is automatically shown as "Caused by:" in the error chain. If the inner error
 //! has no source, only the custom message is displayed.
 //!
+//! # Backtrace Policy
+//!
+//! By default, backtraces are captured based on the `RUST_BACKTRACE` environment variable. You can
+//! override this behavior using the `#[backtrace(...)]` attribute:
+//!
+//! ```rust
+//! // Always capture backtraces, regardless of environment
+//! #[ohno::error]
+//! #[backtrace(force)]
+//! struct ForcedBacktraceError;
+//!
+//! // Never capture backtraces
+//! #[ohno::error]
+//! #[backtrace(disabled)]
+//! struct NoBacktraceError;
+//!
+//! // Default: respects RUST_BACKTRACE environment variable
+//! #[ohno::error]
+//! struct AutoBacktraceError;
+//! ```
+//!
+//! This is useful for:
+//! - **`force`**: Critical paths where you always want backtraces for debugging
+//! - **`disabled`**:
+//!   - High-frequency errors where backtraces would impact performance
+//!   - Backtraces are captured elsewhere and don't need duplication
+//!
 //! # Automatic Constructors
 //!
 //! By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:

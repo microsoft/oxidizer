@@ -5,23 +5,31 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, Result};
 
-use crate::derive_error::types::ErrorFieldRef;
+use crate::derive_error::types::{BacktracePolicy, ErrorFieldRef};
 use crate::utils::bail;
 
 /// Generate constructor methods for the error struct
-pub fn generate_constructor_methods(input: &DeriveInput, error_field: &ErrorFieldRef) -> Result<proc_macro2::TokenStream> {
+pub fn generate_constructor_methods(
+    input: &DeriveInput,
+    error_field: &ErrorFieldRef,
+    backtrace_policy: BacktracePolicy,
+) -> Result<proc_macro2::TokenStream> {
     let Data::Struct(data_struct) = &input.data else {
         bail!("Constructor generation only supports structs");
     };
 
     match &data_struct.fields {
-        Fields::Named(_) => generate_constructor_methods_named(input, error_field),
-        Fields::Unnamed(_) => generate_constructor_methods_tuple(input, error_field),
+        Fields::Named(_) => generate_constructor_methods_named(input, error_field, backtrace_policy),
+        Fields::Unnamed(_) => generate_constructor_methods_tuple(input, error_field, backtrace_policy),
         Fields::Unit => bail!("Constructor generation not supported for unit structs"),
     }
 }
 
-fn generate_constructor_methods_named(input: &DeriveInput, error_field: &ErrorFieldRef) -> Result<proc_macro2::TokenStream> {
+fn generate_constructor_methods_named(
+    input: &DeriveInput,
+    error_field: &ErrorFieldRef,
+    backtrace_policy: BacktracePolicy,
+) -> Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -58,6 +66,7 @@ fn generate_constructor_methods_named(input: &DeriveInput, error_field: &ErrorFi
             &new_method,
             &caused_by_method,
             &error_field_access,
+            backtrace_policy,
         ))
     } else {
         // Complex case: multiple fields
@@ -70,11 +79,16 @@ fn generate_constructor_methods_named(input: &DeriveInput, error_field: &ErrorFi
             &caused_by_method,
             &error_field_access,
             &non_error_fields,
+            backtrace_policy,
         ))
     }
 }
 
-fn generate_constructor_methods_tuple(input: &DeriveInput, error_field: &ErrorFieldRef) -> Result<proc_macro2::TokenStream> {
+fn generate_constructor_methods_tuple(
+    input: &DeriveInput,
+    error_field: &ErrorFieldRef,
+    backtrace_policy: BacktracePolicy,
+) -> Result<proc_macro2::TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -104,6 +118,7 @@ fn generate_constructor_methods_tuple(input: &DeriveInput, error_field: &ErrorFi
             where_clause,
             &new_method,
             &caused_by_method,
+            backtrace_policy,
         ))
     } else {
         // Complex case: multiple fields
@@ -116,12 +131,14 @@ fn generate_constructor_methods_tuple(input: &DeriveInput, error_field: &ErrorFi
             &caused_by_method,
             error_field_index,
             fields,
+            backtrace_policy,
         ))
     }
 }
 
 // Helper functions for generating constructor implementations
 
+#[expect(clippy::too_many_arguments, reason = "C'est la vie")]
 fn generate_simple_named_constructors(
     name: &syn::Ident,
     impl_generics: &syn::ImplGenerics,
@@ -130,20 +147,24 @@ fn generate_simple_named_constructors(
     new_method: &syn::Ident,
     caused_by_method: &syn::Ident,
     error_field_access: &proc_macro2::TokenStream,
+    backtrace_policy: BacktracePolicy,
 ) -> proc_macro2::TokenStream {
+    let default_core = backtrace_policy.to_builder_call();
+    let caused_by_core = backtrace_policy.to_builder_call_with_error();
+
     quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             /// Creates a new error with default message.
             pub(crate) fn #new_method() -> Self {
                 Self {
-                    #error_field_access: ohno::OhnoCore::default(),
+                    #error_field_access: #default_core,
                 }
             }
 
             /// Creates a new error with a specified error.
             pub(crate) fn #caused_by_method(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
                 Self {
-                    #error_field_access: ohno::OhnoCoreBuilder::new().error(error).build(),
+                    #error_field_access: #caused_by_core,
                 }
             }
         }
@@ -161,9 +182,12 @@ fn generate_complex_named_constructors(
     caused_by_method: &syn::Ident,
     error_field_access: &proc_macro2::TokenStream,
     non_error_fields: &[&syn::Field],
+    backtrace_policy: BacktracePolicy,
 ) -> proc_macro2::TokenStream {
     let field_names: Vec<_> = non_error_fields.iter().map(|field| field.ident.as_ref().unwrap()).collect();
     let field_types: Vec<_> = non_error_fields.iter().map(|field| &field.ty).collect();
+    let default_core = backtrace_policy.to_builder_call();
+    let caused_by_core = backtrace_policy.to_builder_call_with_error();
 
     // Use field names as parameter names to match the expected API
     let param_names = &field_names;
@@ -174,7 +198,7 @@ fn generate_complex_named_constructors(
             pub(crate) fn #new_method(#(#param_names: impl Into<#field_types>),*) -> Self {
                 Self {
                     #(#field_names: #param_names.into(),)*
-                    #error_field_access: ohno::OhnoCore::default(),
+                    #error_field_access: #default_core,
                 }
             }
 
@@ -182,7 +206,7 @@ fn generate_complex_named_constructors(
             pub(crate) fn #caused_by_method(#(#param_names: impl Into<#field_types>,)* error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
                 Self {
                     #(#field_names: #param_names.into(),)*
-                    #error_field_access: ohno::OhnoCoreBuilder::new().error(error).build(),
+                    #error_field_access: #caused_by_core,
                 }
             }
         }
@@ -196,17 +220,21 @@ fn generate_simple_tuple_constructors(
     where_clause: Option<&syn::WhereClause>,
     new_method: &syn::Ident,
     caused_by_method: &syn::Ident,
+    backtrace_policy: BacktracePolicy,
 ) -> proc_macro2::TokenStream {
+    let default_core = backtrace_policy.to_builder_call();
+    let caused_by_core = backtrace_policy.to_builder_call_with_error();
+
     quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             /// Creates a new error with default message.
             pub(crate) fn #new_method() -> Self {
-                Self(ohno::OhnoCore::default())
+                Self(#default_core)
             }
 
             /// Creates a new error with a specified error.
             pub(crate) fn #caused_by_method(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
-                Self(ohno::OhnoCoreBuilder::new().error(error).build())
+                Self(#caused_by_core)
             }
         }
     }
@@ -222,7 +250,11 @@ fn generate_complex_tuple_constructors(
     caused_by_method: &syn::Ident,
     error_field_index: usize,
     fields: &syn::FieldsUnnamed,
+    backtrace_policy: BacktracePolicy,
 ) -> proc_macro2::TokenStream {
+    let default_core = backtrace_policy.to_builder_call();
+    let caused_by_core = backtrace_policy.to_builder_call_with_error();
+
     // Get all field types except the error field
     let mut field_types = Vec::new();
     let mut param_names = Vec::new();
@@ -230,7 +262,7 @@ fn generate_complex_tuple_constructors(
 
     for (i, field) in fields.unnamed.iter().enumerate() {
         if i == error_field_index {
-            field_assignments.push(quote! { ohno::OhnoCore::default() });
+            field_assignments.push(default_core.clone());
         } else {
             field_types.push(&field.ty);
             let param_name = syn::Ident::new(&format!("param_{i}"), Span::call_site());
@@ -244,7 +276,7 @@ fn generate_complex_tuple_constructors(
     let mut caused_by_param_idx = 0;
     for (i, _) in fields.unnamed.iter().enumerate() {
         if i == error_field_index {
-            caused_by_assignments.push(quote! { ohno::OhnoCoreBuilder::new().error(error).build() });
+            caused_by_assignments.push(caused_by_core.clone());
         } else {
             let param_name = &param_names[caused_by_param_idx];
             caused_by_assignments.push(quote! { #param_name.into() });
@@ -294,7 +326,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods(&input, &named_field("inner")),
+            generate_constructor_methods(&input, &named_field("inner"), BacktracePolicy::Auto),
             "Constructor generation only supports structs",
         );
     }
@@ -306,7 +338,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods(&input, &named_field("inner")),
+            generate_constructor_methods(&input, &named_field("inner"), BacktracePolicy::Auto),
             "Constructor generation not supported for unit structs",
         );
     }
@@ -321,7 +353,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods_named(&input, &indexed_field(0)),
+            generate_constructor_methods_named(&input, &indexed_field(0), BacktracePolicy::Auto),
             "Expected named field for named struct",
         );
     }
@@ -335,7 +367,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods_named(&input, &named_field("inner")),
+            generate_constructor_methods_named(&input, &named_field("inner"), BacktracePolicy::Auto),
             "Constructor generation for named structs only support structs",
         );
     }
@@ -347,7 +379,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods_named(&input, &named_field("inner")),
+            generate_constructor_methods_named(&input, &named_field("inner"), BacktracePolicy::Auto),
             "Constructor generation for named structs only support structs with named fields",
         );
     }
@@ -359,7 +391,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods_tuple(&input, &named_field("inner")),
+            generate_constructor_methods_tuple(&input, &named_field("inner"), BacktracePolicy::Auto),
             "Expected indexed field for tuple struct",
         );
     }
@@ -373,7 +405,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods_tuple(&input, &indexed_field(0)),
+            generate_constructor_methods_tuple(&input, &indexed_field(0), BacktracePolicy::Auto),
             "Constructor generation for tuple structs only support structs",
         );
     }
@@ -388,7 +420,7 @@ mod tests {
         };
 
         expect_message(
-            generate_constructor_methods_tuple(&input, &indexed_field(0)),
+            generate_constructor_methods_tuple(&input, &indexed_field(0), BacktracePolicy::Auto),
             "Constructor generation for tuple structs only support structs with unnamed fields",
         );
     }

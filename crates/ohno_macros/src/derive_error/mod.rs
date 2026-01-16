@@ -49,10 +49,11 @@ fn impl_error_derive(input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     };
     let from_configs = find_from_attribute(input)?;
     let should_impl_debug = !has_no_debug_attribute(input);
+    let backtrace_policy = find_backtrace_attribute(input)?;
 
     // Generate implementations
-    let constructor_impl = generate_constructor_impl(input, &error_field)?;
-    let from_impl = generate_from_implementations(input, &error_field, &from_configs)?;
+    let constructor_impl = generate_constructor_impl(input, &error_field, backtrace_policy)?;
+    let from_impl = generate_from_implementations(input, &error_field, &from_configs, backtrace_policy)?;
     let from_infallible_impl = generate_from_infallible_impl(name, &impl_generics, &ty_generics, where_clause);
     let display_impl = generate_display_impl(
         &error_field,
@@ -85,11 +86,15 @@ fn impl_error_derive(input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
 
 // Helper functions for generating trait implementations
 
-fn generate_constructor_impl(input: &DeriveInput, error_field: &types::ErrorFieldRef) -> Result<proc_macro2::TokenStream> {
+fn generate_constructor_impl(
+    input: &DeriveInput,
+    error_field: &types::ErrorFieldRef,
+    backtrace_policy: types::BacktracePolicy,
+) -> Result<proc_macro2::TokenStream> {
     if has_no_constructors_attribute(input) {
         Ok(quote! {})
     } else {
-        generate_constructor_methods(input, error_field)
+        generate_constructor_methods(input, error_field, backtrace_policy)
     }
 }
 

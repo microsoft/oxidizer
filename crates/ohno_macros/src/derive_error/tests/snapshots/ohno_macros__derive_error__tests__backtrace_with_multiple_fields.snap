@@ -1,0 +1,64 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/mod.rs
+expression: formatted
+---
+impl ErrorWithFields {
+    /// Creates a new error with custom fields and default message.
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            inner: ohno::OhnoCoreBuilder::new()
+                .backtrace_policy(ohno::BacktracePolicy::Forced)
+                .build(),
+        }
+    }
+    /// Creates a new error with custom fields and a specified error.
+    pub(crate) fn caused_by(
+        message: impl Into<String>,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            inner: ohno::OhnoCoreBuilder::new()
+                .backtrace_policy(ohno::BacktracePolicy::Forced)
+                .error(error)
+                .build(),
+        }
+    }
+}
+impl From<std::convert::Infallible> for ErrorWithFields {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to Error")
+    }
+}
+impl std::fmt::Display for ErrorWithFields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.format_error(f, stringify!(ErrorWithFields), None)
+    }
+}
+impl std::error::Error for ErrorWithFields {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+impl ohno::Enrichable for ErrorWithFields {
+    fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+        self.inner.add_enrichment(entry);
+    }
+}
+impl ::core::fmt::Debug for ErrorWithFields {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct(stringify!(ErrorWithFields))
+            .field("message", &self.message)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+impl ohno::ErrorExt for ErrorWithFields {
+    fn message(&self) -> String {
+        self.inner.format_message(stringify!(ErrorWithFields), None)
+    }
+    fn backtrace(&self) -> &std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}
