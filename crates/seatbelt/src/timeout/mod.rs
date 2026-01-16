@@ -14,13 +14,11 @@
 //! ```rust
 //! # use std::time::Duration;
 //! # use std::io;
-//! # use oxidizer_rt::Builtins;
+//! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::timeout::Timeout;
 //! # use seatbelt::SeatbeltOptions;
-//! # #[oxidizer_rt::test]
-//! # async fn example(state: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! # let clock = state.clock().clone();
+//! # async fn example(clock: Clock) -> Result<(), io::Error> {
 //! let options = SeatbeltOptions::new(&clock).pipeline_name("my_service");
 //!
 //! let stack = (
@@ -34,7 +32,7 @@
 //! let result = service.execute("input".to_string()).await;
 //! # Ok(())
 //! # }
-//! # async fn my_operation(input: String) -> Result<String, String> { Ok(input) }
+//! # async fn my_operation(input: String) -> Result<String, io::Error> { Ok(input) }
 //! ```
 //!
 //! # Configuration
@@ -93,14 +91,11 @@
 //!
 //! ```rust
 //! # use std::time::Duration;
-//! # use oxidizer_rt::Builtins;
-//! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
+//! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::SeatbeltOptions;
 //! # use seatbelt::timeout::Timeout;
-//! # #[oxidizer_rt::test]
-//! # async fn example(state: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! # let clock = state.clock().clone();
+//! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
 //! let options = SeatbeltOptions::new(&clock);
@@ -122,6 +117,7 @@
 //! // Execute the service
 //! let result = service.execute("quick".to_string()).await;
 //! # let _result = result;
+//! # Ok(())
 //! # }
 //!
 //! # async fn execute_unreliable_operation(input: String) -> String { input }
@@ -135,14 +131,11 @@
 //! ```rust
 //! # use std::time::Duration;
 //! # use std::io;
-//! # use oxidizer_rt::Builtins;
-//! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
+//! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::SeatbeltOptions;
 //! # use seatbelt::timeout::Timeout;
-//! # #[oxidizer_rt::test]
-//! # async fn example(state: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! # let clock = state.clock().clone();
+//! # async fn example(clock: Clock) -> Result<(), io::Error> {
 //! // Define common options for resilience middleware.
 //! let options = SeatbeltOptions::new(&clock);
 //!
@@ -153,11 +146,11 @@
 //!         // Default timeout
 //!         .timeout(Duration::from_secs(30))
 //!         // Callback for when a timeout occurs
-//!         .on_timeout(|_output, args| {
+//!         .on_timeout(|_output: &Result<String, io::Error>, args| {
 //!             println!("timeout occurred after {}ms", args.timeout().as_millis());
 //!         })
 //!         // Provide per-input timeout overrides (fallback to default on None)
-//!         .timeout_override(|input, args| {
+//!         .timeout_override(|input: &String, args| {
 //!             match input.as_str() {
 //!                 "quick" => Some(Duration::from_secs(5)), // override
 //!                 "slow" => Some(Duration::from_secs(60)),
@@ -165,7 +158,7 @@
 //!             }
 //!         })
 //!         // Optionally disable timeouts for some inputs
-//!         .enable_if(|input| !input.starts_with("bypass_")),
+//!         .enable_if(|input: &String| !input.starts_with("bypass_")),
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
@@ -175,7 +168,7 @@
 //! # let _result = result;
 //! # Ok(())
 //! # }
-//! # async fn execute_unreliable_operation(input: String) -> String { input }
+//! # async fn execute_unreliable_operation(input: String) -> Result<String, io::Error> { Ok(input) }
 //! ```
 //!
 //! ## Incomplete Configuration

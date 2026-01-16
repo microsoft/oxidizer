@@ -12,18 +12,16 @@
 //! # Quick Start
 //!
 //! ```rust
-//! # use oxidizer_rt::Builtins;
+//! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
 //! # use seatbelt::{Backoff, RecoveryInfo, SeatbeltOptions};
-//! # #[oxidizer_rt::test]
-//! # async fn example(state: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! # let clock = state.clock().clone();
+//! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let options = SeatbeltOptions::new(&clock).pipeline_name("my_service");
 //!
 //! let stack = (
 //!     Retry::layer("retry", &options)
-//!         .clone_input_with(|args| Some(args.input().clone()))
+//!         .clone_input()
 //!         .recovery_with(|result, _| match result {
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(_) => RecoveryInfo::retry(),
@@ -105,13 +103,11 @@
 //!
 //! ```rust
 //! # use std::time::Duration;
-//! # use oxidizer_rt::Builtins;
+//! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
 //! # use seatbelt::{Backoff, RecoveryInfo, SeatbeltOptions};
-//! # #[oxidizer_rt::test]
-//! # async fn example(state: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! # let clock = state.clock().clone();
+//! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
 //! let options = SeatbeltOptions::new(&clock).pipeline_name("example");
@@ -119,7 +115,7 @@
 //! let stack = (
 //!     Retry::layer("my_retry", &options)
 //!         // Required: how to clone inputs for retries
-//!         .clone_input_with(|args| Some(args.input().clone()))
+//!         .clone_input()
 //!         // Required: determine if we should retry based on output
 //!         .recovery_with(|output, _args| match output {
 //!             // These are demonstrative, real code will have more meaningful recovery detection
@@ -138,7 +134,7 @@
 //! # let _result = result;
 //! # Ok(())
 //! # }
-//! # async fn execute_unreliable_operation(input: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> { Ok(input) }
+//! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
 //!
 //! ## Advanced Usage
@@ -148,20 +144,18 @@
 //!
 //! ```rust
 //! # use std::time::Duration;
-//! # use oxidizer_rt::Builtins;
+//! # use tick::Clock;
 //! # use layered::{Execute, Stack};
 //! # use seatbelt::retry::Retry;
 //! # use seatbelt::{RecoveryInfo, SeatbeltOptions, Backoff};
-//! # #[oxidizer_rt::test]
-//! # async fn example(state: Builtins) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! # let clock = state.clock().clone();
+//! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware.
 //! let options = SeatbeltOptions::new(&clock);
 //!
 //! let stack = (
 //!     Retry::layer("advanced_retry", &options)
-//!         .clone_input_with(|args| Some(args.input().clone()))
-//!         .recovery_with(|output, _args| match output {
+//!         .clone_input()
+//!         .recovery_with(|output: &Result<String, io::Error>, _args| match output {
 //!             Err(msg) if msg.contains("rate_limit") => {
 //!                 RecoveryInfo::retry().delay(Duration::from_secs(60))
 //!             }
@@ -173,12 +167,12 @@
 //!         .max_retry_attempts(5)
 //!         .base_delay(Duration::from_millis(200))
 //!         .backoff(Backoff::Exponential)
-//!         .jitter(true)
+//!         .use_jitter(true)
 //!         // You can extract the delay from the output, or return None to use the
 //!         // one provided by the retry middleware
 //!         .delay_generator(|_output, args| None)
 //!         // Callback called just before the next retry
-//!         .on_retry(|output, args| {
+//!         .on_retry(|output: Result<String, io::Error>, args| {
 //!             println!(
 //!                 "retrying, attempt: {}, delay: {}ms",
 //!                 args.attempt(),
@@ -191,10 +185,9 @@
 //! // Build and execute the service
 //! let service = stack.build();
 //! let result = service.execute("test_timeout".to_string()).await;
-//! # let _result = result;
-//! # Ok(())
+//! # Ok(result)
 //! # }
-//! # async fn execute_unreliable_operation(input: String) -> Result<String, Box<dyn std::error::Error + Send + Sync>> { Ok(input) }
+//! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
 //!
 //! ## Incomplete Configuration

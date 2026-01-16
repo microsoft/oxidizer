@@ -31,15 +31,13 @@
 //! # #[cfg(all(feature = "retry", feature = "timeout"))]
 //! # {
 //! # use std::time::Duration;
-//! # use oxidizer_rt::Builtins;
+//! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! use seatbelt::retry::Retry;
 //! use seatbelt::timeout::Timeout;
 //! use seatbelt::{RecoveryInfo, SeatbeltOptions};
 //!
-//! # #[oxidizer_rt::main]
-//! # async fn main(state: Builtins) {
-//! # let clock = state.clock().clone();
+//! # async fn main(clock: Clock) {
 //! let options = SeatbeltOptions::new(&clock);
 //! let service = (
 //!     // Retry middleware: Automatically retries failed operations
