@@ -1,0 +1,12 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/debug.rs
+expression: format_tokens(result)
+---
+impl ::core::fmt::Debug for NamedStruct {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct(stringify!(NamedStruct))
+            .field("field1", &self.field1)
+            .field("field2", &self.field2)
+            .finish()
+    }
+}

@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use pretty_assertions::assert_eq;
+
 use syn::{DeriveInput, parse_quote};
 
 use crate::derive_error::generate_debug_impl;
+use crate::utils::assert_formatted_snapshot;
 
 #[test]
 fn test_generate_debug_impl_unit_struct() {
@@ -17,20 +18,7 @@ fn test_generate_debug_impl_unit_struct() {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let result = generate_debug_impl(&input, name, &impl_generics, &ty_generics, where_clause);
-
-    // Parse and format the result for comparison
-    let result_string = result.to_string();
-
-    // Verify it generates the unit struct debug implementation
-    // The generated code uses ":: core :: fmt" with spaces
-    assert!(result_string.contains("debug_struct"));
-    assert!(result_string.contains("UnitStruct"));
-    assert!(result_string.contains("finish"));
-
-    // More precise check: parse as an impl and verify structure
-    let impl_block: syn::ItemImpl = syn::parse2(result).expect("Should parse as valid impl");
-
-    assert_eq!(impl_block.trait_.as_ref().unwrap().1.segments.last().unwrap().ident, "Debug");
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -47,17 +35,7 @@ fn test_generate_debug_impl_enum() {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let result = generate_debug_impl(&input, name, &impl_generics, &ty_generics, where_clause);
-
-    let result_string = result.to_string();
-
-    // Verify it generates the enum debug implementation with finish_non_exhaustive
-    assert!(result_string.contains("debug_struct"));
-    assert!(result_string.contains("TestEnum"));
-    assert!(result_string.contains("finish_non_exhaustive"));
-
-    // Verify it's a valid impl block
-    let impl_block: syn::ItemImpl = syn::parse2(result).expect("Should parse as valid impl");
-    assert_eq!(impl_block.trait_.as_ref().unwrap().1.segments.last().unwrap().ident, "Debug");
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -74,14 +52,7 @@ fn test_generate_debug_impl_named_fields() {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let result = generate_debug_impl(&input, name, &impl_generics, &ty_generics, where_clause);
-
-    let result_string = result.to_string();
-
-    // Verify it generates the named struct debug implementation
-    assert!(result_string.contains("debug_struct"));
-    assert!(result_string.contains("NamedStruct"));
-    assert!(result_string.contains(r#""field1""#));
-    assert!(result_string.contains(r#""field2""#));
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -95,14 +66,7 @@ fn test_generate_debug_impl_tuple_struct() {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let result = generate_debug_impl(&input, name, &impl_generics, &ty_generics, where_clause);
-
-    let result_string = result.to_string();
-
-    // Verify it generates the tuple struct debug implementation
-    assert!(result_string.contains("debug_tuple"));
-    assert!(result_string.contains("TupleStruct"));
-    assert!(result_string.contains("self . 0"));
-    assert!(result_string.contains("self . 1"));
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -118,10 +82,6 @@ fn test_generate_debug_impl_with_generics() {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let result = generate_debug_impl(&input, name, &impl_generics, &ty_generics, where_clause);
-
-    let result_string = result.to_string();
-
-    // Verify generics are included - with spaces in token stream
-    assert!(result_string.contains("< T >"));
-    assert!(result_string.contains("GenericStruct"));
+    assert_formatted_snapshot!(result);
 }
+
