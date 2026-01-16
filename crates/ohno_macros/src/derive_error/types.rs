@@ -10,18 +10,18 @@ use quote::quote;
 /// This enum controls how backtraces are captured when errors are created.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BacktracePolicy {
-    /// Automatically decide based on the RUST_BACKTRACE environment variable.
+    /// Automatically decide based on the `RUST_BACKTRACE` environment variable.
     #[default]
     Auto,
-    /// Force backtrace capture even if the RUST_BACKTRACE environment variable is not set.
+    /// Force backtrace capture even if the `RUST_BACKTRACE` environment variable is not set.
     Force,
-    /// Never capture backtraces, regardless of the RUST_BACKTRACE environment variable.
+    /// Never capture backtraces, regardless of the `RUST_BACKTRACE` environment variable.
     Disabled,
 }
 
 impl BacktracePolicy {
-    /// Generate the token stream for creating an OhnoCore with this policy.
-    pub fn to_builder_call(&self) -> proc_macro2::TokenStream {
+    /// Generate the token stream for creating an `OhnoCore` with this policy.
+    pub fn to_builder_call(self) -> proc_macro2::TokenStream {
         match self {
             Self::Auto => quote! { ohno::OhnoCore::default() },
             Self::Force => {
@@ -33,8 +33,8 @@ impl BacktracePolicy {
         }
     }
 
-    /// Generate the token stream for creating an OhnoCore with this policy and an error.
-    pub fn to_builder_call_with_error(&self) -> proc_macro2::TokenStream {
+    /// Generate the token stream for creating an `OhnoCore` with this policy and an error.
+    pub fn to_builder_call_with_error(self) -> proc_macro2::TokenStream {
         match self {
             Self::Auto => quote! { ohno::OhnoCoreBuilder::new().error(error).build() },
             Self::Force => {
