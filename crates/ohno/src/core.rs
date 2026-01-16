@@ -209,7 +209,7 @@ impl fmt::Display for MessageFormatter<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::enrichable::Enrichable;
+    use crate::{OhnoCoreBuilder, enrichable::Enrichable};
 
     #[test]
     fn test_default() {
@@ -354,5 +354,22 @@ mod tests {
         assert_eq!(error.backtrace().status(), BacktraceStatus::Disabled);
         let display = format!("{error}");
         assert_eq!(display, "test error without backtrace");
+    }
+
+    #[test]
+    fn default_builder_settings() {
+        let core = OhnoCoreBuilder::default().build();
+
+        assert!(core.data.enrichment.is_empty(), "{:?}", core.data.enrichment);
+        assert!(matches!(core.data.source, Source::None), "{:?}", core.data.source);
+    }
+
+    #[test]
+    fn transparent_source() {
+        let io_error = std::io::Error::other("io error");
+        let core = OhnoCore::builder().transparent_error(io_error).build();
+
+        assert!(matches!(core.data.source, Source::Transparent(_)), "{:?}", core.data.source);
+        assert!(core.source().is_none());
     }
 }
