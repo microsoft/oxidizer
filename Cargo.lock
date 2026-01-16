@@ -1587,7 +1587,6 @@ dependencies = [
 name = "tick"
 version = "0.1.2"
 dependencies = [
- "anyhow",
  "chrono",
  "chrono-tz",
  "criterion",
@@ -1595,6 +1594,7 @@ dependencies = [
  "futures-core",
  "jiff",
  "mutants",
+ "ohno",
  "pin-project-lite",
  "serde",
  "serde_core",

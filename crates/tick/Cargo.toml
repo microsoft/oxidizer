@@ -44,8 +44,9 @@ serde_core = { workspace = true, features = ["std"], optional = true }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
+ohno = { workspace = true, features = ["app-err"] }
+
 #external
-anyhow = { workspace = true }
 chrono = { workspace = true, features = ["clock"] }
 chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
