@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::handle::JoinHandle;
-#[cfg(feature = "tokio")]
+#[cfg(any(feature = "tokio", feature = "custom"))]
 use crate::handle::JoinHandleInner;
 
 #[cfg(feature = "custom")]

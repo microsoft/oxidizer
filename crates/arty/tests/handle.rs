@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(any(feature = "tokio", feature = "custom"))]
+
 //! Tests for `JoinHandle` implementations.
 
 use arty::Spawner;
