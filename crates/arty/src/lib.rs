@@ -26,9 +26,8 @@
 //! # #[tokio::main]
 //! # async fn main() {
 //! let spawner = Spawner::tokio();
-//! spawner.spawn(async {
-//!     println!("Task running!");
-//! });
+//! let result = spawner.spawn(async { 1 + 1 }).await;
+//! assert_eq!(result, 2);
 //! # }
 //! ```
 //!
@@ -41,9 +40,8 @@
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
 //! });
 //!
-//! spawner.spawn(async {
-//!     println!("Running on custom runtime!");
-//! });
+//! // Returns a JoinHandle that can be awaited or dropped
+//! let handle = spawner.spawn(async { 42 });
 //! ```
 //!
 //! # Features
@@ -53,6 +51,10 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
 
+#[cfg(feature = "custom")]
+mod custom;
+mod handle;
 mod spawner;
 
+pub use handle::JoinHandle;
 pub use spawner::Spawner;

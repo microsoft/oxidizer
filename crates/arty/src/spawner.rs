@@ -3,14 +3,14 @@
 
 //! [`Spawner`] for plugging in runtime implementations.
 
-use std::fmt::Debug;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
-use futures_channel::oneshot;
-
-type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
-type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
+#[cfg(feature = "tokio")]
+use crate::handle::JoinHandleInner;
+use crate::{
+    custom::{BoxedFuture, CustomSpawner},
+    handle::JoinHandle,
+};
 
 /// Runtime-agnostic task spawner.
 ///
@@ -28,9 +28,10 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// # #[tokio::main]
 /// # async fn main() {
 /// let spawner = Spawner::tokio();
-/// spawner.spawn(async {
+/// let handle = spawner.spawn(async {
 ///     println!("Task running!");
 /// });
+/// handle.await; // Wait for task to complete
 /// # }
 /// ```
 ///
@@ -44,15 +45,16 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
 /// });
 ///
-/// spawner.spawn(async {
+/// let handle = spawner.spawn(async {
 ///     println!("Running on custom runtime!");
 /// });
+/// // handle can be awaited or dropped (fire-and-forget)
 /// # }
 /// ```
 ///
 /// ## Getting Results
 ///
-/// Use [`run`](Spawner::run) to retrieve a value from the task:
+/// Await the [`JoinHandle`](crate::JoinHandle) to retrieve a value from the task:
 ///
 /// ```rust
 /// use arty::Spawner;
@@ -60,7 +62,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// # #[tokio::main]
 /// # async fn main() {
 /// let spawner = Spawner::tokio();
-/// let value = spawner.run(async { 1 + 1 }).await;
+/// let value = spawner.spawn(async { 1 + 1 }).await;
 /// assert_eq!(value, 2);
 /// # }
 /// ```
@@ -77,7 +79,7 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 /// let spawner = Spawner::tokio();
 ///
 /// let result = spawner
-///     .run(async {
+///     .spawn(async {
 ///         if true { Ok(42) } else { Err("something went wrong") }
 ///     })
 ///     .await;
@@ -95,6 +97,7 @@ pub struct Spawner(SpawnerKind);
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio,
+    #[cfg(feature = "custom")]
     Custom(CustomSpawner),
 }
 
@@ -113,9 +116,8 @@ impl Spawner {
     /// # #[tokio::main]
     /// # async fn main() {
     /// let spawner = Spawner::tokio();
-    /// spawner.spawn(async {
-    ///     println!("Running on Tokio!");
-    /// });
+    /// let result = spawner.spawn(async { 42 }).await;
+    /// assert_eq!(result, 42);
     /// # }
     /// ```
     #[must_use]
@@ -139,6 +141,8 @@ impl Spawner {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));
     /// });
     /// ```
+    #[cfg(feature = "custom")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
     pub fn custom<F>(f: F) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
@@ -148,25 +152,12 @@ impl Spawner {
 
     /// Spawns an async task on the runtime.
     ///
-    /// The task runs independently and its result is discarded. Use
-    /// [`run`](Self::run) to retrieve results.
-    pub fn spawn(&self, work: impl Future<Output = ()> + Send + 'static) {
-        match &self.0 {
-            #[cfg(feature = "tokio")]
-            SpawnerKind::Tokio => {
-                ::tokio::spawn(work);
-            }
-            SpawnerKind::Custom(c) => (c.0)(Box::pin(work)),
-        }
-    }
-
-    /// Runs an async task and returns its result.
-    ///
-    /// The task runs independently.
+    /// Returns a [`JoinHandle`] that can be awaited to retrieve the task's result,
+    /// or dropped to run the task in fire-and-forget mode.
     ///
     /// # Panics
     ///
-    /// Panics if the spawned task panics before producing a result.
+    /// Awaiting the returned `JoinHandle` will panic if the spawned task panics.
     ///
     /// # Examples
     ///
@@ -176,83 +167,21 @@ impl Spawner {
     /// # #[tokio::main]
     /// # async fn main() {
     /// let spawner = Spawner::tokio();
-    /// let result = spawner.run(async { 1 + 1 }).await;
-    /// assert_eq!(result, 2);
+    ///
+    /// // Await to get the result
+    /// let value = spawner.spawn(async { 1 + 1 }).await;
+    /// assert_eq!(value, 2);
+    ///
+    /// // Or fire-and-forget by dropping the handle
+    /// let _ = spawner.spawn(async { println!("background task") });
     /// # }
     /// ```
-    pub async fn run<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> T {
-        let (tx, rx) = oneshot::channel();
-        self.spawn(async move {
-            let _ = tx.send(work.await);
-        });
-        rx.await.expect("spawned task panicked")
-    }
-}
-
-/// Internal wrapper for custom spawn functions.
-#[derive(Clone)]
-pub(crate) struct CustomSpawner(Arc<SpawnFn>);
-
-impl Debug for CustomSpawner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomSpawner").finish_non_exhaustive()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(feature = "tokio")]
-    #[tokio::test]
-    async fn tokio_spawn_fire_and_forget() {
-        let spawner = Spawner::tokio();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        spawner.spawn(async move {
-            tx.send(42).unwrap();
-        });
-
-        assert_eq!(rx.await.unwrap(), 42);
-    }
-
-    #[test]
-    fn custom_spawn() {
-        let spawner = Spawner::custom(|fut| {
-            std::thread::spawn(move || futures::executor::block_on(fut));
-        });
-
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        spawner.spawn(async move {
-            tx.send(42).unwrap();
-        });
-
-        assert_eq!(rx.recv().unwrap(), 42);
-    }
-
-    #[cfg(feature = "tokio")]
-    #[tokio::test]
-    async fn tokio_run() {
-        let spawner = Spawner::tokio();
-        let result = spawner.run(async { 42 }).await;
-        assert_eq!(result, 42);
-    }
-
-    #[test]
-    fn custom_run() {
-        let spawner = Spawner::custom(|fut| {
-            std::thread::spawn(move || futures::executor::block_on(fut));
-        });
-
-        let result = futures::executor::block_on(spawner.run(async { 42 }));
-        assert_eq!(result, 42);
-    }
-
-    #[test]
-    fn custom_spawner_debug() {
-        let spawner = Spawner::custom(|_| {});
-        let debug_str = format!("{spawner:?}");
-        assert!(debug_str.contains("CustomSpawner"));
+    pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
+        match &self.0 {
+            #[cfg(feature = "tokio")]
+            SpawnerKind::Tokio => JoinHandle(JoinHandleInner::Tokio(::tokio::spawn(work))),
+            #[cfg(feature = "custom")]
+            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
+        }
     }
 }

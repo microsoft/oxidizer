@@ -14,7 +14,7 @@ async fn main() {
     let spawner = Spawner::tokio();
 
     // Fire-and-forget: spawn a task without waiting for its result
-    spawner.spawn({
+    let _ = spawner.spawn({
         let clock = clock.clone();
         async move {
             clock.delay(Duration::from_millis(10)).await;
@@ -22,8 +22,8 @@ async fn main() {
         }
     });
 
-    // Retrieve a result using run
-    let value = spawner.run(async { 1 + 1 }).await;
+    // Retrieve a result by awaiting the JoinHandle
+    let value = spawner.spawn(async { 1 + 1 }).await;
     println!("Got result: {value}");
 
     // Wait for background task

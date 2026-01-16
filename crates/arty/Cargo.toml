@@ -3,7 +3,7 @@
 
 [package]
 name = "arty"
-description = "A generic future spawner compatible with any async runtime"
+description = "A generic task spawner compatible with any async runtime"
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
@@ -20,17 +20,32 @@ repository.workspace = true
 all-features = true
 
 [features]
-default = ["tokio"]
+default = ["tokio", "custom"]
 tokio = ["dep:tokio"]
+custom = ["dep:futures-channel"]
 
 [dependencies]
-futures-channel = { workspace = true, features = ["alloc"] }
+futures-channel = { workspace = true, features = ["alloc"], optional = true }
 tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]
+async-std = { version = "1.13", features = ["attributes"] }
+criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[[bench]]
+name = "spawner"
+harness = false
+
+[[example]]
+name = "custom"
+requires-features = ["custom"]
+
+[[example]]
+name = "tokio"
+requires-features = ["tokio"]
 
 [lints]
 workspace = true

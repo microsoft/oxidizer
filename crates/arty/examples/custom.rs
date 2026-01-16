@@ -14,14 +14,14 @@ fn main() {
     });
 
     // Fire-and-forget: spawn a task without waiting for its result
-    spawner.spawn(async {
+    let _ = spawner.spawn(async {
         std::thread::sleep(Duration::from_millis(10));
         println!("Background task completed!");
     });
 
-    // Retrieve a result using run
-    let rx = spawner.run(async { 1 + 1 });
-    let value = futures::executor::block_on(rx);
+    // Retrieve a result by awaiting the JoinHandle
+    let handle = spawner.spawn(async { 1 + 1 });
+    let value = futures::executor::block_on(handle);
     println!("Got result: {value}");
 
     // Wait for background task
