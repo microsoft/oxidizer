@@ -67,6 +67,7 @@ impl OhnoCore {
 
     /// Creates a new [`OhnoCoreBuilder`](crate::OhnoCoreBuilder) for configuring an `OhnoCore` instance.
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // mutants replaces it with Default::default() which is equivalent to OhnoCoreBuilder::new()
     pub fn builder() -> crate::OhnoCoreBuilder {
         crate::OhnoCoreBuilder::new()
     }
