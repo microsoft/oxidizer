@@ -54,32 +54,25 @@ pub fn generate_unique_field_name(existing_fields: &[&syn::Ident]) -> syn::Ident
     syn::Ident::new(&candidate, proc_macro2::Span::call_site())
 }
 
-/// Assert that two token streams are semantically identical by parsing them
-/// into `syn::File`, pretty-printing with `prettyplease` and comparing the
-/// resulting strings.
+/// Assert that a token stream matches its snapshot by parsing it
+/// into `syn::File`, pretty-printing with `prettyplease` and comparing
+/// using insta snapshots.
 ///
 /// Usage:
 /// ```ignore
-/// assert_token_streams_equal!(expected_tokens, actual_tokens);
+/// assert_formatted_snapshot!(result);
 /// ```
 #[cfg(test)]
-macro_rules! assert_token_streams_equal {
-    ($actual:expr, $expected:expr $(,)?) => {{
-        let expected_ts: proc_macro2::TokenStream = $expected;
-        let actual_ts: proc_macro2::TokenStream = $actual;
-
-        let ast_actual: syn::File = syn::parse2(actual_ts).expect("actual tokenstream is not valid Rust");
-        let ast_expected: syn::File = syn::parse2(expected_ts).expect("expected tokenstream is not valid Rust");
-
-        let actual_string = prettyplease::unparse(&ast_actual);
-        let expected_string = prettyplease::unparse(&ast_expected);
-
-        pretty_assertions::assert_eq!(actual_string, expected_string);
+macro_rules! assert_formatted_snapshot {
+    ($tokens:expr) => {{
+        let ast: syn::File = syn::parse2($tokens).expect("tokenstream is not valid Rust");
+        let formatted = prettyplease::unparse(&ast);
+        insta::assert_snapshot!(formatted);
     }};
 }
 
 #[cfg(test)]
-pub(crate) use assert_token_streams_equal;
+pub(crate) use assert_formatted_snapshot;
 
 #[cfg(test)]
 mod tests {

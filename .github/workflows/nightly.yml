@@ -50,8 +50,6 @@ jobs:
 
       # execute
       - name: Mutate All
-        env:
-          DISABLE_T_REX: 1
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs
 
       - name: Create or Update Issue on Failure

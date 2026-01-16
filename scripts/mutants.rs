@@ -8,13 +8,13 @@ edition = "2024"
 
 [dependencies]
 automation = { path = "../crates/automation" }
-anyhow = "1.0"
+ohno = { path = "../crates/ohno", features = ["app-err"] }
 argh = "0.1.12"
 ---
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use ohno::AppError;
 use argh::FromArgs;
 
 const JOBS: u32 = 1;
@@ -134,7 +134,7 @@ fn main() {
     }
 }
 
-fn mutate_group(group: &[String], args: &Args) -> Result<()> {
+fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
     println!("Mutating: {}", group.join(", "));
 
     let mut cargo_args = vec![

@@ -28,8 +28,8 @@ quote.workspace = true
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro"] }
 
 [dev-dependencies]
+insta.workspace = true
 mutants.workspace = true
-pretty_assertions = { workspace = true, features = ["std"] }
 prettyplease.workspace = true
 
 [lints]

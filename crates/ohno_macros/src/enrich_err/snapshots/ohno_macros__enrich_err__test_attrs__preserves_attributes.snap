@@ -1,0 +1,17 @@
+---
+source: crates/ohno_macros/src/enrich_err/test_attrs.rs
+expression: format_tokens(result)
+---
+#[inline]
+#[allow(clippy::unused)]
+fn test_function() -> Result<(), OhnoErrorType> {
+    (|| { Ok(()) })()
+        .map_err(|mut e| {
+            let msg = "error in function test_function";
+            ohno::Enrichable::add_enrichment(
+                &mut e,
+                ohno::EnrichmentEntry::new(msg, file!(), line!()),
+            );
+            e
+        })
+}

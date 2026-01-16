@@ -1,0 +1,9 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/debug.rs
+expression: format_tokens(result)
+---
+impl<T> ::core::fmt::Debug for GenericStruct<T> {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct(stringify!(GenericStruct)).field("value", &self.value).finish()
+    }
+}
