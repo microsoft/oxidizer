@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::error::Error as StdError;
 
 use crate::OhnoCore;
