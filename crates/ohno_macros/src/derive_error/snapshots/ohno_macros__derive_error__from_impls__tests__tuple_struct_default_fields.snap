@@ -1,0 +1,9 @@
+---
+source: crates/ohno_macros/src/derive_error/from_impls.rs
+expression: formatted
+---
+impl From<std::io::Error> for SimpleTupleError {
+    fn from(error: std::io::Error) -> Self {
+        Self(ohno::OhnoCoreBuilder::new().error(error).build(), Default::default())
+    }
+}

@@ -151,14 +151,13 @@ fn generate_from_implementations_tuple(
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
-    use syn::parse_str;
 
-    // Helper: parse DeriveInput from snippet
-    fn di(src: &str) -> DeriveInput {
-        parse_str(src).unwrap()
-    }
+    use syn::{parse_quote, parse_str};
+
+    use super::*;
+    use crate::utils::assert_formatted_snapshot;
+
     // Helper: common FromConfig for std::io::Error without field expressions
     fn cfg_io() -> FromConfig {
         FromConfig {
@@ -168,92 +167,89 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_from_implementations_no_configs() {
-        let input = di(r"struct MyError { source: ohno::OhnoCore, }");
+    fn no_configs_produces_empty_output() {
+        let input: DeriveInput = parse_quote! {
+            struct MyError {
+                source: ohno::OhnoCore,
+            }
+        };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
         let result = generate_from_implementations(&input, &error_field_ref, &[]).unwrap();
         assert!(result.is_empty(), "Expected empty token stream when no from_configs are provided");
     }
 
     #[test]
-    fn test_generate_from_implementations_named_with_generics() {
-        let input = di(r"struct MyError<T: std::fmt::Debug> { source: ohno::OhnoCore, other: T, }");
-        let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
-        let expected = quote! {
-            impl<T: std::fmt::Debug> From<std::io::Error> for MyError<T> {
-                fn from(error: std::io::Error) -> Self {
-                    Self { other: Default::default(), source: ohno::OhnoCoreBuilder::new().error(error).build(), }
-                }
+    fn named_struct_with_generics() {
+        let input: DeriveInput = parse_quote! {
+            struct MyError<T: std::fmt::Debug> {
+                source: ohno::OhnoCore,
+                other: T,
             }
         };
-        assert_eq!(result.to_string(), expected.to_string());
+        let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
+        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
+        assert_formatted_snapshot!(result);
     }
 
     #[test]
-    fn test_generate_from_implementations_tuple_default_fields() {
-        let input = di(r"struct SimpleTupleError(ohno::OhnoCore, String);");
+    fn tuple_struct_default_fields() {
+        let input: DeriveInput = parse_quote! {
+            struct SimpleTupleError(ohno::OhnoCore, String);
+        };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
         let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
-        let expected = quote! {
-            impl From<std::io::Error> for SimpleTupleError {
-                fn from(error: std::io::Error) -> Self { Self(ohno::OhnoCoreBuilder::new().error(error).build(), Default::default()) }
-            }
-        };
-        assert_eq!(result.to_string(), expected.to_string());
+        assert_formatted_snapshot!(result);
     }
 
     // Consolidated: all non-struct inputs to tuple implementation helper produce identical bail message.
     #[test]
-    fn test_tuple_non_struct_variants_bail() {
-        let cases = [
+    fn tuple_non_struct_variants_bail() {
+        let cases: &[DeriveInput] = &[
             // enum (basic)
-            r"enum MyError { A, B }",
+            parse_quote! { enum MyError { A, B } },
             // union
-            r"union MyUnion { a: u32, }",
+            parse_quote! { union MyUnion { a: u32 } },
             // generic enum
-            r"enum GenericEnumError<T> { A(T) }",
+            parse_quote! { enum GenericEnumError<T> { A(T) } },
         ];
-        for src in cases {
-            let input = di(src);
+        for input in cases {
             let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-            let result = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]);
-            assert!(result.is_err(), "Expected error for non-struct input: {src}");
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                "From implementations for tuple structs only support structs"
-            );
+            let err = generate_from_implementations_tuple(input, &error_field_ref, &[cfg_io()]).unwrap_err();
+            assert_eq!(err.to_string(), "From implementations for tuple structs only support structs");
         }
     }
 
     #[test]
-    fn test_generate_from_implementations_tuple_named_fields() {
-        let input = di(r"struct MyError { source: ohno::OhnoCore, message: String, }");
+    fn tuple_impl_rejects_named_fields() {
+        let input: DeriveInput = parse_quote! {
+            struct MyError {
+                source: ohno::OhnoCore,
+                message: String,
+            }
+        };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-        let result = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]);
-        assert!(result.is_err(), "Expected error for named fields in tuple function");
+        let err = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
         assert_eq!(
-            result.unwrap_err().to_string(),
+            err.to_string(),
             "From implementations for tuple structs only support structs with unnamed fields"
         );
     }
 
     #[test]
-    fn test_generate_from_implementations_tuple_error_field_at_different_positions() {
-        let input = di(r"struct TupleError(String, ohno::OhnoCore, i32);");
+    fn tuple_struct_error_field_at_different_positions() {
+        let input: DeriveInput = parse_quote! {
+            struct TupleError(String, ohno::OhnoCore, i32);
+        };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(1));
         let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
-        let expected = quote! {
-            impl From<std::io::Error> for TupleError {
-                fn from(error: std::io::Error) -> Self { Self(Default::default(), ohno::OhnoCoreBuilder::new().error(error).build(), Default::default()) }
-            }
-        };
-        assert_eq!(result.to_string(), expected.to_string());
+        assert_formatted_snapshot!(result);
     }
 
     #[test]
-    fn test_generate_from_implementations_tuple_with_custom_field_expressions() {
-        let input = di(r"struct TupleError(ohno::OhnoCore, String, i32);");
+    fn tuple_struct_with_custom_field_expressions() {
+        let input: DeriveInput = parse_quote! {
+            struct TupleError(ohno::OhnoCore, String, i32);
+        };
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
         let mut field_expressions = HashMap::new();
         field_expressions.insert("1".to_string(), parse_str("String::from(\"custom\")").unwrap());
@@ -263,26 +259,27 @@ mod tests {
             field_expressions,
         };
         let result = generate_from_implementations(&input, &error_field_ref, &[cfg]).unwrap();
-        let expected = quote! {
-            impl From<std::io::Error> for TupleError {
-                fn from(error: std::io::Error) -> Self { Self(ohno::OhnoCoreBuilder::new().error(error).build(), String::from("custom"), 42) }
+        assert_formatted_snapshot!(result);
+    }
+
+    #[test]
+    fn non_struct_rejected_at_top_level() {
+        let input: DeriveInput = parse_quote! {
+            enum NotAStruct { A, B }
+        };
+        let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("dummy", proc_macro2::Span::call_site()));
+        let err = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        assert_eq!(err.to_string(), "From implementations only support structs");
+    }
+
+    #[test]
+    fn named_struct_with_custom_field_expression() {
+        let input: DeriveInput = parse_quote! {
+            struct NamedErr {
+                source: ohno::OhnoCore,
+                detail: String,
             }
         };
-        assert_eq!(result.to_string(), expected.to_string());
-    }
-
-    #[test]
-    fn test_generate_from_implementations_non_struct() {
-        let input = di(r"enum NotAStruct { A, B }");
-        let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("dummy", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]);
-        assert!(result.is_err(), "Expected error for non-struct type at top-level function");
-        assert_eq!(result.unwrap_err().to_string(), "From implementations only support structs");
-    }
-
-    #[test]
-    fn test_generate_from_implementations_named_pattern_success() {
-        let input = di(r"struct NamedErr { source: ohno::OhnoCore, detail: String, }");
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
         let mut field_expressions = HashMap::new();
         field_expressions.insert("detail".to_string(), parse_str("String::from(\"custom\")").unwrap());
@@ -291,87 +288,75 @@ mod tests {
             field_expressions,
         };
         let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg]).unwrap();
-        let expected = quote! {
-            impl From<std::io::Error> for NamedErr {
-                fn from(error: std::io::Error) -> Self { Self { detail: String::from("custom"), source: ohno::OhnoCoreBuilder::new().error(error).build(), } }
-            }
-        };
-        assert_eq!(tokens.to_string(), expected.to_string());
+        assert_formatted_snapshot!(tokens);
     }
 
     #[test]
-    fn test_generate_from_implementations_named_pattern_success_default() {
-        let input = di(r"struct SimpleNamed { source: ohno::OhnoCore, info: String, }");
+    fn named_struct_default_fields() {
+        let input: DeriveInput = parse_quote! {
+            struct SimpleNamed {
+                source: ohno::OhnoCore,
+                info: String,
+            }
+        };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
         let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap();
-        let expected = quote! {
-            impl From<std::io::Error> for SimpleNamed {
-                fn from(error: std::io::Error) -> Self { Self { info: Default::default(), source: ohno::OhnoCoreBuilder::new().error(error).build(), } }
+        assert_formatted_snapshot!(tokens);
+    }
+
+    #[test]
+    fn named_impl_rejects_indexed_error_field() {
+        let input: DeriveInput = parse_quote! {
+            struct NamedStruct {
+                source: ohno::OhnoCore,
+                message: String,
             }
         };
-        assert_eq!(tokens.to_string(), expected.to_string());
-    }
-
-    #[test]
-    fn test_generate_from_implementations_named_error_field_mismatch() {
-        let input = di(r"struct NamedStruct { source: ohno::OhnoCore, message: String, }");
         let error_field_ref = ErrorFieldRef::Indexed(syn::Index::from(0));
-        let result = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]);
-        assert!(
-            result.is_err(),
-            "Expected error when passing Indexed field to named struct implementation"
-        );
-        assert_eq!(result.unwrap_err().to_string(), "Expected named field for named struct");
+        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        assert_eq!(err.to_string(), "Expected named field for named struct");
     }
 
     #[test]
-    fn test_generate_from_implementations_named_non_struct() {
-        let input = di(r"enum NotStruct { A }");
+    fn named_impl_rejects_non_struct() {
+        let input: DeriveInput = parse_quote! {
+            enum NotStruct { A }
+        };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]);
-        assert!(result.is_err(), "Expected error for non-struct input inside named implementation");
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "From implementations for named structs only support structs"
-        );
+        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        assert_eq!(err.to_string(), "From implementations for named structs only support structs");
     }
 
     #[test]
-    fn test_generate_from_implementations_named_requires_named_fields() {
-        let input = di(r"struct TupleStructError(ohno::OhnoCore, String);");
+    fn named_impl_requires_named_fields() {
+        let input: DeriveInput = parse_quote! {
+            struct TupleStructError(ohno::OhnoCore, String);
+        };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]);
-        assert!(
-            result.is_err(),
-            "Expected error for tuple struct passed to named implementation function"
-        );
+        let err = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
         assert_eq!(
-            result.unwrap_err().to_string(),
+            err.to_string(),
             "From implementations for named structs only support structs with named fields"
         );
     }
 
     #[test]
-    fn test_generate_from_implementations_unit_struct() {
-        let input = di(r"struct UnitStructError;");
+    fn unit_struct_rejected() {
+        let input: DeriveInput = parse_quote! {
+            struct UnitStructError;
+        };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]);
-        assert!(result.is_err(), "Expected error for unit struct input at Fields::Unit arm");
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "From implementations not supported for unit structs"
-        );
+        let err = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        assert_eq!(err.to_string(), "From implementations not supported for unit structs");
     }
 
     #[test]
-    fn test_generate_from_implementations_tuple_error_field_mismatch() {
-        let input = di(r"struct MismatchTuple(ohno::OhnoCore, String);");
+    fn tuple_impl_rejects_named_error_field() {
+        let input: DeriveInput = parse_quote! {
+            struct MismatchTuple(ohno::OhnoCore, String);
+        };
         let error_field_ref = ErrorFieldRef::Named(syn::Ident::new("source", proc_macro2::Span::call_site()));
-        let result = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]);
-        assert!(
-            result.is_err(),
-            "Expected error for mismatch between tuple struct and named error field ref"
-        );
-        assert_eq!(result.unwrap_err().to_string(), "Expected indexed field for tuple struct");
+        let err = generate_from_implementations_tuple(&input, &error_field_ref, &[cfg_io()]).unwrap_err();
+        assert_eq!(err.to_string(), "Expected indexed field for tuple struct");
     }
 }

@@ -1,0 +1,12 @@
+---
+source: crates/ohno_macros/src/derive_error/from_impls.rs
+expression: formatted
+---
+impl<T: std::fmt::Debug> From<std::io::Error> for MyError<T> {
+    fn from(error: std::io::Error) -> Self {
+        Self {
+            other: Default::default(),
+            source: ohno::OhnoCoreBuilder::new().error(error).build(),
+        }
+    }
+}

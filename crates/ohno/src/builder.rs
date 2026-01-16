@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
 
-use crate::source::Source;
 use crate::OhnoCore;
+use crate::source::Source;
 
 /// Policy for capturing backtraces in errors.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,8 +57,8 @@ impl OhnoCoreBuilder {
     }
 
     /// Transparent errors delegate [`source`](StdError::source) calls to the inner error.
-    /// 
-    /// Typically it's used with private error types that are not exposed to the users of the 
+    ///
+    /// Typically it's used with private error types that are not exposed to the users of the
     /// library.
     pub fn transparent_error<E>(mut self, error: E) -> Self
     where
@@ -72,9 +72,7 @@ impl OhnoCoreBuilder {
     pub fn build(self) -> OhnoCore {
         OhnoCore::from_builder(self)
     }
-
 }
-
 
 const STR_TYPE_IDS: [typeid::ConstTypeId; 3] = [
     typeid::ConstTypeId::of::<&str>(),
@@ -93,7 +91,6 @@ mod tests {
 
     use super::*;
 
-    
     #[test]
     fn is_string_error_test() {
         assert!(is_string_error(&"a string slice"));

@@ -252,12 +252,12 @@ extern crate self as ohno;
 #[cfg(feature = "app-err")]
 mod app;
 mod backtrace;
+mod builder;
 mod core;
 mod enrichable;
 mod enrichment_entry;
 mod error_ext;
 mod source;
-mod builder;
 
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
@@ -266,8 +266,8 @@ pub use core::OhnoCore;
 
 #[cfg(feature = "app-err")]
 pub use app::{AppError, IntoAppError};
+pub use builder::{BacktracePolicy, OhnoCoreBuilder};
 pub use enrichable::{Enrichable, EnrichableExt};
 pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
 pub use ohno_macros::{Error, enrich_err, error};
-pub use builder::{OhnoCoreBuilder, BacktracePolicy};

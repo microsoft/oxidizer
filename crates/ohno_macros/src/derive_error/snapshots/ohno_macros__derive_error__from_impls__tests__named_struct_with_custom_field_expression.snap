@@ -1,0 +1,12 @@
+---
+source: crates/ohno_macros/src/derive_error/from_impls.rs
+expression: formatted
+---
+impl From<std::io::Error> for NamedErr {
+    fn from(error: std::io::Error) -> Self {
+        Self {
+            detail: String::from("custom"),
+            source: ohno::OhnoCoreBuilder::new().error(error).build(),
+        }
+    }
+}
