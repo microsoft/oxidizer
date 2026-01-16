@@ -5,7 +5,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
-//! Runtime-agnostic async task spawning.
+//! Async runtime abstractions
 //!
 //! This crate provides a [`Spawner`] type that abstracts task spawning across
 //! different async runtimes without generic infection.

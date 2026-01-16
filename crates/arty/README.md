@@ -13,7 +13,7 @@
 
 </div>
 
-Runtime-agnostic async task spawning.
+Async runtime abstractions
 
 This crate provides a [`Spawner`][__link0] type that abstracts task spawning across
 different async runtimes without generic infection.
@@ -61,6 +61,6 @@ spawner.spawn(async {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGz2vPTqTl9UCG38obYO2K--jG0X7KlikClvvG6i1Pg-T7jGeYWSBgmRhcnR5ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG97CGOXohRcKG6oqJHGRKB_UG6aHakh4orawGyQoqFPoHfauYWSBgmRhcnR5ZTAuMS4w
  [__link0]: https://docs.rs/arty/0.1.0/arty/?search=Spawner
  [__link1]: https://docs.rs/arty/0.1.0/arty/?search=Spawner::tokio
