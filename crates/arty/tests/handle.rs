@@ -5,8 +5,6 @@
 
 use arty::{JoinHandle, Spawner};
 
-static_assertions::assert_impl_all!(JoinHandle<()>: Send, Sync);
-
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn join_handle_debug() {

@@ -5,6 +5,8 @@
 
 use arty::Spawner;
 
+static_assertions::assert_impl_all!(Spawner: Send, Sync);
+
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn tokio_spawn_and_await() {
