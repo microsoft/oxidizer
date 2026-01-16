@@ -7,7 +7,7 @@ use std::fmt;
 
 use ohno::{ErrorExt, OhnoCore};
 
-use crate::Enrichable;
+use crate::{Enrichable, OhnoCoreBuilder};
 
 /// Inner error type that implements `ohno::Error`.
 #[derive(ohno::Error, Clone)]
@@ -117,7 +117,7 @@ impl AppError {
     {
         Self {
             inner: Inner {
-                inner: OhnoCore::from(error),
+                inner: OhnoCoreBuilder::new().error(error).build(),
             },
         }
     }

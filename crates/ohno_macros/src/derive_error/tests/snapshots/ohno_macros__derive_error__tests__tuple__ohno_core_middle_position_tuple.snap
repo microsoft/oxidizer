@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/tuple.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl MiddlePositionTupleError {
     /// Creates a new error with custom fields and default message.
@@ -13,7 +13,11 @@ impl MiddlePositionTupleError {
         param_2: impl Into<u32>,
         error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
-        Self(param_0.into(), ohno::OhnoCore::from(error), param_2.into())
+        Self(
+            param_0.into(),
+            ohno::OhnoCoreBuilder::new().error(error).build(),
+            param_2.into(),
+        )
     }
 }
 impl From<std::convert::Infallible> for MiddlePositionTupleError {

@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/mod.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl NoDebugError {
     /// Creates a new error with custom fields and default message.
@@ -17,7 +17,7 @@ impl NoDebugError {
     ) -> Self {
         Self {
             message: message.into(),
-            inner: ohno::OhnoCore::from(error),
+            inner: ohno::OhnoCoreBuilder::new().error(error).build(),
         }
     }
 }

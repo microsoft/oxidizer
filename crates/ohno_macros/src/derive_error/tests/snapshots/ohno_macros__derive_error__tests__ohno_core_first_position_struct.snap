@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/mod.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl FirstPositionError {
     /// Creates a new error with custom fields and default message.
@@ -20,7 +20,7 @@ impl FirstPositionError {
         Self {
             message: message.into(),
             code: code.into(),
-            inner: ohno::OhnoCore::from(error),
+            inner: ohno::OhnoCoreBuilder::new().error(error).build(),
         }
     }
 }

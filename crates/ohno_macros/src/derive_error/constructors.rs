@@ -143,7 +143,7 @@ fn generate_simple_named_constructors(
             /// Creates a new error with a specified error.
             pub(crate) fn #caused_by_method(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
                 Self {
-                    #error_field_access: ohno::OhnoCore::from(error),
+                    #error_field_access: ohno::OhnoCoreBuilder::new().error(error).build(),
                 }
             }
         }
@@ -182,7 +182,7 @@ fn generate_complex_named_constructors(
             pub(crate) fn #caused_by_method(#(#param_names: impl Into<#field_types>,)* error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
                 Self {
                     #(#field_names: #param_names.into(),)*
-                    #error_field_access: ohno::OhnoCore::from(error),
+                    #error_field_access: ohno::OhnoCoreBuilder::new().error(error).build(),
                 }
             }
         }
@@ -206,7 +206,7 @@ fn generate_simple_tuple_constructors(
 
             /// Creates a new error with a specified error.
             pub(crate) fn #caused_by_method(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
-                Self(ohno::OhnoCore::from(error))
+                Self(ohno::OhnoCoreBuilder::new().error(error).build())
             }
         }
     }
@@ -244,7 +244,7 @@ fn generate_complex_tuple_constructors(
     let mut caused_by_param_idx = 0;
     for (i, _) in fields.unnamed.iter().enumerate() {
         if i == error_field_index {
-            caused_by_assignments.push(quote! { ohno::OhnoCore::from(error) });
+            caused_by_assignments.push(quote! { ohno::OhnoCoreBuilder::new().error(error).build() });
         } else {
             let param_name = &param_names[caused_by_param_idx];
             caused_by_assignments.push(quote! { #param_name.into() });

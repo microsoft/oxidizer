@@ -86,3 +86,20 @@ fn is_string_error<T>(_: &T) -> bool {
     let typeid_of_t = typeid::of::<T>();
     STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::*;
+
+    
+    #[test]
+    fn is_string_error_test() {
+        assert!(is_string_error(&"a string slice"));
+        assert!(is_string_error(&String::from("a string")));
+        assert!(is_string_error(&Cow::Borrowed("a string slice")));
+        assert!(is_string_error(&Cow::<'static, str>::Owned(String::from("a string"))));
+        assert!(!is_string_error(&std::io::Error::other("an io error")));
+    }
+}

@@ -65,24 +65,6 @@ impl OhnoCore {
         Self::from_source(Source::None)
     }
 
-    /// Creates a new `OhnoCore` wrapping an existing error without capturing backtrace.
-    ///
-    /// ```rust
-    /// use ohno::OhnoCore;
-    ///
-    /// let io_error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
-    /// let wrapped = OhnoCore::without_backtrace(io_error);
-    /// ```
-    pub fn without_backtrace(error: impl Into<Box<dyn StdError + Send + Sync + 'static>>) -> Self {
-        Self {
-            data: Box::new(Inner {
-                source: Source::Error(error.into().into()),
-                backtrace: Backtrace::disabled(),
-                enrichment: Vec::new(),
-            }),
-        }
-    }
-
     fn from_source(source: Source) -> Self {
         Self {
             data: Box::new(Inner {
@@ -187,31 +169,6 @@ impl Default for OhnoCore {
     fn default() -> Self {
         Self::new()
     }
-}
-
-impl<T> From<T> for OhnoCore
-where
-    T: Into<Box<dyn StdError + Send + Sync>>,
-{
-    fn from(value: T) -> Self {
-        // StringError is a private error type and cannot be referenced directly
-        if is_string_error(&value) {
-            Self::from_source(Source::Transparent(value.into().into()))
-        } else {
-            Self::from_source(Source::Error(value.into().into()))
-        }
-    }
-}
-
-const STR_TYPE_IDS: [typeid::ConstTypeId; 3] = [
-    typeid::ConstTypeId::of::<&str>(),
-    typeid::ConstTypeId::of::<String>(),
-    typeid::ConstTypeId::of::<Cow<'_, str>>(),
-];
-
-fn is_string_error<T>(_: &T) -> bool {
-    let typeid_of_t = typeid::of::<T>();
-    STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t)
 }
 
 /// Helper struct for formatting error messages in a consistent way.
@@ -385,14 +342,5 @@ mod tests {
         assert_eq!(error.backtrace().status(), BacktraceStatus::Disabled);
         let display = format!("{error}");
         assert_eq!(display, "test error without backtrace");
-    }
-
-    #[test]
-    fn is_string_error_test() {
-        assert!(is_string_error(&"a string slice"));
-        assert!(is_string_error(&String::from("a string")));
-        assert!(is_string_error(&Cow::Borrowed("a string slice")));
-        assert!(is_string_error(&Cow::<'static, str>::Owned(String::from("a string"))));
-        assert!(!is_string_error(&std::io::Error::other("an io error")));
     }
 }

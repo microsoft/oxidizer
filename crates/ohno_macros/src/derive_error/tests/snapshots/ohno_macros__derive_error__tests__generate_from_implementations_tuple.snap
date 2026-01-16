@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/mod.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl TestError {
     /// Creates a new error with custom fields and default message.
@@ -12,12 +12,12 @@ impl TestError {
         param_0: impl Into<String>,
         error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
-        Self(param_0.into(), ohno::OhnoCore::from(error))
+        Self(param_0.into(), ohno::OhnoCoreBuilder::new().error(error).build())
     }
 }
 impl From<String> for TestError {
     fn from(error: String) -> Self {
-        Self(Default::default(), ohno::OhnoCore::from(error))
+        Self(Default::default(), ohno::OhnoCoreBuilder::new().error(error).build())
     }
 }
 impl From<std::convert::Infallible> for TestError {

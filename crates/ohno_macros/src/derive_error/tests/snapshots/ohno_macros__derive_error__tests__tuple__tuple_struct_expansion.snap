@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/tuple.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl TupleError {
     /// Creates a new error with custom fields and default message.
@@ -12,7 +12,7 @@ impl TupleError {
         param_0: impl Into<String>,
         error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
-        Self(param_0.into(), ohno::OhnoCore::from(error))
+        Self(param_0.into(), ohno::OhnoCoreBuilder::new().error(error).build())
     }
 }
 impl From<std::convert::Infallible> for TupleError {

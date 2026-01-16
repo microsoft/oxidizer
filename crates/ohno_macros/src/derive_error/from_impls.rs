@@ -78,7 +78,7 @@ fn generate_from_implementations_named(
                 fn from(error: #from_type) -> Self {
                     Self {
                         #(#field_defaults,)*
-                        #error_field_access: ohno::OhnoCore::from(error),
+                        #error_field_access: ohno::OhnoCoreBuilder::new().error(error).build(),
                     }
                 }
             }
@@ -122,7 +122,7 @@ fn generate_from_implementations_tuple(
         let field_defaults: Vec<proc_macro2::TokenStream> = (0..total_fields)
             .map(|i| {
                 if i == error_field_index {
-                    quote! { ohno::OhnoCore::from(error) }
+                    quote! { ohno::OhnoCoreBuilder::new().error(error).build() }
                 } else {
                     let field_index_str = i.to_string();
                     if let Some(custom_expr) = from_config.field_expressions.get(&field_index_str) {
@@ -183,7 +183,7 @@ mod tests {
         let expected = quote! {
             impl<T: std::fmt::Debug> From<std::io::Error> for MyError<T> {
                 fn from(error: std::io::Error) -> Self {
-                    Self { other: Default::default(), source: ohno::OhnoCore::from(error), }
+                    Self { other: Default::default(), source: ohno::OhnoCoreBuilder::new().error(error).build(), }
                 }
             }
         };
@@ -197,7 +197,7 @@ mod tests {
         let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
         let expected = quote! {
             impl From<std::io::Error> for SimpleTupleError {
-                fn from(error: std::io::Error) -> Self { Self(ohno::OhnoCore::from(error), Default::default()) }
+                fn from(error: std::io::Error) -> Self { Self(ohno::OhnoCoreBuilder::new().error(error).build(), Default::default()) }
             }
         };
         assert_eq!(result.to_string(), expected.to_string());
@@ -245,7 +245,7 @@ mod tests {
         let result = generate_from_implementations(&input, &error_field_ref, &[cfg_io()]).unwrap();
         let expected = quote! {
             impl From<std::io::Error> for TupleError {
-                fn from(error: std::io::Error) -> Self { Self(Default::default(), ohno::OhnoCore::from(error), Default::default()) }
+                fn from(error: std::io::Error) -> Self { Self(Default::default(), ohno::OhnoCoreBuilder::new().error(error).build(), Default::default()) }
             }
         };
         assert_eq!(result.to_string(), expected.to_string());
@@ -265,7 +265,7 @@ mod tests {
         let result = generate_from_implementations(&input, &error_field_ref, &[cfg]).unwrap();
         let expected = quote! {
             impl From<std::io::Error> for TupleError {
-                fn from(error: std::io::Error) -> Self { Self(ohno::OhnoCore::from(error), String::from("custom"), 42) }
+                fn from(error: std::io::Error) -> Self { Self(ohno::OhnoCoreBuilder::new().error(error).build(), String::from("custom"), 42) }
             }
         };
         assert_eq!(result.to_string(), expected.to_string());
@@ -293,7 +293,7 @@ mod tests {
         let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg]).unwrap();
         let expected = quote! {
             impl From<std::io::Error> for NamedErr {
-                fn from(error: std::io::Error) -> Self { Self { detail: String::from("custom"), source: ohno::OhnoCore::from(error), } }
+                fn from(error: std::io::Error) -> Self { Self { detail: String::from("custom"), source: ohno::OhnoCoreBuilder::new().error(error).build(), } }
             }
         };
         assert_eq!(tokens.to_string(), expected.to_string());
@@ -306,7 +306,7 @@ mod tests {
         let tokens = generate_from_implementations_named(&input, &error_field_ref, &[cfg_io()]).unwrap();
         let expected = quote! {
             impl From<std::io::Error> for SimpleNamed {
-                fn from(error: std::io::Error) -> Self { Self { info: Default::default(), source: ohno::OhnoCore::from(error), } }
+                fn from(error: std::io::Error) -> Self { Self { info: Default::default(), source: ohno::OhnoCoreBuilder::new().error(error).build(), } }
             }
         };
         assert_eq!(tokens.to_string(), expected.to_string());

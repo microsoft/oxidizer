@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/tuple.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl OnlyCoreError {
     /// Creates a new error with default message.
@@ -11,7 +11,7 @@ impl OnlyCoreError {
     pub(crate) fn caused_by(
         error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
-        Self(ohno::OhnoCore::from(error))
+        Self(ohno::OhnoCoreBuilder::new().error(error).build())
     }
 }
 impl From<std::convert::Infallible> for OnlyCoreError {

@@ -1,6 +1,6 @@
 ---
 source: crates/ohno_macros/src/derive_error/tests/mod.rs
-expression: format_tokens(result)
+expression: formatted
 ---
 impl IoWrapperError {
     /// Creates a new error with default message.
@@ -14,14 +14,14 @@ impl IoWrapperError {
         error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
         Self {
-            inner: ohno::OhnoCore::from(error),
+            inner: ohno::OhnoCoreBuilder::new().error(error).build(),
         }
     }
 }
 impl From<std::io::Error> for IoWrapperError {
     fn from(error: std::io::Error) -> Self {
         Self {
-            inner: ohno::OhnoCore::from(error),
+            inner: ohno::OhnoCoreBuilder::new().error(error).build(),
         }
     }
 }
