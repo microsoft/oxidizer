@@ -7,8 +7,7 @@ use opentelemetry::StringValue;
 
 use crate::service::Layer;
 use crate::timeout::{
-    OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs,
-    TimeoutOverride, TimeoutOverrideArgs,
+    OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
 };
 use crate::{EnableIf, NotSet, SeatbeltOptions, Set};
 
@@ -120,10 +119,7 @@ impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutp
     /// * `on_timeout` - Function that takes a reference to the timeout output and
     ///   [`OnTimeoutArgs`] containing timeout context information
     #[must_use]
-    pub fn on_timeout(
-        mut self,
-        on_timeout: impl Fn(&Out, OnTimeoutArgs) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn on_timeout(mut self, on_timeout: impl Fn(&Out, OnTimeoutArgs) + Send + Sync + 'static) -> Self {
         self.on_timeout = Some(OnTimeout::new(on_timeout));
         self
     }
@@ -205,10 +201,7 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
             timeout: self.timeout.expect("timeout must be set in Ready state"),
             enable_if: self.enable_if.clone(),
             on_timeout: self.on_timeout.clone(),
-            timeout_output: self
-                .timeout_output
-                .clone()
-                .expect("timeout_result must be set in Ready state"),
+            timeout_output: self.timeout_output.clone().expect("timeout_result must be set in Ready state"),
             name: self.strategy_name.clone(),
             pipeline_name: self.options.get_pipeline_name().clone().into(),
             event_reporter: self.options.create_resilience_event_counter(),
@@ -246,8 +239,7 @@ mod tests {
     #[test]
     fn new_needs_timeout_output() {
         let options = create_test_options();
-        let layer: TimeoutLayer<_, _, NotSet, NotSet> =
-            TimeoutLayer::new(StringValue::from("test_timeout"), &options);
+        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new(StringValue::from("test_timeout"), &options);
 
         assert!(layer.timeout.is_none());
         assert!(layer.timeout_output.is_none());
@@ -262,8 +254,7 @@ mod tests {
         let options = create_test_options();
         let layer = TimeoutLayer::new(StringValue::from("test"), &options);
 
-        let layer: TimeoutLayer<_, _, NotSet, Set> =
-            layer.timeout_output(|args| format!("timeout: {}", args.timeout().as_millis()));
+        let layer: TimeoutLayer<_, _, NotSet, Set> = layer.timeout_output(|args| format!("timeout: {}", args.timeout().as_millis()));
         let result = layer.timeout_output.unwrap().call(TimeoutOutputArgs {
             timeout: Duration::from_millis(3),
         });
@@ -276,8 +267,7 @@ mod tests {
         let options = create_test_options_result();
         let layer = TimeoutLayer::new(StringValue::from("test"), &options);
 
-        let layer: TimeoutLayer<_, _, NotSet, Set> =
-            layer.timeout_error(|args| format!("timeout: {}", args.timeout().as_millis()));
+        let layer: TimeoutLayer<_, _, NotSet, Set> = layer.timeout_error(|args| format!("timeout: {}", args.timeout().as_millis()));
         let result = layer
             .timeout_output
             .unwrap()
@@ -291,10 +281,9 @@ mod tests {
 
     #[test]
     fn timeout_ensure_set_correctly() {
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            TimeoutLayer::new(StringValue::from("test"), &create_test_options())
-                .timeout_output(|_args| "timeout: ".to_string())
-                .timeout(Duration::from_millis(3));
+        let layer: TimeoutLayer<_, _, Set, Set> = TimeoutLayer::new(StringValue::from("test"), &create_test_options())
+            .timeout_output(|_args| "timeout: ".to_string())
+            .timeout(Duration::from_millis(3));
 
         assert_eq!(layer.timeout.unwrap(), Duration::from_millis(3));
     }
@@ -304,10 +293,9 @@ mod tests {
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = Arc::clone(&called);
 
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            create_ready_layer().on_timeout(move |_output, _args| {
-                called_clone.store(true, Ordering::SeqCst);
-            });
+        let layer: TimeoutLayer<_, _, Set, Set> = create_ready_layer().on_timeout(move |_output, _args| {
+            called_clone.store(true, Ordering::SeqCst);
+        });
 
         layer.on_timeout.unwrap().call(
             &"output".to_string(),
@@ -321,8 +309,7 @@ mod tests {
 
     #[test]
     fn timeout_override_ok() {
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            create_ready_layer().timeout_override(|_input, _args| Some(Duration::from_secs(3)));
+        let layer: TimeoutLayer<_, _, Set, Set> = create_ready_layer().timeout_override(|_input, _args| Some(Duration::from_secs(3)));
 
         let result = layer.timeout_override.unwrap().call(
             &"a".to_string(),
@@ -336,8 +323,7 @@ mod tests {
 
     #[test]
     fn enable_if_ok() {
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            create_ready_layer().enable_if(|input| matches!(input.as_ref(), "enable"));
+        let layer: TimeoutLayer<_, _, Set, Set> = create_ready_layer().enable_if(|input| matches!(input.as_ref(), "enable"));
 
         assert!(layer.enable_if.call(&"enable".to_string()));
         assert!(!layer.enable_if.call(&"disable".to_string()));
@@ -359,16 +345,14 @@ mod tests {
 
     #[test]
     fn timeout_when_ready_ok() {
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            create_ready_layer().timeout(Duration::from_secs(123));
+        let layer: TimeoutLayer<_, _, Set, Set> = create_ready_layer().timeout(Duration::from_secs(123));
 
         assert_eq!(layer.timeout.unwrap(), Duration::from_secs(123));
     }
 
     #[test]
     fn timeout_output_when_ready_ok() {
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            create_ready_layer().timeout_output(|_args| "some new value".to_string());
+        let layer: TimeoutLayer<_, _, Set, Set> = create_ready_layer().timeout_output(|_args| "some new value".to_string());
         assert!(layer.timeout_output.is_some());
         let result = layer.timeout_output.unwrap().call(TimeoutOutputArgs {
             timeout: Duration::from_secs(123),
@@ -379,8 +363,7 @@ mod tests {
 
     #[test]
     fn timeout_error_when_ready_ok() {
-        let layer: TimeoutLayer<_, _, Set, Set> =
-            create_ready_layer_with_result().timeout_error(|_args| "some error value".to_string());
+        let layer: TimeoutLayer<_, _, Set, Set> = create_ready_layer_with_result().timeout_error(|_args| "some error value".to_string());
         assert!(layer.timeout_output.is_some());
         let result = layer
             .timeout_output
@@ -395,8 +378,7 @@ mod tests {
 
     #[test]
     fn layer_ok() {
-        let _layered =
-            create_ready_layer().layer(Execute::new(|input: String| async move { input }));
+        let _layered = create_ready_layer().layer(Execute::new(|input: String| async move { input }));
     }
 
     #[test]

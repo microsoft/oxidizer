@@ -66,12 +66,9 @@ impl Iterator for DelaysIter {
                 }
             }
             (Backoff::Exponential, false) => duration_mul_pow2(self.props.base_delay, self.attempt),
-            (Backoff::Exponential, true) => decorrelated_jitter_backoff_v2(
-                self.attempt,
-                self.props.base_delay,
-                &mut self.prev,
-                &self.props.rnd,
-            ),
+            (Backoff::Exponential, true) => {
+                decorrelated_jitter_backoff_v2(self.attempt, self.props.base_delay, &mut self.prev, &self.props.rnd)
+            }
         };
 
         self.attempt = next_attempt;
@@ -131,12 +128,7 @@ fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
 /// - [Polly V7 implementation](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry/blob/7596d2dacf22d88bbd814bc49c28424fb6e921e9/src/Polly.Contrib.WaitAndRetry/Backoff.DecorrelatedJitterV2.cs#L22)
 /// - [Polly.Contrib.WaitAndRetry repo](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry)
 #[inline]
-fn decorrelated_jitter_backoff_v2(
-    attempt: u32,
-    base_delay: Duration,
-    prev: &mut f64,
-    rnd: &Rnd,
-) -> Duration {
+fn decorrelated_jitter_backoff_v2(attempt: u32, base_delay: Duration, prev: &mut f64, rnd: &Rnd) -> Duration {
     // The original author/credit for this jitter formula is @george-polevoy .
     // Jitter formula used with permission as described at https://github.com/App-vNext/Polly/issues/530#issuecomment-526555979
     // Minor adaptations (pFactor = 4.0 and rpScalingFactor = 1 / 1.4d) by @reisenberger, to scale the formula output for easier parameterization to users.
@@ -515,14 +507,8 @@ mod tests {
             });
 
             let delays: Vec<_> = backoff.delays().skip(attempt).take(2).collect();
-            assert!(
-                delays[0] > Duration::ZERO,
-                "Attempt {attempt}: first delay should be positive"
-            );
-            assert!(
-                delays[1] > Duration::ZERO,
-                "Attempt {attempt}: second delay should be positive"
-            );
+            assert!(delays[0] > Duration::ZERO, "Attempt {attempt}: first delay should be positive");
+            assert!(delays[1] > Duration::ZERO, "Attempt {attempt}: second delay should be positive");
         }
     }
 
@@ -541,22 +527,10 @@ mod tests {
             });
 
             let delays: Vec<_> = backoff.delays().skip(attempt).take(2).collect();
-            assert!(
-                delays[0] > Duration::ZERO,
-                "Attempt {attempt}: first delay should be positive"
-            );
-            assert!(
-                delays[0] <= max_delay,
-                "Attempt {attempt}: first delay should not exceed max"
-            );
-            assert!(
-                delays[1] > Duration::ZERO,
-                "Attempt {attempt}: second delay should be positive"
-            );
-            assert!(
-                delays[1] <= max_delay,
-                "Attempt {attempt}: second delay should not exceed max"
-            );
+            assert!(delays[0] > Duration::ZERO, "Attempt {attempt}: first delay should be positive");
+            assert!(delays[0] <= max_delay, "Attempt {attempt}: first delay should not exceed max");
+            assert!(delays[1] > Duration::ZERO, "Attempt {attempt}: second delay should be positive");
+            assert!(delays[1] <= max_delay, "Attempt {attempt}: second delay should not exceed max");
         }
     }
 
@@ -637,9 +611,7 @@ mod tests {
             .into_iter(),
         );
 
-        let delays_ms = [
-            8_626, 10_830, 18_396, 27_703, 37_213, 159_824, 405_539, 300_743, 1_839_611, 639_970,
-        ];
+        let delays_ms = [8_626, 10_830, 18_396, 27_703, 37_213, 159_824, 405_539, 300_743, 1_839_611, 639_970];
 
         let backoff = DelayBackoff(BackoffOptions {
             backoff_type: Backoff::Exponential,
@@ -671,9 +643,7 @@ mod tests {
             .into_iter(),
         );
 
-        let delays_ms = [
-            7800, 15600, 31200, 62400, 124_800, 249_600, 499_200, 998_400, 1_996_800, 3_993_600,
-        ];
+        let delays_ms = [7800, 15600, 31200, 62400, 124_800, 249_600, 499_200, 998_400, 1_996_800, 3_993_600];
 
         let backoff = DelayBackoff(BackoffOptions {
             backoff_type: Backoff::Exponential,

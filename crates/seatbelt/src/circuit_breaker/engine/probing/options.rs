@@ -34,31 +34,17 @@ impl ProbesOptions {
     }
 
     pub fn reliable(stage_duration: Duration, failure_threshold: f32) -> Self {
-        Self::gradual(
-            &[0.001, 0.01, 0.05, 0.1, 0.25, 0.5],
-            stage_duration,
-            failure_threshold,
-        )
+        Self::gradual(&[0.001, 0.01, 0.05, 0.1, 0.25, 0.5], stage_duration, failure_threshold)
     }
 
-    pub fn gradual(
-        probing_ratio: &[f64],
-        stage_duration: Duration,
-        failure_threshold: f32,
-    ) -> Self {
+    pub fn gradual(probing_ratio: &[f64], stage_duration: Duration, failure_threshold: f32) -> Self {
         // Start with a single probe
-        let initial = std::iter::once(ProbeOptions::SingleProbe {
-            cooldown: stage_duration,
-        });
+        let initial = std::iter::once(ProbeOptions::SingleProbe { cooldown: stage_duration });
 
         // Then continue with health-based probes
-        let health = probing_ratio.iter().map(|probing_ratio| {
-            ProbeOptions::HealthProbe(HealthProbeOptions::new(
-                stage_duration,
-                failure_threshold,
-                *probing_ratio,
-            ))
-        });
+        let health = probing_ratio
+            .iter()
+            .map(|probing_ratio| ProbeOptions::HealthProbe(HealthProbeOptions::new(stage_duration, failure_threshold, *probing_ratio)));
 
         Self::new(initial.chain(health))
     }
@@ -82,18 +68,9 @@ pub struct HealthProbeOptions {
 
 impl HealthProbeOptions {
     pub fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64) -> Self {
-        assert!(
-            probing_ratio > 0.0 && probing_ratio <= 1.0,
-            "probing_ratio must be in (0.0, 1.0]"
-        );
-        assert!(
-            (0.0..1.0).contains(&failure_threshold),
-            "failure_threshold must be in [0.0, 1.0)"
-        );
-        assert!(
-            stage_duration > Duration::ZERO,
-            "stage_duration must be greater than zero"
-        );
+        assert!(probing_ratio > 0.0 && probing_ratio <= 1.0, "probing_ratio must be in (0.0, 1.0]");
+        assert!((0.0..1.0).contains(&failure_threshold), "failure_threshold must be in [0.0, 1.0)");
+        assert!(stage_duration > Duration::ZERO, "stage_duration must be greater than zero");
 
         Self {
             // The min throughput is set to 0, so if no requests come in during the probing stage,
@@ -150,15 +127,9 @@ mod tests {
 
         let probes: Vec<_> = options.probes().collect();
         assert_eq!(probes.len(), 3);
-        assert!(
-            matches!(&probes[0], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(10))
-        );
-        assert!(
-            matches!(&probes[1], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(20))
-        );
-        assert!(
-            matches!(&probes[2], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(30))
-        );
+        assert!(matches!(&probes[0], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(10)));
+        assert!(matches!(&probes[1], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(20)));
+        assert!(matches!(&probes[2], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(30)));
     }
 
     #[test]

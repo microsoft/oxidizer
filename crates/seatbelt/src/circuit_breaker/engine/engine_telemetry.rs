@@ -5,10 +5,7 @@ use opentelemetry::metrics::Counter;
 use tick::Clock;
 
 use crate::circuit_breaker::telemetry::*;
-use crate::circuit_breaker::{
-    CircuitEngine, CircuitState, EnterCircuitResult, ExecutionMode, ExecutionResult,
-    ExitCircuitResult,
-};
+use crate::circuit_breaker::{CircuitEngine, CircuitState, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
 use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
 /// Wrapper around a circuit engine to add telemetry capabilities.

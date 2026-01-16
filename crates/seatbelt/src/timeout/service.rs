@@ -10,10 +10,7 @@ use tick::{Clock, FutureExt};
 
 use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 use crate::timeout::telemetry::TIMEOUT_EVENT_NAME;
-use crate::timeout::{
-    OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride,
-    TimeoutOverrideArgs,
-};
+use crate::timeout::{OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs};
 use crate::{EnableIf, NotSet, SeatbeltOptions};
 
 /// Applies a timeout to service execution for canceling long-running operations.
@@ -71,10 +68,7 @@ impl<In, Out> Timeout<In, Out, ()> {
     /// For comprehensive examples, see the [timeout module] documentation.
     ///
     /// [timeout module]: crate::timeout
-    pub fn layer(
-        name: impl Into<Cow<'static, str>>,
-        options: &SeatbeltOptions<In, Out>,
-    ) -> TimeoutLayer<In, Out, NotSet, NotSet> {
+    pub fn layer(name: impl Into<Cow<'static, str>>, options: &SeatbeltOptions<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {
         TimeoutLayer::new(name.into().into(), options)
     }
 }
@@ -106,12 +100,7 @@ where
             .unwrap_or(self.timeout);
 
         Either::Right(async move {
-            match self
-                .inner
-                .execute(input)
-                .timeout(&self.clock, timeout)
-                .await
-            {
+            match self.inner.execute(input).timeout(&self.clock, timeout).await {
                 Ok(output) => output,
                 Err(_error) => {
                     self.event_reporter.add(
@@ -236,21 +225,13 @@ mod tests {
 
         let service = stack.build();
 
-        assert_eq!(
-            service.execute("test input".to_string()).await,
-            "timed out after 150ms"
-        );
-        assert_eq!(
-            service.execute("ignore".to_string()).await,
-            "timed out after 200ms"
-        );
+        assert_eq!(service.execute("test input".to_string()).await, "timed out after 150ms");
+        assert_eq!(service.execute("ignore".to_string()).await, "timed out after 200ms");
     }
 
     #[tokio::test]
     async fn no_timeout_if_disabled() {
-        let clock = ClockControl::default()
-            .auto_advance_timers(true)
-            .to_clock();
+        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let stack = (
             Timeout::layer("test_timeout", &SeatbeltOptions::new(&clock))
                 .timeout_output(|_args| "timed out".to_string())

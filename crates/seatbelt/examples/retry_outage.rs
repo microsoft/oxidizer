@@ -138,9 +138,7 @@ impl Recovery for HttpError {
 
 fn configure_telemetry() -> SdkMeterProvider {
     // Set up tracing subscriber for logs to console
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
         .with_periodic_exporter(MetricExporter::default())

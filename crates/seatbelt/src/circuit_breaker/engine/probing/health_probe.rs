@@ -2,9 +2,7 @@
 
 use std::time::Instant;
 
-use crate::circuit_breaker::engine::probing::{
-    AllowProbeResult, HealthProbeOptions, ProbeOperation, ProbingResult,
-};
+use crate::circuit_breaker::engine::probing::{AllowProbeResult, HealthProbeOptions, ProbeOperation, ProbingResult};
 use crate::circuit_breaker::{ExecutionResult, HealthMetrics, HealthStatus};
 use crate::rnd::Rnd;
 
@@ -20,9 +18,7 @@ pub(crate) struct HealthProbe {
 impl ProbeOperation for HealthProbe {
     fn allow_probe(&mut self, now: Instant) -> AllowProbeResult {
         // Sampling starts with the first probe attempt. Make sure relevant timestamps are set.
-        let sample_until = *self
-            .sample_until
-            .get_or_insert_with(|| now + self.options.stage_duration());
+        let sample_until = *self.sample_until.get_or_insert_with(|| now + self.options.stage_duration());
 
         // Fallback probe is allowed only after the sampling duration has elapsed.
         let fallback_after = *self.fallback_after.get_or_insert(sample_until);
@@ -119,10 +115,7 @@ mod tests {
         let mut probe = HealthProbe::new(options);
         probe.rnd = Rnd::new_fixed(0.1);
 
-        assert_eq!(
-            probe.allow_probe(Instant::now()),
-            AllowProbeResult::Rejected
-        );
+        assert_eq!(probe.allow_probe(Instant::now()), AllowProbeResult::Rejected);
     }
 
     #[test]
@@ -131,15 +124,9 @@ mod tests {
         let mut probe = HealthProbe::new(options);
         let now = Instant::now();
 
-        assert_eq!(
-            probe.record(ExecutionResult::Success, now),
-            ProbingResult::Pending,
-        );
+        assert_eq!(probe.record(ExecutionResult::Success, now), ProbingResult::Pending,);
 
-        assert_eq!(
-            probe.record(ExecutionResult::Success, now),
-            ProbingResult::Pending,
-        );
+        assert_eq!(probe.record(ExecutionResult::Success, now), ProbingResult::Pending,);
 
         let status = probe.metrics.health_info();
         assert_eq!(status.status(), HealthStatus::Healthy);

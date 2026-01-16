@@ -6,9 +6,8 @@ use layered::Service;
 use tick::Clock;
 
 use super::{
-    CircuitBreakerLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode,
-    ExecutionResult, ExitCircuitResult, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing,
-    OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput,
+    CircuitBreakerLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed,
+    OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput,
     RejectedInputArgs, ShouldRecover,
 };
 use crate::{EnableIf, NotSet};
@@ -70,9 +69,7 @@ where
         let partition_key = self
             .partition_key
             .as_ref()
-            .map_or_else(PartitionKey::default, |partition_key| {
-                partition_key.call(&input)
-            });
+            .map_or_else(PartitionKey::default, |partition_key| partition_key.call(&input));
 
         // Retrieve the engine for this partition
         let engine = self.engines.get_engine(&partition_key);
@@ -119,20 +116,11 @@ impl<In, Out, S> CircuitBreaker<In, Out, S> {
                 }
             }
             // Circuit is open, return rejected input output
-            EnterCircuitResult::Rejected => ControlFlow::Break(
-                self.rejected_input
-                    .call(input, RejectedInputArgs { partition_key }),
-            ),
+            EnterCircuitResult::Rejected => ControlFlow::Break(self.rejected_input.call(input, RejectedInputArgs { partition_key })),
         }
     }
 
-    fn after_execute(
-        &self,
-        engine: &impl CircuitEngine,
-        output: &Out,
-        mode: ExecutionMode,
-        partition_key: &PartitionKey,
-    ) {
+    fn after_execute(&self, engine: &impl CircuitEngine, output: &Out, mode: ExecutionMode, partition_key: &PartitionKey) {
         let recovery = self.recovery.call(
             output,
             RecoveryArgs {
@@ -187,10 +175,8 @@ mod tests {
 
     #[test]
     fn layer_ensure_defaults() {
-        let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen())
-            .pipeline_name("test_pipeline");
-        let layer: CircuitBreakerLayer<String, String, NotSet, NotSet> =
-            CircuitBreaker::layer("test_breaker", &options);
+        let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
+        let layer: CircuitBreakerLayer<String, String, NotSet, NotSet> = CircuitBreaker::layer("test_breaker", &options);
         let layer = layer
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input(|_, _| "rejected".to_string());
@@ -215,8 +201,7 @@ mod tests {
     #[tokio::test]
     async fn passthrough_behavior() {
         let clock = Clock::new_frozen();
-        let service = create_ready_circuit_breaker_layer(&clock)
-            .layer(Execute::new(move |v: String| async move { v }));
+        let service = create_ready_circuit_breaker_layer(&clock).layer(Execute::new(move |v: String| async move { v }));
 
         let result = service.execute("test".to_string()).await;
 
@@ -300,12 +285,7 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(
-            &engine,
-            &"success".to_string(),
-            ExecutionMode::Normal,
-            &PartitionKey::default(),
-        );
+        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &PartitionKey::default());
     }
 
     #[test]
@@ -323,12 +303,7 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(
-            &engine,
-            &"success".to_string(),
-            ExecutionMode::Normal,
-            &PartitionKey::default(),
-        );
+        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &PartitionKey::default());
     }
 
     #[test]
@@ -476,11 +451,8 @@ mod tests {
         assert_eq!(result, "B");
     }
 
-    fn create_ready_circuit_breaker_layer(
-        clock: &Clock,
-    ) -> CircuitBreakerLayer<String, String, Set, Set> {
-        let options =
-            SeatbeltOptions::<String, String>::new(clock.clone()).pipeline_name("test_pipeline");
+    fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitBreakerLayer<String, String, Set, Set> {
+        let options = SeatbeltOptions::<String, String>::new(clock.clone()).pipeline_name("test_pipeline");
         CircuitBreaker::layer("test_breaker", &options)
             .recovery_with(|output, _| {
                 if output.contains("error") {

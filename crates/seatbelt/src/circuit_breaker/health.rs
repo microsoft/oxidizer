@@ -81,11 +81,7 @@ impl HealthMetricsBuilder {
     }
 
     pub fn build(&self) -> HealthMetrics {
-        HealthMetrics::new(
-            self.sampling_duration,
-            self.failure_threshold,
-            self.min_throughput,
-        )
+        HealthMetrics::new(self.sampling_duration, self.failure_threshold, self.min_throughput)
     }
 }
 
@@ -141,12 +137,7 @@ impl HealthMetrics {
             failures = failures.saturating_add(w.failures);
         }
 
-        HealthInfo::new(
-            successes,
-            failures,
-            self.failure_threshold,
-            self.min_throughput,
-        )
+        HealthInfo::new(successes, failures, self.failure_threshold, self.min_throughput)
     }
 }
 

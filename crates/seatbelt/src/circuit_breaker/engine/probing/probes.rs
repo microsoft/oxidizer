@@ -16,9 +16,7 @@ pub(crate) struct Probes {
 impl Probes {
     pub fn new(options: &ProbesOptions) -> Self {
         let mut probes = options.probes();
-        let probe = probes
-            .next()
-            .expect("probes are never empty because ProbesOptions enforces that");
+        let probe = probes.next().expect("probes are never empty because ProbesOptions enforces that");
 
         Self {
             probes,
@@ -70,16 +68,10 @@ mod tests {
 
         assert_eq!(probes.allow_probe(now), AllowProbeResult::Accepted);
         assert_eq!(probes.allow_probe(now), AllowProbeResult::Rejected);
-        assert_eq!(
-            probes.record(ExecutionResult::Success, now),
-            ProbingResult::Pending
-        );
+        assert_eq!(probes.record(ExecutionResult::Success, now), ProbingResult::Pending);
 
         assert_eq!(probes.allow_probe(now), AllowProbeResult::Accepted);
-        assert_eq!(
-            probes.record(ExecutionResult::Success, now),
-            ProbingResult::Success
-        );
+        assert_eq!(probes.record(ExecutionResult::Success, now), ProbingResult::Success);
 
         assert!(probes.probes.next().is_none());
     }

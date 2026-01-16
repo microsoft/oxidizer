@@ -11,8 +11,7 @@ use tick::Clock;
 use crate::options::MaxAttempts;
 use crate::retry::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
 use crate::retry::{
-    CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput,
-    RestoreInputArgs, ShouldRecover,
+    CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, ShouldRecover,
 };
 use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 use crate::{Attempt, EnableIf, NotSet, RecoveryInfo, RecoveryKind};
@@ -80,10 +79,7 @@ where
         let mut previous_recovery = None;
 
         loop {
-            match self
-                .execute_attempt(input, attempt, &mut delays, previous_recovery)
-                .await
-            {
+            match self.execute_attempt(input, attempt, &mut delays, previous_recovery).await {
                 ControlFlow::Continue((next_input, next_attempt, recovery)) => {
                     input = next_input;
                     attempt = next_attempt;
@@ -161,14 +157,7 @@ where
         // At this point, we know that the output is recoverable and that we have more attempts left.
         // Determine the delay before the next attempt based on the recovery kind.
         let flow_control = match recovery_kind {
-            RecoverableKind::Retry => self.finalize_retryable_attempt(
-                original_input,
-                out,
-                attempt,
-                next_attempt,
-                retry_delay,
-                recovery,
-            ),
+            RecoverableKind::Retry => self.finalize_retryable_attempt(original_input, out, attempt, next_attempt, retry_delay, recovery),
         };
 
         // Only ever delay if we have a next attempt
@@ -275,13 +264,9 @@ mod tests {
 
     #[test]
     fn layer_ensure_defaults() {
-        let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen())
-            .pipeline_name("test_pipeline");
-        let layer: RetryLayer<String, String, NotSet, NotSet> =
-            Retry::layer("test_retry", &options);
-        let layer = layer
-            .recovery_with(|_, _| RecoveryInfo::never())
-            .clone_input();
+        let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
+        let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &options);
+        let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
         let retry = layer.layer(Execute::new(|v: String| async move { v }));
 
@@ -417,10 +402,7 @@ mod tests {
 
         let service = create_ready_retry_layer(&clock, RecoveryInfo::retry())
             .clone_input_with(move |input, args| {
-                attempts_for_clone_clone
-                    .lock()
-                    .unwrap()
-                    .push(args.attempt());
+                attempts_for_clone_clone.lock().unwrap().push(args.attempt());
                 Some(input.clone())
             })
             .recovery_with(move |_input, _args| RecoveryInfo::retry())
@@ -549,9 +531,7 @@ mod tests {
             })
             .handle_unavailable(true) // Enable outage handling
             .max_retry_attempts(2)
-            .layer(Execute::new(move |input: String| async move {
-                format!("processed_{input}")
-            }));
+            .layer(Execute::new(move |input: String| async move { format!("processed_{input}") }));
 
         let result = service.execute("test".to_string()).await;
 
@@ -586,20 +566,15 @@ mod tests {
         let _result = service.execute("test".to_string()).await;
 
         // Should use the recovery hint as the delay
-        assert_eq!(
-            delays.lock().unwrap().to_vec(),
-            vec![Duration::from_secs(10)]
-        );
+        assert_eq!(delays.lock().unwrap().to_vec(), vec![Duration::from_secs(10)]);
     }
 
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
-        let options = SeatbeltOptions::<String, String>::new(
-            ClockControl::default().auto_advance_timers(true).to_clock(),
-        )
-        .pipeline_name("test_pipeline")
-        .meter_provider(tester.meter_provider());
+        let options = SeatbeltOptions::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
+            .pipeline_name("test_pipeline")
+            .meter_provider(tester.meter_provider());
 
         let service = create_ready_retry_layer_core(RecoveryInfo::retry(), &options)
             .clone_input_with(move |input, _args| Some(input.clone()))
@@ -623,10 +598,7 @@ mod tests {
         );
     }
 
-    fn create_ready_retry_layer(
-        clock: &Clock,
-        recover: RecoveryInfo,
-    ) -> RetryLayer<String, String, Set, Set> {
+    fn create_ready_retry_layer(clock: &Clock, recover: RecoveryInfo) -> RetryLayer<String, String, Set, Set> {
         let options = SeatbeltOptions::new(clock.clone()).pipeline_name("test_pipeline");
         create_ready_retry_layer_core(recover, &options)
     }

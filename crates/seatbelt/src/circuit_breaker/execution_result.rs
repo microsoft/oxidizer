@@ -36,22 +36,13 @@ mod tests {
 
     #[test]
     fn test_execution_result_from_recovery() {
-        assert_eq!(
-            ExecutionResult::from_recovery(&RecoveryInfo::retry()),
-            ExecutionResult::Failure
-        );
+        assert_eq!(ExecutionResult::from_recovery(&RecoveryInfo::retry()), ExecutionResult::Failure);
         assert_eq!(
             ExecutionResult::from_recovery(&RecoveryInfo::unavailable()),
             ExecutionResult::Failure
         );
-        assert_eq!(
-            ExecutionResult::from_recovery(&RecoveryInfo::never()),
-            ExecutionResult::Success
-        );
-        assert_eq!(
-            ExecutionResult::from_recovery(&RecoveryInfo::unknown()),
-            ExecutionResult::Success
-        );
+        assert_eq!(ExecutionResult::from_recovery(&RecoveryInfo::never()), ExecutionResult::Success);
+        assert_eq!(ExecutionResult::from_recovery(&RecoveryInfo::unknown()), ExecutionResult::Success);
     }
 
     #[test]

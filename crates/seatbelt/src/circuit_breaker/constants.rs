@@ -32,4 +32,5 @@ pub(crate) const DEFAULT_FAILURE_THRESHOLD: f32 = 0.1;
 /// <https://www.pollydocs.org/strategies/circuit-breaker.html#defaults>
 pub(crate) const DEFAULT_BREAK_DURATION: Duration = Duration::from_secs(5);
 
-pub(crate) const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
+pub(crate) const ERR_POISONED_LOCK: &str =
+    "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";

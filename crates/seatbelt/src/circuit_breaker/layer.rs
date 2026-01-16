@@ -5,14 +5,10 @@ use std::time::Duration;
 
 use opentelemetry::StringValue;
 
-use super::constants::{
-    DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT,
-    DEFAULT_SAMPLING_DURATION,
-};
+use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::{
-    CircuitBreaker, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened,
-    OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RejectedInput,
-    RejectedInputArgs, ShouldRecover,
+    CircuitBreaker, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs,
+    PartionKeyProvider, PartitionKey, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
 use crate::circuit_breaker::engine::probing::ProbesOptions;
 use crate::service::Layer;
@@ -70,9 +66,7 @@ impl<In, Out> CircuitBreakerLayer<In, Out, NotSet, NotSet> {
     }
 }
 
-impl<In, Out, E, RecoveryState, RejectedInputState>
-    CircuitBreakerLayer<In, Result<Out, E>, RecoveryState, RejectedInputState>
-{
+impl<In, Out, E, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Result<Out, E>, RecoveryState, RejectedInputState> {
     /// Sets the error to return when the circuit breaker is open for Result-returning services.
     ///
     /// When the circuit is open, requests are immediately rejected and this function
@@ -97,9 +91,7 @@ impl<In, Out, E, RecoveryState, RejectedInputState>
     }
 }
 
-impl<In, Out, RecoveryState, RejectedInputState>
-    CircuitBreakerLayer<In, Out, RecoveryState, RejectedInputState>
-{
+impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, RecoveryState, RejectedInputState> {
     /// Sets the recovery classification function.
     ///
     /// This function determines whether a specific output represents a failure
@@ -116,10 +108,7 @@ impl<In, Out, RecoveryState, RejectedInputState>
     #[must_use]
     pub fn recovery_with(
         mut self,
-        recover_fn: impl Fn(&Out, crate::circuit_breaker::RecoveryArgs) -> RecoveryInfo
-        + Send
-        + Sync
-        + 'static,
+        recover_fn: impl Fn(&Out, crate::circuit_breaker::RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
     ) -> CircuitBreakerLayer<In, Out, Set, RejectedInputState> {
         self.recovery = Some(ShouldRecover::new(recover_fn));
         self.into_state::<Set, RejectedInputState>()
@@ -249,10 +238,7 @@ impl<In, Out, RecoveryState, RejectedInputState>
     /// * `callback` - Function that takes a reference to the output and
     ///   [`OnOpenedArgs`] containing circuit breaker context
     #[must_use]
-    pub fn on_opened(
-        mut self,
-        callback: impl Fn(&Out, OnOpenedArgs) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn on_opened(mut self, callback: impl Fn(&Out, OnOpenedArgs) + Send + Sync + 'static) -> Self {
         self.on_opened = Some(OnOpened::new(callback));
         self
     }
@@ -269,10 +255,7 @@ impl<In, Out, RecoveryState, RejectedInputState>
     /// * `callback` - Function that takes a reference to the output and
     ///   [`OnClosedArgs`] containing circuit breaker context
     #[must_use]
-    pub fn on_closed(
-        mut self,
-        callback: impl Fn(&Out, OnClosedArgs) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn on_closed(mut self, callback: impl Fn(&Out, OnClosedArgs) + Send + Sync + 'static) -> Self {
         self.on_closed = Some(OnClosed::new(callback));
         self
     }
@@ -289,10 +272,7 @@ impl<In, Out, RecoveryState, RejectedInputState>
     /// * `callback` - Function that takes a mutable reference to the input and
     ///   [`OnProbingArgs`] containing circuit breaker context
     #[must_use]
-    pub fn on_probing(
-        mut self,
-        callback: impl Fn(&mut In, OnProbingArgs) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn on_probing(mut self, callback: impl Fn(&mut In, OnProbingArgs) + Send + Sync + 'static) -> Self {
         self.on_probing = Some(OnProbing::new(callback));
         self
     }
@@ -349,10 +329,7 @@ impl<In, Out, RecoveryState, RejectedInputState>
     /// are created do not contain any sensitive data such as authentication tokens, personal
     /// identifiable information (PII), or other confidential data.
     #[must_use]
-    pub fn partition_key(
-        mut self,
-        key_provider: impl Fn(&In) -> PartitionKey + Send + Sync + 'static,
-    ) -> Self {
+    pub fn partition_key(mut self, key_provider: impl Fn(&In) -> PartitionKey + Send + Sync + 'static) -> Self {
         self.partition_key = Some(PartionKeyProvider::new(key_provider));
         self
     }
@@ -418,14 +395,8 @@ impl<In, Out, S> Layer<S> for CircuitBreakerLayer<In, Out, Set, Set> {
         CircuitBreaker {
             inner,
             clock: self.options.get_clock().clone(),
-            recovery: self
-                .recovery
-                .clone()
-                .expect("recovery must be set in Ready state"),
-            rejected_input: self
-                .rejected_input
-                .clone()
-                .expect("rejected_input must be set in Ready state"),
+            recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
+            rejected_input: self.rejected_input.clone().expect("rejected_input must be set in Ready state"),
             enable_if: self.enable_if.clone(),
             engines: self.engines(),
             on_opened: self.on_opened.clone(),
@@ -436,9 +407,7 @@ impl<In, Out, S> Layer<S> for CircuitBreakerLayer<In, Out, Set, Set> {
     }
 }
 
-impl<In, Out, RecoveryState, RejectedInputState>
-    CircuitBreakerLayer<In, Out, RecoveryState, RejectedInputState>
-{
+impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, RecoveryState, RejectedInputState> {
     fn probes_options(&self) -> ProbesOptions {
         self.half_open_mode
             // we will use break duration as the sampling duration for probes
@@ -449,11 +418,7 @@ impl<In, Out, RecoveryState, RejectedInputState>
         Engines::new(
             super::engine::EngineOptions {
                 break_duration: self.break_duration,
-                health_metrics_builder: HealthMetricsBuilder::new(
-                    self.sampling_duration,
-                    self.failure_threshold,
-                    self.min_throughput,
-                ),
+                health_metrics_builder: HealthMetricsBuilder::new(self.sampling_duration, self.failure_threshold, self.min_throughput),
                 probes: self.probes_options(),
             },
             self.options.get_clock().clone(),
@@ -500,8 +465,7 @@ mod tests {
     #[expect(clippy::float_cmp, reason = "Test")]
     fn new_creates_correct_initial_state() {
         let options = create_test_options();
-        let layer: CircuitBreakerLayer<_, _, NotSet, NotSet> =
-            CircuitBreakerLayer::new(StringValue::from("test_breaker"), &options);
+        let layer: CircuitBreakerLayer<_, _, NotSet, NotSet> = CircuitBreakerLayer::new(StringValue::from("test_breaker"), &options);
 
         assert!(layer.recovery.is_none());
         assert!(layer.rejected_input.is_none());
@@ -575,8 +539,7 @@ mod tests {
         let options = create_test_options();
         let layer = CircuitBreakerLayer::new(StringValue::from("test"), &options);
 
-        let layer: CircuitBreakerLayer<_, _, NotSet, Set> =
-            layer.rejected_input(|_, _| "rejected".to_string());
+        let layer: CircuitBreakerLayer<_, _, NotSet, Set> = layer.rejected_input(|_, _| "rejected".to_string());
 
         let result = layer.rejected_input.as_ref().unwrap().call(
             "test".to_string(),

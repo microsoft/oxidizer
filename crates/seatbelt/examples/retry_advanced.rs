@@ -58,22 +58,13 @@ async fn main() -> Result<(), AppError> {
     // Create the service from the stack
     let service = stack.build();
 
-    let request = Request::builder()
-        .uri("https://example.com")
-        .body("value".to_string())?;
+    let request = Request::builder().uri("https://example.com").body("value".to_string())?;
 
     match service.execute(request).await {
         Ok(output) => {
             // Extract attempt info that was forwarded through the pipeline
-            let attempts = output
-                .extensions()
-                .get::<Attempt>()
-                .map_or(0, |a| a.index());
-            println!(
-                "execution succeeded, result: {}, attempts: {}",
-                output.body(),
-                attempts
-            );
+            let attempts = output.extensions().get::<Attempt>().map_or(0, |a| a.index());
+            println!("execution succeeded, result: {}, attempts: {}", output.body(), attempts);
         }
         Err(e) => println!("execution failed, error: {e}"),
     }
@@ -90,11 +81,7 @@ async fn send_request(input: Request<String>) -> Result<Response<String>, Error>
         Err(Error::other("transient execution error"))
     } else {
         // Extract attempt info that was injected during custom cloning
-        let attempt = input
-            .extensions()
-            .get::<Attempt>()
-            .copied()
-            .unwrap_or_default();
+        let attempt = input.extensions().get::<Attempt>().copied().unwrap_or_default();
 
         // Forward attempt info to output via response extensions
         Response::builder()
@@ -106,9 +93,7 @@ async fn send_request(input: Request<String>) -> Result<Response<String>, Error>
 
 fn configure_telemetry() -> SdkMeterProvider {
     // Set up tracing subscriber for logs to console
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
         .with_periodic_exporter(MetricExporter::default())

@@ -60,17 +60,10 @@ impl HalfOpenMode {
         }
     }
 
-    pub(super) fn to_options(
-        &self,
-        default_stage_duration: Duration,
-        failure_threshold: f32,
-    ) -> ProbesOptions {
+    pub(super) fn to_options(&self, default_stage_duration: Duration, failure_threshold: f32) -> ProbesOptions {
         match self.inner {
             Mode::Quick => ProbesOptions::quick(default_stage_duration),
-            Mode::Reliable(duration) => ProbesOptions::reliable(
-                duration.unwrap_or(default_stage_duration),
-                failure_threshold,
-            ),
+            Mode::Reliable(duration) => ProbesOptions::reliable(duration.unwrap_or(default_stage_duration), failure_threshold),
         }
     }
 }
@@ -173,8 +166,6 @@ mod tests {
     fn reliable_mode_clamps_min_duration() {
         let mode = HalfOpenMode::reliable(Duration::from_millis(500));
 
-        assert!(
-            matches!(mode.inner, Mode::Reliable(duration) if duration == Some(Duration::from_secs(1)))
-        );
+        assert!(matches!(mode.inner, Mode::Reliable(duration) if duration == Some(Duration::from_secs(1))));
     }
 }

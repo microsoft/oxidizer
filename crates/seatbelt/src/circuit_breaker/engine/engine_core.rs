@@ -8,9 +8,7 @@ use tick::Clock;
 use super::{EngineOptions, EnterCircuitResult, ExitCircuitResult};
 use crate::circuit_breaker::constants::ERR_POISONED_LOCK;
 use crate::circuit_breaker::engine::probing::{AllowProbeResult, Probes, ProbingResult};
-use crate::circuit_breaker::{
-    CircuitEngine, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus,
-};
+use crate::circuit_breaker::{CircuitEngine, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
 
 /// Engine that manages the state of the circuit breaker.
 #[derive(Debug)]
@@ -37,20 +35,14 @@ impl CircuitEngine for EngineCore {
         let now = self.clock.instant();
 
         // NOTE: Remember to execute all expensive operations (like time checks) outside the lock.
-        self.state
-            .lock()
-            .expect(ERR_POISONED_LOCK)
-            .enter(now, &self.options)
+        self.state.lock().expect(ERR_POISONED_LOCK).enter(now, &self.options)
     }
 
     fn exit(&self, result: ExecutionResult, _mode: ExecutionMode) -> ExitCircuitResult {
         let now = self.clock.instant();
 
         // NOTE: Remember to execute all expensive operations (like time checks) outside the lock.
-        self.state
-            .lock()
-            .expect(ERR_POISONED_LOCK)
-            .exit(result, now, &self.options)
+        self.state.lock().expect(ERR_POISONED_LOCK).exit(result, now, &self.options)
     }
 }
 
@@ -83,10 +75,7 @@ impl State {
                     EnterCircuitResult::Rejected
                 }
             }
-            Self::HalfOpen {
-                probes,
-                stats: info,
-            } => {
+            Self::HalfOpen { probes, stats: info } => {
                 let allow = probes.allow_probe(now);
                 info.record_allow_result(allow);
                 EnterCircuitResult::from(allow)
@@ -94,12 +83,7 @@ impl State {
         }
     }
 
-    fn exit(
-        &mut self,
-        result: ExecutionResult,
-        now: Instant,
-        settings: &EngineOptions,
-    ) -> ExitCircuitResult {
+    fn exit(&mut self, result: ExecutionResult, now: Instant, settings: &EngineOptions) -> ExitCircuitResult {
         match self {
             Self::Closed { health } => {
                 // first, record the result and evaluate the health metrics
@@ -439,9 +423,7 @@ mod tests {
 
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
-        assert!(
-            matches!(result, ExitCircuitResult::Closed(stats) if stats.probes_successes == 1 && stats.probes_total == 1)
-        );
+        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes_successes == 1 && stats.probes_total == 1));
     }
 
     #[test]

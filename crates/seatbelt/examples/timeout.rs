@@ -35,12 +35,7 @@ async fn main() -> Result<(), AppError> {
             // Required: specify the timeout duration
             .timeout(TIMEOUT_DURATION)
             // Required: create error output for timeouts
-            .timeout_error(|args| {
-                app_err!(
-                    "timeout occurred, timeout: {}ms",
-                    args.timeout().as_millis()
-                )
-            }),
+            .timeout_error(|args| app_err!("timeout occurred, timeout: {}ms", args.timeout().as_millis())),
         Execute::new({
             let clock = clock.clone();
             move |_input| {
@@ -70,9 +65,7 @@ async fn main() -> Result<(), AppError> {
 
 fn configure_telemetry() -> SdkMeterProvider {
     // Set up tracing subscriber for logs to console
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
         .with_periodic_exporter(MetricExporter::default())

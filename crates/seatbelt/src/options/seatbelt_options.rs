@@ -235,8 +235,7 @@ mod tests {
     #[test]
     fn test_pipeline_name_with_custom_value_sets_name_and_is_owned() {
         let clock = tick::Clock::new_frozen();
-        let options =
-            SeatbeltOptions::<(), ()>::new(clock).pipeline_name(String::from("custom_pipeline"));
+        let options = SeatbeltOptions::<(), ()>::new(clock).pipeline_name(String::from("custom_pipeline"));
         assert_eq!(options.get_pipeline_name().as_ref(), "custom_pipeline");
         assert!(matches!(options.get_pipeline_name(), Cow::Owned(_)));
     }
@@ -263,9 +262,7 @@ mod tests {
 
     fn test_meter_provider() -> (SdkMeterProvider, InMemoryMetricExporter) {
         let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder()
-            .with_periodic_exporter(exporter.clone())
-            .build();
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
         (provider, exporter)
     }
 }

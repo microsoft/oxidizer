@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-use super::{
-    OnClosedArgs, OnOpenedArgs, OnProbingArgs, PartitionKey, RecoveryArgs, RejectedInputArgs,
-};
+use super::{OnClosedArgs, OnOpenedArgs, OnProbingArgs, PartitionKey, RecoveryArgs, RejectedInputArgs};
 use crate::RecoveryInfo;
 
 crate::define_fn_wrapper!(PartionKeyProvider<In>(Fn(&In) -> PartitionKey));

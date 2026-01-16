@@ -35,10 +35,7 @@ fn entry(c: &mut Criterion) {
 
     // With observability
     let options = SeatbeltOptions::new(Clock::new_frozen());
-    let service = Observability::new(
-        &options,
-        Execute::new(|v: Input| async move { Output::from(v) }),
-    );
+    let service = Observability::new(&options, Execute::new(|v: Input| async move { Output::from(v) }));
     let operation = session.operation("observability");
     group.bench_function("observability", |b| {
         b.iter(|| {
@@ -48,14 +45,9 @@ fn entry(c: &mut Criterion) {
     });
 
     // With observability + listener
-    let meter_provider = SdkMeterProvider::builder()
-        .with_periodic_exporter(EmptyExporter)
-        .build();
+    let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(EmptyExporter).build();
     let options = SeatbeltOptions::new(Clock::new_frozen()).meter_provider(&meter_provider);
-    let service = Observability::new(
-        &options,
-        Execute::new(|v: Input| async move { Output::from(v) }),
-    );
+    let service = Observability::new(&options, Execute::new(|v: Input| async move { Output::from(v) }));
     let operation = session.operation("observability-and-listener");
     group.bench_function("observability-and-listener", |b| {
         b.iter(|| {

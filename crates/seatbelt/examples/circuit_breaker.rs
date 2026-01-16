@@ -36,9 +36,7 @@ async fn main() -> Result<(), AppError> {
                 Err(_) => RecoveryInfo::retry(),
             })
             // Required: provide output when circuit is open
-            .rejected_input_error(|input, _args| {
-                format!("rejecting execution of '{input}' because circuit is open")
-            })
+            .rejected_input_error(|input, _args| format!("rejecting execution of '{input}' because circuit is open"))
             // Decrease the following values to see the circuit breaker trip faster
             // and speed-up the example
             .sampling_duration(Duration::from_secs(2))
@@ -93,9 +91,7 @@ async fn execute_operation(input: u32) -> Result<String, String> {
 
 fn configure_telemetry() -> SdkMeterProvider {
     // Set up tracing subscriber for logs to console
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
         .with_periodic_exporter(MetricExporter::default())

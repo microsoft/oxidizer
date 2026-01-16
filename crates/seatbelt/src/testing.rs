@@ -25,9 +25,7 @@ impl MetricTester {
 
         Self {
             exporter: in_memory.clone(),
-            provider: SdkMeterProvider::builder()
-                .with_periodic_exporter(in_memory)
-                .build(),
+            provider: SdkMeterProvider::builder().with_periodic_exporter(in_memory).build(),
         }
     }
 
@@ -81,58 +79,22 @@ fn collect_attributes(exporter: &InMemoryMetricExporter) -> Vec<KeyValue> {
 fn collect_attributes_for_metric(metric: &Metric) -> impl Iterator<Item = KeyValue> {
     match metric.data() {
         AggregatedMetrics::F64(data) => match data {
-            MetricData::Gauge(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::Sum(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::Histogram(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::ExponentialHistogram(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
+            MetricData::Gauge(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::Sum(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::Histogram(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::ExponentialHistogram(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
         },
         AggregatedMetrics::U64(data) => match data {
-            MetricData::Gauge(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::Sum(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::Histogram(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::ExponentialHistogram(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
+            MetricData::Gauge(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::Sum(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::Histogram(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::ExponentialHistogram(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
         },
         AggregatedMetrics::I64(data) => match data {
-            MetricData::Gauge(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::Sum(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::Histogram(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
-            MetricData::ExponentialHistogram(data) => data
-                .data_points()
-                .flat_map(|v| v.attributes().cloned())
-                .collect::<Vec<_>>(),
+            MetricData::Gauge(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::Sum(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::Histogram(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
+            MetricData::ExponentialHistogram(data) => data.data_points().flat_map(|v| v.attributes().cloned()).collect::<Vec<_>>(),
         },
     }
     .into_iter()

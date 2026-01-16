@@ -59,18 +59,12 @@ async fn main() -> Result<(), AppError> {
 }
 
 async fn execute_operation(input: String) -> String {
-    if fastrand::i16(0..10) > 4 {
-        "error".to_string()
-    } else {
-        input
-    }
+    if fastrand::i16(0..10) > 4 { "error".to_string() } else { input }
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
     // Set up tracing subscriber for logs to console
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
         .with_periodic_exporter(MetricExporter::default())

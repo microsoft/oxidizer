@@ -83,11 +83,7 @@ mod tests {
         let engines = Engines::new(
             EngineOptions {
                 break_duration: Duration::from_secs(60),
-                health_metrics_builder: HealthMetricsBuilder::new(
-                    Duration::from_millis(100),
-                    0.5,
-                    5,
-                ),
+                health_metrics_builder: HealthMetricsBuilder::new(Duration::from_millis(100), 0.5, 5),
                 probes: ProbesOptions::quick(Duration::from_secs(1)),
             },
             Clock::new_frozen(),

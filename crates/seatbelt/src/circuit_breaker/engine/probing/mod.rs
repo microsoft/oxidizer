@@ -127,14 +127,8 @@ mod tests {
         });
         let now = Instant::now();
 
-        assert_eq!(
-            probe.record(ExecutionResult::Success, now),
-            ProbingResult::Success
-        );
-        assert_eq!(
-            probe.record(ExecutionResult::Failure, now),
-            ProbingResult::Failure
-        );
+        assert_eq!(probe.record(ExecutionResult::Success, now), ProbingResult::Success);
+        assert_eq!(probe.record(ExecutionResult::Failure, now), ProbingResult::Failure);
     }
 
     #[test]

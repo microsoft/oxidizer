@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-use crate::circuit_breaker::{
-    CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult,
-};
+use crate::circuit_breaker::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
 
 /// Fake engine to be used in tests.
 #[derive(Debug)]
@@ -13,10 +11,7 @@ pub(crate) struct EngineFake {
 
 impl EngineFake {
     pub fn new(enter_result: EnterCircuitResult, exit_result: ExitCircuitResult) -> Self {
-        Self {
-            enter_result,
-            exit_result,
-        }
+        Self { enter_result, exit_result }
     }
 }
 

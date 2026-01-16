@@ -7,10 +7,7 @@ use opentelemetry::StringValue;
 
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
-use crate::retry::{
-    CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs,
-    Retry, ShouldRecover,
-};
+use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
 use crate::service::Layer;
 use crate::{Backoff, EnableIf, MaxAttempts, NotSet, Recovery, RecoveryInfo, SeatbeltOptions, Set};
 
@@ -236,10 +233,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     /// * `retry_fn` - Function that takes a reference to the output and
     ///   [`OnRetryArgs`] containing retry context information
     #[must_use]
-    pub fn on_retry(
-        mut self,
-        retry_fn: impl Fn(&Out, OnRetryArgs) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn on_retry(mut self, retry_fn: impl Fn(&Out, OnRetryArgs) + Send + Sync + 'static) -> Self {
         self.on_retry = Some(OnRetry::new(retry_fn));
         self
     }
@@ -399,10 +393,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     /// # }
     /// ```
     #[must_use]
-    pub fn restore_input(
-        mut self,
-        restore_fn: impl Fn(&mut Out, RestoreInputArgs) -> Option<In> + Send + Sync + 'static,
-    ) -> Self {
+    pub fn restore_input(mut self, restore_fn: impl Fn(&mut Out, RestoreInputArgs) -> Option<In> + Send + Sync + 'static) -> Self {
         self.restore_input = Some(RestoreInput::new(restore_fn));
         self
     }
@@ -417,14 +408,8 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
             clock: self.options.get_clock().clone(),
             max_attempts: self.max_attempts,
             backoff: self.backoff.clone().into(),
-            clone_input: self
-                .clone_input
-                .clone()
-                .expect("clone_input must be set in Ready state"),
-            should_recover: self
-                .should_recover
-                .clone()
-                .expect("should_recover must be set in Ready state"),
+            clone_input: self.clone_input.clone().expect("clone_input must be set in Ready state"),
+            should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
             on_retry: self.on_retry.clone(),
             enable_if: self.enable_if.clone(),
             strategy_name: self.strategy_name.clone(),
@@ -436,9 +421,7 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
     }
 }
 
-impl<In, Res, Error, CloneInputState, RecoveryState>
-    RetryLayer<In, Result<Res, Error>, CloneInputState, RecoveryState>
-{
+impl<In, Res, Error, CloneInputState, RecoveryState> RetryLayer<In, Result<Res, Error>, CloneInputState, RecoveryState> {
     /// Sets a specialized input restoration callback that operates only on error cases.
     ///
     /// This is a convenience method for working with `Result<Res, Error>` outputs, where you
@@ -494,10 +477,7 @@ impl<In, Res, Error, CloneInputState, RecoveryState>
     /// # }
     /// ```
     #[must_use]
-    pub fn restore_input_from_error(
-        self,
-        restore_fn: impl Fn(&mut Error, RestoreInputArgs) -> Option<In> + Send + Sync + 'static,
-    ) -> Self {
+    pub fn restore_input_from_error(self, restore_fn: impl Fn(&mut Error, RestoreInputArgs) -> Option<In> + Send + Sync + 'static) -> Self {
         self.restore_input(move |input, args| match input {
             Ok(_) => None,
             Err(e) => restore_fn(e, args),
@@ -539,8 +519,7 @@ mod tests {
     #[test]
     fn new_creates_correct_initial_state() {
         let options = create_test_options();
-        let layer: RetryLayer<_, _, NotSet, NotSet> =
-            RetryLayer::new(StringValue::from("test_retry"), &options);
+        let layer: RetryLayer<_, _, NotSet, NotSet> = RetryLayer::new(StringValue::from("test_retry"), &options);
 
         assert_eq!(layer.max_attempts, MaxAttempts::Finite(4)); // 3 retries + 1 original = 4 total
         assert!(matches!(layer.backoff.backoff_type, Backoff::Exponential));
@@ -559,8 +538,7 @@ mod tests {
         let options = create_test_options();
         let layer = RetryLayer::new(StringValue::from("test"), &options);
 
-        let layer: RetryLayer<_, _, Set, NotSet> =
-            layer.clone_input_with(|input, _args| Some(input.clone()));
+        let layer: RetryLayer<_, _, Set, NotSet> = layer.clone_input_with(|input, _args| Some(input.clone()));
 
         let result = layer.clone_input.unwrap().call(
             &mut "test".to_string(),

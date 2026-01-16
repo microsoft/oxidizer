@@ -38,18 +38,10 @@ async fn main() -> Result<(), AppError> {
             // Required: specify the timeout duration
             .timeout(TIMEOUT_DURATION)
             // Required: create error output for timeouts
-            .timeout_error(|args| {
-                app_err!(
-                    "timeout occurred, timeout: {}ms",
-                    args.timeout().as_millis()
-                )
-            })
+            .timeout_error(|args| app_err!("timeout occurred, timeout: {}ms", args.timeout().as_millis()))
             // Optional: callback to be invoked when a timeout occurs
             .on_timeout(|_out, args| {
-                println!(
-                    "timeout occurred, timeout: {}ms",
-                    args.timeout().as_millis()
-                );
+                println!("timeout occurred, timeout: {}ms", args.timeout().as_millis());
             })
             // Optional: override the default timeout duration by inspecting the input
             .timeout_override(|input, _args| match input.as_str() {
@@ -88,9 +80,7 @@ async fn main() -> Result<(), AppError> {
 
 fn configure_telemetry() -> SdkMeterProvider {
     // Set up tracing subscriber for logs to console
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     SdkMeterProvider::builder()
         .with_periodic_exporter(MetricExporter::default())
