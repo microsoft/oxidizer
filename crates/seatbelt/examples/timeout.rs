@@ -9,17 +9,25 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use layered::{Execute, Service, Stack};
-use oxidizer_rt::Builtins;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_stdout::MetricExporter;
 use seatbelt::SeatbeltOptions;
 use seatbelt::timeout::Timeout;
+use tick::Clock;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 const TIMEOUT_DURATION: Duration = Duration::from_millis(100);
 const PROCESSING_DELAY: Duration = Duration::from_millis(500);
 
-#[oxidizer_rt::main]
-async fn main(state: Builtins) -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let meter_provider = configure_telemetry();
+
+    let clock = Clock::new_tokio();
+
     // Create common options
-    let options = SeatbeltOptions::new(&state);
+    let options = SeatbeltOptions::new(&clock).meter_provider(&meter_provider);
 
     // Define stack with timeout layer
     let stack = (
@@ -33,11 +41,14 @@ async fn main(state: Builtins) -> anyhow::Result<()> {
                     args.timeout().as_millis()
                 )
             }),
-        Execute::new(move |_input| {
-            let clock = state.clock().clone();
-            async move {
-                clock.delay(PROCESSING_DELAY).await; // Simulate some processing delay so the timeout can trigger
-                Ok(())
+        Execute::new({
+            let clock = clock.clone();
+            move |_input| {
+                let clock = clock.clone();
+                async move {
+                    clock.delay(PROCESSING_DELAY).await; // Simulate some processing delay so the timeout can trigger
+                    Ok(())
+                }
             }
         }),
     );
@@ -51,5 +62,19 @@ async fn main(state: Builtins) -> anyhow::Result<()> {
         println!("{i} attempt, error: {timeout_error}");
     }
 
+    // Flush metrics to stdout before exiting
+    meter_provider.force_flush()?;
+
     Ok(())
+}
+
+fn configure_telemetry() -> SdkMeterProvider {
+    // Set up tracing subscriber for logs to console
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    SdkMeterProvider::builder()
+        .with_periodic_exporter(MetricExporter::default())
+        .build()
 }

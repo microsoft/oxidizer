@@ -99,6 +99,7 @@ xxhash-rust = { version = "0.8.15", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 opentelemetry = { version = "0.31.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", default-features = false }
+opentelemetry-stdout = { version = "0.31.0", default-features = false }
 http = { version = "1.2.0", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]

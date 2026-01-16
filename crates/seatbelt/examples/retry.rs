@@ -5,13 +5,14 @@
 use std::io::Error;
 
 use layered::{Execute, Service, Stack};
-use oxidizer_rt::Builtins;
 use seatbelt::retry::Retry;
 use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use tick::Clock;
 
-#[oxidizer_rt::main]
-async fn main(state: Builtins) -> anyhow::Result<()> {
-    let options = SeatbeltOptions::new(&state);
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let clock = Clock::new_tokio();
+    let options = SeatbeltOptions::new(&clock);
 
     // Define stack with retry layer
     let stack = (

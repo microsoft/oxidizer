@@ -11,13 +11,20 @@
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
-use oxidizer_rt::Builtins;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_stdout::MetricExporter;
 use seatbelt::circuit_breaker::CircuitBreaker;
 use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use tick::Clock;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
-#[oxidizer_rt::main]
-async fn main(builtins: Builtins) -> anyhow::Result<()> {
-    let options = SeatbeltOptions::new(&builtins);
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let meter_provider = configure_telemetry();
+
+    let clock = Clock::new_tokio();
+    let options = SeatbeltOptions::new(&clock).meter_provider(&meter_provider);
 
     // Define stack with circuit breaker layer
     let stack = (
@@ -54,13 +61,16 @@ async fn main(builtins: Builtins) -> anyhow::Result<()> {
     // failure rate exceeds the threshold. You can play with this value an increase it to 300
     // to see how the circuit breaker eventually closes when the service recovers.
     for attempt in 0..30 {
-        builtins.clock().delay(Duration::from_millis(50)).await;
+        clock.delay(Duration::from_millis(50)).await;
 
         match service.execute(attempt).await {
             Ok(output) => println!("{attempt}: {output}"),
             Err(e) => println!("{attempt}: {e}"),
         }
     }
+
+    // Flush metrics to stdout before exiting
+    meter_provider.force_flush()?;
 
     Ok(())
 }
@@ -78,4 +88,15 @@ async fn execute_operation(input: u32) -> Result<String, String> {
         // Produce some output
         Ok(format!("output-{input}"))
     }
+}
+
+fn configure_telemetry() -> SdkMeterProvider {
+    // Set up tracing subscriber for logs to console
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    SdkMeterProvider::builder()
+        .with_periodic_exporter(MetricExporter::default())
+        .build()
 }

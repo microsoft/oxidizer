@@ -9,26 +9,28 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use layered::{Execute, Service, Stack};
-use oxidizer_rt::Builtins;
-use oxidizer_telemetry::Telemetry;
-use oxidizer_telemetry::destination::{stdout_logs, stdout_metrics};
-use oxidizer_telemetry::logs::InterceptTracingToLogExporter;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_stdout::MetricExporter;
 use seatbelt::SeatbeltOptions;
 use seatbelt::timeout::Timeout;
-use tracing_subscriber::prelude::*;
+use tick::Clock;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 const TIMEOUT_DURATION: Duration = Duration::from_millis(20);
 const PROCESSING_DELAY: Duration = Duration::from_secs(1);
 
-#[oxidizer_rt::main]
-async fn main(state: Builtins) -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // Configure telemetry to see the timeout metrics and logs
-    let telemetry = configure_telemetry();
+    let meter_provider = configure_telemetry();
+
+    let clock = Clock::new_tokio();
 
     // Create service options
-    let options: SeatbeltOptions<String, anyhow::Result<()>> = SeatbeltOptions::new(&state)
+    let options: SeatbeltOptions<String, anyhow::Result<()>> = SeatbeltOptions::new(&clock)
         .pipeline_name("my_pipeline")
-        .meter_provider(telemetry.meter_provider());
+        .meter_provider(&meter_provider);
 
     // Define stack with timeout layer
     let stack = (
@@ -54,12 +56,15 @@ async fn main(state: Builtins) -> anyhow::Result<()> {
                 "2" => Some(Duration::from_millis(300)),
                 _ => None,
             }),
-        Execute::new(move |_input| {
-            let clock = state.clock().clone();
-            async move {
-                // Simulate some processing delay so the timeout can trigger
-                clock.delay(PROCESSING_DELAY).await;
-                Ok(())
+        Execute::new({
+            let clock = clock.clone();
+            move |_input| {
+                let clock = clock.clone();
+                async move {
+                    // Simulate some processing delay so the timeout can trigger
+                    clock.delay(PROCESSING_DELAY).await;
+                    Ok(())
+                }
             }
         }),
     );
@@ -75,20 +80,19 @@ async fn main(state: Builtins) -> anyhow::Result<()> {
         }
     }
 
+    // Flush metrics to stdout before exiting
+    meter_provider.force_flush()?;
+
     Ok(())
 }
 
-fn configure_telemetry() -> Telemetry {
-    let telemetry = oxidizer_telemetry::builder()
-        .destination(stdout_metrics())
-        .unwrap()
-        .destination(stdout_logs())
-        .unwrap()
-        .build();
-
+fn configure_telemetry() -> SdkMeterProvider {
+    // Set up tracing subscriber for logs to console
     tracing_subscriber::registry()
-        .with_tracing_interception(telemetry.logger_provider())
+        .with(tracing_subscriber::fmt::layer())
         .init();
 
-    telemetry
+    SdkMeterProvider::builder()
+        .with_periodic_exporter(MetricExporter::default())
+        .build()
 }

@@ -12,16 +12,23 @@ use std::time::Duration;
 
 use http::{Request, Response};
 use layered::{Execute, Service, Stack};
-use oxidizer_rt::Builtins;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
 use seatbelt::{Recovery, RecoveryInfo, SeatbeltOptions};
+use tick::Clock;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 const ENDPOINT_WITH_OUTAGE: &str = "https://example.com";
 const ENDPOINT_ALIVE: &str = "https://fallback.example.com";
 
-#[oxidizer_rt::main]
-async fn main(state: Builtins) -> anyhow::Result<()> {
-    let options = SeatbeltOptions::new(&state);
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let meter_provider = configure_telemetry();
+
+    let clock = Clock::new_tokio();
+    let options = SeatbeltOptions::new(&clock).meter_provider(&meter_provider);
 
     // Configure retry layer for outage handling with input restoration
     let stack = (
@@ -60,6 +67,9 @@ async fn main(state: Builtins) -> anyhow::Result<()> {
     let response = service.execute(request).await?;
 
     println!("Final response: {}", response.body());
+
+    // Flush metrics to stdout before exiting
+    meter_provider.force_flush()?;
 
     Ok(())
 }
@@ -123,4 +133,15 @@ impl Recovery for HttpError {
     fn recovery(&self) -> RecoveryInfo {
         self.recovery.clone()
     }
+}
+
+fn configure_telemetry() -> SdkMeterProvider {
+    // Set up tracing subscriber for logs to console
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    SdkMeterProvider::builder()
+        .with_periodic_exporter(MetricExporter::default())
+        .build()
 }

@@ -10,15 +10,22 @@ use std::time::Duration;
 
 use http::{Request, Response};
 use layered::{Execute, Service, Stack};
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
 use seatbelt::{Attempt, RecoveryInfo, SeatbeltOptions};
+use tick::Clock;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-#[oxidizer_rt::main]
-async fn main(state: Builtins) -> anyhow::Result<()> {
-    let options = SeatbeltOptions::new(&state)
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let meter_provider = configure_telemetry();
+
+    let clock = Clock::new_tokio();
+    let options = SeatbeltOptions::new(&clock)
         .pipeline_name("retry_advanced")
-        .meter_provider(configure_telemetry().meter_provider());
+        .meter_provider(&meter_provider);
 
     // Define stack with retry layer
     let stack = (
@@ -70,6 +77,9 @@ async fn main(state: Builtins) -> anyhow::Result<()> {
         Err(e) => println!("execution failed, error: {e}"),
     }
 
+    // Flush metrics to stdout before exiting
+    meter_provider.force_flush()?;
+
     Ok(())
 }
 
@@ -93,17 +103,13 @@ async fn send_request(input: Request<String>) -> Result<Response<String>, Error>
     }
 }
 
-fn configure_telemetry() -> Telemetry {
-    let telemetry = oxidizer_telemetry::builder()
-        .destination(stdout_metrics())
-        .unwrap()
-        .destination(stdout_logs())
-        .unwrap()
-        .build();
-
+fn configure_telemetry() -> SdkMeterProvider {
+    // Set up tracing subscriber for logs to console
     tracing_subscriber::registry()
-        .with_tracing_interception(telemetry.logger_provider())
+        .with(tracing_subscriber::fmt::layer())
         .init();
 
-    telemetry
+    SdkMeterProvider::builder()
+        .with_periodic_exporter(MetricExporter::default())
+        .build()
 }

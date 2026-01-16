@@ -50,12 +50,14 @@ alloc_tracker.workspace = true
 futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
+opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 anyhow.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 fastrand.workspace = true
 http.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
+ohno = { workspace, features = ["app-err"] }
 
 [[example]]
 name = "timeout"
