@@ -42,7 +42,7 @@ required-features = ["tokio", "custom"]
 
 [[example]]
 name = "custom"
-required-features = ["custom", "tokio"]
+required-features = ["tokio", "custom"]
 
 [[example]]
 name = "tokio"
