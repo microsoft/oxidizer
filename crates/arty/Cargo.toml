@@ -32,6 +32,7 @@ tokio = { workspace = true, features = ["rt"], optional = true }
 async-std = { version = "1.13", features = ["attributes"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
+static_assertions.workspace = true
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 

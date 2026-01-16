@@ -3,7 +3,9 @@
 
 //! Tests for `JoinHandle` implementations.
 
-use arty::Spawner;
+use arty::{JoinHandle, Spawner};
+
+static_assertions::assert_impl_all!(JoinHandle<()>: Send, Sync);
 
 #[cfg(feature = "tokio")]
 #[tokio::test]
