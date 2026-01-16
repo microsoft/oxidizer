@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-01-16
+
+- ✨ Features
+
+  - add AppError type for application level errors ([#192](https://github.com/microsoft/oxidizer/pull/192))
+
 ## [0.2.0] - 2025-12-01
 
 - ⚠️ Breaking
