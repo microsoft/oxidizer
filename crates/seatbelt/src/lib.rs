@@ -1,5 +1,10 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/favicon.ico")]
 #![expect(
     rustdoc::broken_intra_doc_links,
     reason = "Too ugly to make 'live links' possible with the combination of features"
@@ -140,5 +145,6 @@ pub mod service {
 #[cfg(any(feature = "retry", feature = "circuit-breaker", test))]
 mod rnd;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 pub(crate) mod testing;

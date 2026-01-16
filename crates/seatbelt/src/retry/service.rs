@@ -245,6 +245,7 @@ impl<In, Out, S> Retry<In, Out, S> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(not(miri))] // Oxidizer runtime does not support Miri.
 #[cfg(test)]
 mod tests {

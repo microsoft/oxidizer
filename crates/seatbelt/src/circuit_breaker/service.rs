@@ -157,6 +157,7 @@ impl<In, Out, S> CircuitBreaker<In, Out, S> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {

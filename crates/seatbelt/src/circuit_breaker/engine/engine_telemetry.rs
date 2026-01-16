@@ -159,6 +159,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {

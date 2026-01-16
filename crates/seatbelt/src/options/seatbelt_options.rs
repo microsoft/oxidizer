@@ -217,6 +217,7 @@ impl<In, Out> Clone for SeatbeltOptions<In, Out> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};

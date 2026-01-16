@@ -128,6 +128,7 @@ macro_rules! define_fn_wrapper {
 
 pub(crate) use define_fn_wrapper;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;

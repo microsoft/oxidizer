@@ -83,6 +83,7 @@ pub(crate) trait CircuitEngine: Debug + Send + Sync + 'static {
 mod engine_core;
 pub(crate) use engine_core::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod engine_fake;
 #[cfg(test)]
@@ -94,6 +95,7 @@ pub(crate) use engine_telemetry::*;
 mod engines;
 pub(crate) use engines::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

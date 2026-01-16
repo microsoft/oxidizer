@@ -40,6 +40,7 @@ pub const STRATEGY_NAME: &str = "resilience.strategy.name";
 /// Examples: `retry`, `timeout`, `circuit_opened`.
 pub const EVENT_NAME: &str = "resilience.event.name";
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

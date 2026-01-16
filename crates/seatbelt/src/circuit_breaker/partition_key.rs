@@ -101,6 +101,7 @@ enum PartitionKeyValue {
     String(Cow<'static, str>),
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;

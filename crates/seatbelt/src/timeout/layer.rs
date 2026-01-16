@@ -225,6 +225,7 @@ impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutp
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;

@@ -449,6 +449,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;

@@ -170,6 +170,7 @@ impl From<u32> for MaxAttempts {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -133,6 +133,7 @@ where
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(not(miri))] // tokio runtime does not support Miri.
 #[cfg(test)]
 mod tests {

@@ -20,6 +20,7 @@ repository.workspace = true
 all-features = true
 
 [features]
+default = []
 service = ["dep:layered"]
 telemetry = []
 metrics = ["dep:opentelemetry", "opentelemetry/metrics", "telemetry"]

@@ -24,6 +24,7 @@ pub(crate) fn create_resilience_event_counter(meter: &Meter) -> Counter<u64> {
         .build()
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use opentelemetry_sdk::metrics::InMemoryMetricExporter;

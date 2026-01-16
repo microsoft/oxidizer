@@ -503,6 +503,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
