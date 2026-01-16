@@ -24,13 +24,13 @@ struct TupleErrorWithFrom(#[error] OhnoCore);
 
 #[test]
 fn test_simple_tuple_error() {
-    let error = SimpleTupleError(OhnoCore::from("test error"));
+    let error = SimpleTupleError(OhnoCore::builder().error("test error").build());
     assert!(error.to_string().contains("test error"));
 }
 
 #[test]
 fn test_tuple_error_with_fields() {
-    let error = TupleErrorWithFields("operation".to_string(), 42, OhnoCore::from("failed"));
+    let error = TupleErrorWithFields("operation".to_string(), 42, OhnoCore::builder().error("failed").build());
 
     // Access the fields to verify they work
     assert_eq!(error.0, "operation");
@@ -40,14 +40,14 @@ fn test_tuple_error_with_fields() {
 
 #[test]
 fn test_tuple_error_auto_detect() {
-    let error = TupleErrorAutoDetect(OhnoCore::from("auto detected"));
+    let error = TupleErrorAutoDetect(OhnoCore::builder().error("auto detected").build());
     assert!(error.to_string().contains("auto detected"));
 }
 
 #[test]
 fn test_tuple_error_source() {
     let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-    let error = SimpleTupleError(OhnoCore::from(io_error));
+    let error = SimpleTupleError(OhnoCore::builder().error(io_error).build());
 
     assert!(error.source().is_some());
 }
@@ -78,7 +78,7 @@ fn test_tuple_error_with_fields_constructors() {
 fn test_tuple_add_enrichment() {
     use ohno::Enrichable;
 
-    let mut error = SimpleTupleError(OhnoCore::from("test"));
+    let mut error = SimpleTupleError(OhnoCore::builder().error("test").build());
     error.add_enrichment(ohno::EnrichmentEntry::new("enrichment message", "test.rs", 80));
     let msg = error.to_string();
     assert!(msg.starts_with("test"), "{msg}");

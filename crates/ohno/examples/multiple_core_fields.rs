@@ -14,8 +14,8 @@ struct MyError {
 
 fn failing_function() -> Result<(), MyError> {
     Err(MyError {
-        metadata: OhnoCore::from("Additional metadata"),
-        main_error: OhnoCore::from("Main error occurred"),
+        metadata: OhnoCore::builder().error("Additional metadata").build(),
+        main_error: OhnoCore::builder().error("Main error occurred").build(),
     })
 }
 

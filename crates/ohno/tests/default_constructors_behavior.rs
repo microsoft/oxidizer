@@ -61,7 +61,7 @@ fn test_no_constructors() {
     // The NoConstructorsError should NOT have new() or caused_by() methods
     // This test verifies that we can manually construct the error
     let error = NoConstructorsError {
-        inner: OhnoCore::from("manually constructed"),
+        inner: OhnoCore::builder().error("manually constructed").build(),
     };
     assert!(format!("{error}").contains("manually constructed"));
 

@@ -33,11 +33,11 @@ pub struct Inner {
 /// use ohno::OhnoCore;
 ///
 /// // Create from a string message
-/// let core = OhnoCore::from("something went wrong");
+/// let core = OhnoCore::builder().error("something went wrong").build();
 ///
 /// // Wrap an existing error
 /// let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file.txt");
-/// let wrapped = OhnoCore::from(io_error);
+/// let wrapped = OhnoCore::builder().error(io_error).build();
 /// ```
 #[derive(Clone)]
 pub struct OhnoCore {
@@ -63,6 +63,12 @@ impl OhnoCore {
     #[must_use]
     pub fn new() -> Self {
         Self::from_source(Source::None)
+    }
+
+    /// Creates a new [`OhnoCoreBuilder`](crate::OhnoCoreBuilder) for configuring an `OhnoCore` instance.
+    #[must_use]
+    pub fn builder() -> crate::OhnoCoreBuilder {
+        crate::OhnoCoreBuilder::new()
     }
 
     fn from_source(source: Source) -> Self {
@@ -213,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_format_error() {
-        let error = OhnoCore::from("test error");
+        let error = OhnoCore::builder().error("test error").build();
         let result = error.to_string();
         assert!(result.contains("test error"));
     }
@@ -227,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_from_string() {
-        let error = OhnoCore::from("msg");
+        let error = OhnoCore::builder().error("msg").build();
         assert!(error.source().is_none());
         if let Source::Transparent(source) = &error.data.source {
             assert_eq!(source.to_string(), "msg");
@@ -238,7 +244,10 @@ mod tests {
     #[test]
     fn test_caused_by_without_backtrace() {
         let io_error = std::io::Error::other("io error");
-        let error = OhnoCore::without_backtrace(io_error);
+        let error = OhnoCore::builder()
+            .backtrace_policy(crate::BacktracePolicy::Never)
+            .error(io_error)
+            .build();
         assert!(matches!(error.data.source, Source::Error(_)));
         assert!(!error.has_backtrace());
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
@@ -247,7 +256,7 @@ mod tests {
     #[test]
     fn test_caused_by() {
         let io_error = std::io::Error::other("io error");
-        let error = OhnoCore::from(io_error);
+        let error = OhnoCore::builder().error(io_error).build();
         assert!(matches!(error.data.source, Source::Error(_)));
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
@@ -256,7 +265,7 @@ mod tests {
     fn test_from_boxed_error() {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
-        let error = OhnoCore::from(boxed);
+        let error = OhnoCore::builder().error(boxed).build();
         assert!(matches!(error.data.source, Source::Error(_)));
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
@@ -265,14 +274,14 @@ mod tests {
     fn test_from_boxed_error_2() {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
-        let error: OhnoCore = boxed.into();
+        let error = OhnoCore::builder().error(boxed).build();
         assert!(matches!(error.data.source, Source::Error(_)));
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
 
     #[test]
     fn test_enrichment_iter_and_messages() {
-        let mut error = OhnoCore::from("msg");
+        let mut error = OhnoCore::builder().error("msg").build();
         error.add_enrichment(EnrichmentEntry::new("ctx1", "test.rs", 1));
         error.add_enrichment(EnrichmentEntry::new("ctx2", "test.rs", 2));
         let messages: Vec<_> = error.enrichment_messages().collect();
@@ -281,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_display_and_debug() {
-        let error = OhnoCore::from("msg");
+        let error = OhnoCore::builder().error("msg").build();
         let display = format!("{error}");
         assert!(display.starts_with("msg"));
         let debug = format!("{error:?}");
@@ -290,16 +299,15 @@ mod tests {
 
     #[test]
     fn test_from_string_impls() {
-        let s = "abc";
-        let error1: OhnoCore = s.into();
+        let error1 = OhnoCore::builder().error("abc").build();
         assert!(error1.to_string().starts_with("abc"));
         assert!(matches!(error1.data.source, Source::Transparent(_)));
 
-        let error2: OhnoCore = String::from("def").into();
+        let error2 = OhnoCore::builder().error(String::from("def")).build();
         assert!(error2.to_string().starts_with("def"));
         assert!(matches!(error2.data.source, Source::Transparent(_)));
 
-        let error3: OhnoCore = Cow::Borrowed("ghi").into();
+        let error3 = OhnoCore::builder().error(Cow::Borrowed("ghi")).build();
         assert!(error3.to_string().starts_with("ghi"));
         assert!(matches!(error3.data.source, Source::Transparent(_)));
     }
@@ -308,7 +316,7 @@ mod tests {
     fn test_from_boxed_error_impl() {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
-        let error: OhnoCore = boxed.into();
+        let error = OhnoCore::builder().error(boxed).build();
         assert!(matches!(error.data.source, Source::Error(_)));
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
@@ -316,7 +324,7 @@ mod tests {
     #[test]
     fn test_from_io_error_impl() {
         let io_error = std::io::Error::other("io error");
-        let error: OhnoCore = io_error.into();
+        let error = OhnoCore::builder().error(io_error).build();
         assert!(matches!(error.data.source, Source::Error(_)));
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
@@ -324,8 +332,10 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // unsupported operation: `GetCurrentDirectoryW` not available when isolation is enabled
     fn force_backtrace_capture() {
-        let mut error = OhnoCore::from("test error with backtrace");
-        error.data.backtrace = Backtrace::force_capture();
+        let error = OhnoCore::builder()
+            .backtrace_policy(crate::BacktracePolicy::Forced)
+            .error("test error with backtrace")
+            .build();
 
         assert!(error.has_backtrace());
         let backtrace = error.backtrace();
@@ -336,8 +346,10 @@ mod tests {
 
     #[test]
     fn no_backtrace_capture() {
-        let mut error = OhnoCore::from("test error without backtrace");
-        error.data.backtrace = Backtrace::disabled();
+        let error = OhnoCore::builder()
+            .backtrace_policy(crate::BacktracePolicy::Never)
+            .error("test error without backtrace")
+            .build();
         assert!(!error.has_backtrace());
         assert_eq!(error.backtrace().status(), BacktraceStatus::Disabled);
         let display = format!("{error}");

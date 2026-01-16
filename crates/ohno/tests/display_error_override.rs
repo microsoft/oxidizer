@@ -28,7 +28,7 @@ fn test_display_error_override_with_empty_core() {
 fn test_display_error_override_with_field() {
     let error = ConfigError {
         path: "/etc/config.toml".to_string(),
-        inner_error: OhnoCore::from("file not found"),
+        inner_error: OhnoCore::builder().error("file not found").build(),
     };
 
     assert_error_message!(
@@ -45,7 +45,9 @@ fn test_display_error_override_with_field() {
 fn test_display_error_override_with_enrichment() {
     let error = ConfigError {
         path: "/tmp/test.conf".to_string(),
-        inner_error: OhnoCore::from("permission denied")
+        inner_error: OhnoCore::builder()
+            .error("permission denied")
+            .build()
             .enrich("filesystem access failed")
             .enrich("security check failed"),
     };
@@ -79,7 +81,7 @@ fn test_display_error_override_static_empty() {
 #[test]
 fn test_display_error_override_static() {
     let error = StaticError {
-        inner_error: OhnoCore::from("underlying error"),
+        inner_error: OhnoCore::builder().error("underlying error").build(),
     };
 
     assert_error_message!(error, "Static error message\ncaused by: underlying error");
@@ -99,7 +101,7 @@ fn test_display_error_override_multiple_fields() {
     let error = MultiFieldError {
         name: "test".to_string(),
         code: 404,
-        inner_error: OhnoCore::from("not found"),
+        inner_error: OhnoCore::builder().error("not found").build(),
     };
 
     assert_error_message!(error, "Multiple fields: test - 404\ncaused by: not found");

@@ -20,14 +20,14 @@ struct TestError {
 fn test_source_behavior() {
     // Case 1: OhnoCore with string message - source should be None
     let error1 = TestError {
-        inner_error: OhnoCore::from("test message"),
+        inner_error: OhnoCore::builder().error("test message").build(),
     };
     assert!(error1.source().is_none(), "String-based OhnoCore should have no source");
 
     // Case 2: OhnoCore with wrapped error - source should be Some
     let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file.txt");
     let error2 = TestError {
-        inner_error: OhnoCore::from(io_error),
+        inner_error: OhnoCore::builder().error(io_error).build(),
     };
     assert!(error2.source().is_some(), "Error-wrapping OhnoCore should have a source");
 

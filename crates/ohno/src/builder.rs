@@ -30,6 +30,7 @@ impl Default for OhnoCoreBuilder {
 
 impl OhnoCoreBuilder {
     /// Creates a new [`OhnoCoreBuilder`] with default settings.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             backtrace_policy: BacktracePolicy::Auto,
@@ -38,12 +39,14 @@ impl OhnoCoreBuilder {
     }
 
     /// Sets the backtrace capture policy.
+    #[must_use]
     pub fn backtrace_policy(mut self, policy: BacktracePolicy) -> Self {
         self.backtrace_policy = policy;
         self
     }
 
     /// Sets the main error for the [`OhnoCore`] instance.
+    #[must_use]
     pub fn error<E>(mut self, error: E) -> Self
     where
         E: Into<Box<dyn StdError + Send + Sync + 'static>>,
@@ -60,6 +63,7 @@ impl OhnoCoreBuilder {
     ///
     /// Typically it's used with private error types that are not exposed to the users of the
     /// library.
+    #[must_use]
     pub fn transparent_error<E>(mut self, error: E) -> Self
     where
         E: Into<Box<dyn StdError + Send + Sync + 'static>>,
@@ -69,6 +73,7 @@ impl OhnoCoreBuilder {
     }
 
     /// Builds the [`OhnoCore`] instance.
+    #[must_use]
     pub fn build(self) -> OhnoCore {
         OhnoCore::from_builder(self)
     }

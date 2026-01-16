@@ -51,7 +51,7 @@ struct ComplexNoDebugError {
 #[test]
 fn test_simple_error_debug() {
     let error = SimpleError {
-        inner_error: OhnoCore::from("test error"),
+        inner_error: OhnoCore::builder().error("test error").build(),
     };
 
     let debug_str = format!("{error:?}");
@@ -64,7 +64,7 @@ fn test_multi_field_error_debug() {
     let error = MultiFieldError {
         name: "test".to_string(),
         code: 404,
-        inner_error: OhnoCore::from("not found"),
+        inner_error: OhnoCore::builder().error("not found").build(),
     };
 
     let debug_str = format!("{error:?}");
@@ -78,7 +78,7 @@ fn test_multi_field_error_debug() {
 
 #[test]
 fn test_tuple_error_debug() {
-    let error = TupleError("test".to_string(), OhnoCore::from("error"));
+    let error = TupleError("test".to_string(), OhnoCore::builder().error("error").build());
 
     let debug_str = format!("{error:?}");
     assert!(debug_str.contains("TupleError"));
@@ -87,7 +87,7 @@ fn test_tuple_error_debug() {
 
 #[test]
 fn test_unit_error_debug() {
-    let error = UnitError(OhnoCore::from("unit error"));
+    let error = UnitError(OhnoCore::builder().error("unit error").build());
 
     let debug_str = format!("{error:?}");
     assert!(debug_str.contains("UnitError"));
@@ -96,7 +96,7 @@ fn test_unit_error_debug() {
 #[test]
 fn test_no_debug_attribute_works() {
     let error = NoDebugError {
-        inner_error: OhnoCore::from("no debug test"),
+        inner_error: OhnoCore::builder().error("no debug test").build(),
     };
 
     // Should work with manual Debug derive
@@ -108,7 +108,7 @@ fn test_no_debug_attribute_works() {
 fn test_no_debug_with_complex_attributes() {
     let error = ComplexNoDebugError {
         code: 500,
-        inner_error: OhnoCore::from("server error"),
+        inner_error: OhnoCore::builder().error("server error").build(),
     };
 
     // Should work with manual Debug derive
@@ -129,7 +129,11 @@ fn test_debug_with_enrichment() {
     use ohno::EnrichableExt;
 
     let error = SimpleError {
-        inner_error: OhnoCore::from("base error").enrich("first enrichment").enrich("second enrichment"),
+        inner_error: OhnoCore::builder()
+            .error("base error")
+            .build()
+            .enrich("first enrichment")
+            .enrich("second enrichment"),
     };
 
     let debug_str = format!("{error:?}");

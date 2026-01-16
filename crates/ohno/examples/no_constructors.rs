@@ -16,7 +16,7 @@ struct MyError {
 fn failing_function() -> Result<(), MyError> {
     // Must construct manually when constructors are disabled
     Err(MyError {
-        inner: OhnoCore::from("Manually constructed error"),
+        inner: OhnoCore::builder().error("Manually constructed error").build(),
     })
 }
 

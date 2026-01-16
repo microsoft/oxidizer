@@ -24,7 +24,7 @@ fn test_named_struct_debug_structure() {
     }
 
     let ref_struct = RefNamedStruct {
-        inner: OhnoCore::from("test_error"),
+        inner: OhnoCore::builder().error("test_error").build(),
         code: 404,
         message: "Not found".to_string(),
     };
@@ -48,7 +48,11 @@ fn test_tuple_struct_debug_structure() {
     #[derive(Error)]
     pub struct TestTupleStruct(#[error] pub OhnoCore, pub String, pub i32);
 
-    let ref_struct = RefTupleStruct(OhnoCore::from("error_content"), "additional_info".to_string(), 42);
+    let ref_struct = RefTupleStruct(
+        OhnoCore::builder().error("error_content").build(),
+        "additional_info".to_string(),
+        42,
+    );
 
     let ref_debug = format!("{ref_struct:?}").replace("RefTupleStruct", "TestTupleStruct");
 
@@ -72,7 +76,7 @@ fn test_single_field_struct_debug_structure() {
     }
 
     let ref_struct = RefSingleField {
-        value: OhnoCore::from("single_value"),
+        value: OhnoCore::builder().error("single_value").build(),
     };
 
     let ref_debug = format!("{ref_struct:?}").replace("RefSingleField", "TestSingleField");
@@ -107,7 +111,7 @@ fn test_struct_with_enum_field_debug_structure() {
     }
 
     let ref_struct = RefEnumFieldStruct {
-        error: OhnoCore::from("enum_error"),
+        error: OhnoCore::builder().error("enum_error").build(),
         status: TestStatus::Error("fail".to_string()),
     };
     let ref_debug = format!("{ref_struct:?}").replace("RefEnumFieldStruct", "TestEnumFieldStruct");

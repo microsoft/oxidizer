@@ -56,7 +56,9 @@ impl std::error::Error for TestError {
 
 #[test]
 fn test_detailed_enrich() {
-    let error = OhnoCore::from("base error")
+    let error = OhnoCore::builder()
+        .error("base error")
+        .build()
         .enrich("first message")
         .enrich("second message")
         .enrich("third message");
@@ -79,7 +81,10 @@ fn test_detailed_enrich() {
 
 #[test]
 fn test_with_enrich() {
-    let error = OhnoCore::from("base").enrich_with(|| format!("computed: {}", 42));
+    let error = OhnoCore::builder()
+        .error("base")
+        .build()
+        .enrich_with(|| format!("computed: {42}"));
 
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
@@ -88,34 +93,40 @@ fn test_with_enrich() {
 
 #[test]
 fn test_source_enum_variants() {
-    let error = OhnoCore::from("message error");
+    let error = OhnoCore::builder().error("message error").build();
     assert!(error.source().is_none());
 
     // Test Source::Error variant
     let io_error = io::Error::new(io::ErrorKind::NotFound, "file.txt");
-    let wrapped = OhnoCore::from(io_error);
+    let wrapped = OhnoCore::builder().error(io_error).build();
     assert!(wrapped.source().is_some());
 }
 
 #[test]
 fn test_backtrace_capture() {
-    let error_with_bt = OhnoCore::from("test");
-    let error_also_with_bt = OhnoCore::from(io::Error::other("test"));
-    let error_without_bt = OhnoCore::without_backtrace(io::Error::other("test"));
+    use ohno::BacktracePolicy;
 
-    // Note: Backtrace capture depends on RUST_BACKTRACE environment variable
-    // We can't test the actual presence but we can test the methods exist
-    let _ = error_with_bt.has_backtrace();
-    let _ = error_with_bt.backtrace();
-    let _ = error_also_with_bt.has_backtrace();
-    let _ = error_also_with_bt.backtrace();
+    let error_with_bt = OhnoCore::builder().backtrace_policy(BacktracePolicy::Forced).error("test").build();
+    let error_also_with_bt = OhnoCore::builder()
+        .backtrace_policy(BacktracePolicy::Forced)
+        .error(io::Error::other("test"))
+        .build();
+    let error_without_bt = OhnoCore::builder()
+        .backtrace_policy(BacktracePolicy::Never)
+        .error(io::Error::other("test"))
+        .build();
+
+    assert!(error_with_bt.has_backtrace());
+    assert_eq!(error_with_bt.backtrace().status(), std::backtrace::BacktraceStatus::Captured);
+    assert!(error_also_with_bt.has_backtrace());
+    assert_eq!(error_also_with_bt.backtrace().status(), std::backtrace::BacktraceStatus::Captured);
     assert!(!error_without_bt.has_backtrace());
     assert_eq!(error_without_bt.backtrace().status(), std::backtrace::BacktraceStatus::Disabled);
 }
 
 #[test]
 fn test_trace_messages_iterator() {
-    let error = OhnoCore::from("base").enrich("first").enrich("second");
+    let error = OhnoCore::builder().error("base").build().enrich("first").enrich("second");
 
     let messages: Vec<_> = error.enrichment_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);
@@ -127,7 +138,7 @@ fn error_source_is_accessible() {
 
     assert_eq!(inner_with_source.to_string(), "outer");
 
-    let core = OhnoCore::from(inner_with_source);
+    let core = OhnoCore::builder().error(inner_with_source).build();
     assert_error_message!(core, "outer");
 
     let source = core.source().unwrap();
@@ -139,7 +150,11 @@ fn error_source_is_accessible() {
 
 #[test]
 fn clone_ohno_core() {
-    let original = OhnoCore::from("original error").enrich("first message").enrich("second message");
+    let original = OhnoCore::builder()
+        .error("original error")
+        .build()
+        .enrich("first message")
+        .enrich("second message");
     let mut cloned = original.clone();
     assert_eq!(original.to_string(), cloned.to_string());
 
@@ -150,7 +165,7 @@ fn clone_ohno_core() {
 #[test]
 fn clone_with_inner_error() {
     let inner = TestError::new("inner error");
-    let original = OhnoCore::from(inner).enrich("enrichment message");
+    let original = OhnoCore::builder().error(inner).build().enrich("enrichment message");
     let cloned = original.clone();
 
     let _ = original.source().unwrap().downcast_ref::<TestError>().unwrap();
