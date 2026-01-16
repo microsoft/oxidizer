@@ -3,14 +3,16 @@
 
 //! [`Spawner`] for plugging in runtime implementations.
 
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
+#[cfg(feature = "custom")]
+use std::sync::Arc;
 
+use crate::handle::JoinHandle;
 #[cfg(feature = "tokio")]
 use crate::handle::JoinHandleInner;
-use crate::{
-    custom::{BoxedFuture, CustomSpawner},
-    handle::JoinHandle,
-};
+
+#[cfg(feature = "custom")]
+use crate::custom::{BoxedFuture, CustomSpawner};
 
 /// Runtime-agnostic task spawner.
 ///
@@ -37,10 +39,9 @@ use crate::{
 ///
 /// ## Custom Runtime
 ///
-/// ```rust
+/// ```rust,ignore
 /// use arty::Spawner;
 ///
-/// # fn main() {
 /// let spawner = Spawner::custom(|fut| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
 /// });
@@ -49,7 +50,6 @@ use crate::{
 ///     println!("Running on custom runtime!");
 /// });
 /// // handle can be awaited or dropped (fire-and-forget)
-/// # }
 /// ```
 ///
 /// ## Getting Results
@@ -134,7 +134,7 @@ impl Spawner {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// use arty::Spawner;
     ///
     /// let spawner = Spawner::custom(|fut| {

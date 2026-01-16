@@ -33,7 +33,7 @@
 //!
 //! ## Custom Runtime
 //!
-//! ```rust
+//! ```rust,ignore
 //! use arty::Spawner;
 //!
 //! let spawner = Spawner::custom(|fut| {
@@ -47,6 +47,7 @@
 //! # Features
 //!
 //! - `tokio` (default): Enables the [`Spawner::tokio`] constructor
+//! - `custom`: Enables the [`Spawner::custom`] constructor
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]

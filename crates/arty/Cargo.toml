@@ -20,7 +20,7 @@ repository.workspace = true
 all-features = true
 
 [features]
-default = ["tokio", "custom"]
+default = ["tokio"]
 tokio = ["dep:tokio"]
 custom = ["dep:futures-channel"]
 
@@ -38,14 +38,15 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 [[bench]]
 name = "spawner"
 harness = false
+required-features = ["tokio", "custom"]
 
 [[example]]
 name = "custom"
-requires-features = ["custom"]
+required-features = ["custom", "tokio"]
 
 [[example]]
 name = "tokio"
-requires-features = ["tokio"]
+required-features = ["tokio"]
 
 [lints]
 workspace = true

@@ -32,9 +32,8 @@ different async runtimes without generic infection.
 use arty::Spawner;
 
 let spawner = Spawner::tokio();
-spawner.spawn(async {
-    println!("Task running!");
-});
+let result = spawner.spawn(async { 1 + 1 }).await;
+assert_eq!(result, 2);
 ```
 
 ### Custom Runtime
@@ -46,14 +45,14 @@ let spawner = Spawner::custom(|fut| {
     std::thread::spawn(move || futures::executor::block_on(fut));
 });
 
-spawner.spawn(async {
-    println!("Running on custom runtime!");
-});
+// Returns a JoinHandle that can be awaited or dropped
+let handle = spawner.spawn(async { 42 });
 ```
 
 ## Features
 
 * `tokio` (default): Enables the [`Spawner::tokio`][__link1] constructor
+* `custom`: Enables the [`Spawner::custom`][__link2] constructor
 
 
 <hr/>
@@ -61,6 +60,7 @@ spawner.spawn(async {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/arty">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG97CGOXohRcKG6oqJHGRKB_UG6aHakh4orawGyQoqFPoHfauYWSBgmRhcnR5ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyjnWqOXl0hfG5JzJZzygN1qG0YJmwqDZUQGGzO95yYeMZDOYWSBgmRhcnR5ZTAuMS4w
  [__link0]: https://docs.rs/arty/0.1.0/arty/?search=Spawner
  [__link1]: https://docs.rs/arty/0.1.0/arty/?search=Spawner::tokio
+ [__link2]: https://docs.rs/arty/0.1.0/arty/?search=Spawner::custom
