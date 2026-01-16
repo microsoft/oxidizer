@@ -104,6 +104,34 @@ The template string supports field interpolation using `{field_name}` syntax. Th
 error (if any) is automatically shown as “Caused by:” in the error chain. If the inner error
 has no source, only the custom message is displayed.
 
+## Backtrace Policy
+
+By default, backtraces are captured based on the `RUST_BACKTRACE` environment variable. You can
+override this behavior using the `#[backtrace(...)]` attribute:
+
+```rust
+// Always capture backtraces, regardless of environment
+#[ohno::error]
+#[backtrace(force)]
+struct ForcedBacktraceError;
+
+// Never capture backtraces
+#[ohno::error]
+#[backtrace(disabled)]
+struct NoBacktraceError;
+
+// Default: respects RUST_BACKTRACE environment variable
+#[ohno::error]
+struct AutoBacktraceError;
+```
+
+This is useful for:
+
+* **`force`**: Critical paths where you always want backtraces for debugging
+* **`disabled`**:
+  * High-frequency errors where backtraces would impact performance
+  * Backtraces are captured elsewhere and don’t need duplication
+
 ## Automatic Constructors
 
 By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:
@@ -258,7 +286,7 @@ fn process() -> Result<(), AppError> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7xRMk7SDB66G1v2n-Rmf3nUGyeREro-k6dWGzjgBXgBcFi-YWSCgmRvaG5vZTAuMi4xgmtvaG5vX21hY3Jvc2UwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2uf2AFHj7QHG0F4IrifQLZ3G53GvmKLcnYOG5u6Fyr933_1YWSCgmRvaG5vZTAuMi4xgmtvaG5vX21hY3Jvc2UwLjIuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
