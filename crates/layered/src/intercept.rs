@@ -3,8 +3,10 @@
 
 use std::fmt::Debug;
 use std::ops::ControlFlow;
+#[cfg(any(feature = "tower-service", test))]
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
 use std::task::{Context, Poll};
 
 use crate::Service;
