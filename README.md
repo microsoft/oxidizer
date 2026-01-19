@@ -36,7 +36,7 @@ These are the crates built out of this repo:
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
-- [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for services, applications, and libraries.
+- [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.
 - [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/README.md) - Macros for the `thread_aware` crate.

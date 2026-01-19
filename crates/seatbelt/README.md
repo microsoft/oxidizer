@@ -88,16 +88,12 @@ for each module for details on how to use them.
 
 This crate supports several optional features that can be enabled to extend functionality:
 
-* `options`: Enables common APIs for building resilience middleware, including [`Context`][__link9].
-  Requires [`tick`][__link10] for timing operations.
-* `service`: Re-exports common types for building middleware from [`layered`][__link11] crate.
-* `telemetry`: Enables telemetry and observability features using OpenTelemetry for monitoring
-  resilience operations.
-* `metrics`: Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
-* `timeout`: Enables the [`timeout`][__link12] middleware for canceling long-running operations.
-* `retry`: Enables the [`retry`][__link13] middleware for automatically retrying failed operations with
+* `timeout`: Enables the [`timeout`][__link9] middleware for canceling long-running operations.
+* `retry`: Enables the [`retry`][__link10] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* `circuit`: Enables the [`circuit`][__link14] middleware for preventing cascading failures.
+* `circuit`: Enables the [`circuit`][__link11] middleware for preventing cascading failures.
+* `metrics`: Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
+* `logs`: Enables structured logging for resilience middleware using the `tracing` crate.
 
 
 <hr/>
@@ -105,14 +101,11 @@ This crate supports several optional features that can be enabled to extend func
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1hGrYSwKcJlG5sEnPybj4Z2G2k1NmMcyogWG2e6c2EE42AfYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0Hjz9kfeI26GzMvGpstB3vOG0ewSOFsNqPIG2iqBNy7tUwXYWSDgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
  [__link0]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link1]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
- [__link10]: https://crates.io/crates/tick/0.1.2
- [__link11]: https://crates.io/crates/layered/0.1.0
- [__link12]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
- [__link13]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
- [__link14]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
+ [__link10]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
+ [__link11]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
  [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link3]: https://crates.io/crates/tick/0.1.2
  [__link4]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
@@ -120,4 +113,4 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link6]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
  [__link7]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
  [__link8]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
- [__link9]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
+ [__link9]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
