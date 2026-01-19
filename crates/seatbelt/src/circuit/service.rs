@@ -6,7 +6,7 @@ use layered::Service;
 use tick::Clock;
 
 use super::{
-    CircuitBreakerLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed,
+    CircuitLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed,
     OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput,
     RejectedInputArgs, ShouldRecover,
 };
@@ -14,19 +14,19 @@ use crate::{EnableIf, NotSet};
 
 /// Applies circuit breaker logic to prevent cascading failures.
 ///
-/// `CircuitBreaker` wraps an inner [`Service`] and monitors the success and failure rates
+/// `Circuit` wraps an inner [`Service`] and monitors the success and failure rates
 /// of operations. When the failure rate exceeds a configured threshold, the circuit breaker opens
 /// and temporarily blocks requests to give the downstream service time to recover.
 ///
 /// This middleware is designed to be used across services, applications, and libraries
 /// to prevent cascading failures in distributed systems.
 ///
-/// `CircuitBreaker` is configured by calling [`CircuitBreaker::layer`] and using the
-/// builder methods on the returned [`CircuitBreakerLayer`] instance.
+/// `Circuit` is configured by calling [`Circuit::layer`] and using the
+/// builder methods on the returned [`CircuitLayer`] instance.
 ///
-/// For comprehensive examples and usage patterns, see the [`circuit_breaker` module][crate::circuit_breaker] documentation.
+/// For comprehensive examples and usage patterns, see the [`circuit_breaker` module][crate::circuit] documentation.
 #[derive(Debug)]
-pub struct CircuitBreaker<In, Out, S> {
+pub struct Circuit<In, Out, S> {
     pub(super) inner: S,
     pub(super) clock: Clock,
     pub(super) recovery: ShouldRecover<Out>,
@@ -39,20 +39,20 @@ pub struct CircuitBreaker<In, Out, S> {
     pub(super) on_probing: Option<OnProbing<In>>,
 }
 
-impl<In, Out> CircuitBreaker<In, Out, ()> {
+impl<In, Out> Circuit<In, Out, ()> {
     /// Creates a new circuit breaker layer with the specified name and options.
     ///
-    /// Returns a [`CircuitBreakerLayer`] that must be configured with required parameters
+    /// Returns a [`CircuitLayer`] that must be configured with required parameters
     /// before it can be used to build a circuit breaker service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
         options: &crate::SeatbeltOptions<In, Out>,
-    ) -> CircuitBreakerLayer<In, Out, NotSet, NotSet> {
-        CircuitBreakerLayer::new(name.into().into(), options)
+    ) -> CircuitLayer<In, Out, NotSet, NotSet> {
+        CircuitLayer::new(name.into().into(), options)
     }
 }
 
-impl<In, Out: Send, S> Service<In> for CircuitBreaker<In, Out, S>
+impl<In, Out: Send, S> Service<In> for Circuit<In, Out, S>
 where
     In: Send,
     S: Service<In, Out = Out>,
@@ -90,7 +90,7 @@ where
     }
 }
 
-impl<In, Out, S> CircuitBreaker<In, Out, S> {
+impl<In, Out, S> Circuit<In, Out, S> {
     #[inline]
     fn before_execute(
         &self,
@@ -169,15 +169,15 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::circuit_breaker::constants::DEFAULT_BREAK_DURATION;
-    use crate::circuit_breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
+    use crate::circuit::constants::DEFAULT_BREAK_DURATION;
+    use crate::circuit::{EngineFake, HalfOpenMode, HealthInfo, Stats};
     use crate::service::Layer;
     use crate::{RecoveryInfo, SeatbeltOptions, Set};
 
     #[test]
     fn layer_ensure_defaults() {
         let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
-        let layer: CircuitBreakerLayer<String, String, NotSet, NotSet> = CircuitBreaker::layer("test_breaker", &options);
+        let layer: CircuitLayer<String, String, NotSet, NotSet> = Circuit::layer("test_breaker", &options);
         let layer = layer
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input(|_, _| "rejected".to_string());
@@ -452,9 +452,9 @@ mod tests {
         assert_eq!(result, "B");
     }
 
-    fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitBreakerLayer<String, String, Set, Set> {
+    fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitLayer<String, String, Set, Set> {
         let options = SeatbeltOptions::<String, String>::new(clock.clone()).pipeline_name("test_pipeline");
-        CircuitBreaker::layer("test_breaker", &options)
+        Circuit::layer("test_breaker", &options)
             .recovery_with(|output, _| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

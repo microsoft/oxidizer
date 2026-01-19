@@ -4,7 +4,7 @@ use std::time::Instant;
 use std::vec;
 
 use super::{AllowProbeResult, Probe, ProbeOperation, ProbeOptions, ProbesOptions, ProbingResult};
-use crate::circuit_breaker::ExecutionResult;
+use crate::circuit::ExecutionResult;
 
 /// Manages a sequence of probes.
 #[derive(Debug)]

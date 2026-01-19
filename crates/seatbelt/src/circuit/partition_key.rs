@@ -15,7 +15,7 @@ use std::hash::Hasher;
 /// ## Creation from a number
 ///
 /// ```rust
-/// use seatbelt::circuit_breaker::PartitionKey;
+/// use seatbelt::circuit::PartitionKey;
 ///
 /// let key = PartitionKey::from(42_u64);
 /// assert_eq!(key.to_string(), "42");
@@ -24,7 +24,7 @@ use std::hash::Hasher;
 /// ## Creation from HTTP request authority and scheme
 ///
 /// ```rust
-/// use seatbelt::circuit_breaker::PartitionKey;
+/// use seatbelt::circuit::PartitionKey;
 ///
 /// // Simulate extracting authority and scheme from an HTTP request
 /// let scheme = "https";

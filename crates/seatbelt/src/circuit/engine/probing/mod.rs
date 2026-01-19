@@ -11,7 +11,7 @@
 use std::fmt::Debug;
 use std::time::Instant;
 
-use crate::circuit_breaker::{EnterCircuitResult, ExecutionMode, ExecutionResult};
+use crate::circuit::{EnterCircuitResult, ExecutionMode, ExecutionResult};
 
 mod health_probe;
 mod options;

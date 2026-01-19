@@ -7,8 +7,8 @@ use opentelemetry::StringValue;
 use opentelemetry::metrics::Counter;
 use tick::Clock;
 
-use crate::circuit_breaker::constants::ERR_POISONED_LOCK;
-use crate::circuit_breaker::{Engine, EngineCore, EngineOptions, EngineTelemetry, PartitionKey};
+use crate::circuit::constants::ERR_POISONED_LOCK;
+use crate::circuit::{Engine, EngineCore, EngineOptions, EngineTelemetry, PartitionKey};
 
 /// Manages circuit breaker engines for different partition keys.
 #[derive(Debug)]
@@ -75,8 +75,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::circuit_breaker::HealthMetricsBuilder;
-    use crate::circuit_breaker::engine::probing::ProbesOptions;
+    use crate::circuit::HealthMetricsBuilder;
+    use crate::circuit::engine::probing::ProbesOptions;
     use crate::telemetry::metrics::create_resilience_event_counter;
 
     #[test]

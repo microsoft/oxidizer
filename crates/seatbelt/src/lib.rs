@@ -90,7 +90,7 @@
 //!
 //! - [`timeout`]: Cancels long-running operations.
 //! - [`retry`]: Automatically retries failed operations with configurable backoff strategies.
-//! - [`circuit_breaker`]: Prevents cascading failures by stopping requests to unhealthy services.
+//! - [`circuit`]: Prevents cascading failures by stopping requests to unhealthy services.
 //!
 //! ## Features
 //!
@@ -105,7 +105,7 @@
 //! - `timeout`: Enables the [`timeout`] middleware for canceling long-running operations.
 //! - `retry`: Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
-//! - `circuit-breaker`: Enables the [`circuit_breaker`] middleware for preventing cascading failures.
+//! - `circuit`: Enables the [`circuit`] middleware for preventing cascading failures.
 
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -132,8 +132,8 @@ pub mod timeout;
 #[cfg(any(feature = "retry", test))]
 pub mod retry;
 
-#[cfg(any(feature = "circuit-breaker", test))]
-pub mod circuit_breaker;
+#[cfg(any(feature = "circuit", test))]
+pub mod circuit;
 
 /// Re-exported types from the [`layered`] crate.
 #[cfg(any(feature = "service", test))]
@@ -142,7 +142,7 @@ pub mod service {
     pub use layered::{Layer, Service, Stack};
 }
 
-#[cfg(any(feature = "retry", feature = "circuit-breaker", test))]
+#[cfg(any(feature = "retry", feature = "circuit", test))]
 mod rnd;
 
 #[cfg_attr(coverage_nightly, coverage(off))]

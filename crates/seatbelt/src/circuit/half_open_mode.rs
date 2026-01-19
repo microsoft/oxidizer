@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use crate::circuit_breaker::constants::MIN_SAMPLING_DURATION;
-use crate::circuit_breaker::engine::probing::ProbesOptions;
+use crate::circuit::constants::MIN_SAMPLING_DURATION;
+use crate::circuit::engine::probing::ProbesOptions;
 
 /// Defines the behavior of the circuit breaker when transitioning from half-open to closed state.
 ///
@@ -78,7 +78,7 @@ enum Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::circuit_breaker::engine::probing::ProbeOptions;
+    use crate::circuit::engine::probing::ProbeOptions;
 
     #[test]
     fn quick_mode_creates_single_probe() {

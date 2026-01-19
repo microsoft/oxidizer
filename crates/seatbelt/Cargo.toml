@@ -29,7 +29,7 @@ logs = ["telemetry", "dep:tracing"]
 options = ["dep:tick", "telemetry", "service", "metrics", "logs"]
 timeout = ["options"]
 retry = ["options", "dep:fastrand"]
-circuit-breaker = ["options", "dep:fastrand"]
+circuit = ["options", "dep:fastrand"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
@@ -84,8 +84,8 @@ name = "resilience_pipeline"
 required-features = ["retry", "timeout"]
 
 [[example]]
-name = "circuit_breaker"
-required-features = ["circuit-breaker"]
+name = "circuit"
+required-features = ["circuit"]
 
 [[bench]]
 name = "observability"
@@ -103,9 +103,9 @@ harness = false
 required-features = ["retry"]
 
 [[bench]]
-name = "circuit_breaker"
+name = "circuit"
 harness = false
-required-features = ["circuit-breaker"]
+required-features = ["circuit"]
 
 [lints]
 workspace = true

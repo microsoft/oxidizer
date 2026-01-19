@@ -7,25 +7,25 @@ use opentelemetry::StringValue;
 
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::{
-    CircuitBreaker, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs,
+    Circuit, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs,
     PartionKeyProvider, PartitionKey, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
-use crate::circuit_breaker::engine::probing::ProbesOptions;
+use crate::circuit::engine::probing::ProbesOptions;
 use crate::service::Layer;
 use crate::{EnableIf, NotSet, Recovery, RecoveryInfo, SeatbeltOptions, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///
-/// This type is created by calling [`CircuitBreaker::layer`] and uses the
+/// This type is created by calling [`Circuit::layer`] and uses the
 /// typestate pattern to enforce that required properties are configured before the circuit breaker
 /// middleware can be built:
 ///
-/// - [`recovery`][CircuitBreakerLayer::recovery]: Required to determine if an output represents a failure
-/// - [`rejected_input`][CircuitBreakerLayer::rejected_input]: Required to specify the output when the circuit is open and inputs are rejected
+/// - [`recovery`][CircuitLayer::recovery]: Required to determine if an output represents a failure
+/// - [`rejected_input`][CircuitLayer::rejected_input]: Required to specify the output when the circuit is open and inputs are rejected
 ///
-/// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit_breaker] documentation.
+/// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit] documentation.
 #[derive(Debug)]
-pub struct CircuitBreakerLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> {
+pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> {
     options: SeatbeltOptions<In, Out>,
     recovery: Option<ShouldRecover<Out>>,
     rejected_input: Option<RejectedInput<In, Out>>,
@@ -43,7 +43,7 @@ pub struct CircuitBreakerLayer<In, Out, RecoveryState = Set, RejectedInputState 
     _state: PhantomData<fn(In, RecoveryState, RejectedInputState) -> Out>,
 }
 
-impl<In, Out> CircuitBreakerLayer<In, Out, NotSet, NotSet> {
+impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
     #[must_use]
     pub(crate) fn new(name: StringValue, options: &SeatbeltOptions<In, Out>) -> Self {
         Self {
@@ -66,7 +66,7 @@ impl<In, Out> CircuitBreakerLayer<In, Out, NotSet, NotSet> {
     }
 }
 
-impl<In, Out, E, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Result<Out, E>, RecoveryState, RejectedInputState> {
+impl<In, Out, E, RecoveryState, RejectedInputState> CircuitLayer<In, Result<Out, E>, RecoveryState, RejectedInputState> {
     /// Sets the error to return when the circuit breaker is open for Result-returning services.
     ///
     /// When the circuit is open, requests are immediately rejected and this function
@@ -84,32 +84,32 @@ impl<In, Out, E, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Resu
     pub fn rejected_input_error(
         self,
         error_producer: impl Fn(In, RejectedInputArgs) -> E + Send + Sync + 'static,
-    ) -> CircuitBreakerLayer<In, Result<Out, E>, RecoveryState, Set> {
+    ) -> CircuitLayer<In, Result<Out, E>, RecoveryState, Set> {
         self.into_state::<RecoveryState, Set>()
             .rejected_input(move |input, args| Err(error_producer(input, args)))
             .into_state()
     }
 }
 
-impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, RecoveryState, RejectedInputState> {
+impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryState, RejectedInputState> {
     /// Sets the recovery classification function.
     ///
     /// This function determines whether a specific output represents a failure
     /// by examining the output and returning a [`RecoveryInfo`] classification.
     ///
-    /// The function receives the output and [`RecoveryArgs`][crate::circuit_breaker::RecoveryArgs]
+    /// The function receives the output and [`RecoveryArgs`][crate::circuit::RecoveryArgs]
     /// with context about the circuit breaker state.
     ///
     /// # Arguments
     ///
     /// * `recover_fn` - Function that takes a reference to the output and
-    ///   [`RecoveryArgs`][crate::circuit_breaker::RecoveryArgs] containing circuit breaker context,
+    ///   [`RecoveryArgs`][crate::circuit::RecoveryArgs] containing circuit breaker context,
     ///   and returns a [`RecoveryInfo`] decision
     #[must_use]
     pub fn recovery_with(
         mut self,
-        recover_fn: impl Fn(&Out, crate::circuit_breaker::RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
-    ) -> CircuitBreakerLayer<In, Out, Set, RejectedInputState> {
+        recover_fn: impl Fn(&Out, crate::circuit::RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
+    ) -> CircuitLayer<In, Out, Set, RejectedInputState> {
         self.recovery = Some(ShouldRecover::new(recover_fn));
         self.into_state::<Set, RejectedInputState>()
     }
@@ -121,14 +121,14 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
     /// this provides a simple way to enable circuit breaker behavior without manually
     /// implementing a recovery classification function.
     ///
-    /// This is equivalent to calling [`recovery_with`][CircuitBreakerLayer::recovery_with] with
+    /// This is equivalent to calling [`recovery_with`][CircuitLayer::recovery_with] with
     /// `|output, _args| output.recovery()`.
     ///
     /// # Type Requirements
     ///
     /// This method is only available when the output type `Out` implements [`Recovery`].
     #[must_use]
-    pub fn recovery(self) -> CircuitBreakerLayer<In, Out, Set, RejectedInputState>
+    pub fn recovery(self) -> CircuitLayer<In, Out, Set, RejectedInputState>
     where
         Out: Recovery,
     {
@@ -150,7 +150,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
     pub fn rejected_input(
         mut self,
         rejected_fn: impl Fn(In, RejectedInputArgs) -> Out + Send + Sync + 'static,
-    ) -> CircuitBreakerLayer<In, Out, RecoveryState, Set> {
+    ) -> CircuitLayer<In, Out, RecoveryState, Set> {
         self.rejected_input = Some(RejectedInput::new(rejected_fn));
         self.into_state::<RecoveryState, Set>()
     }
@@ -300,7 +300,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
     /// # Example
     ///
     /// ```rust
-    /// # use seatbelt::circuit_breaker::{CircuitBreakerLayer, PartitionKey};
+    /// # use seatbelt::circuit::{CircuitLayer, PartitionKey};
     /// // Example HTTP request structure
     /// struct HttpRequest {
     ///     scheme: String,
@@ -308,7 +308,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
     ///     port: u16,
     ///     path: String,
     /// }
-    /// # fn example(circuit_breaker_layer: CircuitBreakerLayer<HttpRequest, ()>) {
+    /// # fn example(circuit_breaker_layer: CircuitLayer<HttpRequest, ()>) {
     /// // Configure circuit breaker with a partition key based on a scheme, host and port.
     /// let layer = circuit_breaker_layer.partition_key(|request: &HttpRequest| {
     ///     let partition = format!("{}://{}:{}", request.scheme, request.host, request.port);
@@ -388,11 +388,11 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
     }
 }
 
-impl<In, Out, S> Layer<S> for CircuitBreakerLayer<In, Out, Set, Set> {
-    type Service = CircuitBreaker<In, Out, S>;
+impl<In, Out, S> Layer<S> for CircuitLayer<In, Out, Set, Set> {
+    type Service = Circuit<In, Out, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        CircuitBreaker {
+        Circuit {
             inner,
             clock: self.options.get_clock().clone(),
             recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
@@ -407,7 +407,7 @@ impl<In, Out, S> Layer<S> for CircuitBreakerLayer<In, Out, Set, Set> {
     }
 }
 
-impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, RecoveryState, RejectedInputState> {
+impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryState, RejectedInputState> {
     fn probes_options(&self) -> ProbesOptions {
         self.half_open_mode
             // we will use break duration as the sampling duration for probes
@@ -428,8 +428,8 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitBreakerLayer<In, Out, Re
         )
     }
 
-    fn into_state<R, O>(self) -> CircuitBreakerLayer<In, Out, R, O> {
-        CircuitBreakerLayer {
+    fn into_state<R, O>(self) -> CircuitLayer<In, Out, R, O> {
+        CircuitLayer {
             options: self.options,
             recovery: self.recovery,
             rejected_input: self.rejected_input,
@@ -458,15 +458,15 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::circuit_breaker::RecoveryArgs;
-    use crate::circuit_breaker::engine::probing::ProbeOptions;
+    use crate::circuit::RecoveryArgs;
+    use crate::circuit::engine::probing::ProbeOptions;
     use crate::testing::RecoverableType;
 
     #[test]
     #[expect(clippy::float_cmp, reason = "Test")]
     fn new_creates_correct_initial_state() {
         let options = create_test_options();
-        let layer: CircuitBreakerLayer<_, _, NotSet, NotSet> = CircuitBreakerLayer::new(StringValue::from("test_breaker"), &options);
+        let layer: CircuitLayer<_, _, NotSet, NotSet> = CircuitLayer::new(StringValue::from("test_breaker"), &options);
 
         assert!(layer.recovery.is_none());
         assert!(layer.rejected_input.is_none());
@@ -480,9 +480,9 @@ mod tests {
     #[test]
     fn recovery_sets_correctly() {
         let options = create_test_options();
-        let layer = CircuitBreakerLayer::new(StringValue::from("test"), &options);
+        let layer = CircuitLayer::new(StringValue::from("test"), &options);
 
-        let layer: CircuitBreakerLayer<_, _, Set, NotSet> = layer.recovery_with(|output, _args| {
+        let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery_with(|output, _args| {
             if output.contains("error") {
                 RecoveryInfo::retry()
             } else {
@@ -512,9 +512,9 @@ mod tests {
     #[test]
     fn recovery_auto_sets_correctly() {
         let options = SeatbeltOptions::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
-        let layer = CircuitBreakerLayer::new(StringValue::from("test"), &options);
+        let layer = CircuitLayer::new(StringValue::from("test"), &options);
 
-        let layer: CircuitBreakerLayer<_, _, Set, NotSet> = layer.recovery();
+        let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery();
 
         let result = layer.recovery.as_ref().unwrap().call(
             &RecoverableType::from(RecoveryInfo::retry()),
@@ -538,9 +538,9 @@ mod tests {
     #[test]
     fn rejected_input_sets_correctly() {
         let options = create_test_options();
-        let layer = CircuitBreakerLayer::new(StringValue::from("test"), &options);
+        let layer = CircuitLayer::new(StringValue::from("test"), &options);
 
-        let layer: CircuitBreakerLayer<_, _, NotSet, Set> = layer.rejected_input(|_, _| "rejected".to_string());
+        let layer: CircuitLayer<_, _, NotSet, Set> = layer.rejected_input(|_, _| "rejected".to_string());
 
         let result = layer.rejected_input.as_ref().unwrap().call(
             "test".to_string(),
@@ -641,7 +641,7 @@ mod tests {
     #[expect(clippy::float_cmp, reason = "Test")]
     fn default_values_are_correct() {
         let options = create_test_options();
-        let layer = CircuitBreakerLayer::new(StringValue::from("test"), &options);
+        let layer = CircuitLayer::new(StringValue::from("test"), &options);
 
         assert_eq!(layer.failure_threshold, DEFAULT_FAILURE_THRESHOLD);
         assert_eq!(layer.min_throughput, DEFAULT_MIN_THROUGHPUT);
@@ -676,18 +676,18 @@ mod tests {
 
     #[test]
     fn static_assertions() {
-        static_assertions::assert_impl_all!(CircuitBreakerLayer<String, String, Set, Set>: Layer<String>);
-        static_assertions::assert_not_impl_all!(CircuitBreakerLayer<String, String, Set, NotSet>: Layer<String>);
-        static_assertions::assert_not_impl_all!(CircuitBreakerLayer<String, String, NotSet, Set>: Layer<String>);
-        static_assertions::assert_impl_all!(CircuitBreakerLayer<String, String, Set, Set>: Debug);
+        static_assertions::assert_impl_all!(CircuitLayer<String, String, Set, Set>: Layer<String>);
+        static_assertions::assert_not_impl_all!(CircuitLayer<String, String, Set, NotSet>: Layer<String>);
+        static_assertions::assert_not_impl_all!(CircuitLayer<String, String, NotSet, Set>: Layer<String>);
+        static_assertions::assert_impl_all!(CircuitLayer<String, String, Set, Set>: Debug);
     }
 
     fn create_test_options() -> SeatbeltOptions<String, String> {
         SeatbeltOptions::new(Clock::new_frozen()).pipeline_name("test_pipeline")
     }
 
-    fn create_ready_layer() -> CircuitBreakerLayer<String, String, Set, Set> {
-        CircuitBreakerLayer::new(StringValue::from("test"), &create_test_options())
+    fn create_ready_layer() -> CircuitLayer<String, String, Set, Set> {
+        CircuitLayer::new(StringValue::from("test"), &create_test_options())
             .recovery_with(|output, _args| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

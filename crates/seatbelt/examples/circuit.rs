@@ -14,7 +14,7 @@ use layered::{Execute, Service, Stack};
 use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
-use seatbelt::circuit_breaker::CircuitBreaker;
+use seatbelt::circuit::Circuit;
 use seatbelt::{RecoveryInfo, SeatbeltOptions};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
@@ -29,7 +29,7 @@ async fn main() -> Result<(), AppError> {
 
     // Define stack with circuit breaker layer
     let stack = (
-        CircuitBreaker::layer("my_circuit_breaker", &options)
+        Circuit::layer("my_circuit_breaker", &options)
             // Required: classify the recoverability of outputs
             .recovery_with(|output, _args| match output {
                 Ok(_) => RecoveryInfo::never(),

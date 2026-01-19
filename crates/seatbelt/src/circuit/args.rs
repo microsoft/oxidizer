@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tick::Clock;
 
-use crate::circuit_breaker::PartitionKey;
+use crate::circuit::PartitionKey;
 
 /// Arguments for the [`recovery_with`][super::CircuitBreakerLayer::recovery_with] callback function.
 ///

@@ -4,7 +4,7 @@ use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
-use seatbelt::circuit_breaker::CircuitBreaker;
+use seatbelt::circuit::Circuit;
 use seatbelt::{RecoveryInfo, SeatbeltOptions};
 use tick::Clock;
 
@@ -29,7 +29,7 @@ fn entry(c: &mut Criterion) {
     let options = SeatbeltOptions::new(Clock::new_frozen());
 
     let service = (
-        CircuitBreaker::layer("bench", &options)
+        Circuit::layer("bench", &options)
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input_error(|_input, _args| Output)
             .min_throughput(1000), // High threshold to keep circuit closed

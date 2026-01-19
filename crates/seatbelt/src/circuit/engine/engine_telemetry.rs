@@ -4,8 +4,8 @@ use opentelemetry::StringValue;
 use opentelemetry::metrics::Counter;
 use tick::Clock;
 
-use crate::circuit_breaker::telemetry::*;
-use crate::circuit_breaker::{CircuitEngine, CircuitState, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
+use crate::circuit::telemetry::*;
+use crate::circuit::{CircuitEngine, CircuitState, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
 use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
 /// Wrapper around a circuit engine to add telemetry capabilities.
@@ -168,7 +168,7 @@ mod tests {
     use opentelemetry::KeyValue;
 
     use super::*;
-    use crate::circuit_breaker::{EngineFake, HealthInfo, Stats};
+    use crate::circuit::{EngineFake, HealthInfo, Stats};
     use crate::telemetry::metrics::{create_meter, create_resilience_event_counter};
     use crate::testing::MetricTester;
 
