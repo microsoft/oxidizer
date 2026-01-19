@@ -11,7 +11,7 @@ use tick::{Clock, FutureExt};
 use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 use crate::timeout::telemetry::TIMEOUT_EVENT_NAME;
 use crate::timeout::{OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs};
-use crate::{EnableIf, NotSet, SeatbeltOptions};
+use crate::{Context, EnableIf, NotSet};
 
 /// Applies a timeout to service execution for canceling long-running operations.
 ///
@@ -55,11 +55,11 @@ impl<In, Out> Timeout<In, Out, ()> {
     /// # use std::time::Duration;
     /// # use layered::{Execute, Stack};
     /// # use tick::Clock;
-    /// # use seatbelt::SeatbeltOptions;
+    /// # use seatbelt::Context;
     /// use seatbelt::timeout::Timeout;
     ///
-    /// # fn example(options: SeatbeltOptions<String, String>) {
-    /// let timeout_layer = Timeout::layer("my_timeout", &options)
+    /// # fn example(context: Context<String, String>) {
+    /// let timeout_layer = Timeout::layer("my_timeout", &context)
     ///     .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
     ///     .timeout(Duration::from_secs(30));
     /// # }
@@ -68,8 +68,8 @@ impl<In, Out> Timeout<In, Out, ()> {
     /// For comprehensive examples, see the [timeout module] documentation.
     ///
     /// [timeout module]: crate::timeout
-    pub fn layer(name: impl Into<Cow<'static, str>>, options: &SeatbeltOptions<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {
-        TimeoutLayer::new(name.into().into(), options)
+    pub fn layer(name: impl Into<Cow<'static, str>>, context: &Context<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {
+        TimeoutLayer::new(name.into().into(), context)
     }
 }
 
@@ -145,10 +145,10 @@ mod tests {
     #[tokio::test]
     async fn no_timeout() {
         let clock = Clock::new_frozen();
-        let options = SeatbeltOptions::new(clock);
+        let context = Context::new(clock);
 
         let stack = (
-            Timeout::layer("test_timeout", &options)
+            Timeout::layer("test_timeout", &context)
                 .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
                 .timeout(Duration::from_secs(5)),
             Execute::new(|input: String| async move { input }),
@@ -167,12 +167,12 @@ mod tests {
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
             .to_clock();
-        let options = SeatbeltOptions::new(clock.clone());
+        let context = Context::new(clock.clone());
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = std::sync::Arc::clone(&called);
 
         let stack = (
-            Timeout::layer("test_timeout", &options)
+            Timeout::layer("test_timeout", &context)
                 .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
                 .timeout(Duration::from_millis(200))
                 .on_timeout(move |out, args| {
@@ -205,7 +205,7 @@ mod tests {
             .to_clock();
 
         let stack = (
-            Timeout::layer("test_timeout", &SeatbeltOptions::new(clock.clone()))
+            Timeout::layer("test_timeout", &Context::new(clock.clone()))
                 .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
                 .timeout(Duration::from_millis(200))
                 .timeout_override(|input, _args| {
@@ -234,7 +234,7 @@ mod tests {
     async fn no_timeout_if_disabled() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let stack = (
-            Timeout::layer("test_timeout", &SeatbeltOptions::new(&clock))
+            Timeout::layer("test_timeout", &Context::new(&clock))
                 .timeout_output(|_args| "timed out".to_string())
                 .timeout(Duration::from_millis(200))
                 .disable(),

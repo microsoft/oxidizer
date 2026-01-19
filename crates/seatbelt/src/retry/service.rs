@@ -55,9 +55,9 @@ impl<In, Out> Retry<In, Out, ()> {
     /// before it can be used to build a retry service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
-        options: &crate::SeatbeltOptions<In, Out>,
+        context: &crate::Context<In, Out>,
     ) -> crate::retry::RetryLayer<In, Out, NotSet, NotSet> {
-        crate::retry::RetryLayer::new(name.into().into(), options)
+        crate::retry::RetryLayer::new(name.into().into(), context)
     }
 }
 
@@ -261,12 +261,12 @@ mod tests {
     use crate::retry::RetryLayer;
     use crate::service::Layer;
     use crate::testing::MetricTester;
-    use crate::{SeatbeltOptions, Set};
+    use crate::{Context, Set};
 
     #[test]
     fn layer_ensure_defaults() {
-        let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
-        let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &options);
+        let context = Context::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
+        let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &context);
         let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
         let retry = layer.layer(Execute::new(|v: String| async move { v }));
@@ -573,11 +573,11 @@ mod tests {
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
-        let options = SeatbeltOptions::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
+        let context = Context::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
             .pipeline_name("test_pipeline")
             .meter_provider(tester.meter_provider());
 
-        let service = create_ready_retry_layer_core(RecoveryInfo::retry(), &options)
+        let service = create_ready_retry_layer_core(RecoveryInfo::retry(), &context)
             .clone_input_with(move |input, _args| Some(input.clone()))
             .max_retry_attempts(2)
             .recovery_with(move |_input, _args| RecoveryInfo::retry())
@@ -600,15 +600,12 @@ mod tests {
     }
 
     fn create_ready_retry_layer(clock: &Clock, recover: RecoveryInfo) -> RetryLayer<String, String, Set, Set> {
-        let options = SeatbeltOptions::new(clock.clone()).pipeline_name("test_pipeline");
-        create_ready_retry_layer_core(recover, &options)
+        let context = Context::new(clock.clone()).pipeline_name("test_pipeline");
+        create_ready_retry_layer_core(recover, &context)
     }
 
-    fn create_ready_retry_layer_core(
-        recover: RecoveryInfo,
-        seatbelt_options: &SeatbeltOptions<String, String>,
-    ) -> RetryLayer<String, String, Set, Set> {
-        Retry::layer("test_retry", seatbelt_options)
+    fn create_ready_retry_layer_core(recover: RecoveryInfo, context: &Context<String, String>) -> RetryLayer<String, String, Set, Set> {
+        Retry::layer("test_retry", context)
             .recovery_with(move |_, _| recover.clone())
             .clone_input()
             .max_delay(Duration::from_secs(9999)) // protect against infinite backoff

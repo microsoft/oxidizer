@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+#![expect(missing_docs, reason = "benchmark code")]
 
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
 use seatbelt::retry::Retry;
-use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Context, RecoveryInfo};
 use tick::Clock;
 
 #[global_allocator]
@@ -28,10 +29,10 @@ fn entry(c: &mut Criterion) {
     });
 
     // With retry
-    let options = SeatbeltOptions::new(Clock::new_frozen());
+    let context = Context::new(Clock::new_frozen());
 
     let service = (
-        Retry::layer("bench", &options)
+        Retry::layer("bench", &context)
             .clone_input()
             .recovery_with(|_, _| RecoveryInfo::never()),
         Execute::new(|v: Input| async move { Output::from(v) }),
@@ -47,10 +48,10 @@ fn entry(c: &mut Criterion) {
     });
 
     // With retry and recovery
-    let options = SeatbeltOptions::new(Clock::new_frozen());
+    let context = Context::new(Clock::new_frozen());
 
     let service = (
-        Retry::layer("bench", &options)
+        Retry::layer("bench", &context)
             .clone_input()
             .max_retry_attempts(1)
             .base_delay(Duration::ZERO)

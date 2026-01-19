@@ -15,12 +15,12 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::{Backoff, RecoveryInfo, SeatbeltOptions};
+//! # use seatbelt::{Backoff, RecoveryInfo, Context};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! let options = SeatbeltOptions::new(&clock).pipeline_name("my_service");
+//! let context = Context::new(&clock).pipeline_name("my_service");
 //!
 //! let stack = (
-//!     Retry::layer("retry", &options)
+//!     Retry::layer("retry", &context)
 //!         .clone_input()
 //!         .recovery_with(|result, _| match result {
 //!             Ok(_) => RecoveryInfo::never(),
@@ -89,7 +89,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted for each attempt that should be retried (including the final retry attempt)
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`SeatbeltOptions::pipeline_name`]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Retry::layer`]
 //!   - `resilience.event.name`: Always `retry`
 //!   - `resilience.attempt.index`: Attempt index (0-based)
@@ -106,14 +106,14 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::{Backoff, RecoveryInfo, SeatbeltOptions};
+//! # use seatbelt::{Backoff, RecoveryInfo, Context};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
-//! let options = SeatbeltOptions::new(&clock).pipeline_name("example");
+//! let context = Context::new(&clock).pipeline_name("example");
 //!
 //! let stack = (
-//!     Retry::layer("my_retry", &options)
+//!     Retry::layer("my_retry", &context)
 //!         // Required: how to clone inputs for retries
 //!         .clone_input()
 //!         // Required: determine if we should retry based on output
@@ -148,13 +148,13 @@
 //! # use std::io;
 //! # use layered::{Execute, Stack, Service};
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::{RecoveryInfo, SeatbeltOptions, Backoff};
+//! # use seatbelt::{RecoveryInfo, Context, Backoff};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware.
-//! let options = SeatbeltOptions::new(&clock);
+//! let context = Context::new(&clock);
 //!
 //! let stack = (
-//!     Retry::layer("advanced_retry", &options)
+//!     Retry::layer("advanced_retry", &context)
 //!         .clone_input()
 //!         .recovery_with(|output: &Result<String, io::Error>, _args| match output {
 //!             Err(err) if err.kind() == io::ErrorKind::TimedOut => RecoveryInfo::retry().delay(Duration::from_secs(60)),
@@ -193,9 +193,9 @@
 //!
 //! ```compile_fail
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::SeatbeltOptions;
+//! # use seatbelt::Context;
 //! # use tick::Clock;
-//! # fn example(service_options: SeatbeltOptions<String, String>) {
+//! # fn example(context: Context<String, String>) {
 //! let stack = (
 //!     Retry::layer("test", &service_options), // Missing required configuration!
 //!     Execute::new(|input| async move { input })

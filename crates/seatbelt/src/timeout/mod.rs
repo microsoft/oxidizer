@@ -17,12 +17,12 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::timeout::Timeout;
-//! # use seatbelt::SeatbeltOptions;
+//! # use seatbelt::Context;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
-//! let options = SeatbeltOptions::new(&clock).pipeline_name("my_service");
+//! let context = Context::new(&clock).pipeline_name("my_service");
 //!
 //! let stack = (
-//!     Timeout::layer("timeout", &options)
+//!     Timeout::layer("timeout", &context)
 //!         .timeout_error(|_| io::Error::new(io::ErrorKind::TimedOut, "operation timed out"))
 //!         .timeout(Duration::from_secs(30)),
 //!     Execute::new(my_operation),
@@ -79,7 +79,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted when a timeout occurs
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`SeatbeltOptions::pipeline_name`]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
 //!   - `resilience.event.name`: Always `timeout`
 //!
@@ -93,15 +93,15 @@
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::SeatbeltOptions;
+//! # use seatbelt::Context;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
-//! let options = SeatbeltOptions::new(&clock);
+//! let context = Context::new(&clock);
 //!
 //! let stack = (
-//!     Timeout::layer("my_timeout", &options)
+//!     Timeout::layer("my_timeout", &context)
 //!         // Required: timeout middleware needs to know what output to return when timeout occurs
 //!         .timeout_output(|args| {
 //!             format!("timeout error, duration: {}ms", args.timeout().as_millis())
@@ -133,14 +133,14 @@
 //! # use std::io;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::SeatbeltOptions;
+//! # use seatbelt::Context;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
 //! // Define common options for resilience middleware.
-//! let options = SeatbeltOptions::new(&clock);
+//! let context = Context::new(&clock);
 //!
 //! let stack = (
-//!     Timeout::layer("my_timeout", &options)
+//!     Timeout::layer("my_timeout", &context)
 //!         // Return an error for Result outputs on timeout
 //!         .timeout_error(|args| io::Error::new(io::ErrorKind::TimedOut, "request timed out"))
 //!         // Default timeout
@@ -180,11 +180,11 @@
 //! # use std::time::Duration;
 //! # use layered::{Execute, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::SeatbeltOptions;
+//! # use seatbelt::Context;
 //! # use seatbelt::timeout::Timeout;
-//! # fn example(service_options: SeatbeltOptions<String, String>) {
+//! # fn example(context: Context<String, String>) {
 //! let stack = (
-//!     Timeout::layer("my_timeout", &service_options), // Missing required configuration!
+//!     Timeout::layer("my_timeout", &context), // Missing required configuration!
 //!     Execute::new(|input| async move { input })
 //! );
 //!

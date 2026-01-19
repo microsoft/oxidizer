@@ -12,7 +12,7 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
 use seatbelt::timeout::Timeout;
-use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Context, RecoveryInfo};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -24,13 +24,11 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
 
     // Shared options for resilience middleware
-    let options = SeatbeltOptions::new(&clock)
-        .meter_provider(&meter_provider)
-        .pipeline_name("my_pipeline");
+    let context = Context::new(&clock).meter_provider(&meter_provider).pipeline_name("my_pipeline");
 
     // Define stack with retry and timeout middlewares
     let stack = (
-        Retry::layer("my_retry", &options)
+        Retry::layer("my_retry", &context)
             // automatically clones the input for retries
             .clone_input()
             // classify the output
@@ -38,7 +36,7 @@ async fn main() -> Result<(), AppError> {
                 "error" | "timeout" => RecoveryInfo::retry(),
                 _ => RecoveryInfo::never(),
             }),
-        Timeout::layer("my_timeout", &options)
+        Timeout::layer("my_timeout", &context)
             .timeout(Duration::from_secs(1))
             .timeout_output(|_args| "timeout".to_string()),
         Execute::new(execute_operation),

@@ -16,7 +16,7 @@ use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
-use seatbelt::{Recovery, RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Context, Recovery, RecoveryInfo};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -29,11 +29,11 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let options = SeatbeltOptions::new(&clock).meter_provider(&meter_provider);
+    let context = Context::new(&clock).meter_provider(&meter_provider);
 
     // Configure retry layer for outage handling with input restoration
     let stack = (
-        Retry::layer("outage_retry", &options)
+        Retry::layer("outage_retry", &context)
             // Disable input cloning - we'll restore from error instead
             .clone_input_with(|_, _| None)
             // Configure recovery based on an error type

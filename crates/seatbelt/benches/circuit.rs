@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
-
+#![expect(missing_docs, reason = "benchmark code")]
 use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
 use seatbelt::circuit::Circuit;
-use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Context, RecoveryInfo};
 use tick::Clock;
 
 #[global_allocator]
@@ -26,10 +26,10 @@ fn entry(c: &mut Criterion) {
     });
 
     // With circuit breaker (closed state)
-    let options = SeatbeltOptions::new(Clock::new_frozen());
+    let context = Context::new(Clock::new_frozen());
 
     let service = (
-        Circuit::layer("bench", &options)
+        Circuit::layer("bench", &context)
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input_error(|_input, _args| Output)
             .min_throughput(1000), // High threshold to keep circuit closed

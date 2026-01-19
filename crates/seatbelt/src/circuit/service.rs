@@ -46,9 +46,9 @@ impl<In, Out> Circuit<In, Out, ()> {
     /// before it can be used to build a circuit breaker service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
-        options: &crate::SeatbeltOptions<In, Out>,
+        context: &crate::Context<In, Out>,
     ) -> CircuitLayer<In, Out, NotSet, NotSet> {
-        CircuitLayer::new(name.into().into(), options)
+        CircuitLayer::new(name.into().into(), context)
     }
 }
 
@@ -172,12 +172,12 @@ mod tests {
     use crate::circuit::constants::DEFAULT_BREAK_DURATION;
     use crate::circuit::{EngineFake, HalfOpenMode, HealthInfo, Stats};
     use crate::service::Layer;
-    use crate::{RecoveryInfo, SeatbeltOptions, Set};
+    use crate::{Context, RecoveryInfo, Set};
 
     #[test]
     fn layer_ensure_defaults() {
-        let options = SeatbeltOptions::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
-        let layer: CircuitLayer<String, String, NotSet, NotSet> = Circuit::layer("test_breaker", &options);
+        let context = Context::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
+        let layer: CircuitLayer<String, String, NotSet, NotSet> = Circuit::layer("test_breaker", &context);
         let layer = layer
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input(|_, _| "rejected".to_string());
@@ -453,8 +453,8 @@ mod tests {
     }
 
     fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitLayer<String, String, Set, Set> {
-        let options = SeatbeltOptions::<String, String>::new(clock.clone()).pipeline_name("test_pipeline");
-        Circuit::layer("test_breaker", &options)
+        let context = Context::<String, String>::new(clock.clone()).pipeline_name("test_pipeline");
+        Circuit::layer("test_breaker", &context)
             .recovery_with(|output, _| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

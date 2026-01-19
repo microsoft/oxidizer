@@ -1,5 +1,5 @@
 // Copyright (c) Microsoft Corporation.
-
+#![expect(missing_docs, reason = "benchmark code")]
 use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
@@ -12,7 +12,7 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
-use seatbelt::SeatbeltOptions;
+use seatbelt::Context;
 use seatbelt::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 use tick::Clock;
 
@@ -34,8 +34,8 @@ fn entry(c: &mut Criterion) {
     });
 
     // With observability
-    let options = SeatbeltOptions::new(Clock::new_frozen());
-    let service = Observability::new(&options, Execute::new(|v: Input| async move { Output::from(v) }));
+    let context = Context::new(Clock::new_frozen());
+    let service = Observability::new(&context, Execute::new(|v: Input| async move { Output::from(v) }));
     let operation = session.operation("observability");
     group.bench_function("observability", |b| {
         b.iter(|| {
@@ -46,8 +46,8 @@ fn entry(c: &mut Criterion) {
 
     // With observability + listener
     let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(EmptyExporter).build();
-    let options = SeatbeltOptions::new(Clock::new_frozen()).meter_provider(&meter_provider);
-    let service = Observability::new(&options, Execute::new(|v: Input| async move { Output::from(v) }));
+    let context = Context::new(Clock::new_frozen()).meter_provider(&meter_provider);
+    let service = Observability::new(&context, Execute::new(|v: Input| async move { Output::from(v) }));
     let operation = session.operation("observability-and-listener");
     group.bench_function("observability-and-listener", |b| {
         b.iter(|| {
@@ -83,11 +83,11 @@ struct Observability<S> {
 }
 
 impl<S> Observability<S> {
-    pub fn new(options: &SeatbeltOptions<Input, Output>, service: S) -> Self {
+    pub fn new(context: &Context<Input, Output>, service: S) -> Self {
         Self {
             service,
-            event_reporter: options.create_resilience_event_counter(),
-            pipeline_name: options.get_pipeline_name().clone().into(),
+            event_reporter: context.create_resilience_event_counter(),
+            pipeline_name: context.get_pipeline_name().clone().into(),
         }
     }
 }

@@ -38,12 +38,12 @@ and **Timeout** prevents operations from hanging indefinitely:
 ```rust
 use seatbelt::retry::Retry;
 use seatbelt::timeout::Timeout;
-use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use seatbelt::{RecoveryInfo, Context};
 
-let options = SeatbeltOptions::new(&clock);
+let context = Context::new(&clock);
 let service = (
     // Retry middleware: Automatically retries failed operations
-    Retry::layer("retry", &options)
+    Retry::layer("retry", &context)
         .clone_input()
         .recovery_with(|output: &String, _| match output.as_str() {
             "temporary_error" => RecoveryInfo::retry(),
@@ -51,7 +51,7 @@ let service = (
             _ => RecoveryInfo::never(),
         }),
     // Timeout middleware: Cancels operations that take too long
-    Timeout::layer("timeout", &options)
+    Timeout::layer("timeout", &context)
         .timeout_output(|_| "operation timed out".to_string())
         .timeout(Duration::from_secs(30)),
     // Your core business logic
@@ -65,7 +65,7 @@ let result = service.execute("input data".to_string()).await;
  > 
  > **Note**: Resilience middleware requires [`Clock`][__link2] from the [`tick`][__link3] crate for timing
  > operations like delays, timeouts, and backoff calculations. The clock is passed through
- > [`SeatbeltOptions`][__link4] when creating middleware layers.
+ > [`Context`][__link4] when creating middleware layers.
 
 See [Built-in Middlewares](#built-in-middleware) for more details.
 
@@ -88,7 +88,7 @@ for each module for details on how to use them.
 
 This crate supports several optional features that can be enabled to extend functionality:
 
-* `options`: Enables common APIs for building resilience middleware, including [`SeatbeltOptions`][__link9].
+* `options`: Enables common APIs for building resilience middleware, including [`Context`][__link9].
   Requires [`tick`][__link10] for timing operations.
 * `service`: Re-exports common types for building middleware from [`layered`][__link11] crate.
 * `telemetry`: Enables telemetry and observability features using OpenTelemetry for monitoring
@@ -115,9 +115,9 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link14]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
  [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link3]: https://crates.io/crates/tick/0.1.2
- [__link4]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::SeatbeltOptions
+ [__link4]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
  [__link5]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
  [__link6]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
  [__link7]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
  [__link8]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
- [__link9]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::SeatbeltOptions
+ [__link9]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context

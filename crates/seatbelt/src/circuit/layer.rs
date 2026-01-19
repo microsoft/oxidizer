@@ -12,7 +12,7 @@ use super::{
 };
 use crate::circuit::engine::probing::ProbesOptions;
 use crate::service::Layer;
-use crate::{EnableIf, NotSet, Recovery, RecoveryInfo, SeatbeltOptions, Set};
+use crate::{Context, EnableIf, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///
@@ -26,7 +26,7 @@ use crate::{EnableIf, NotSet, Recovery, RecoveryInfo, SeatbeltOptions, Set};
 /// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit] documentation.
 #[derive(Debug)]
 pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> {
-    options: SeatbeltOptions<In, Out>,
+    context: Context<In, Out>,
     recovery: Option<ShouldRecover<Out>>,
     rejected_input: Option<RejectedInput<In, Out>>,
     on_opened: Option<OnOpened<Out>>,
@@ -45,9 +45,9 @@ pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> 
 
 impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: StringValue, options: &SeatbeltOptions<In, Out>) -> Self {
+    pub(crate) fn new(name: StringValue, context: &Context<In, Out>) -> Self {
         Self {
-            options: options.clone(),
+            context: context.clone(),
             recovery: None,
             rejected_input: None,
             on_opened: None,
@@ -394,7 +394,7 @@ impl<In, Out, S> Layer<S> for CircuitLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         Circuit {
             inner,
-            clock: self.options.get_clock().clone(),
+            clock: self.context.get_clock().clone(),
             recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
             rejected_input: self.rejected_input.clone().expect("rejected_input must be set in Ready state"),
             enable_if: self.enable_if.clone(),
@@ -421,16 +421,16 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
                 health_metrics_builder: HealthMetricsBuilder::new(self.sampling_duration, self.failure_threshold, self.min_throughput),
                 probes: self.probes_options(),
             },
-            self.options.get_clock().clone(),
+            self.context.get_clock().clone(),
             self.strategy_name.clone(),
-            self.options.get_pipeline_name().clone().into(),
-            self.options.create_resilience_event_counter(),
+            self.context.get_pipeline_name().clone().into(),
+            self.context.create_resilience_event_counter(),
         )
     }
 
     fn into_state<R, O>(self) -> CircuitLayer<In, Out, R, O> {
         CircuitLayer {
-            options: self.options,
+            context: self.context,
             recovery: self.recovery,
             rejected_input: self.rejected_input,
             on_opened: self.on_opened,
@@ -465,8 +465,8 @@ mod tests {
     #[test]
     #[expect(clippy::float_cmp, reason = "Test")]
     fn new_creates_correct_initial_state() {
-        let options = create_test_options();
-        let layer: CircuitLayer<_, _, NotSet, NotSet> = CircuitLayer::new(StringValue::from("test_breaker"), &options);
+        let context = create_test_context();
+        let layer: CircuitLayer<_, _, NotSet, NotSet> = CircuitLayer::new(StringValue::from("test_breaker"), &context);
 
         assert!(layer.recovery.is_none());
         assert!(layer.rejected_input.is_none());
@@ -479,8 +479,8 @@ mod tests {
 
     #[test]
     fn recovery_sets_correctly() {
-        let options = create_test_options();
-        let layer = CircuitLayer::new(StringValue::from("test"), &options);
+        let context = create_test_context();
+        let layer = CircuitLayer::new(StringValue::from("test"), &context);
 
         let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery_with(|output, _args| {
             if output.contains("error") {
@@ -511,8 +511,8 @@ mod tests {
 
     #[test]
     fn recovery_auto_sets_correctly() {
-        let options = SeatbeltOptions::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
-        let layer = CircuitLayer::new(StringValue::from("test"), &options);
+        let context = Context::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
+        let layer = CircuitLayer::new(StringValue::from("test"), &context);
 
         let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery();
 
@@ -537,8 +537,8 @@ mod tests {
 
     #[test]
     fn rejected_input_sets_correctly() {
-        let options = create_test_options();
-        let layer = CircuitLayer::new(StringValue::from("test"), &options);
+        let context = create_test_context();
+        let layer = CircuitLayer::new(StringValue::from("test"), &context);
 
         let layer: CircuitLayer<_, _, NotSet, Set> = layer.rejected_input(|_, _| "rejected".to_string());
 
@@ -640,8 +640,8 @@ mod tests {
     #[test]
     #[expect(clippy::float_cmp, reason = "Test")]
     fn default_values_are_correct() {
-        let options = create_test_options();
-        let layer = CircuitLayer::new(StringValue::from("test"), &options);
+        let context = create_test_context();
+        let layer = CircuitLayer::new(StringValue::from("test"), &context);
 
         assert_eq!(layer.failure_threshold, DEFAULT_FAILURE_THRESHOLD);
         assert_eq!(layer.min_throughput, DEFAULT_MIN_THROUGHPUT);
@@ -663,12 +663,12 @@ mod tests {
             .probes_options();
 
         // access the last probe which should be the health probe
-        let options = probes.probes().last().unwrap();
+        let probe = probes.probes().last().unwrap();
 
-        match options {
-            ProbeOptions::HealthProbe(options) => {
-                assert_eq!(options.stage_duration(), Duration::from_secs(234));
-                assert_eq!(options.failure_threshold(), 0.52);
+        match probe {
+            ProbeOptions::HealthProbe(health_probe) => {
+                assert_eq!(health_probe.stage_duration(), Duration::from_secs(234));
+                assert_eq!(health_probe.failure_threshold(), 0.52);
             }
             ProbeOptions::SingleProbe { .. } => panic!("Expected HealthProbe"),
         }
@@ -682,12 +682,12 @@ mod tests {
         static_assertions::assert_impl_all!(CircuitLayer<String, String, Set, Set>: Debug);
     }
 
-    fn create_test_options() -> SeatbeltOptions<String, String> {
-        SeatbeltOptions::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context() -> Context<String, String> {
+        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
     }
 
     fn create_ready_layer() -> CircuitLayer<String, String, Set, Set> {
-        CircuitLayer::new(StringValue::from("test"), &create_test_options())
+        CircuitLayer::new(StringValue::from("test"), &create_test_context())
             .recovery_with(|output, _args| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

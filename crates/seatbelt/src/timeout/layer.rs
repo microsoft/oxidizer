@@ -9,7 +9,7 @@ use crate::service::Layer;
 use crate::timeout::{
     OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
 };
-use crate::{EnableIf, NotSet, SeatbeltOptions, Set};
+use crate::{Context, EnableIf, NotSet, Set};
 
 /// Builder for configuring timeout resilience middleware.
 ///
@@ -22,7 +22,7 @@ use crate::{EnableIf, NotSet, SeatbeltOptions, Set};
 /// For comprehensive examples, see the [timeout module][crate::timeout] documentation.
 #[derive(Debug)]
 pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
-    options: SeatbeltOptions<In, Out>,
+    context: Context<In, Out>,
     timeout: Option<Duration>,
     timeout_output: Option<TimeoutOutputCallback<Out>>,
     on_timeout: Option<OnTimeout<Out>>,
@@ -34,14 +34,14 @@ pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
 
 impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: StringValue, options: &SeatbeltOptions<In, Out>) -> Self {
+    pub(crate) fn new(name: StringValue, context: &Context<In, Out>) -> Self {
         Self {
             timeout: None,
             timeout_output: None,
             on_timeout: None,
             enable_if: EnableIf::always(),
             strategy_name: name,
-            options: options.clone(),
+            context: context.clone(),
             timeout_override: None,
             _state: PhantomData,
         }
@@ -197,14 +197,14 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         Timeout {
             inner,
-            clock: self.options.get_clock().clone(),
+            clock: self.context.get_clock().clone(),
             timeout: self.timeout.expect("timeout must be set in Ready state"),
             enable_if: self.enable_if.clone(),
             on_timeout: self.on_timeout.clone(),
             timeout_output: self.timeout_output.clone().expect("timeout_result must be set in Ready state"),
             name: self.strategy_name.clone(),
-            pipeline_name: self.options.get_pipeline_name().clone().into(),
-            event_reporter: self.options.create_resilience_event_counter(),
+            pipeline_name: self.context.get_pipeline_name().clone().into(),
+            event_reporter: self.context.create_resilience_event_counter(),
             timeout_override: self.timeout_override.clone(),
         }
     }
@@ -218,7 +218,7 @@ impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutp
             timeout_output: self.timeout_output,
             on_timeout: self.on_timeout,
             strategy_name: self.strategy_name,
-            options: self.options,
+            context: self.context,
             timeout_override: self.timeout_override,
             _state: PhantomData,
         }
@@ -239,8 +239,8 @@ mod tests {
 
     #[test]
     fn new_needs_timeout_output() {
-        let options = create_test_options();
-        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new(StringValue::from("test_timeout"), &options);
+        let context = create_test_context();
+        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new(StringValue::from("test_timeout"), &context);
 
         assert!(layer.timeout.is_none());
         assert!(layer.timeout_output.is_none());
@@ -252,8 +252,8 @@ mod tests {
 
     #[test]
     fn timeout_output_ensure_set_correctly() {
-        let options = create_test_options();
-        let layer = TimeoutLayer::new(StringValue::from("test"), &options);
+        let context = create_test_context();
+        let layer = TimeoutLayer::new(StringValue::from("test"), &context);
 
         let layer: TimeoutLayer<_, _, NotSet, Set> = layer.timeout_output(|args| format!("timeout: {}", args.timeout().as_millis()));
         let result = layer.timeout_output.unwrap().call(TimeoutOutputArgs {
@@ -265,8 +265,8 @@ mod tests {
 
     #[test]
     fn timeout_error_ensure_set_correctly() {
-        let options = create_test_options_result();
-        let layer = TimeoutLayer::new(StringValue::from("test"), &options);
+        let context = create_test_context_result();
+        let layer = TimeoutLayer::new(StringValue::from("test"), &context);
 
         let layer: TimeoutLayer<_, _, NotSet, Set> = layer.timeout_error(|args| format!("timeout: {}", args.timeout().as_millis()));
         let result = layer
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn timeout_ensure_set_correctly() {
-        let layer: TimeoutLayer<_, _, Set, Set> = TimeoutLayer::new(StringValue::from("test"), &create_test_options())
+        let layer: TimeoutLayer<_, _, Set, Set> = TimeoutLayer::new(StringValue::from("test"), &create_test_context())
             .timeout_output(|_args| "timeout: ".to_string())
             .timeout(Duration::from_millis(3));
 
@@ -390,22 +390,22 @@ mod tests {
         static_assertions::assert_impl_all!(TimeoutLayer<String, String, Set, Set>: Debug);
     }
 
-    fn create_test_options() -> SeatbeltOptions<String, String> {
-        SeatbeltOptions::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context() -> Context<String, String> {
+        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
     }
 
-    fn create_test_options_result() -> SeatbeltOptions<String, Result<String, String>> {
-        SeatbeltOptions::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context_result() -> Context<String, Result<String, String>> {
+        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
     }
 
     fn create_ready_layer() -> TimeoutLayer<String, String, Set, Set> {
-        TimeoutLayer::new(StringValue::from("test"), &create_test_options())
+        TimeoutLayer::new(StringValue::from("test"), &create_test_context())
             .timeout_output(|_args| "timeout: ".to_string())
             .timeout(Duration::from_millis(3))
     }
 
     fn create_ready_layer_with_result() -> TimeoutLayer<String, Result<String, String>, Set, Set> {
-        TimeoutLayer::new(StringValue::from("test"), &create_test_options_result())
+        TimeoutLayer::new(StringValue::from("test"), &create_test_context_result())
             .timeout_error(|_args| "timeout: ".to_string())
             .timeout(Duration::from_millis(3))
     }

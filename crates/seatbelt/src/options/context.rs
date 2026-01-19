@@ -11,13 +11,13 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 
 /// Shared options for resilience middleware pipelines.
 ///
-/// `SeatbeltOptions` bundles a clock and telemetry primitives (OpenTelemetry
+/// `Context` bundles a clock and telemetry primitives (OpenTelemetry
 /// meter) that resilience middleware uses to measure time, emit metrics, and
 /// report events. Use a single instance to configure a whole resilience
 /// pipeline (retries, timeouts, circuit breakers, hedging, rate limiting,
 /// etc.).
 ///
-/// The [`pipeline_name`][`SeatbeltOptions::pipeline_name`] groups resilience middleware under one logical
+/// The [`pipeline_name`][`Context::pipeline_name`] groups resilience middleware under one logical
 /// parent for telemetry correlation. When you reuse the same name across all
 /// policies in a pipeline, exported metrics and events will carry the same
 /// pipeline attribute, making dashboards and analysis easier.
@@ -32,25 +32,25 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// ```rust
 /// # use opentelemetry::KeyValue;
 /// # use opentelemetry::metrics::MeterProvider;
-/// # use seatbelt::SeatbeltOptions;
+/// # use seatbelt::Context;
 /// # use seatbelt::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 /// # use tick::Clock;
 /// # fn example(clock: Clock, meter_provider: &dyn MeterProvider) {
-/// let options = SeatbeltOptions::<String, String>::new(&clock)
+/// let ctx = Context::<String, String>::new(&clock)
 ///     .pipeline_name("auth_pipeline")
 ///     .meter_provider(meter_provider);
 ///
 /// // Use the clock for timing operations
-/// let start = options.get_clock().instant();
+/// let start = ctx.get_clock().instant();
 ///
 /// // Create an event reporter
-/// let resilience_counter = options.create_resilience_event_counter();
+/// let resilience_counter = ctx.create_resilience_event_counter();
 ///
 /// // Report an event with required attributes
 /// resilience_counter.add(
 ///     1,
 ///     &[
-///         KeyValue::new(PIPELINE_NAME, options.get_pipeline_name().clone()),
+///         KeyValue::new(PIPELINE_NAME, ctx.get_pipeline_name().clone()),
 ///         KeyValue::new(STRATEGY_NAME, "my_strategy"),
 ///         KeyValue::new(EVENT_NAME, "my_event"),
 ///     ],
@@ -58,15 +58,15 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// # }
 /// ```
 ///
-/// # Authoring Resilience `MIddlewares`
+/// # Authoring Resilience `Middlewares`
 ///
 /// This crate’s primitives are designed to make writing custom resilience middleware
-/// straightforward and observable. Pass a shared [`SeatbeltOptions`] to each
+/// straightforward and observable. Pass a shared [`Context`] to each
 /// middleware that needs telemetry. You can keep a single instance (or derive child
 /// scopes from it) to group related middleware under one logical parent so their
 /// telemetry automatically shares correlation dimensions (e.g., the pipeline name).
 ///
-/// With `SeatbeltOptions` you can:
+/// With `Context` you can:
 ///
 /// - Share a common `Clock` for consistent timing and timeouts
 /// - Create and use telemetry instruments via the OpenTelemetry `Meter`
@@ -76,7 +76,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 ///
 /// Resilience middleware typically follows this pattern:
 ///
-/// 1. Accept a [`SeatbeltOptions`] in your layer/builder to configure observability
+/// 1. Accept a [`Context`] in your layer/builder to configure observability
 /// 2. Create instruments from the options (e.g., counters, histograms)
 /// 3. Wrap the next service/layer and forward requests without hidden global state
 /// 4. Report events at key decision points (retries, circuit breaker trips, timeouts, …)
@@ -90,7 +90,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// > `layered` and reference it here instead of diverging.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct SeatbeltOptions<In, Out> {
+pub struct Context<In, Out> {
     clock: Clock,
     pipeline_name: Cow<'static, str>,
     meter: Meter,
@@ -98,7 +98,7 @@ pub struct SeatbeltOptions<In, Out> {
     _out: std::marker::PhantomData<fn() -> Out>,
 }
 
-impl<In, Out> SeatbeltOptions<In, Out> {
+impl<In, Out> Context<In, Out> {
     /// Create options with a clock and the global meter provider.
     ///
     /// Initializes with `pipeline_name = "default"` and a meter from the
@@ -184,10 +184,10 @@ impl<In, Out> SeatbeltOptions<In, Out> {
     /// # use tick::Clock;
     /// # use opentelemetry::KeyValue;
     /// # use opentelemetry::metrics::Meter;
-    /// # use seatbelt::SeatbeltOptions;
+    /// # use seatbelt::Context;
     /// # use seatbelt::telemetry::{PIPELINE_NAME, STRATEGY_NAME, EVENT_NAME};
-    /// # fn example(seatbelt_options: &SeatbeltOptions<(), ()>) {
-    /// let counter = seatbelt_options.create_resilience_event_counter();
+    /// # fn example(context: &Context<(), ()>) {
+    /// let counter = context.create_resilience_event_counter();
     ///
     /// counter.add(
     ///     1,
@@ -205,7 +205,7 @@ impl<In, Out> SeatbeltOptions<In, Out> {
     }
 }
 
-impl<In, Out> Clone for SeatbeltOptions<In, Out> {
+impl<In, Out> Clone for Context<In, Out> {
     fn clone(&self) -> Self {
         Self {
             clock: self.clock.clone(),
@@ -227,18 +227,18 @@ mod tests {
     #[test]
     fn test_new_with_clock_sets_default_pipeline_name() {
         let clock = tick::Clock::new_frozen();
-        let options = SeatbeltOptions::<(), ()>::new(clock);
-        assert_eq!(options.get_pipeline_name().as_ref(), DEFAULT_PIPELINE_NAME);
+        let ctx = Context::<(), ()>::new(clock);
+        assert_eq!(ctx.get_pipeline_name().as_ref(), DEFAULT_PIPELINE_NAME);
         // Ensure clock reference behaves (timestamp monotonic relative behaviour not required, just accessible)
-        let _ = options.get_clock().system_time();
+        let _ = ctx.get_clock().system_time();
     }
 
     #[test]
     fn test_pipeline_name_with_custom_value_sets_name_and_is_owned() {
         let clock = tick::Clock::new_frozen();
-        let options = SeatbeltOptions::<(), ()>::new(clock).pipeline_name(String::from("custom_pipeline"));
-        assert_eq!(options.get_pipeline_name().as_ref(), "custom_pipeline");
-        assert!(matches!(options.get_pipeline_name(), Cow::Owned(_)));
+        let ctx = Context::<(), ()>::new(clock).pipeline_name(String::from("custom_pipeline"));
+        assert_eq!(ctx.get_pipeline_name().as_ref(), "custom_pipeline");
+        assert!(matches!(ctx.get_pipeline_name(), Cow::Owned(_)));
     }
 
     #[cfg(not(miri))]
@@ -247,9 +247,9 @@ mod tests {
         let clock = tick::Clock::new_frozen();
         let (provider, exporter) = test_meter_provider();
 
-        let options = SeatbeltOptions::<(), ()>::new(clock).meter_provider(&provider);
-        let c1 = create_resilience_event_counter(options.get_meter());
-        let c2 = create_resilience_event_counter(options.get_meter());
+        let ctx = Context::<(), ()>::new(clock).meter_provider(&provider);
+        let c1 = create_resilience_event_counter(ctx.get_meter());
+        let c2 = create_resilience_event_counter(ctx.get_meter());
         c1.add(1, &[]);
         c2.add(2, &[]);
 

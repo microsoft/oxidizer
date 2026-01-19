@@ -7,17 +7,17 @@ use std::io::Error;
 use layered::{Execute, Service, Stack};
 use ohno::AppError;
 use seatbelt::retry::Retry;
-use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Context, RecoveryInfo};
 use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
-    let options = SeatbeltOptions::new(&clock);
+    let context = Context::new(&clock);
 
     // Define stack with retry layer
     let stack = (
-        Retry::layer("my_retry", &options)
+        Retry::layer("my_retry", &context)
             .clone_input() // Automatically clone input for retries
             .recovery_with(|output, _args| match output {
                 Ok(_) => RecoveryInfo::never(),

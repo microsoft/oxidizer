@@ -24,8 +24,8 @@ impl<In> EnableIf<In> {
     }
 }
 
-mod seatbelt_options;
-pub use seatbelt_options::SeatbeltOptions;
+mod context;
+pub use context::Context;
 
 mod define_fn_wrapper;
 pub(crate) use define_fn_wrapper::define_fn_wrapper;

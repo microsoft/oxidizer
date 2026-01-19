@@ -14,7 +14,7 @@ use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::retry::Retry;
-use seatbelt::{Attempt, RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Attempt, Context, RecoveryInfo};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -24,13 +24,11 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let options = SeatbeltOptions::new(&clock)
-        .pipeline_name("retry_advanced")
-        .meter_provider(&meter_provider);
+    let context = Context::new(&clock).pipeline_name("retry_advanced").meter_provider(&meter_provider);
 
     // Define stack with retry layer
     let stack = (
-        Retry::layer("my_retry", &options)
+        Retry::layer("my_retry", &context)
             // Custom input cloning - inject attempt info into request extensions
             .clone_input_with(|input: &mut Request<String>, args| {
                 let mut cloned = input.clone();

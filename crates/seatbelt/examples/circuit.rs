@@ -15,7 +15,7 @@ use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::circuit::Circuit;
-use seatbelt::{RecoveryInfo, SeatbeltOptions};
+use seatbelt::{Context, RecoveryInfo};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -25,11 +25,11 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let options = SeatbeltOptions::new(&clock).meter_provider(&meter_provider);
+    let context = Context::new(&clock).meter_provider(&meter_provider);
 
     // Define stack with circuit breaker layer
     let stack = (
-        Circuit::layer("my_circuit_breaker", &options)
+        Circuit::layer("my_circuit_breaker", &context)
             // Required: classify the recoverability of outputs
             .recovery_with(|output, _args| match output {
                 Ok(_) => RecoveryInfo::never(),
