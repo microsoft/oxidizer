@@ -258,9 +258,9 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
+    use crate::Layer;
     use crate::options::Backoff;
     use crate::retry::RetryLayer;
-    use crate::Layer;
     use crate::testing::MetricTester;
     use crate::{Context, Set};
 

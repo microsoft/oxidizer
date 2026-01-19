@@ -11,8 +11,8 @@ use super::{
     Circuit, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs,
     PartionKeyProvider, PartitionKey, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
-use crate::circuit::engine::probing::ProbesOptions;
 use crate::Layer;
+use crate::circuit::engine::probing::ProbesOptions;
 use crate::{Context, EnableIf, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.

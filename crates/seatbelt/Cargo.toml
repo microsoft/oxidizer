@@ -18,9 +18,14 @@ repository.workspace = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "tick::Clock",
-    "layered::{Stack, Layer, Service}",
-    "opentelemetry::metrics::MeterProvider",
+    "layered::layer::stack::Stack",
+    "layered::service::Service",
+    "opentelemetry::metrics::meter::MeterProvider",
+    "recoverable::Recovery",
+    "recoverable::RecoveryInfo",
+    "recoverable::RecoveryKind",
+    "tick::clock::Clock",
+    "tower_layer::Layer",
 ]
 
 [package.metadata.docs.rs]

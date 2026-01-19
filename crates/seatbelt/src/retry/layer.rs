@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use opentelemetry::StringValue;
 
+use crate::Layer;
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
-use crate::Layer;
 use crate::{Backoff, Context, EnableIf, MaxAttempts, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring retry resilience middleware.

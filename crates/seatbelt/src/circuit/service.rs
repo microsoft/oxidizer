@@ -170,9 +170,9 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
+    use crate::Layer;
     use crate::circuit::constants::DEFAULT_BREAK_DURATION;
     use crate::circuit::{EngineFake, HalfOpenMode, HealthInfo, Stats};
-    use crate::Layer;
     use crate::{Context, RecoveryInfo, Set};
 
     #[test]
