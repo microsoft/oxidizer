@@ -13,22 +13,7 @@
     )
 )]
 
-//! Resilience and fault handling for applications and libraries.
-//!
-//! This crate helps applications handle transient faults gracefully through composable
-//! resilience patterns. It provides resilience middleware for building robust distributed systems
-//! that can automatically handle timeouts, retries, and other failure scenarios.
-//!
-//! # Runtime Agnostic Design
-//!
-//! The `seatbelt` crate is designed to be **runtime agnostic** and works seamlessly across any
-//! async runtime. This flexibility allows you to use the same resilience patterns across
-//! different projects and migrate between runtimes without changing your resilience patterns.
-//!
-//! # Core Types
-//!
-//! - [`RecoveryInfo`]: Classifies errors as recoverable (transient) or non-recoverable (permanent).
-//! - [`Recovery`]: A trait for types that can determine their recoverability.
+//! Resilience and recovery mechanisms for fallible operations.
 //!
 //! # Quick Start
 //!
@@ -78,34 +63,46 @@
 //! > operations like delays, timeouts, and backoff calculations. The clock is passed through
 //! > [`Context`] when creating middleware layers.
 //!
-//! See [Built-in Middleware](#built-in-middleware) for more details.
+//! # Why?
 //!
-//! # Recovery Metadata
+//! This crate provides production-ready resilience middleware with excellent telemetry for building
+//! robust distributed systems that can automatically handle timeouts, retries, and other failure
+//! scenarios.
 //!
-//! Error types can implement [`Recovery`] to provide additional metadata about their retry characteristics.
-//! This enables callers to use a unified, streamlined approach when determining whether to retry an
-//! operation, regardless of the underlying error type or source.
+//! - **Runtime agnostic** - Works seamlessly across any async runtime. Use the same resilience
+//!   patterns across different projects and migrate between runtimes without changes.
+//! - **Production-ready** - Battle-tested middleware with sensible defaults and comprehensive
+//!   configuration options.
+//! - **Excellent telemetry** - Built-in support for metrics and structured logging to monitor
+//!   resilience behavior in production.
 //!
-//! # Built-in Middleware
+//! # Overview
+//!
+//! ## Core Types
+//!
+//! - [`Context`] - Holds shared state for resilience middleware, including the clock.
+//! - [`RecoveryInfo`] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
+//! - [`Recovery`] - A trait for types that can determine their recoverability.
+//!
+//! ## Built-in Middleware
 //!
 //! This crate provides built-in resilience middleware that you can use out of the box. See the documentation
 //! for each module for details on how to use them.
 //!
-//! - [`timeout`]: Cancels long-running operations.
-//! - [`retry`]: Automatically retries failed operations with configurable backoff strategies.
-//! - [`circuit`]: Prevents cascading failures by stopping requests to unhealthy services.
+//! - [`timeout`] - Middleware that cancels long-running operations.
+//! - [`retry`] - Middleware that automatically retries failed operations.
+//! - [`circuit`] - Middleware that prevents cascading failures.
 //!
-//! ## Features
+//! # Features
 //!
-//! This crate supports several optional features that can be enabled to extend functionality:
+//! This crate provides several optional features that can be enabled in your `Cargo.toml`:
 //!
-
-//! - `timeout`: Enables the [`timeout`] middleware for canceling long-running operations.
-//! - `retry`: Enables the [`retry`] middleware for automatically retrying failed operations with
+//! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
+//! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
-//! - `circuit`: Enables the [`circuit`] middleware for preventing cascading failures.
-//! - `metrics`: Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
-//! - `logs`: Enables structured logging for resilience middleware using the `tracing` crate.
+//! - **`circuit`** - Enables the [`circuit`] middleware for preventing cascading failures.
+//! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
+//! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};

@@ -13,22 +13,7 @@
 
 </div>
 
-Resilience and fault handling for applications and libraries.
-
-This crate helps applications handle transient faults gracefully through composable
-resilience patterns. It provides resilience middleware for building robust distributed systems
-that can automatically handle timeouts, retries, and other failure scenarios.
-
-## Runtime Agnostic Design
-
-The `seatbelt` crate is designed to be **runtime agnostic** and works seamlessly across any
-async runtime. This flexibility allows you to use the same resilience patterns across
-different projects and migrate between runtimes without changing your resilience patterns.
-
-## Core Types
-
-* [`RecoveryInfo`][__link0]: Classifies errors as recoverable (transient) or non-recoverable (permanent).
-* [`Recovery`][__link1]: A trait for types that can determine their recoverability.
+Resilience and recovery mechanisms for fallible operations.
 
 ## Quick Start
 
@@ -63,37 +48,50 @@ let result = service.execute("input data".to_string()).await;
 ```
 
  > 
- > **Note**: Resilience middleware requires [`Clock`][__link2] from the [`tick`][__link3] crate for timing
+ > **Note**: Resilience middleware requires [`Clock`][__link0] from the [`tick`][__link1] crate for timing
  > operations like delays, timeouts, and backoff calculations. The clock is passed through
- > [`Context`][__link4] when creating middleware layers.
+ > [`Context`][__link2] when creating middleware layers.
 
-See [Built-in Middleware](#built-in-middleware) for more details.
+## Why?
 
-## Recovery Metadata
+This crate provides production-ready resilience middleware with excellent telemetry for building
+robust distributed systems that can automatically handle timeouts, retries, and other failure
+scenarios.
 
-Error types can implement [`Recovery`][__link5] to provide additional metadata about their retry characteristics.
-This enables callers to use a unified, streamlined approach when determining whether to retry an
-operation, regardless of the underlying error type or source.
+* **Runtime agnostic** - Works seamlessly across any async runtime. Use the same resilience
+  patterns across different projects and migrate between runtimes without changes.
+* **Production-ready** - Battle-tested middleware with sensible defaults and comprehensive
+  configuration options.
+* **Excellent telemetry** - Built-in support for metrics and structured logging to monitor
+  resilience behavior in production.
 
-## Built-in Middleware
+## Overview
+
+### Core Types
+
+* [`Context`][__link3] - Holds shared state for resilience middleware, including the clock.
+* [`RecoveryInfo`][__link4] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
+* [`Recovery`][__link5] - A trait for types that can determine their recoverability.
+
+### Built-in Middleware
 
 This crate provides built-in resilience middleware that you can use out of the box. See the documentation
 for each module for details on how to use them.
 
-* [`timeout`][__link6]: Cancels long-running operations.
-* [`retry`][__link7]: Automatically retries failed operations with configurable backoff strategies.
-* [`circuit`][__link8]: Prevents cascading failures by stopping requests to unhealthy services.
+* [`timeout`][__link6] - Middleware that cancels long-running operations.
+* [`retry`][__link7] - Middleware that automatically retries failed operations.
+* [`circuit`][__link8] - Middleware that prevents cascading failures.
 
-### Features
+## Features
 
-This crate supports several optional features that can be enabled to extend functionality:
+This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-* `timeout`: Enables the [`timeout`][__link9] middleware for canceling long-running operations.
-* `retry`: Enables the [`retry`][__link10] middleware for automatically retrying failed operations with
+* **`timeout`** - Enables the [`timeout`][__link9] middleware for canceling long-running operations.
+* **`retry`** - Enables the [`retry`][__link10] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* `circuit`: Enables the [`circuit`][__link11] middleware for preventing cascading failures.
-* `metrics`: Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
-* `logs`: Enables structured logging for resilience middleware using the `tracing` crate.
+* **`circuit`** - Enables the [`circuit`][__link11] middleware for preventing cascading failures.
+* **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
+* **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
 
 <hr/>
@@ -101,14 +99,14 @@ This crate supports several optional features that can be enabled to extend func
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0Hjz9kfeI26GzMvGpstB3vOG0ewSOFsNqPIG2iqBNy7tUwXYWSDgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
- [__link0]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
- [__link1]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-il1i73I0eIG01mMeTMhRSaGy-RA787VSNNG1P5sUqhvHhWYWSDgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
+ [__link0]: https://docs.rs/tick/0.1.2/tick/?search=Clock
+ [__link1]: https://crates.io/crates/tick/0.1.2
  [__link10]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
  [__link11]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
- [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
- [__link3]: https://crates.io/crates/tick/0.1.2
- [__link4]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
+ [__link2]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
+ [__link3]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
+ [__link4]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link5]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
  [__link6]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
  [__link7]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
