@@ -21,12 +21,10 @@ all-features = true
 
 [features]
 default = []
-service = ["dep:layered"]
-telemetry = []
-metrics = ["dep:opentelemetry", "opentelemetry/metrics", "telemetry"]
-logs = ["telemetry", "dep:tracing"]
+metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
+logs = ["dep:tracing"]
 # This exposes a common APIs for building resilience middlewares.
-options = ["dep:tick", "telemetry", "service", "metrics", "logs"]
+options = ["dep:tick", "dep:layered", "metrics", "logs"]
 timeout = ["options"]
 retry = ["options", "dep:fastrand"]
 circuit = ["options", "dep:fastrand"]

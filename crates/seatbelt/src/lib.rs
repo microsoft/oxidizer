@@ -126,7 +126,7 @@ pub(crate) use crate::options::MaxAttempts;
 #[cfg(any(feature = "options", test))]
 pub use crate::options::{Attempt, Backoff, Context, NotSet, Set};
 
-#[cfg(any(feature = "telemetry", test))]
+#[cfg(any(feature = "options", test))]
 pub mod telemetry;
 
 #[cfg(any(feature = "timeout", test))]
@@ -139,7 +139,7 @@ pub mod retry;
 pub mod circuit;
 
 #[doc(inline)]
-#[cfg(any(feature = "service", test))]
+#[cfg(any(feature = "options", test))]
 pub use layered::{Layer, Service, Stack};
 
 #[cfg(any(feature = "retry", feature = "circuit", test))]
