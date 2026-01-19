@@ -1,0 +1,19 @@
+---
+source: crates/ohno_macros/src/enrich_err/tests.rs
+expression: format_tokens(result)
+---
+fn test_function() -> Result<(), OhnoErrorType> {
+    (|| {
+        let value = compute_value()?;
+        validate(value)?;
+        Ok(())
+    })()
+        .map_err(|mut e| {
+            let msg = "custom error message";
+            ohno::Enrichable::add_enrichment(
+                &mut e,
+                ohno::EnrichmentEntry::new(msg, file!(), line!()),
+            );
+            e
+        })
+}

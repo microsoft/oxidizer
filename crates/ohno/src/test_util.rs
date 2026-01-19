@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, coverage(off))] // coverage doesn't handle panics well
+
 //! Test utilities for the ohno crate.
 //!
 //! This module is only available when the `test-util` feature is enabled.
@@ -32,24 +34,22 @@ macro_rules! assert_error_message {
         let error_string = $error.to_string();
         let expected: &str = $expected;
 
-        if error_string == expected {
-            // Exact match, success
-        } else {
-            // Check if it starts with the expected message followed by backtrace
-            let starts_with = format!("{expected}\n\nBacktrace:\n");
-
-            assert!(
-                error_string.starts_with(&starts_with),
-                "Expected error to be '{}' or start with '{}', but got: '{}'",
-                expected,
-                starts_with,
-                error_string
-            );
-        }
+        let test = move || {
+            if error_string == expected {
+                return ();
+            }
+            if let Some(remainder) = error_string.strip_prefix(expected) {
+                // backtrace, caused by, or error trace indicators
+                if remainder.starts_with("\n\nBacktrace:\n") || remainder.starts_with("\ncaused by: ") || remainder.starts_with("\n> ") {
+                    return ();
+                }
+            }
+            panic!("left : {expected}\nright: {error_string}");
+        };
+        test();
     }};
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use crate::{OhnoCore, backtrace::Backtrace};
@@ -74,7 +74,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Expected error to be")]
+    #[should_panic(expected = "left : expected message\nright: actual message")]
     fn test_assert_error_message_mismatch() {
         let error = MyTestError::caused_by("actual message");
         assert_error_message!(error, "expected message");

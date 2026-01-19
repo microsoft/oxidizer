@@ -1,0 +1,9 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/debug.rs
+expression: format_tokens(result)
+---
+impl ::core::fmt::Debug for TupleStruct {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_tuple(stringify!(TupleStruct)).field(&self.0).field(&self.1).finish()
+    }
+}

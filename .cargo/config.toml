@@ -1,0 +1,7 @@
+# enable use of modern CPU features on Linux for the benefit of our benchmarks
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+# enable use of modern CPU features on Windows for the benefit of our benchmarks
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-cpu=x86-64-v3"]

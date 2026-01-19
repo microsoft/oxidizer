@@ -24,20 +24,23 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.0" }
-data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.0" }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.2" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.1.1" }
+data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
+layered = { path = "crates/layered", default-features = false, version = "0.1.0" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.2.1" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
+recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.0" }
-tick = { path = "crates/tick", default-features = false, version = "0.1.1" }
+tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
 
 # external dependencies
 alloc_tracker = { version = "0.5.9", default-features = false }
@@ -48,8 +51,10 @@ chrono-tz = { version = "0.10.4", default-features = false }
 criterion = { version = "0.7.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
+dynosaur = { version = "0.3.0", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
+futures-util = { version = "0.3.31", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 jiff = { version = "0.2.16", default-features = false }
@@ -80,8 +85,12 @@ thiserror = { version = "2.0.17", default-features = false }
 time = { version = "0.3.37", default-features = false }
 time-tz = { version = "2.0.0", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
+tower = { version = "0.5.2", default-features = false }
+tower-layer = { version = "0.3.3", default-features = false }
+tower-service = { version = "0.3.3", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
+trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
@@ -162,9 +171,22 @@ multiple_crate_versions = "allow"
 missing_crate_level_docs = "warn"
 unescaped_backticks = "warn"
 
+# A bit of debugging support for release builds.
 [profile.release]
 debug = "line-tables-only"
 
+# Best perf possible for benchmarks
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+
+# Best debugging experience possible for test builds. Even though this is the default, we specify it explicitly,
+# otherwise it appears that cargo-llvm-cov assumes different defaults which leads to only minimal debug info in
+# coverage builds.
+[profile.test]
+debug = "full"
+
+# No debug info for mutation testing to speed up compilation
 [profile.mutants]
 inherits = "test"
 debug = "none"
