@@ -5,15 +5,13 @@ use std::time::Duration;
 use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
-use layered::{Execute, Service};
-use opentelemetry::metrics::Counter;
-use opentelemetry::{KeyValue, StringValue};
+use layered::{Execute, Service, Stack};
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
-use seatbelt::Context;
-use seatbelt::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+use seatbelt::retry::Retry;
+use seatbelt::{Context, RecoveryInfo};
 use tick::Clock;
 
 #[global_allocator]
@@ -23,33 +21,37 @@ fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("observability");
     let session = Session::new();
 
-    // No observability
-    let service = NoObservability(Execute::new(|v: Input| async move { Output::from(v) }));
-    let operation = session.operation("no-observability");
-    group.bench_function("no-observability", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
-        });
-    });
-
-    // With observability
+    // With retry middleware (no meter provider listener)
     let context = Context::new(Clock::new_frozen());
-    let service = Observability::new(&context, Execute::new(|v: Input| async move { Output::from(v) }));
-    let operation = session.operation("observability");
-    group.bench_function("observability", |b| {
+    let service = (
+        Retry::layer("bench", &context)
+            .clone_input()
+            .base_delay(Duration::ZERO)
+            .recovery_with(|_, _| RecoveryInfo::retry()),
+        Execute::new(|v: Input| async move { Output::from(v) }),
+    )
+        .build();
+    let operation = session.operation("retry-no-telemetry");
+    group.bench_function("retry-no-telemetry", |b| {
         b.iter(|| {
             let _span = operation.measure_thread();
             _ = block_on(service.execute(Input));
         });
     });
 
-    // With observability + listener
+    // With retry middleware + meter provider listener
     let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(EmptyExporter).build();
     let context = Context::new(Clock::new_frozen()).meter_provider(&meter_provider);
-    let service = Observability::new(&context, Execute::new(|v: Input| async move { Output::from(v) }));
-    let operation = session.operation("observability-and-listener");
-    group.bench_function("observability-and-listener", |b| {
+    let service = (
+        Retry::layer("bench", &context)
+            .clone_input()
+            .base_delay(Duration::ZERO)
+            .recovery_with(|_, _| RecoveryInfo::retry()),
+        Execute::new(|v: Input| async move { Output::from(v) }),
+    )
+        .build();
+    let operation = session.operation("retry-telemetry");
+    group.bench_function("retry-telemetry", |b| {
         b.iter(|| {
             let _span = operation.measure_thread();
             _ = block_on(service.execute(Input));
@@ -63,59 +65,10 @@ fn entry(c: &mut Criterion) {
 criterion_group!(benches, entry);
 criterion_main!(benches);
 
-struct NoObservability<S>(S);
-
-impl<S> Service<Input> for NoObservability<S>
-where
-    S: Service<Input, Out = Output>,
-{
-    type Out = Output;
-
-    async fn execute(&self, input: Input) -> Self::Out {
-        self.0.execute(input).await
-    }
-}
-
-struct Observability<S> {
-    service: S,
-    event_reporter: Counter<u64>,
-    pipeline_name: StringValue,
-}
-
-impl<S> Observability<S> {
-    pub fn new(context: &Context<Input, Output>, service: S) -> Self {
-        Self {
-            service,
-            event_reporter: context.create_resilience_event_counter(),
-            pipeline_name: context.get_pipeline_name().clone().into(),
-        }
-    }
-}
-
-impl<S> Service<Input> for Observability<S>
-where
-    S: Service<Input, Out = Output>,
-{
-    type Out = Output;
-
-    async fn execute(&self, input: Input) -> Self::Out {
-        let output = self.service.execute(input).await;
-
-        self.event_reporter.add(
-            1,
-            &[
-                KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                KeyValue::new(STRATEGY_NAME, "benchmark.observability"),
-                KeyValue::new(EVENT_NAME, "custom"),
-            ],
-        );
-
-        output
-    }
-}
-
+#[derive(Debug, Clone)]
 struct Input;
 
+#[derive(Debug, Clone)]
 struct Output;
 
 impl From<Input> for Output {

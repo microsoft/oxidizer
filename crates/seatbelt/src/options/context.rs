@@ -30,31 +30,17 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// Basic usage:
 ///
 /// ```rust
-/// # use opentelemetry::KeyValue;
 /// # use opentelemetry::metrics::MeterProvider;
 /// # use seatbelt::Context;
-/// # use seatbelt::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 /// # use tick::Clock;
 /// # fn example(clock: Clock, meter_provider: &dyn MeterProvider) {
+/// // Create a context for a resilience pipeline
 /// let ctx = Context::<String, String>::new(&clock)
 ///     .pipeline_name("auth_pipeline")
 ///     .meter_provider(meter_provider);
 ///
-/// // Use the clock for timing operations
-/// let start = ctx.get_clock().instant();
-///
-/// // Create an event reporter
-/// let resilience_counter = ctx.create_resilience_event_counter();
-///
-/// // Report an event with required attributes
-/// resilience_counter.add(
-///     1,
-///     &[
-///         KeyValue::new(PIPELINE_NAME, ctx.get_pipeline_name().clone()),
-///         KeyValue::new(STRATEGY_NAME, "my_strategy"),
-///         KeyValue::new(EVENT_NAME, "my_event"),
-///     ],
-/// );
+/// // Pass the context to resilience middleware layers
+/// // (e.g., Retry::layer("my_retry", &ctx), Timeout::layer("my_timeout", &ctx))
 /// # }
 /// ```
 ///
@@ -122,7 +108,7 @@ impl<In, Out> Context<In, Out> {
     /// Middlewares use this to measure durations, track timeouts, and perform
     /// other time-related operations from a consistent source.
     #[must_use]
-    pub fn get_clock(&self) -> &Clock {
+    pub(crate) fn get_clock(&self) -> &Clock {
         &self.clock
     }
 
@@ -140,7 +126,7 @@ impl<In, Out> Context<In, Out> {
 
     /// Get the configured pipeline name (`default` if not set).
     #[must_use]
-    pub fn get_pipeline_name(&self) -> &Cow<'static, str> {
+    pub(crate) fn get_pipeline_name(&self) -> &Cow<'static, str> {
         &self.pipeline_name
     }
 
@@ -161,7 +147,7 @@ impl<In, Out> Context<In, Out> {
     /// - Version: `v0.1.0`
     /// - Schema URL: `https://opentelemetry.io/schemas/1.47.0`
     #[must_use]
-    pub fn get_meter(&self) -> &Meter {
+    pub(crate) fn get_meter(&self) -> &Meter {
         &self.meter
     }
 
@@ -177,30 +163,8 @@ impl<In, Out> Context<In, Out> {
     /// - [`PIPELINE_NAME`][crate::telemetry::PIPELINE_NAME]: The name of the pipeline this middleware belongs to
     /// - [`STRATEGY_NAME`][crate::telemetry::STRATEGY_NAME]: The name of the specific strategy/middleware
     /// - [`EVENT_NAME`][crate::telemetry::EVENT_NAME]: The name of the event being reported
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use tick::Clock;
-    /// # use opentelemetry::KeyValue;
-    /// # use opentelemetry::metrics::Meter;
-    /// # use seatbelt::Context;
-    /// # use seatbelt::telemetry::{PIPELINE_NAME, STRATEGY_NAME, EVENT_NAME};
-    /// # fn example(context: &Context<(), ()>) {
-    /// let counter = context.create_resilience_event_counter();
-    ///
-    /// counter.add(
-    ///     1,
-    ///     &[
-    ///         KeyValue::new(PIPELINE_NAME, "my_pipeline"),
-    ///         KeyValue::new(STRATEGY_NAME, "my_strategy"),
-    ///         KeyValue::new(EVENT_NAME, "my_event"),
-    ///     ],
-    /// );
-    /// # }
-    /// ```
     #[must_use]
-    pub fn create_resilience_event_counter(&self) -> Counter<u64> {
+    pub(crate) fn create_resilience_event_counter(&self) -> Counter<u64> {
         create_resilience_event_counter(self.get_meter())
     }
 }
