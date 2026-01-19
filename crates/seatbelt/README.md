@@ -21,7 +21,7 @@ that can automatically handle timeouts, retries, and other failure scenarios.
 
 ## Runtime Agnostic Design
 
-The seatbelt crate is designed to be **runtime agnostic** and works seamlessly across any
+The `seatbelt` crate is designed to be **runtime agnostic** and works seamlessly across any
 async runtime. This flexibility allows you to use the same resilience patterns across
 different projects and migrate between runtimes without changing your resilience patterns.
 
@@ -67,7 +67,7 @@ let result = service.execute("input data".to_string()).await;
  > operations like delays, timeouts, and backoff calculations. The clock is passed through
  > [`Context`][__link4] when creating middleware layers.
 
-See [Built-in Middlewares](#built-in-middleware) for more details.
+See [Built-in Middleware](#built-in-middleware) for more details.
 
 ## Recovery Metadata
 
@@ -105,7 +105,7 @@ This crate supports several optional features that can be enabled to extend func
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2dhk5l0Ky--G-zcUMSmDnfBG6s2B3IYE_rxGzkEJPiyOJeqYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1hGrYSwKcJlG5sEnPybj4Z2G2k1NmMcyogWG2e6c2EE42AfYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
  [__link0]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link1]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
  [__link10]: https://crates.io/crates/tick/0.1.2
