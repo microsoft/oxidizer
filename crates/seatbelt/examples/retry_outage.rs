@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 
+#![expect(clippy::unwrap_used, reason = "sample code")]
+
 //! Demonstrates advanced retry patterns with input restoration from errors.
 //!
 //! This example showcases how to handle outage scenarios where:

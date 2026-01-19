@@ -35,13 +35,11 @@ impl MetricTester {
     }
 
     #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "TODO")]
     pub fn collect_attributes(&self) -> Vec<KeyValue> {
         self.provider.force_flush().unwrap();
         collect_attributes(&self.exporter)
     }
 
-    #[expect(clippy::missing_panics_doc, reason = "TODO")]
     pub fn assert_attributes(&self, key_values: &[KeyValue], expected_length: Option<usize>) {
         let attributes = self.collect_attributes();
 

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+#![expect(clippy::unwrap_used, reason = "sample code")]
 
 //! Simple timeout resilience middleware example.
 //!
