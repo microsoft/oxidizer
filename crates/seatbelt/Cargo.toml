@@ -21,13 +21,12 @@ all-features = true
 
 [features]
 default = []
+timeout = ["_middleware"]
+retry = ["_middleware", "dep:fastrand"]
+circuit = ["_middleware", "dep:fastrand"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
-# This exposes a common APIs for building resilience middlewares.
-options = ["dep:tick", "dep:layered", "metrics", "logs"]
-timeout = ["options"]
-retry = ["options", "dep:fastrand"]
-circuit = ["options", "dep:fastrand"]
+_middleware = ["dep:tick", "dep:layered", "metrics", "logs"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
@@ -87,7 +86,7 @@ required-features = ["circuit"]
 [[bench]]
 name = "observability"
 harness = false
-required-features = ["options"]
+required-features = ["_middleware"]
 
 [[bench]]
 name = "timeout"

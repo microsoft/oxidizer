@@ -99,34 +99,31 @@
 //!
 //! This crate supports several optional features that can be enabled to extend functionality:
 //!
-//! - `options`: Enables common APIs for building resilience middleware, including [`Context`].
-//!   Requires [`tick`] for timing operations.
-//! - `service`: Re-exports common types for building middleware from [`layered`] crate.
-//! - `telemetry`: Enables telemetry and observability features using OpenTelemetry for monitoring
-//!   resilience operations.
-//! - `metrics`: Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
+
 //! - `timeout`: Enables the [`timeout`] middleware for canceling long-running operations.
 //! - `retry`: Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
 //! - `circuit`: Enables the [`circuit`] middleware for preventing cascading failures.
+//! - `metrics`: Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
+//! - `logs`: Enables structured logging for resilience middleware using the `tracing` crate.
 
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
-#[cfg(any(feature = "options", test))]
+#[cfg(any(feature = "_middleware", test))]
 pub(crate) mod options;
 
-#[cfg(any(feature = "options", test))]
+#[cfg(any(feature = "_middleware", test))]
 pub(crate) use options::EnableIf;
-#[cfg(any(feature = "options", test))]
+#[cfg(any(feature = "_middleware", test))]
 pub(crate) use options::define_fn_wrapper;
 
 #[cfg(any(feature = "retry", test))]
 pub(crate) use crate::options::MaxAttempts;
-#[cfg(any(feature = "options", test))]
+#[cfg(any(feature = "_middleware", test))]
 pub use crate::options::{Attempt, Backoff, Context, NotSet, Set};
 
-#[cfg(any(feature = "options", test))]
+#[cfg(any(feature = "_middleware", test))]
 pub mod telemetry;
 
 #[cfg(any(feature = "timeout", test))]
@@ -139,7 +136,7 @@ pub mod retry;
 pub mod circuit;
 
 #[doc(inline)]
-#[cfg(any(feature = "options", test))]
+#[cfg(any(feature = "_middleware", test))]
 pub use layered::{Layer, Service, Stack};
 
 #[cfg(any(feature = "retry", feature = "circuit", test))]
