@@ -15,7 +15,7 @@ use crate::circuit::engine::probing::ProbesOptions;
 /// Currently, two modes are supported:
 ///
 /// - [`HalfOpenMode::quick`]: Allows a single probe request to determine if the service has recovered.
-/// - [`HalfOpenMode::reliable`](default): Gradually increases the percentage of probing requests over multiple stages.
+/// - [`HalfOpenMode::reliable`]: Gradually increases the percentage of probing requests over multiple stages (default).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HalfOpenMode {
     inner: Mode,
@@ -52,7 +52,7 @@ impl HalfOpenMode {
     /// # Arguments
     ///
     /// - `stage_duration` - Optional custom stage duration for each probing stage. If not provided,
-    ///   the value of [`break_duration`][CircuitBreakerLayer::break_duration] is used. The provided stage
+    ///   the value of [`break_duration`][crate::circuit::CircuitLayer::break_duration] is used. The provided stage
     ///   duration is clamped to a minimum of 1 second.
     #[must_use]
     pub fn reliable(stage_duration: impl Into<Option<Duration>>) -> Self {

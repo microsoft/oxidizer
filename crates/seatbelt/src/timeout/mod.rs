@@ -80,7 +80,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted when a timeout occurs
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`][crate::Context::pipeline_name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
 //!   - `resilience.event.name`: Always `timeout`
 //!

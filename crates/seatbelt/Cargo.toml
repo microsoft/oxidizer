@@ -42,7 +42,6 @@ tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloc_tracker.workspace = true
-anyhow.workspace = true
 criterion.workspace = true
 fastrand.workspace = true
 futures = { workspace = true, features = ["executor"] }

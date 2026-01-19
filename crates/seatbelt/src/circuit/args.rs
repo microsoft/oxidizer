@@ -7,7 +7,7 @@ use tick::Clock;
 
 use crate::circuit::PartitionKey;
 
-/// Arguments for the [`recovery_with`][super::CircuitBreakerLayer::recovery_with] callback function.
+/// Arguments for the [`recovery_with`][super::CircuitLayer::recovery_with] callback function.
 ///
 /// Provides context for recovery classification in the circuit breaker.
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl RecoveryArgs<'_> {
     }
 }
 
-/// Arguments for the [`rejected_input`][super::CircuitBreakerLayer::rejected_input] callback function.
+/// Arguments for the [`rejected_input`][super::CircuitLayer::rejected_input] callback function.
 ///
 /// Provides context for generating outputs when the inputs are rejected by the circuit breaker.
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl RejectedInputArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_probing`][super::CircuitBreakerLayer::on_probing] callback function.
+/// Arguments for the [`on_probing`][super::CircuitLayer::on_probing] callback function.
 ///
 /// Provides context when the circuit breaker enters the probing state to test if the service has recovered.
 #[derive(Debug)]
@@ -64,7 +64,7 @@ impl OnProbingArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_closed`][super::CircuitBreakerLayer::on_closed] callback function.
+/// Arguments for the [`on_closed`][super::CircuitLayer::on_closed] callback function.
 ///
 /// Provides context when the circuit breaker transitions to the closed state, allowing normal operation.
 #[derive(Debug)]
@@ -88,7 +88,7 @@ impl OnClosedArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_opened`][super::CircuitBreakerLayer::on_opened] callback function.
+/// Arguments for the [`on_opened`][super::CircuitLayer::on_opened] callback function.
 ///
 /// Provides context when the circuit breaker transitions to the open state, blocking requests due to failures.
 #[derive(Debug)]

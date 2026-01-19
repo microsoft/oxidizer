@@ -166,7 +166,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted when circuit state transitions occur and when requests are rejected
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`][crate::Context::pipeline_name]
 //!   - `resilience.strategy.name`: Circuit breaker identifier from [`Circuit::layer`]
 //!   - `resilience.event.name`: One of:
 //!     - `circuit_opened`: When the circuit transitions to open state due to failure threshold being exceeded

@@ -1360,7 +1360,6 @@ name = "seatbelt"
 version = "0.1.0"
 dependencies = [
  "alloc_tracker",
- "anyhow",
  "criterion",
  "fastrand",
  "futures",

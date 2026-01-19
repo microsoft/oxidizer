@@ -90,7 +90,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted for each attempt that should be retried (including the final retry attempt)
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`][crate::Context::pipeline_name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Retry::layer`]
 //!   - `resilience.event.name`: Always `retry`
 //!   - `resilience.attempt.index`: Attempt index (0-based)
