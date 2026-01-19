@@ -3,6 +3,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(feature = "app-err"), expect(rustdoc::broken_intra_doc_links))]
 #![expect(clippy::doc_markdown, reason = "AppError in header doesn't look good with backticks")]
 
 //! High-quality error handling for Rust.

@@ -31,7 +31,6 @@ ohno_macros.workspace = true
 typeid.workspace = true
 
 [dev-dependencies]
-anyhow.workspace = true
 futures.workspace = true
 mutants.workspace = true
 regex = { workspace = true, features = [ "unicode-perl"] }
