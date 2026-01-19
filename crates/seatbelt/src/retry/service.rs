@@ -260,7 +260,7 @@ mod tests {
     use super::*;
     use crate::options::Backoff;
     use crate::retry::RetryLayer;
-    use crate::service::Layer;
+    use crate::Layer;
     use crate::testing::MetricTester;
     use crate::{Context, Set};
 

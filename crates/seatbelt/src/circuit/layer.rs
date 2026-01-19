@@ -12,7 +12,7 @@ use super::{
     PartionKeyProvider, PartitionKey, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
 use crate::circuit::engine::probing::ProbesOptions;
-use crate::service::Layer;
+use crate::Layer;
 use crate::{Context, EnableIf, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.

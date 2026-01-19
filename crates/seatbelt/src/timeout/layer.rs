@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use opentelemetry::StringValue;
 
-use crate::service::Layer;
+use crate::Layer;
 use crate::timeout::{
     OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
 };

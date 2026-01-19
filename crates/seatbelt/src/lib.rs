@@ -138,12 +138,9 @@ pub mod retry;
 #[cfg(any(feature = "circuit", test))]
 pub mod circuit;
 
-/// Re-exported types from the [`layered`] crate.
+#[doc(inline)]
 #[cfg(any(feature = "service", test))]
-pub mod service {
-    #[doc(inline)]
-    pub use layered::{Layer, Service, Stack};
-}
+pub use layered::{Layer, Service, Stack};
 
 #[cfg(any(feature = "retry", feature = "circuit", test))]
 mod rnd;

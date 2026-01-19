@@ -172,7 +172,7 @@ mod tests {
     use super::*;
     use crate::circuit::constants::DEFAULT_BREAK_DURATION;
     use crate::circuit::{EngineFake, HalfOpenMode, HealthInfo, Stats};
-    use crate::service::Layer;
+    use crate::Layer;
     use crate::{Context, RecoveryInfo, Set};
 
     #[test]
