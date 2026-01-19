@@ -5,9 +5,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/favicon.ico")]
-#![expect(
-    rustdoc::broken_intra_doc_links,
-    reason = "Too ugly to make 'live links' possible with the combination of features"
+#![cfg_attr(
+    not(all(feature = "retry", feature = "timeout", feature = "circuit")),
+    expect(
+        rustdoc::broken_intra_doc_links,
+        reason = "too ugly to make 'live links' possible with the combination of features"
+    )
 )]
 
 //! Resilience and fault handling for applications and libraries.

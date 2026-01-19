@@ -6,9 +6,9 @@ use layered::Service;
 use tick::Clock;
 
 use super::{
-    CircuitLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed,
-    OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput,
-    RejectedInputArgs, ShouldRecover,
+    CircuitEngine, CircuitLayer, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed, OnClosedArgs,
+    OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput, RejectedInputArgs,
+    ShouldRecover,
 };
 use crate::{EnableIf, NotSet};
 
