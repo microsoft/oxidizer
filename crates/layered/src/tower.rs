@@ -177,7 +177,7 @@ mod tests {
         let mut mock_adapter = Adapter(mock_service);
 
         let waker = futures::task::noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
+        let mut cx = Context::from_waker(&waker);
 
         assert_eq!(TowerService::poll_ready(&mut mock_adapter, &mut cx), Poll::Ready(Ok(())));
     }
@@ -190,7 +190,7 @@ mod tests {
         let mut adapter = Adapter(mock_service);
 
         let waker = futures::task::noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
+        let mut cx = Context::from_waker(&waker);
 
         let result1 = TowerService::poll_ready(&mut adapter, &mut cx);
         let result2 = Poll::from(Ok::<(), String>(()));
