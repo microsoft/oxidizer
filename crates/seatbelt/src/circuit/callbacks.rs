@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use super::{OnClosedArgs, OnOpenedArgs, OnProbingArgs, PartitionKey, RecoveryArgs, RejectedInputArgs};
 use crate::RecoveryInfo;

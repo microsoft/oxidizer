@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

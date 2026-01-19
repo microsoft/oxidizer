@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 pub(super) const CIRCUIT_OPENED_EVENT_NAME: &str = "circuit_opened";
 pub(super) const CIRCUIT_CLOSED_EVENT_NAME: &str = "circuit_closed";

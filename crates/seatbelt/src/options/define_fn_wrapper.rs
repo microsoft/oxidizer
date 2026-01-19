@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// A macro to generate `Fn` like wrapper types with consistent patterns.
 ///

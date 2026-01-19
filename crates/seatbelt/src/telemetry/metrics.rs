@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use opentelemetry::InstrumentationScope;
 use opentelemetry::metrics::{Counter, Meter, MeterProvider};

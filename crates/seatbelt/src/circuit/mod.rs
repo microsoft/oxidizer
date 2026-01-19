@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Circuit breaker resilience middleware for preventing cascading failures.
 //!

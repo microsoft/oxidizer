@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// A flag indicating that the required property is set.
 #[non_exhaustive]

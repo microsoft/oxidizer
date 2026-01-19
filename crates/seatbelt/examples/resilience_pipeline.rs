@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates how to combine multiple resilience middlewares
 //! using the `seatbelt` crate to create a robust execution pipeline with basic

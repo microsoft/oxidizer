@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Advanced retry middleware demonstrating custom input cloning and attempt info forwarding.
 //!

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Timeout resilience middleware for services, applications, and libraries.
 //!

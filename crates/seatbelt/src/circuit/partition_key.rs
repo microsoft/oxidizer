@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;

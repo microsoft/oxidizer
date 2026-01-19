@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use super::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 use crate::RecoveryInfo;

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Basic retry middleware example with automatic input cloning and simple recovery logic.
 

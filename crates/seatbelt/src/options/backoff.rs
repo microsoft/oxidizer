@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// Defines the backoff strategy used by resilience middleware for retry operations.
 ///

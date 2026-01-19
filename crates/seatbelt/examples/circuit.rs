@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Circuit breaker example that simulates a major service outage and tripping of the
 //! circuit breaker by:
