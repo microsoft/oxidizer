@@ -651,6 +651,15 @@ mod tests {
     }
 
     #[test]
+    fn debug_intercept_future() {
+        let future: InterceptFuture<String> = InterceptFuture {
+            inner: Box::pin(async { "test".to_string() }),
+        };
+        let debug_str = format!("{future:?}");
+        assert!(debug_str.contains("InterceptFuture"));
+    }
+
+    #[test]
     fn short_circuit_layered() {
         let stack = (
             Intercept::layer().input_control_flow(|_: String| ControlFlow::Break("rejected".into())),
