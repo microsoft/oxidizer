@@ -1,0 +1,31 @@
+trigger:
+- main
+
+parameters:
+- name: validationOsList
+  type: object
+  default:
+  - linux
+- name: validationProfiles
+  type: object
+  default:
+  - dev
+- name: previousVersion
+  type: string
+  default: 'HEAD^'
+
+resources:
+  repositories:
+  # Internal repository that hosts the publishing template
+  - repository: ox-sdk
+    type: git
+    name: ox-sdk
+    ref: refs/heads/master
+
+extends:
+  template: .pipelines/templates/OxidizerGitHub.Publish.yml@ox-sdk
+  parameters:
+    validationOsList: ${{ parameters.validationOsList }}
+    validationProfiles: ${{ parameters.validationProfiles }}
+    previousVersion: ${{ parameters.previousVersion }}
+    pipelineType: 'Testing'
