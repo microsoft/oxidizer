@@ -10,6 +10,7 @@ parameters:
   type: object
   default:
   - dev
+  - release
 - name: previousVersion
   type: string
   default: 'HEAD^'
@@ -20,7 +21,7 @@ resources:
   - repository: ox-sdk
     type: git
     name: ox-sdk
-    ref: refs/heads/master
+    ref: refs/heads/u/makolnek/esrp-gh-publish
 
 extends:
   template: .pipelines/templates/OxidizerGitHub.Publish.yml@ox-sdk

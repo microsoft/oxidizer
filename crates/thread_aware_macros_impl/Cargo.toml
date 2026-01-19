@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware_macros_impl"
 description = "Macros for the thread_aware crate."
-version = "0.0.1"
+version = "0.0.2"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware", "macro", "derive"]
 categories = ["data-structures"]
