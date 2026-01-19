@@ -39,12 +39,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
-name = "anyhow"
-version = "1.0.100"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
-
-[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -917,7 +911,6 @@ dependencies = [
 name = "ohno"
 version = "0.2.1"
 dependencies = [
- "anyhow",
  "futures",
  "mutants",
  "ohno_macros",
@@ -1587,7 +1580,6 @@ dependencies = [
 name = "tick"
 version = "0.1.2"
 dependencies = [
- "anyhow",
  "chrono",
  "chrono-tz",
  "criterion",
@@ -1595,6 +1587,7 @@ dependencies = [
  "futures-core",
  "jiff",
  "mutants",
+ "ohno",
  "pin-project-lite",
  "serde",
  "serde_core",
