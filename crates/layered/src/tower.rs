@@ -152,21 +152,14 @@ where
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use tower::service_fn;
     use tower_service::Service as TowerService;
 
     use super::*;
     use crate::testing::MockService;
+    use std::task::Poll;
 
-    #[test]
-    fn adapt_tower_ok() {
-        let service = service_fn(|req: u32| async move { Ok::<_, ()>(req + 1) });
-        let service = Adapter(service);
-
-        let result = block_on(service.execute(0));
-
-        assert_eq!(result, Ok(1));
-    }
+    // Public API tests have been moved to tests/tower.rs
+    // Internal tests that use MockService remain here
 
     #[test]
     fn adapt_tower_ensure_poll_error_respected() {
@@ -179,51 +172,14 @@ mod tests {
     }
 
     #[test]
-    fn adapt_oxidizer_ok() {
-        let mock_service = MockService::new(Poll::Ready(Ok(())), Ok("success".to_string()));
-        let mut service = Adapter(mock_service);
-
-        let result = block_on(async move { service.call("request".to_string()).await });
-
-        assert_eq!(result, Ok("success".to_string()));
-    }
-
-    #[test]
-    fn poll_ready_always_returns_ready_ok() {
-        let mock_service = MockService::new(Poll::Ready(Ok(())), Ok("success".to_string()));
-        let mut adapter = Adapter(mock_service);
-
-        let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
-
-        let result = adapter.poll_ready(&mut cx);
-        assert_eq!(result, Poll::Ready(Ok(())));
-    }
-
-    #[test]
-    fn poll_ready_consistent_behavior() {
-        let mock_service = MockService::new(Poll::Ready(Ok(())), Ok("success".to_string()));
-        let mut adapter = Adapter(mock_service);
-
-        let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
-
-        // Multiple calls should return the same result
-        for _ in 0..3 {
-            let result = adapter.poll_ready(&mut cx);
-            assert_eq!(result, Poll::Ready(Ok(())));
-        }
-    }
-
-    #[test]
     fn poll_ready_with_mock_service() {
         let mock_service = MockService::new(Poll::Ready(Ok(())), Ok("success".to_string()));
         let mut mock_adapter = Adapter(mock_service);
 
         let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = std::task::Context::from_waker(&waker);
 
-        assert_eq!(mock_adapter.poll_ready(&mut cx), Poll::Ready(Ok(())));
+        assert_eq!(TowerService::poll_ready(&mut mock_adapter, &mut cx), Poll::Ready(Ok(())));
     }
 
     #[test]
@@ -234,9 +190,9 @@ mod tests {
         let mut adapter = Adapter(mock_service);
 
         let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = std::task::Context::from_waker(&waker);
 
-        let result1 = adapter.poll_ready(&mut cx);
+        let result1 = TowerService::poll_ready(&mut adapter, &mut cx);
         let result2 = Poll::from(Ok::<(), String>(()));
 
         // Both should be Poll::Ready(Ok(()))
@@ -253,15 +209,5 @@ mod tests {
         let result = block_on(service.execute("request".to_string()));
 
         assert_eq!(result, Err("service unavailable".to_string()));
-    }
-
-    #[test]
-    fn tower_layer_adapter() {
-        use crate::{Execute, Stack};
-        use tower_layer::Identity;
-
-        let stack = (tower_layer(Identity::new()), Execute::new(|x: i32| async move { Ok::<_, ()>(x) }));
-        let svc = stack.build();
-        assert_eq!(block_on(svc.execute(42)), Ok(42));
     }
 }

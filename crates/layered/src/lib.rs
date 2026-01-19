@@ -54,19 +54,23 @@
 //!
 //! ## Key Concepts
 //!
-//! - **Service**: An async function `In → Out` that processes inputs.
-//! - **Middleware**: A service that wraps another service to add behavior (logging, timeouts, retries).
-//! - **Layer**: A factory that wraps any service with middleware. Stack layers using tuples
-//!   like `(layer1, layer2, service)`.
+//! - **Service**: A type implementing the [`Service`] trait that transforms inputs into outputs
+//!   asynchronously. Think of it as `async fn(&self, In) -> Out`.
+//! - **Middleware**: A service that wraps another service to add cross-cutting behavior such as
+//!   logging, timeouts, or retries. Middleware receives requests before the inner service and can
+//!   process responses after.
+//! - **Layer**: A type implementing the [`Layer`] trait that constructs middleware around a
+//!   service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
 //!
 //! ## Layers and Middleware
 //!
-//! A [`Layer`] wraps a service with additional behavior:
+//! A [`Layer`] wraps a service with additional behavior. In this example, we create a logging
+//! middleware that prints inputs before passing them to the inner service:
 //!
 //! ```
 //! use layered::{Execute, Layer, Service, Stack};
 //!
-//! // A simple logging layer
+//! // A layer that creates logging middleware
 //! struct LogLayer;
 //!
 //! impl<S> Layer<S> for LogLayer {
@@ -77,6 +81,7 @@
 //!     }
 //! }
 //!
+//! // The middleware service that wraps another service
 //! struct LogService<S>(S);
 //!
 //! impl<S, In: Send + std::fmt::Display> Service<In> for LogService<S>
@@ -109,9 +114,12 @@
 //!
 //! ## Features
 //!
-//! - **`intercept`**: Enables [`Intercept`] middleware
-//! - **`dynamic-service`**: Enables [`DynamicService`] for type erasure
-//! - **`tower-service`**: Enables Tower interoperability via the [`tower`] module
+#![cfg_attr(feature = "intercept", doc = "//! - **`intercept`**: Enables [`Intercept`] middleware")]
+#![cfg_attr(not(feature = "intercept"), doc = "//! - **`intercept`**: Enables `Intercept` middleware")]
+#![cfg_attr(feature = "dynamic-service", doc = "//! - **`dynamic-service`**: Enables [`DynamicService`] for type erasure")]
+#![cfg_attr(not(feature = "dynamic-service"), doc = "//! - **`dynamic-service`**: Enables `DynamicService` for type erasure")]
+#![cfg_attr(feature = "tower-service", doc = "//! - **`tower-service`**: Enables Tower interoperability via the [`tower`] module")]
+#![cfg_attr(not(feature = "tower-service"), doc = "//! - **`tower-service`**: Enables Tower interoperability via the `tower` module")]
 
 mod service;
 pub use service::Service;
