@@ -14,7 +14,7 @@ use crate::{Backoff, Context, EnableIf, MaxAttempts, NotSet, Recovery, RecoveryI
 /// Builder for configuring retry resilience middleware.
 ///
 /// This type is created by calling [`Retry::layer`](crate::retry::Retry::layer) and uses the
-/// typestate pattern to enforce that required properties are configured before the retry middleware can be built:
+/// type-state pattern to enforce that required properties are configured before the retry middleware can be built:
 ///
 /// - [`clone_input`][RetryLayer::clone_input]: Required to specify how to clone inputs for retry attempts
 /// - [`recovery`][RetryLayer::recovery]: Required to determine if an output should trigger a retry
@@ -59,7 +59,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     ///
     /// This specifies the maximum number of retry attempts in addition to the original call.
     /// For example, if `max_retry_attempts` is 3, the operation will be attempted up to
-    /// 4 times total (1 original + 3 retries).
+    /// 4 times total (1 original `+` 3 retries).
     ///
     /// **Default**: 3 retry attempts
     #[must_use]
@@ -84,8 +84,8 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     /// Sets the backoff strategy for delay calculation.
     ///
     /// - [`Backoff::Constant`]: Same delay between all retries
-    /// - [`Backoff::Linear`]: Linearly increasing delay (`base_delay` × attempt)
-    /// - [`Backoff::Exponential`]: Exponentially increasing delay (`base_delay` × 2^attempt)
+    /// - [`Backoff::Linear`]: Linearly increasing delay (`base_delay` `×` attempt)
+    /// - [`Backoff::Exponential`]: Exponentially increasing delay (`base_delay × 2^attempt`)
     ///
     /// **Default**: [`Backoff::Exponential`]
     #[must_use]

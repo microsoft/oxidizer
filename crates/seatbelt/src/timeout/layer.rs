@@ -14,7 +14,7 @@ use crate::{Context, EnableIf, NotSet, Set};
 /// Builder for configuring timeout resilience middleware.
 ///
 /// This type is created by calling [`Timeout::layer`](crate::timeout::Timeout::layer) and uses the
-/// typestate pattern to enforce that required properties are configured before the timeout middleware can be built:
+/// type-state pattern to enforce that required properties are configured before the timeout middleware can be built:
 ///
 /// - [`timeout_output`][TimeoutLayer::timeout_output]: Required to specify how to represent output values when a timeout occurs
 /// - [`timeout`][TimeoutLayer::timeout]: Required to set the timeout duration for operations

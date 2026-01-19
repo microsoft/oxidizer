@@ -17,7 +17,7 @@ use crate::{Context, EnableIf, NotSet, Recovery, RecoveryInfo, Set};
 /// Builder for configuring circuit breaker resilience middleware.
 ///
 /// This type is created by calling [`Circuit::layer`] and uses the
-/// typestate pattern to enforce that required properties are configured before the circuit breaker
+/// type-state pattern to enforce that required properties are configured before the circuit breaker
 /// middleware can be built:
 ///
 /// - [`recovery`][CircuitLayer::recovery]: Required to determine if an output represents a failure
@@ -159,13 +159,13 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
     ///
     /// The circuit breaker will open when the failure rate exceeds this threshold
     /// over the sampling duration. The value should be between 0.0 and 1.0, where
-    /// 0.1 represents a 10% failure threshold. Values greater than 1.0 will be clamped to 1.0.
+    /// 0.1 represents a `10%` failure threshold. Values greater than 1.0 will be clamped to 1.0.
     ///
-    /// **Default**: 0.1 (10% failure rate)
+    /// **Default**: 0.1 (`10%` failure rate)
     ///
     /// # Arguments
     ///
-    /// * `threshold` - The failure threshold (0.0 to 1.0, values > 1.0 are clamped)
+    /// * `threshold` - The failure threshold (0.0 to 1.0, values `>` 1.0 are clamped)
     #[must_use]
     pub fn failure_threshold(mut self, threshold: f32) -> Self {
         self.failure_threshold = threshold.min(1.0);

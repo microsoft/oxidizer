@@ -100,13 +100,13 @@ fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
     secs_to_duration_saturating(new_ms / 1000.0)
 }
 
-/// Decorrelated-jitter backoff (v2): smooth exponential growth with bounded randomization.
+/// De-correlated jitter backoff (`v2`): smooth exponential growth with bounded randomization.
 ///
-/// Decorrelated Jitter V2 spreads retries evenly while preserving exponential backoff
+/// De-correlated jitter `V2` spreads retries evenly while preserving exponential backoff
 /// (with a configurable first-retry median), reducing synchronized spikes and tail-latency
-/// compared to naïve “±random” jitter.
+/// compared to naive random jitter.
 ///
-/// What does "decorrelated" mean?
+/// What does "de-correlated" mean?
 ///
 /// - Successive delays are not a direct function of the immediately previous
 ///   delay. Instead, each step samples a random phase (`t = attempt + U[0,1)`)
@@ -114,19 +114,19 @@ fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
 ///   position on that curve. This weakens correlation between consecutive
 ///   samples and reduces synchronization across many callers.
 ///
-/// What does "v2" mean?
+/// What does `v2` mean?
 ///
 /// - It refers to the second-generation formulation from
 ///   `Polly.Contrib.WaitAndRetry` (linked below). Compared to the earlier
-///   (v1) "decorrelated jitter" popularized in the AWS blog post, v2 uses a
+///   (`v1`) "de-correlated jitter" popularized in the `AWS` blog post, `v2` uses a
 ///   closed-form function combining exponential growth with a `tanh(sqrt(p*t))`
-///   taper to achieve monotonic expected growth, reduced tail latencies, and a
-///   tighter distribution—while still remaining decorrelated.
+///   taper to achieve monotonic expected growth, reduced tail latency, and a
+///   tighter distribution while still remaining de-correlated.
 ///
 /// References
-/// - [Polly V8 implementation](https://github.com/App-vNext/Polly/blob/8ba1e3ba295542cbc937d0555fadfa0d23b5c568/src/Polly.Core/Retry/RetryHelper.cs#L96)
-/// - [Polly V7 implementation](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry/blob/7596d2dacf22d88bbd814bc49c28424fb6e921e9/src/Polly.Contrib.WaitAndRetry/Backoff.DecorrelatedJitterV2.cs#L22)
-/// - [Polly.Contrib.WaitAndRetry repo](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry)
+/// - [`Polly V8` implementation](https://github.com/App-vNext/Polly/blob/8ba1e3ba295542cbc937d0555fadfa0d23b5c568/src/Polly.Core/Retry/RetryHelper.cs#L96)
+/// - [`Polly V7` implementation](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry/blob/7596d2dacf22d88bbd814bc49c28424fb6e921e9/src/Polly.Contrib.WaitAndRetry/Backoff.DecorrelatedJitterV2.cs#L22)
+/// - [`Polly.Contrib.WaitAndRetry` repo](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry)
 #[inline]
 fn decorrelated_jitter_backoff_v2(attempt: u32, base_delay: Duration, prev: &mut f64, rnd: &Rnd) -> Duration {
     // The original author/credit for this jitter formula is @george-polevoy .

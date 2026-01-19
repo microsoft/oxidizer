@@ -3,7 +3,7 @@
 //! Circuit breaker resilience middleware for preventing cascading failures.
 //!
 //! This module provides automatic circuit breaking capabilities with configurable failure
-//! thresholds, break durations, and comprehensive telemetry. The primary types are:
+//! thresholds, break duration, and comprehensive telemetry. The primary types are:
 //!
 //! - [`Circuit`] is the middleware that wraps an inner service and monitors failure rates
 //! - [`CircuitLayer`] is used to configure and construct the circuit breaker middleware
@@ -221,7 +221,7 @@
 //! ## Advanced Usage
 //!
 //! This example demonstrates advanced usage of the circuit breaker middleware, including custom
-//! failure thresholds, sampling durations, break durations, and state change callbacks.
+//! failure thresholds, sampling duration, break duration, and state change callbacks.
 //!
 //! ```rust
 //! # use std::time::Duration;

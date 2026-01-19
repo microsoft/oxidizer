@@ -14,7 +14,7 @@ const MIN_THROUGHPUT: u32 = 1;
 pub(crate) enum ProbeOptions {
     /// A single probe that allows one probe.
     ///
-    /// After the initial probe is allowed, it enters a cooldown period during which
+    /// After the initial probe is allowed, it enters a cool-down period during which
     /// no further probes are allowed.
     SingleProbe { cooldown: Duration },
 

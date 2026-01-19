@@ -30,13 +30,13 @@ impl SingleProbe {
 impl ProbeOperation for SingleProbe {
     fn allow_probe(&mut self, now: Instant) -> AllowProbeResult {
         match self.entered_at {
-            // First probe attempt - record the timestamp to start the cooldown period
+            // First probe attempt - record the timestamp to start the cool-down period
             None => {
                 self.entered_at = Some(now);
                 AllowProbeResult::Accepted
             }
-            // Cooldown has elapsed, allow the probe and reset the cooldown timer.
-            // We allow additional probe after the cooldown period to handle the case
+            // Cool-down has elapsed, allow the probe and reset the cool-down timer.
+            // We allow additional probe after the cool-down period to handle the case
             // where the probe result is not recorded due to future being dropped.
             Some(entered_at) if now.saturating_duration_since(entered_at) > self.probe_cooldown => {
                 self.entered_at = Some(now);
@@ -87,11 +87,11 @@ mod tests {
         // The first probe should be accepted
         assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
 
-        // After exactly cooldown duration, the probe should still be rejected
+        // After exactly cool-down duration, the probe should still be rejected
         let later = now + Duration::from_secs(5);
         assert_eq!(probe.allow_probe(later), AllowProbeResult::Rejected);
 
-        // After cooldown + 1 microsecond, the probe should be accepted
+        // After cool-down + 1 microsecond, the probe should be accepted
         let later = now + Duration::from_secs(5) + Duration::from_micros(1);
         assert_eq!(probe.allow_probe(later), AllowProbeResult::Accepted);
     }

@@ -64,7 +64,7 @@
 //!    is used directly.
 //!
 //! 2. **Backoff Strategy**: When no recovery delay is specified, delays are calculated using
-//!    the configured backoff strategy (Constant, Linear, or Exponential with default 2s base delay).
+//!    the configured backoff strategy (Constant, Linear, or Exponential with default `2s` base delay).
 //!
 //! # Defaults
 //!

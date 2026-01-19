@@ -2,7 +2,7 @@
 
 //! # Service Middleware Telemetry
 //!
-//! This module defines well‑known attribute / label keys used when emitting
+//! This module defines well known attribute / label keys used when emitting
 //! telemetry (metrics, traces, logs) from middleware components such as retry,
 //! timeout, bulkhead, circuit breaker, and fallback pipelines.
 //!

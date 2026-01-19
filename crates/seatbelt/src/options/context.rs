@@ -23,7 +23,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// pipeline attribute, making dashboards and analysis easier.
 ///
 /// You can also override the meter provider via [`meter_provider`](Self::meter_provider)
-/// if you need a non-global provider (e.g., tests or custom SDK wiring).
+/// if you need a non-global provider (e.g., tests or custom SDKs wiring).
 ///
 /// # Examples
 ///
@@ -46,7 +46,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 ///
 /// # Authoring Resilience `Middlewares`
 ///
-/// This crate’s primitives are designed to make writing custom resilience middleware
+/// This crate primitives are designed to make writing custom resilience middleware
 /// straightforward and observable. Pass a shared [`Context`] to each
 /// middleware that needs telemetry. You can keep a single instance (or derive child
 /// scopes from it) to group related middleware under one logical parent so their
@@ -68,7 +68,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// 4. Report events at key decision points (retries, circuit breaker trips, timeouts, …)
 /// 5. Use recovery metadata from error types to make informed retry/backoff decisions
 ///
-/// > Note: The canonical, in‑depth description of the Oxidizer middleware / service
+/// > Note: The canonical, in depth description of the Oxidizer middleware / service
 /// > layering pattern lives in the [`layered`] crate documentation. Resilience
 /// > middleware in this crate is expected to follow that same pattern (layer types
 /// > implementing `Layer`, constructors taking the next service, no hidden global
@@ -105,7 +105,7 @@ impl<In, Out> Context<In, Out> {
 
     /// Get the configured clock for timing operations.
     ///
-    /// Middlewares use this to measure durations, track timeouts, and perform
+    /// Middleware use this to measure duration, track timeouts, and perform
     /// other time-related operations from a consistent source.
     #[must_use]
     pub(crate) fn get_clock(&self) -> &Clock {

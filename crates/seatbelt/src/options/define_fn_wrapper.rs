@@ -4,7 +4,7 @@
 ///
 /// This macro generates a type that wraps a function in an `Arc<dyn Fn...>`,
 /// providing `Clone`, `Debug`, and convenient constructor methods. We need this to allow storing
-/// user-provided functions (e.g., predicates) in a thread-safe, cloneable way.
+/// user-provided functions (e.g., predicates) in a thread-safe, clonable way.
 ///
 /// # Syntax
 ///

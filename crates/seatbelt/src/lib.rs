@@ -21,7 +21,7 @@
 //!
 //! # Runtime Agnostic Design
 //!
-//! The seatbelt crate is designed to be **runtime agnostic** and works seamlessly across any
+//! The `seatbelt` crate is designed to be **runtime agnostic** and works seamlessly across any
 //! async runtime. This flexibility allows you to use the same resilience patterns across
 //! different projects and migrate between runtimes without changing your resilience patterns.
 //!
@@ -78,7 +78,7 @@
 //! > operations like delays, timeouts, and backoff calculations. The clock is passed through
 //! > [`Context`] when creating middleware layers.
 //!
-//! See [Built-in Middlewares](#built-in-middleware) for more details.
+//! See [Built-in Middleware](#built-in-middleware) for more details.
 //!
 //! # Recovery Metadata
 //!
