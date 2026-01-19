@@ -151,8 +151,8 @@ pub mod closure;
 #[cfg(feature = "threads")]
 pub mod registry;
 
+pub mod abstractions;
 pub mod affinity;
-pub mod traits;
 
 #[doc(inline)]
 pub use core::ThreadAware;

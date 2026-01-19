@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Traits for thread-aware types.
+//! Core abstractions for thread-aware types.
 //!
 //! This module provides a separate reexport of the [`ThreadAware`] trait, which is also
 //! available at the crate root. The purpose of this module is to allow downstream crates
