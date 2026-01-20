@@ -1,0 +1,20 @@
+---
+source: crates/ohno_macros/src/enrich_err/tests.rs
+expression: format_tokens(result)
+---
+async fn test_function() -> Result<(), OhnoErrorType> {
+    (async || {
+        let data = fetch_data().await?;
+        process_data(&data);
+        Ok(())
+    })()
+        .await
+        .map_err(|mut e| {
+            let msg = "error in function test_function";
+            ohno::Enrichable::add_enrichment(
+                &mut e,
+                ohno::EnrichmentEntry::new(msg, file!(), line!()),
+            );
+            e
+        })
+}

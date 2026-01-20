@@ -151,6 +151,8 @@ pub mod closure;
 #[cfg(feature = "threads")]
 pub mod registry;
 
+#[doc(hidden)]
+pub mod __private;
 pub mod affinity;
 
 #[doc(inline)]

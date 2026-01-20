@@ -33,13 +33,13 @@ fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.1.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.2.1" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.0" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.0" }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.1" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
 tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
