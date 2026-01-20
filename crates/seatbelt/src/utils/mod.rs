@@ -33,6 +33,6 @@ mod tests {
     #[test]
     fn enable_if_debug() {
         let enable_if: EnableIf<String> = EnableIf::always();
-        assert_eq!(format!("{:?}", enable_if), "EnableIf");
+        assert_eq!(format!("{enable_if:?}"), "EnableIf");
     }
 }
