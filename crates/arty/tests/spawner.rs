@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(missing_docs)]
 #![cfg(any(feature = "tokio", feature = "custom"))]
 
 //! Tests for `Spawner` implementations.
