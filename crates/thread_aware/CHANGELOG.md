@@ -4,7 +4,7 @@
 
 - ✨ Features
 
-  - migrate examples to ohno::AppError ([#213](https://github.com/microsoft/oxidizer/pull/213))
+  - Add `__private` module for selective trait reexports
 
 ## [0.6.0] - 2025-12-12
 
