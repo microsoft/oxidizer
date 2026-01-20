@@ -732,6 +732,30 @@ mod tests {
     }
 
     #[test]
+    fn infinite_retry_attempts_sets_correctly() {
+        let context = create_test_context();
+        let layer = RetryLayer::new("test".into(), &context).infinite_retry_attempts();
+        assert_eq!(layer.max_attempts, MaxAttempts::Infinite);
+    }
+
+    #[test]
+    fn restore_input_from_error_sets_correctly() {
+        let context: Context<String, Result<String, String>> = Context::new(Clock::new_frozen()).pipeline_name("test");
+        let layer = RetryLayer::new("test".into(), &context)
+            .restore_input_from_error(|e: &mut String, _| (e == "restore").then(|| std::mem::take(e)));
+
+        let restore = layer.restore_input.as_ref().unwrap();
+        let args = || RestoreInputArgs {
+            attempt: Attempt::new(1, false),
+            recovery: RecoveryInfo::retry(),
+        };
+
+        assert_eq!(restore.call(&mut Err("restore".into()), args()), Some("restore".to_string()));
+        assert_eq!(restore.call(&mut Err("other".into()), args()), None);
+        assert_eq!(restore.call(&mut Ok("success".into()), args()), None);
+    }
+
+    #[test]
     fn static_assertions() {
         static_assertions::assert_impl_all!(RetryLayer<String, String, Set, Set>: Layer<String>);
         static_assertions::assert_not_impl_all!(RetryLayer<String, String, Set, NotSet>: Layer<String>);

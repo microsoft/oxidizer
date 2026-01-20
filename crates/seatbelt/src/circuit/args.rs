@@ -104,3 +104,58 @@ impl OnOpenedArgs<'_> {
         self.partition_key
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_args_accessors() {
+        let key = PartitionKey::from("test");
+        let clock = Clock::new_frozen();
+        let args = RecoveryArgs {
+            partition_key: &key,
+            clock: &clock,
+        };
+        assert_eq!(args.partition_key(), &key);
+        let _ = args.clock();
+        assert!(format!("{args:?}").contains("RecoveryArgs"));
+    }
+
+    #[test]
+    fn rejected_input_args_accessors() {
+        let key = PartitionKey::from("rejected");
+        let args = RejectedInputArgs { partition_key: &key };
+        assert_eq!(args.partition_key(), &key);
+        assert!(format!("{args:?}").contains("RejectedInputArgs"));
+    }
+
+    #[test]
+    fn on_probing_args_accessors() {
+        let key = PartitionKey::from("probing");
+        let args = OnProbingArgs { partition_key: &key };
+        assert_eq!(args.partition_key(), &key);
+        assert!(format!("{args:?}").contains("OnProbingArgs"));
+    }
+
+    #[test]
+    fn on_closed_args_accessors() {
+        let key = PartitionKey::from("closed");
+        let duration = Duration::from_secs(5);
+        let args = OnClosedArgs {
+            partition_key: &key,
+            open_duration: duration,
+        };
+        assert_eq!(args.partition_key(), &key);
+        assert_eq!(args.open_duration(), duration);
+        assert!(format!("{args:?}").contains("OnClosedArgs"));
+    }
+
+    #[test]
+    fn on_opened_args_accessors() {
+        let key = PartitionKey::from("opened");
+        let args = OnOpenedArgs { partition_key: &key };
+        assert_eq!(args.partition_key(), &key);
+        assert!(format!("{args:?}").contains("OnOpenedArgs"));
+    }
+}
