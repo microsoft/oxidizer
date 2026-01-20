@@ -42,7 +42,7 @@ async fn main() {
     // L1 (primary) -> L2 (fallback)
     let l2_builder = Cache::builder::<String, String>(clock.clone()).memory();
 
-    let l1_builder = Cache::builder::<String, String>(clock.clone()).memory().with_fallback(l2_builder);
+    let l1_builder = Cache::builder::<String, String>(clock.clone()).memory().fallback(l2_builder);
 
     // At this point, building would give us a complex type:
     // Cache<String, String, FallbackCache<..., CacheWrapper<..., InMemoryCache<...>>, CacheWrapper<..., InMemoryCache<...>>>>

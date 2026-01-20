@@ -44,7 +44,7 @@ async fn basic_fallback(clock: &Clock, cachelon_telemetry: &CacheTelemetry) {
         .memory()
         .telemetry(cachelon_telemetry.clone(), "primary")
         .ttl(Duration::from_secs(60))
-        .with_fallback(fallback)
+        .fallback(fallback)
         .promotion_policy(FallbackPromotionPolicy::Always)
         .build();
 
@@ -71,7 +71,7 @@ async fn promotion_with_when(clock: &Clock) {
     // Uses a function pointer (most efficient when no captures needed)
     let cache = Cache::builder::<String, String>(clock.clone())
         .memory()
-        .with_fallback(Cache::builder(clock.clone()).memory())
+        .fallback(Cache::builder(clock.clone()).memory())
         .promotion_policy(FallbackPromotionPolicy::when(not_empty))
         .build();
 
@@ -92,7 +92,7 @@ async fn promotion_with_when_capturing(clock: &Clock) {
     // when_boxed() accepts closures that capture external state
     let cache = Cache::builder::<String, String>(clock.clone())
         .memory()
-        .with_fallback(Cache::builder(clock.clone()).memory())
+        .fallback(Cache::builder(clock.clone()).memory())
         .promotion_policy(FallbackPromotionPolicy::when_boxed(move |entry: &CacheEntry<String>| {
             entry.value().starts_with(&required_prefix)
         }))

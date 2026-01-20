@@ -51,7 +51,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 let clock = Clock::new_tokio();
                 let fixed = Cache::builder(clock.clone())
                     .storage(mock_with_value("key".to_string(), CacheEntry::new("blah".to_string())))
-                    .with_fallback(Cache::builder(clock.clone()).storage(MockCache::<String, String>::new()))
+                    .fallback(Cache::builder(clock.clone()).storage(MockCache::<String, String>::new()))
                     .build();
 
                 let _span = fixed_operation.measure_thread();
@@ -74,7 +74,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 let value = CacheEntry::new("blah".to_string());
                 let fixed_with_refresh = Cache::builder(clock.clone())
                     .storage(mock_with_value("key".to_string(), value.clone()))
-                    .with_fallback(Cache::builder(clock.clone()).storage(mock_with_value("key".to_string(), value)))
+                    .fallback(Cache::builder(clock.clone()).storage(mock_with_value("key".to_string(), value)))
                     .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0), &clock))
                     .build();
 
@@ -98,7 +98,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 let value = CacheEntry::new("blah".to_string());
                 let fixed_with_refresh = Cache::builder(clock.clone())
                     .storage(mock_with_value("key".to_string(), value.clone()))
-                    .with_fallback(Cache::builder(clock.clone()).storage(mock_with_value("key".to_string(), value)))
+                    .fallback(Cache::builder(clock.clone()).storage(mock_with_value("key".to_string(), value)))
                     .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(10), &clock))
                     .build();
 
@@ -224,7 +224,7 @@ fn bench_refresh_benefit(c: &mut Criterion) {
 
                 let cache = Cache::builder(clock.clone())
                     .storage(MockCache::<&'static str, &'static str>::new()) // Primary always misses
-                    .with_fallback(Cache::builder(clock.clone()).storage(slow_fallback))
+                    .fallback(Cache::builder(clock.clone()).storage(slow_fallback))
                     .build();
 
                 let _span = no_refresh_operation.measure_thread();
@@ -260,7 +260,7 @@ fn bench_refresh_benefit(c: &mut Criterion) {
                 let stale_time = clock.instant().checked_sub(Duration::from_secs(10)).unwrap();
                 let cache = Cache::builder(clock.clone())
                     .storage(mock_with_value("key", CacheEntry::with_cached_at("stale_value", stale_time)))
-                    .with_fallback(Cache::builder(clock.clone()).storage(slow_fallback))
+                    .fallback(Cache::builder(clock.clone()).storage(slow_fallback))
                     .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0), &clock))
                     .build();
 

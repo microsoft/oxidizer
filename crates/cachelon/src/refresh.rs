@@ -36,15 +36,7 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// # Examples
 ///
 /// ```ignore
-/// use cachelon::refresh::TimeToRefresh;
-/// use tick::Clock;
-/// use std::time::Duration;
-///
-/// let clock = Clock::new_frozen();
-/// let refresh = TimeToRefresh::new_tokio(
-///     Duration::from_secs(300),
-///     TokioDeps { clock }
-/// );
+/// let refresh = TimeToRefresh::new_tokio(Duration::from_secs(300), TokioDeps { clock });
 /// ```
 /// Manages time-based refresh scheduling for cached entries.
 ///

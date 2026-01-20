@@ -23,7 +23,7 @@ fn fallback_cachelon_miss_in_both() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let result = cache.get(&"nonexistent".to_string()).await;
         assert!(result.is_none());
@@ -37,7 +37,7 @@ fn fallback_cachelon_hit_in_primary() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await;
@@ -55,7 +55,7 @@ fn fallback_cachelon_insert_goes_to_both() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await;
@@ -71,7 +71,7 @@ fn fallback_cachelon_invalidate_clears_both() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await;
@@ -88,7 +88,7 @@ fn fallback_cachelon_clear() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         cache.insert(&"k1".to_string(), CacheEntry::new(1)).await;
         cache.insert(&"k2".to_string(), CacheEntry::new(2)).await;
@@ -107,7 +107,7 @@ fn fallback_cachelon_try_operations() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
 
@@ -127,7 +127,7 @@ fn fallback_cachelon_len_returns_some() {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let len = cache.len();
         assert!(len.is_some());
@@ -155,7 +155,7 @@ fn fallback_cachelon_try_insert_error_propagation() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
-            .with_fallback(fallback)
+            .fallback(fallback)
             .build();
 
         let result = cache.try_insert(&"key".to_string(), CacheEntry::new(42)).await;
@@ -175,7 +175,7 @@ fn fallback_cachelon_try_invalidate_error_propagation() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
-            .with_fallback(fallback)
+            .fallback(fallback)
             .build();
 
         let result = cache.try_invalidate(&"key".to_string()).await;
@@ -195,7 +195,7 @@ fn fallback_cachelon_try_clear_error_propagation() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
-            .with_fallback(fallback)
+            .fallback(fallback)
             .build();
 
         let result = cache.try_clear().await;
@@ -215,7 +215,7 @@ fn fallback_cachelon_try_get_error_from_primary() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
-            .with_fallback(fallback)
+            .fallback(fallback)
             .build();
 
         let result = cache.try_get(&"key".to_string()).await;
@@ -232,7 +232,7 @@ fn fallback_builder_with_promotion_policy_always() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .with_fallback(fallback)
+            .fallback(fallback)
             .promotion_policy(FallbackPromotionPolicy::Always)
             .build();
 
@@ -251,7 +251,7 @@ fn fallback_builder_with_promotion_policy_never() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .with_fallback(fallback)
+            .fallback(fallback)
             .promotion_policy(FallbackPromotionPolicy::Never)
             .build();
 
@@ -274,7 +274,7 @@ fn fallback_builder_with_promotion_policy_when() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .with_fallback(fallback)
+            .fallback(fallback)
             .promotion_policy(FallbackPromotionPolicy::when(is_positive))
             .build();
 
@@ -295,7 +295,7 @@ fn fallback_builder_with_promotion_policy_when_boxed() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .with_fallback(fallback)
+            .fallback(fallback)
             .promotion_policy(FallbackPromotionPolicy::when_boxed(move |entry: &CacheEntry<i32>| {
                 *entry.value() >= threshold
             }))
@@ -318,13 +318,13 @@ fn nested_fallback_builder() {
         // L2 with its own fallback
         let l2 = Cache::builder::<String, i32>(clock.clone())
             .memory()
-            .with_fallback(l3)
+            .fallback(l3)
             .promotion_policy(FallbackPromotionPolicy::Always);
 
         // L1 with nested fallback
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .with_fallback(l2)
+            .fallback(l2)
             .promotion_policy(FallbackPromotionPolicy::Never)
             .build();
 

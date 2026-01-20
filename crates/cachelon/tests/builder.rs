@@ -95,7 +95,7 @@ fn fallback_builder_basic() {
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
         .ttl(Duration::from_secs(60))
-        .with_fallback(fallback)
+        .fallback(fallback)
         .build();
 
     block_on(async {
@@ -114,7 +114,7 @@ fn fallback_builder_promotion_policy() {
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
-        .with_fallback(fallback)
+        .fallback(fallback)
         .promotion_policy(FallbackPromotionPolicy::Never)
         .build();
 
@@ -131,9 +131,9 @@ fn nested_fallback() {
     let clock = Clock::new_frozen();
 
     let l3 = Cache::builder::<String, i32>(clock.clone()).memory();
-    let l2 = Cache::builder::<String, i32>(clock.clone()).memory().with_fallback(l3);
+    let l2 = Cache::builder::<String, i32>(clock.clone()).memory().fallback(l3);
 
-    let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(l2).build();
+    let cache = Cache::builder::<String, i32>(clock).memory().fallback(l2).build();
 
     assert!(!cache.name().is_empty());
 
@@ -144,7 +144,7 @@ fn nested_fallback() {
 }
 
 #[test]
-fn fallback_builder_nested_with_fallback() {
+fn fallback_builder_nested_fallback() {
     let clock = Clock::new_frozen();
 
     // L3 (deepest)
@@ -153,13 +153,13 @@ fn fallback_builder_nested_with_fallback() {
     // L2 with its own fallback
     let l2 = Cache::builder::<String, i32>(clock.clone())
         .memory()
-        .with_fallback(l3)
+        .fallback(l3)
         .promotion_policy(FallbackPromotionPolicy::Always);
 
     // L1 with nested fallback
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
-        .with_fallback(l2)
+        .fallback(l2)
         .promotion_policy(FallbackPromotionPolicy::Never)
         .build();
 
@@ -186,7 +186,7 @@ fn fallback_builder_debug() {
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-    let builder = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback);
+    let builder = Cache::builder::<String, i32>(clock).memory().fallback(fallback);
 
     let debug_str = format!("{:?}", builder);
     assert!(debug_str.contains("FallbackBuilder"));

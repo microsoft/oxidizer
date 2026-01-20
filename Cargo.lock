@@ -183,9 +183,9 @@ name = "cachelon_tier"
 version = "0.1.0"
 dependencies = [
  "dynosaur",
- "futures",
  "ohno",
  "parking_lot",
+ "tokio",
 ]
 
 [[package]]

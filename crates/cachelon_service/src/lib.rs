@@ -18,14 +18,8 @@
 //! # Quick Start
 //!
 //! ```ignore
-//! use cachelon_service::{ServiceAdapter, CacheOperation, CacheResponse};
-//! use layered::Service;
-//!
-//! // Any service implementing Service<CacheOperation> can become a cache tier
-//! let service = MyRemoteCacheService::new();
-//! let tier = ServiceAdapter::new(service);
-//!
-//! // Now use `tier` as a CacheTier in multi-tier cache hierarchies
+//! // Any Service<CacheOperation> can become a cache tier
+//! let tier = ServiceAdapter::new(my_service);
 //! ```
 //!
 //! # Use Cases

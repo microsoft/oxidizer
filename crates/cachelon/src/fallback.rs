@@ -104,7 +104,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
-    ///     .with_fallback(l2)
+    ///     .fallback(l2)
     ///     .promotion_policy(FallbackPromotionPolicy::when(should_promote))
     ///     .build();
     /// ```
@@ -125,7 +125,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
-    ///     .with_fallback(l2)
+    ///     .fallback(l2)
     ///     .promotion_policy(FallbackPromotionPolicy::when_boxed(
     ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len
     ///     ))
@@ -176,7 +176,7 @@ impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
 /// On a primary cache miss, the fallback tier is queried. Based on the promotion
 /// policy, successful fallback hits may be promoted back to the primary tier.
 ///
-/// Construct this via `Cache::builder().with_fallback()` rather than directly.
+/// Construct this via `Cache::builder().fallback()` rather than directly.
 ///
 /// # Examples
 ///
@@ -192,7 +192,7 @@ impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
 /// let cache = Cache::builder::<String, String>(clock)
 ///     .memory()
 ///     .ttl(Duration::from_secs(60))
-///     .with_fallback(l2)
+///     .fallback(l2)
 ///     .promotion_policy(FallbackPromotionPolicy::always())
 ///     .build();
 /// # });
@@ -385,7 +385,7 @@ mod tests {
 
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(primary_storage)
-                .with_fallback(fallback)
+                .fallback(fallback)
                 .promotion_policy(FallbackPromotionPolicy::Always)
                 .build();
 
@@ -420,7 +420,7 @@ mod tests {
 
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(primary_storage)
-                .with_fallback(fallback)
+                .fallback(fallback)
                 .promotion_policy(FallbackPromotionPolicy::Never)
                 .build();
 
@@ -443,7 +443,7 @@ mod tests {
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let inner = cache.inner();
         let debug_str = format!("{:?}", inner.inner);
@@ -471,7 +471,7 @@ mod tests {
 
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(primary_storage)
-                .with_fallback(fallback)
+                .fallback(fallback)
                 .promotion_policy(FallbackPromotionPolicy::when(is_positive))
                 .build();
 
@@ -507,7 +507,7 @@ mod tests {
 
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(primary_storage)
-                .with_fallback(fallback)
+                .fallback(fallback)
                 .build();
 
             // try_get should also trigger promotion

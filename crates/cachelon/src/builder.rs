@@ -164,23 +164,8 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// # Examples
     ///
     /// ```ignore
-    /// use cachelon::Cache;
-    /// use tick::Clock;
-    /// use std::time::Duration;
-    ///
-    /// // Assume we have a Redis service implementing Service<CacheOperation>
-    /// let redis_service = RedisService::new(pool);
-    ///
-    /// // Wrap with resilience middleware
-    /// let resilient_redis = ServiceBuilder::new()
-    ///     .retry(...)
-    ///     .timeout(...)
-    ///     .service(redis_service);
-    ///
-    /// // Use as cache storage
-    /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .from_service(resilient_redis)
+    ///     .service(redis_service)
     ///     .ttl(Duration::from_secs(300))
     ///     .build();
     /// ```
@@ -190,7 +175,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
         clippy::wrong_self_convention,
         reason = "builder method that consumes self to construct storage from service"
     )]
-    pub fn from_service<S>(self, service: S) -> CacheBuilder<K, V, cachelon_service::ServiceAdapter<K, V, S>>
+    pub fn service<S>(self, service: S) -> CacheBuilder<K, V, cachelon_service::ServiceAdapter<K, V, S>>
     where
         K: Hash + Eq + Clone + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
@@ -257,7 +242,7 @@ where
     /// and the result is promoted to the primary tier based on the promotion policy.
     ///
     /// Accepts either a `CacheBuilder` or another `FallbackBuilder` as the fallback.
-    pub fn with_fallback<FB>(self, fallback: FB) -> FallbackBuilder<K, V, Self, FB>
+    pub fn fallback<FB>(self, fallback: FB) -> FallbackBuilder<K, V, Self, FB>
     where
         FB: CacheTierBuilder<K, V>,
     {
@@ -310,7 +295,7 @@ where
 
 /// Builder for a cache with fallback tiers.
 ///
-/// Created via `CacheBuilder::with_fallback`. When built, produces a `Cache`
+/// Created via `CacheBuilder::fallback`. When built, produces a `Cache`
 /// wrapping a `FallbackCache` structure.
 #[derive(Debug)]
 #[expect(clippy::struct_field_names, reason = "builder field naming is intentional")]
@@ -355,7 +340,7 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     ///
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
-    ///     .with_fallback(l2)
+    ///     .fallback(l2)
     ///     .promotion_policy(FallbackPromotionPolicy::always())
     ///     .build();
     /// ```
@@ -390,7 +375,7 @@ where
     /// Each `FallbackBuilder` controls its own promotion policy via `.promotion_policy()`.
     ///
     /// Accepts either a `CacheBuilder` or another `FallbackBuilder` as the fallback.
-    pub fn with_fallback<FB2>(self, fallback: FB2) -> FallbackBuilder<K, V, Self, FB2>
+    pub fn fallback<FB2>(self, fallback: FB2) -> FallbackBuilder<K, V, Self, FB2>
     where
         FB2: CacheTierBuilder<K, V>,
     {
@@ -452,7 +437,7 @@ where
     ///
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
-    ///     .with_fallback(l2)
+    ///     .fallback(l2)
     ///     .build();
     /// ```
     pub fn build(self) -> Cache<K, V, FallbackCache<K, V, PB::Tier, FB::Tier>> {
@@ -621,7 +606,7 @@ mod tests {
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .with_fallback(fallback)
+            .fallback(fallback)
             .telemetry(telemetry, "fallback_cache")
             .build();
 
@@ -629,17 +614,17 @@ mod tests {
     }
 
     #[test]
-    fn fallback_builder_nested_with_fallback() {
+    fn fallback_builder_nested_fallback() {
         let clock = Clock::new_frozen();
 
         // L3 (deepest)
         let l3 = Cache::builder::<String, i32>(clock.clone()).memory();
 
         // L2 with its own fallback
-        let l2 = Cache::builder::<String, i32>(clock.clone()).memory().with_fallback(l3);
+        let l2 = Cache::builder::<String, i32>(clock.clone()).memory().fallback(l3);
 
-        // L1 with nested fallback - using FallbackBuilder.with_fallback
-        let cache = Cache::builder::<String, i32>(clock).memory().with_fallback(l2).build();
+        // L1 with nested fallback - using FallbackBuilder.fallback
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(l2).build();
 
         assert!(!cache.name().is_empty());
     }

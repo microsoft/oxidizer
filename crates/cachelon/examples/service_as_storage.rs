@@ -80,7 +80,7 @@ async fn main() {
     // Use .from_service() for simpler construction
     let remote_service2 = RemoteCacheService::new();
     let cache2 = Cache::builder::<String, String>(clock.clone())
-        .from_service(remote_service2) // Wraps service in ServiceAdapter automatically
+        .service(remote_service2) // Wraps service in ServiceAdapter automatically
         .ttl(Duration::from_secs(300))
         .build();
 

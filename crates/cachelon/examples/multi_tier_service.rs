@@ -70,14 +70,14 @@ async fn main() {
     let redis_service = DistributedCacheService::new();
 
     let l2_builder = Cache::builder::<String, Vec<u8>>(clock.clone())
-        .from_service(redis_service)
+        .service(redis_service)
         .ttl(Duration::from_secs(600));
 
     // L1: In-memory cache with L2 fallback
     let cache = Cache::builder::<String, Vec<u8>>(clock.clone())
         .memory()
         .ttl(Duration::from_secs(60))
-        .with_fallback(l2_builder)
+        .fallback(l2_builder)
         .promotion_policy(FallbackPromotionPolicy::always())
         .build();
 

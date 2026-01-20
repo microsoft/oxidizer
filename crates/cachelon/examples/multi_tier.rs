@@ -118,7 +118,7 @@ async fn main() {
     // L2: Negative cache - only promotes NotFound values from L3
     let l2 = Cache::builder::<String, UserData>(clock.clone())
         .memory()
-        .with_fallback(l3)
+        .fallback(l3)
         .promotion_policy(FallbackPromotionPolicy::when_boxed(|entry: &CacheEntry<UserData>| {
             matches!(entry.value(), UserData::NotFound)
         }));
@@ -127,7 +127,7 @@ async fn main() {
     let l1_cache = Cache::builder::<String, UserData>(clock.clone())
         .memory()
         .ttl(Duration::from_secs(60))
-        .with_fallback(l2)
+        .fallback(l2)
         .telemetry(cachelon_telemetry, "L1-invalid-cache")
         .promotion_policy(FallbackPromotionPolicy::when_boxed(|entry: &CacheEntry<UserData>| {
             matches!(entry.value(), UserData::Invalid(_))

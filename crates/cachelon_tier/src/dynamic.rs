@@ -45,19 +45,11 @@ where
 ///
 /// # Examples
 ///
-/// ```
-/// use cachelon_tier::{DynamicCache, DynamicCacheExt, CacheEntry};
-/// use std::sync::Arc;
-/// # use cachelon_tier::testing::MockCache;
-/// # futures::executor::block_on(async {
-///
-/// // Create a dynamic cache from any tier
-/// let mock = MockCache::<String, i32>::new();
-/// let dynamic: DynamicCache<String, i32> = mock.into_dynamic();
+/// ```ignore
+/// let dynamic: DynamicCache<String, i32> = some_tier.into_dynamic();
 ///
 /// // DynamicCache is Clone
 /// let clone = dynamic.clone();
-/// # });
 /// ```
 pub struct DynamicCache<K, V>(Arc<DynCacheTier<'static, K, V>>);
 

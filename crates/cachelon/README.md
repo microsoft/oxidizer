@@ -54,7 +54,7 @@ let l2 = Cache::builder::<String, String>(clock.clone()).memory();
 let cache = Cache::builder::<String, String>(clock)
     .memory()
     .ttl(Duration::from_secs(60))
-    .with_fallback(l2)
+    .fallback(l2)
     .promotion_policy(FallbackPromotionPolicy::always())
     .build();
 ```

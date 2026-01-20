@@ -72,7 +72,7 @@ async fn main() {
     let cache = Cache::builder::<String, String>(clock.clone())
         .memory()
         .ttl(Duration::from_secs(10))
-        .with_fallback(Cache::builder::<String, String>(clock.clone()).storage(database.clone()))
+        .fallback(Cache::builder::<String, String>(clock.clone()).storage(database.clone()))
         .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(2), clock.clone()))
         .promotion_policy(FallbackPromotionPolicy::Always)
         .build();

@@ -23,22 +23,8 @@ use crate::{CacheOperation, CacheResponse, GetRequest, InsertRequest, Invalidate
 /// # Examples
 ///
 /// ```ignore
-/// use cachelon::{Cache, service::{ServiceAdapter, CacheOperation}};
-/// use layered::Service;
-/// use tick::Clock;
-///
-/// // Assume we have a Redis service
-/// let redis_service = RedisService::new(pool);
-///
-/// // Wrap it with resilience middleware
-/// let resilient_redis = (
-///     Retry::layer(...),
-///     Timeout::layer(...),
-///     redis_service
-/// ).build();
-///
-/// // Convert to CacheTier via ServiceAdapter
-/// let adapter = ServiceAdapter::new(resilient_redis);
+/// // Convert any Service<CacheOperation> to a CacheTier
+/// let adapter = ServiceAdapter::new(redis_service);
 ///
 /// // Use as cache storage
 /// let cache = Cache::builder(clock)

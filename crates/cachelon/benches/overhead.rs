@@ -92,22 +92,22 @@ fn bench_pure_overhead(c: &mut Criterion) {
         });
     });
 
-    let noop_with_fallback_get_name = "noop_with_fallback_get";
-    group.bench_function(noop_with_fallback_get_name, |b| {
+    let noop_fallback_get_name = "noop_fallback_get";
+    group.bench_function(noop_fallback_get_name, |b| {
         b.iter_custom(|iters| {
-            let noop_with_fallback_operation = session.operation(noop_with_fallback_get_name);
+            let noop_fallback_operation = session.operation(noop_fallback_get_name);
             rt.block_on(async move {
                 let clock = Clock::new_tokio();
-                let noop_with_fallback = Cache::builder(clock.clone())
+                let noop_fallback = Cache::builder(clock.clone())
                     .storage(MockCache::<String, String>::new())
-                    .with_fallback(Cache::builder(clock).storage(MockCache::<String, String>::new()))
+                    .fallback(Cache::builder(clock).storage(MockCache::<String, String>::new()))
                     .build();
 
-                let _span = noop_with_fallback_operation.measure_thread();
+                let _span = noop_fallback_operation.measure_thread();
                 let key = "key".to_string();
                 let start = Instant::now();
                 for _ in 0..iters {
-                    let _: Option<CacheEntry<String>> = black_box(noop_with_fallback.get(black_box(&key)).await);
+                    let _: Option<CacheEntry<String>> = black_box(noop_fallback.get(black_box(&key)).await);
                 }
                 start.elapsed()
             })
