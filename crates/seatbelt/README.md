@@ -103,18 +103,18 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8-jxRLAdSUYGz8tFJ1hv_siG0AGq6ysYdCHGyn4hzr6iA3-YWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4xLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8-jxRLAdSUYGz8tFJ1hv_siG0AGq6ysYdCHGyn4hzr6iA3-YWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
  [__link0]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link1]: https://crates.io/crates/tick/0.1.2
- [__link10]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
- [__link11]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
- [__link12]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
- [__link13]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
- [__link2]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=shared::Context
+ [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit/index.html
+ [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
+ [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
+ [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit/index.html
+ [__link2]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::Context
  [__link3]: https://crates.io/crates/layered/0.1.0
  [__link4]: https://docs.rs/layered/0.1.0/layered/?search=Stack
- [__link5]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=shared::Context
+ [__link5]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::Context
  [__link6]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link7]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
- [__link8]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
- [__link9]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
+ [__link8]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
+ [__link9]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
