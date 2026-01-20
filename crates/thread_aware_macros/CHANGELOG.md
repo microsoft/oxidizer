@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0] - 2026-01-20
+
+- ✨ Features
+
+  - migrate examples to ohno::AppError ([#213](https://github.com/microsoft/oxidizer/pull/213))
+
+## [0.6.0] - 2025-12-12
+
+- 🧩 Miscellaneous
+
+  - Shouldn't have been renamed due to stuttering in re-exports.
+
 ## [0.5.0] - 2025-12-11
 
 - ✔️ Tasks
