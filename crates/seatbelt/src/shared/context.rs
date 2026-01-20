@@ -190,7 +190,6 @@ impl<In, Out> Clone for Context<In, Out> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
     use super::*;
 
@@ -235,9 +234,15 @@ mod tests {
         assert!(dump.contains('3'));
     }
 
-    fn test_meter_provider() -> (SdkMeterProvider, InMemoryMetricExporter) {
-        let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+    #[cfg(not(miri))]
+    fn test_meter_provider() -> (
+        opentelemetry_sdk::metrics::SdkMeterProvider,
+        opentelemetry_sdk::metrics::InMemoryMetricExporter,
+    ) {
+        let exporter = opentelemetry_sdk::metrics::InMemoryMetricExporter::default();
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build();
         (provider, exporter)
     }
 }

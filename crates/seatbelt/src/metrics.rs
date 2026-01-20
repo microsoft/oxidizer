@@ -28,18 +28,16 @@ pub(crate) fn create_resilience_event_counter(meter: &Meter) -> opentelemetry::m
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[cfg(not(miri))]
 mod tests {
-    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 
     use super::*;
 
     #[test]
-    #[cfg(not(miri))]
     fn assert_definitions() {
         let exporter = InMemoryMetricExporter::default();
-        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-            .with_periodic_exporter(exporter.clone())
-            .build();
+        let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
 
         let meter = create_meter(&meter_provider);
         let resilience_events = create_resilience_event_counter(&meter);

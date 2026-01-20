@@ -87,9 +87,9 @@ mod engine_core;
 pub(crate) use engine_core::*;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod engine_fake;
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 pub(crate) use engine_fake::*;
 
 mod engine_telemetry;
