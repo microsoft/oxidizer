@@ -657,4 +657,34 @@ mod tests {
 
         assert_eq!(stats.opened_duration(later), Duration::from_secs(10));
     }
+
+    #[test]
+    fn exit_when_half_open_with_pending_probe_returns_unchanged() {
+        use crate::circuit::engine::probing::{HealthProbeOptions, ProbeOptions};
+
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10),
+            // Use a HealthProbe with long sampling duration so it returns Pending
+            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
+                Duration::from_secs(60),
+                0.2,
+                1.0,
+            ))]),
+        };
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Force to open state
+        open_engine(&engine);
+
+        // Advance time to transition to half-open
+        control.advance(Duration::from_secs(6));
+        engine.enter();
+
+        // Record success - should return Unchanged because HealthProbe is still sampling
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+    }
 }

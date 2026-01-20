@@ -171,4 +171,36 @@ mod tests {
 
         assert_eq!(h1.finish(), h2.finish());
     }
+
+    #[test]
+    fn into_cow_from_number() {
+        let key = PartitionKey::from(42u64);
+        let cow: Cow<'static, str> = key.into();
+        assert!(matches!(cow, Cow::Owned(_)));
+        assert_eq!(cow, "42");
+    }
+
+    #[test]
+    fn into_cow_from_string_owned() {
+        let key = PartitionKey::from(String::from("owned_string"));
+        let cow: Cow<'static, str> = key.into();
+        assert!(matches!(cow, Cow::Owned(_)));
+        assert_eq!(cow, "owned_string");
+    }
+
+    #[test]
+    fn into_cow_from_string_borrowed() {
+        let key = PartitionKey::from("static_str");
+        let cow: Cow<'static, str> = key.into();
+        assert!(matches!(cow, Cow::Borrowed(_)));
+        assert_eq!(cow, "static_str");
+    }
+
+    #[test]
+    fn into_cow_from_hashed() {
+        let key = PartitionKey::hashed(&"value", "label");
+        let cow: Cow<'static, str> = key.into();
+        assert!(matches!(cow, Cow::Borrowed(_)));
+        assert_eq!(cow, "label");
+    }
 }

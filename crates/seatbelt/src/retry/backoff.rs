@@ -658,4 +658,16 @@ mod tests {
         let computed: Vec<_> = backoff.delays().take(10).map(|v| v.as_millis()).collect();
         assert_eq!(computed, delays_ms);
     }
+
+    #[test]
+    fn secs_to_duration_saturating_zero() {
+        assert_eq!(secs_to_duration_saturating(0.0), Duration::ZERO);
+    }
+
+    #[test]
+    fn secs_to_duration_saturating_negative() {
+        assert_eq!(secs_to_duration_saturating(-1.0), Duration::ZERO);
+        assert_eq!(secs_to_duration_saturating(-0.001), Duration::ZERO);
+        assert_eq!(secs_to_duration_saturating(f64::NEG_INFINITY), Duration::ZERO);
+    }
 }

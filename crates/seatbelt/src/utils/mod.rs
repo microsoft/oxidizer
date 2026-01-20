@@ -25,3 +25,14 @@ impl<In> EnableIf<In> {
         Self::new(|_| false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enable_if_debug() {
+        let enable_if: EnableIf<String> = EnableIf::always();
+        assert_eq!(format!("{:?}", enable_if), "EnableIf");
+    }
+}
