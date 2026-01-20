@@ -65,10 +65,16 @@ mod tests {
     use super::*;
     use crate::circuit::HealthMetricsBuilder;
     use crate::circuit::engine::probing::ProbesOptions;
-    use crate::telemetry::metrics::create_resilience_event_counter;
+    use crate::metrics::create_resilience_event_counter;
 
     #[test]
     fn get_engine_ok() {
+        let telemetry = TelemetryHelper {
+            pipeline_name: "pipeline".into(),
+            strategy_name: "strategy".into(),
+            event_reporter: Some(create_resilience_event_counter(&opentelemetry::global::meter("test"))),
+            logs_enabled: false,
+        };
         let engines = Engines::new(
             EngineOptions {
                 break_duration: Duration::from_secs(60),
@@ -76,9 +82,7 @@ mod tests {
                 probes: ProbesOptions::quick(Duration::from_secs(1)),
             },
             Clock::new_frozen(),
-            StringValue::from("strategy"),
-            StringValue::from("pipeline"),
-            create_resilience_event_counter(&opentelemetry::global::meter("test")),
+            telemetry,
         );
 
         assert!(Arc::ptr_eq(

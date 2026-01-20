@@ -465,11 +465,11 @@ mod tests {
     #[expect(clippy::float_cmp, reason = "Test")]
     fn new_creates_correct_initial_state() {
         let context = create_test_context();
-        let layer: CircuitLayer<_, _, NotSet, NotSet> = CircuitLayer::new(StringValue::from("test_breaker"), &context);
+        let layer: CircuitLayer<_, _, NotSet, NotSet> = CircuitLayer::new("test_breaker".into(), &context);
 
         assert!(layer.recovery.is_none());
         assert!(layer.rejected_input.is_none());
-        assert_eq!(layer.strategy_name, StringValue::from("test_breaker"));
+        assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_breaker");
         assert!(layer.enable_if.call(&"test_input".to_string()));
         assert_eq!(layer.failure_threshold, 0.1);
         assert_eq!(layer.min_throughput, 100);
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn recovery_sets_correctly() {
         let context = create_test_context();
-        let layer = CircuitLayer::new(StringValue::from("test"), &context);
+        let layer = CircuitLayer::new("test".into(), &context);
 
         let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery_with(|output, _args| {
             if output.contains("error") {
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn recovery_auto_sets_correctly() {
         let context = Context::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
-        let layer = CircuitLayer::new(StringValue::from("test"), &context);
+        let layer = CircuitLayer::new("test".into(), &context);
 
         let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery();
 
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn rejected_input_sets_correctly() {
         let context = create_test_context();
-        let layer = CircuitLayer::new(StringValue::from("test"), &context);
+        let layer = CircuitLayer::new("test".into(), &context);
 
         let layer: CircuitLayer<_, _, NotSet, Set> = layer.rejected_input(|_, _| "rejected".to_string());
 
@@ -640,7 +640,7 @@ mod tests {
     #[expect(clippy::float_cmp, reason = "Test")]
     fn default_values_are_correct() {
         let context = create_test_context();
-        let layer = CircuitLayer::new(StringValue::from("test"), &context);
+        let layer = CircuitLayer::new("test".into(), &context);
 
         assert_eq!(layer.failure_threshold, DEFAULT_FAILURE_THRESHOLD);
         assert_eq!(layer.min_throughput, DEFAULT_MIN_THROUGHPUT);
@@ -686,7 +686,7 @@ mod tests {
     }
 
     fn create_ready_layer() -> CircuitLayer<String, String, Set, Set> {
-        CircuitLayer::new(StringValue::from("test"), &create_test_context())
+        CircuitLayer::new("test".into(), &create_test_context())
             .recovery_with(|output, _args| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

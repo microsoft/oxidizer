@@ -240,13 +240,13 @@ mod tests {
     #[test]
     fn new_needs_timeout_output() {
         let context = create_test_context();
-        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new(StringValue::from("test_timeout"), &context);
+        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new("test_timeout".into(), &context);
 
         assert!(layer.timeout.is_none());
         assert!(layer.timeout_output.is_none());
         assert!(layer.on_timeout.is_none());
         assert!(layer.timeout_override.is_none());
-        assert_eq!(layer.telemetry.strategy_name, StringValue::from("test_timeout"));
+        assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_timeout");
         assert!(layer.enable_if.call(&"test_input".to_string()));
     }
 
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn timeout_error_ensure_set_correctly() {
         let context = create_test_context_result();
-        let layer = TimeoutLayer::new(StringValue::from("test"), &context);
+        let layer = TimeoutLayer::new("test".into(), &context);
 
         let layer: TimeoutLayer<_, _, NotSet, Set> = layer.timeout_error(|args| format!("timeout: {}", args.timeout().as_millis()));
         let result = layer
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn timeout_ensure_set_correctly() {
-        let layer: TimeoutLayer<_, _, Set, Set> = TimeoutLayer::new(StringValue::from("test"), &create_test_context())
+        let layer: TimeoutLayer<_, _, Set, Set> = TimeoutLayer::new("test".into(), &create_test_context())
             .timeout_output(|_args| "timeout: ".to_string())
             .timeout(Duration::from_millis(3));
 
@@ -399,13 +399,13 @@ mod tests {
     }
 
     fn create_ready_layer() -> TimeoutLayer<String, String, Set, Set> {
-        TimeoutLayer::new(StringValue::from("test"), &create_test_context())
+        TimeoutLayer::new("test".into(), &create_test_context())
             .timeout_output(|_args| "timeout: ".to_string())
             .timeout(Duration::from_millis(3))
     }
 
     fn create_ready_layer_with_result() -> TimeoutLayer<String, Result<String, String>, Set, Set> {
-        TimeoutLayer::new(StringValue::from("test"), &create_test_context_result())
+        TimeoutLayer::new("test".into(), &create_test_context_result())
             .timeout_error(|_args| "timeout: ".to_string())
             .timeout(Duration::from_millis(3))
     }

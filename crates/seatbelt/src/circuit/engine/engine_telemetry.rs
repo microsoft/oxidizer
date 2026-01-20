@@ -191,7 +191,7 @@ mod tests {
 
     use super::*;
     use crate::circuit::{EngineFake, HealthInfo, Stats};
-    use crate::telemetry::metrics::{create_meter, create_resilience_event_counter};
+    use crate::metrics::{create_meter, create_resilience_event_counter};
     use crate::testing::MetricTester;
 
     #[test]

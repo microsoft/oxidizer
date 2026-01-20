@@ -28,10 +28,12 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// Basic usage:
 ///
 /// ```rust
+/// # #[cfg(feature = "metrics")]
+/// # fn example() {
 /// # use opentelemetry::metrics::MeterProvider;
 /// # use seatbelt::Context;
 /// # use tick::Clock;
-/// # fn example(clock: Clock, meter_provider: &dyn MeterProvider) {
+/// # fn inner(clock: Clock, meter_provider: &dyn MeterProvider) {
 /// // Create a context for a resilience pipeline
 /// let ctx = Context::<String, String>::new(&clock)
 ///     .pipeline_name("auth_pipeline")
@@ -39,6 +41,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 ///
 /// // Pass the context to resilience middleware layers
 /// // (e.g., Retry::layer("my_retry", &ctx), Timeout::layer("my_timeout", &ctx))
+/// # }
 /// # }
 /// ```
 ///
@@ -177,7 +180,8 @@ mod tests {
     fn test_new_with_clock_sets_default_pipeline_name() {
         let clock = tick::Clock::new_frozen();
         let ctx = Context::<(), ()>::new(clock);
-        assert_eq!(ctx.get_pipeline_name().as_ref(), DEFAULT_PIPELINE_NAME);
+        let telemetry = ctx.create_telemetry("test".into());
+        assert_eq!(telemetry.pipeline_name.as_ref(), DEFAULT_PIPELINE_NAME);
         // Ensure clock reference behaves (timestamp monotonic relative behaviour not required, just accessible)
         let _ = ctx.get_clock().system_time();
     }
@@ -186,8 +190,9 @@ mod tests {
     fn test_pipeline_name_with_custom_value_sets_name_and_is_owned() {
         let clock = tick::Clock::new_frozen();
         let ctx = Context::<(), ()>::new(clock).pipeline_name(String::from("custom_pipeline"));
-        assert_eq!(ctx.get_pipeline_name().as_ref(), "custom_pipeline");
-        assert!(matches!(ctx.get_pipeline_name(), Cow::Owned(_)));
+        let telemetry = ctx.create_telemetry("test".into());
+        assert_eq!(telemetry.pipeline_name.as_ref(), "custom_pipeline");
+        assert!(matches!(telemetry.pipeline_name, Cow::Owned(_)));
     }
 
     #[cfg(not(miri))]
@@ -197,8 +202,10 @@ mod tests {
         let (provider, exporter) = test_meter_provider();
 
         let ctx = Context::<(), ()>::new(clock).meter_provider(&provider);
-        let c1 = create_resilience_event_counter(ctx.get_meter());
-        let c2 = create_resilience_event_counter(ctx.get_meter());
+        let telemetry1 = ctx.create_telemetry("test1".into());
+        let telemetry2 = ctx.create_telemetry("test2".into());
+        let c1 = telemetry1.event_reporter.unwrap();
+        let c2 = telemetry2.event_reporter.unwrap();
         c1.add(1, &[]);
         c2.add(2, &[]);
 

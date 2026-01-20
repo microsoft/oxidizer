@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn new_creates_correct_initial_state() {
         let context = create_test_context();
-        let layer: RetryLayer<_, _, NotSet, NotSet> = RetryLayer::new(StringValue::from("test_retry"), &context);
+        let layer: RetryLayer<_, _, NotSet, NotSet> = RetryLayer::new("test_retry".into(), &context);
 
         assert_eq!(layer.max_attempts, MaxAttempts::Finite(4)); // 3 retries + 1 original = 4 total
         assert!(matches!(layer.backoff.backoff_type, Backoff::Exponential));
@@ -531,14 +531,14 @@ mod tests {
         assert!(layer.clone_input.is_none());
         assert!(layer.should_recover.is_none());
         assert!(layer.on_retry.is_none());
-        assert_eq!(layer.telemetry.strategy_name, StringValue::from("test_retry"));
+        assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_retry");
         assert!(layer.enable_if.call(&"test_input".to_string()));
     }
 
     #[test]
     fn clone_input_sets_correctly() {
         let context = create_test_context();
-        let layer = RetryLayer::new(StringValue::from("test"), &context);
+        let layer = RetryLayer::new("test".into(), &context);
 
         let layer: RetryLayer<_, _, Set, NotSet> = layer.clone_input_with(|input, _args| Some(input.clone()));
 
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn recovery_sets_correctly() {
         let context = create_test_context();
-        let layer = RetryLayer::new(StringValue::from("test"), &context);
+        let layer = RetryLayer::new("test".into(), &context);
 
         let layer: RetryLayer<_, _, NotSet, Set> = layer.recovery_with(|output, _args| {
             if output.contains("error") {
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn recovery_auto_sets_correctly() {
         let context = Context::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
-        let layer = RetryLayer::new(StringValue::from("test"), &context);
+        let layer = RetryLayer::new("test".into(), &context);
 
         let layer: RetryLayer<_, _, NotSet, Set> = layer.recovery();
 
@@ -670,7 +670,7 @@ mod tests {
     #[test]
     fn handle_unavailable_sets_correctly() {
         let context = create_test_context();
-        let layer = RetryLayer::new(StringValue::from("test"), &context);
+        let layer = RetryLayer::new("test".into(), &context);
 
         // Test default value
         assert!(!layer.handle_unavailable);
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn restore_input_sets_correctly() {
         let context = create_test_context();
-        let layer = RetryLayer::new(StringValue::from("test"), &context);
+        let layer = RetryLayer::new("test".into(), &context);
 
         let layer = layer.restore_input(|output: &mut String, _args| {
             (output == "restore_me").then(|| {
@@ -743,7 +743,7 @@ mod tests {
     }
 
     fn create_ready_layer() -> RetryLayer<String, String, Set, Set> {
-        RetryLayer::new(StringValue::from("test"), &create_test_context())
+        RetryLayer::new("test".into(), &create_test_context())
             .clone_input_with(|input, _args| Some(input.clone()))
             .recovery_with(|output, _args| {
                 if output.contains("error") {
