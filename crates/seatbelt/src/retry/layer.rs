@@ -415,6 +415,7 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
             should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
             on_retry: self.on_retry.clone(),
             enable_if: self.enable_if.clone(),
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),
             restore_input: self.restore_input.clone(),
             handle_unavailable: self.handle_unavailable,

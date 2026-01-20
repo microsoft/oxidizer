@@ -205,6 +205,7 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
             on_timeout: self.on_timeout.clone(),
             timeout_output: self.timeout_output.clone().expect("timeout_result must be set in Ready state"),
             timeout_override: self.timeout_override.clone(),
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),
         }
     }

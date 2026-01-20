@@ -155,7 +155,7 @@ impl<In, Out> Context<In, Out> {
     }
 
     #[cfg_attr(
-        not(any(feature = "metrics", feature = "logs")),
+        not(any(feature = "metrics", feature = "logs", test)),
         expect(unused_variables, reason = "unused when logs nor metrics are used")
     )]
     #[cfg(any(feature = "retry", feature = "circuit", feature = "timeout", test))]

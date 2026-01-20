@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #[derive(Debug, Clone)]
 pub(crate) struct TelemetryHelper {
     #[cfg(any(feature = "metrics", feature = "logs", test))]

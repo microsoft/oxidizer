@@ -10,7 +10,6 @@ use tick::{Clock, FutureExt};
 
 use crate::timeout::{OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs};
 use crate::utils::EnableIf;
-use crate::utils::TelemetryHelper;
 use crate::{Context, NotSet};
 
 /// Applies a timeout to service execution for canceling long-running operations.
@@ -36,7 +35,8 @@ pub struct Timeout<In, Out, S> {
     pub(super) on_timeout: Option<OnTimeout<Out>>,
     pub(super) timeout_override: Option<TimeoutOverride<In>>,
     pub(super) timeout_output: TimeoutOutput<Out>,
-    pub(super) telemetry: TelemetryHelper,
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
+    pub(super) telemetry: crate::utils::TelemetryHelper,
 }
 
 impl<In, Out> Timeout<In, Out, ()> {

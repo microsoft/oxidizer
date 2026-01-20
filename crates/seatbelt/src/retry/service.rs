@@ -12,7 +12,6 @@ use crate::retry::{
 };
 use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
-use crate::utils::TelemetryHelper;
 use crate::{Attempt, NotSet, RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
@@ -40,7 +39,8 @@ pub struct Retry<In, Out, S> {
     pub(super) should_recover: ShouldRecover<Out>,
     pub(super) on_retry: Option<OnRetry<Out>>,
     pub(super) enable_if: EnableIf<In>,
-    pub(super) telemetry: TelemetryHelper,
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
+    pub(super) telemetry: crate::utils::TelemetryHelper,
     pub(super) restore_input: Option<RestoreInput<In, Out>>,
     pub(super) handle_unavailable: bool,
 }
@@ -171,7 +171,10 @@ enum RecoverableKind {
 }
 
 impl<In, Out, S> Retry<In, Out, S> {
-    #[cfg_attr(not(feature = "logs"), expect(unused_variables, reason = "unused when logs feature not used"))]
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        expect(unused_variables, reason = "unused when logs feature not used")
+    )]
     fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
