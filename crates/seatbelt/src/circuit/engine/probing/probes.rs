@@ -53,7 +53,10 @@ mod tests {
 
     use std::time::Duration;
 
+    use tick::Clock;
+
     use super::*;
+    use crate::circuit::engine::probing::HealthProbeOptions;
 
     #[test]
     fn multiple_probes_ok() {
@@ -76,5 +79,19 @@ mod tests {
         assert_eq!(probes.record(ExecutionResult::Success, now), ProbingResult::Success);
 
         assert!(probes.probes.next().is_none());
+    }
+
+    #[test]
+    fn record_returns_pending_when_probe_returns_pending() {
+        let now = Clock::new_frozen().instant();
+
+        let options = ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0))]);
+        let mut probes = Probes::new(&options);
+
+        // Initialize sampling period
+        assert_eq!(probes.allow_probe(now), AllowProbeResult::Accepted);
+
+        // Record during sampling period returns Pending
+        assert_eq!(probes.record(ExecutionResult::Success, now), ProbingResult::Pending);
     }
 }

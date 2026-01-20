@@ -147,4 +147,40 @@ mod tests {
             EnterCircuitResult::Rejected
         ));
     }
+
+    #[test]
+    fn probe_new_creates_health_probe() {
+        let options = HealthProbeOptions::new(Duration::from_secs(10), 0.2, 0.5);
+        let probe = Probe::new(ProbeOptions::HealthProbe(options));
+        assert!(matches!(probe, Probe::Health(_)));
+    }
+
+    #[test]
+    fn probe_health_allow_probe_delegates_to_inner() {
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0);
+        let mut probe = Probe::new(ProbeOptions::HealthProbe(options));
+        let now = Instant::now();
+
+        // With probing_ratio=1.0, all probes should be accepted
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
+    }
+
+    #[test]
+    fn probe_health_record_delegates_to_inner() {
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0);
+        let mut probe = Probe::new(ProbeOptions::HealthProbe(options));
+        let now = Instant::now();
+
+        // allow_probe initializes the sampling period
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
+
+        // Record before sampling period ends returns Pending
+        assert_eq!(probe.record(ExecutionResult::Success, now), ProbingResult::Pending);
+
+        // Record after sampling period with success returns Success
+        assert_eq!(
+            probe.record(ExecutionResult::Success, now + Duration::from_secs(5)),
+            ProbingResult::Success
+        );
+    }
 }
