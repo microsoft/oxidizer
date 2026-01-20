@@ -551,6 +551,22 @@ mod tests {
     }
 
     #[test]
+    fn rejected_input_error_wraps_in_err() {
+        let context: Context<String, Result<String, String>> = Context::new(Clock::new_frozen());
+        let layer = CircuitLayer::new("test".into(), &context);
+
+        let layer: CircuitLayer<_, _, NotSet, Set> = layer.rejected_input_error(|input, _| format!("rejected: {input}"));
+
+        let result = layer.rejected_input.as_ref().unwrap().call(
+            "test_input".to_string(),
+            RejectedInputArgs {
+                partition_key: &PartitionKey::default(),
+            },
+        );
+        assert_eq!(result, Err("rejected: test_input".to_string()));
+    }
+
+    #[test]
     fn enable_disable_conditions_work() {
         let layer = create_ready_layer().enable_if(|input| input.contains("enable"));
 

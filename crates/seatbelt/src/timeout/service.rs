@@ -295,4 +295,46 @@ mod tests {
         log_capture.assert_contains("log_test_timeout");
         log_capture.assert_contains("timeout.ms=100");
     }
+
+    #[tokio::test]
+    async fn timeout_emits_metrics() {
+        use opentelemetry::KeyValue;
+
+        use crate::testing::MetricTester;
+        use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+
+        let metrics = MetricTester::new();
+        let clock = ClockControl::default()
+            .auto_advance(Duration::from_millis(200))
+            .auto_advance_limit(Duration::from_millis(500))
+            .to_clock();
+        let context = Context::new(clock.clone())
+            .enable_metrics(metrics.meter_provider())
+            .pipeline_name("metrics_pipeline");
+
+        let stack = (
+            Timeout::layer("metrics_timeout", &context)
+                .timeout_output(|_| "timed out".to_string())
+                .timeout(Duration::from_millis(100)),
+            Execute::new(move |input| {
+                let clock = clock.clone();
+                async move {
+                    clock.delay(Duration::from_secs(1)).await;
+                    input
+                }
+            }),
+        );
+
+        let service = stack.build();
+        let _ = service.execute("test".to_string()).await;
+
+        metrics.assert_attributes(
+            &[
+                KeyValue::new(PIPELINE_NAME, "metrics_pipeline"),
+                KeyValue::new(STRATEGY_NAME, "metrics_timeout"),
+                KeyValue::new(EVENT_NAME, "timeout"),
+            ],
+            Some(3),
+        );
+    }
 }

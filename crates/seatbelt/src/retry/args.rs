@@ -121,6 +121,7 @@ mod tests {
         };
 
         assert_eq!(args.attempt(), Attempt::new(3, true));
+        let _clock = args.clock();
     }
 
     #[test]

@@ -53,3 +53,18 @@ impl Rnd {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_real() {
+        assert_eq!(format!("{:?}", Rnd::Real), "Real");
+    }
+
+    #[test]
+    fn debug_test() {
+        assert_eq!(format!("{:?}", Rnd::new_fixed(0.5)), "Test");
+    }
+}
