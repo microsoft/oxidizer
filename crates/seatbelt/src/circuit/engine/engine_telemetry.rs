@@ -71,22 +71,19 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
     fn exit(&self, result: ExecutionResult, mode: ExecutionMode) -> ExitCircuitResult {
         if mode == ExecutionMode::Probe {
             #[cfg(any(feature = "metrics", test))]
-            if let Some(reporter) = &self.telemetry.event_reporter {
-                reporter.add(
-                    1,
-                    &[
-                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_PROBE_EVENT_NAME),
-                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::HalfOpen.as_str()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PROBE_RESULT, result.as_str()),
-                    ],
-                );
+            if self.telemetry.metrics_enabled() {
+                self.telemetry.report_metrics(&[
+                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                    opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_PROBE_EVENT_NAME),
+                    opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::HalfOpen.as_str()),
+                    opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                    opentelemetry::KeyValue::new(CIRCUIT_PROBE_RESULT, result.as_str()),
+                ]);
             }
 
+            #[cfg(any(feature = "logs", test))]
             if self.telemetry.logs_enabled {
-                #[cfg(any(feature = "logs", test))]
                 tracing::event!(
                     name: "seatbelt.circuit_breaker.probe",
                     tracing::Level::INFO,
