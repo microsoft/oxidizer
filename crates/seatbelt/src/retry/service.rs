@@ -173,8 +173,8 @@ enum RecoverableKind {
 impl<In, Out, S> Retry<In, Out, S> {
     #[cfg_attr(not(feature = "logs"), expect(unused_variables, reason = "unused when logs feature not used"))]
     fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
+        #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
-            #[cfg(any(feature = "logs", test))]
             tracing::event!(
                 name: "seatbelt.retry",
                 tracing::Level::WARN,

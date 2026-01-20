@@ -150,6 +150,7 @@ impl<In, Out> Context<In, Out> {
             pipeline_name: self.pipeline_name.clone(),
             #[cfg(any(feature = "metrics", feature = "logs", test))]
             strategy_name,
+            #[cfg(any(feature = "logs", test))]
             logs_enabled: self.logs_enabled,
         }
     }

@@ -8,6 +8,7 @@ use crate::circuit::{ExecutionResult, HealthInfo, HealthMetricsBuilder};
 
 pub(super) mod probing;
 
+#[cfg(any(feature = "metrics", feature = "logs", test))]
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum CircuitState {
     Closed,
@@ -15,8 +16,8 @@ pub(crate) enum CircuitState {
     HalfOpen,
 }
 
+#[cfg(any(feature = "metrics", feature = "logs", test))]
 impl CircuitState {
-    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Closed => "closed",

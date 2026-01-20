@@ -13,6 +13,7 @@ pub(crate) enum ExecutionResult {
     Failure,
 }
 
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 impl ExecutionResult {
     pub fn as_str(self) -> &'static str {
         match self {

@@ -114,8 +114,8 @@ where
 
                     let output = self.timeout_output.call(TimeoutOutputArgs { timeout });
 
+                    #[cfg(any(feature = "logs", test))]
                     if self.telemetry.logs_enabled {
-                        #[cfg(any(feature = "logs", test))]
                         tracing::event!(
                             name: "seatbelt.timeout",
                             tracing::Level::WARN,

@@ -5,9 +5,11 @@ use std::borrow::Cow;
 
 use tick::Clock;
 
+#[cfg(any(feature = "metrics", feature = "logs", test))]
+use crate::circuit::CircuitState;
 #[cfg(any(feature = "metrics", test))]
 use crate::circuit::telemetry::*;
-use crate::circuit::{CircuitEngine, CircuitState, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
+use crate::circuit::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
 
 use crate::utils::TelemetryHelper;
 #[cfg(any(feature = "metrics", test))]
@@ -17,12 +19,16 @@ use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 #[derive(Debug)]
 pub(crate) struct EngineTelemetry<T> {
     inner: T,
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) telemetry: TelemetryHelper,
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) partition_key: Cow<'static, str>,
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) clock: Clock,
 }
 
 impl<T> EngineTelemetry<T> {
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub fn new(inner: T, telemetry: TelemetryHelper, partition_key: Cow<'static, str>, clock: Clock) -> Self {
         Self {
             inner,
@@ -30,6 +36,11 @@ impl<T> EngineTelemetry<T> {
             partition_key,
             clock,
         }
+    }
+
+    #[cfg(not(any(feature = "metrics", feature = "logs", test)))]
+    pub fn new(inner: T, _telemetry: TelemetryHelper, _partition_key: Cow<'static, str>, _clock: Clock) -> Self {
+        Self { inner }
     }
 }
 
@@ -49,8 +60,8 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                 ]);
             }
 
+            #[cfg(any(feature = "logs", test))]
             if self.telemetry.logs_enabled {
-                #[cfg(any(feature = "logs", test))]
                 tracing::event!(
                     name: "seatbelt.circuit_breaker.rejected",
                     tracing::Level::WARN,
@@ -109,8 +120,8 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                     ]);
                 }
 
+                #[cfg(any(feature = "logs", test))]
                 if self.telemetry.logs_enabled {
-                    #[cfg(any(feature = "logs", test))]
                     tracing::event!(
                         name: "seatbelt.circuit_breaker.opened",
                         tracing::Level::WARN,
@@ -137,8 +148,8 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                     ]);
                 }
 
+                #[cfg(any(feature = "logs", test))]
                 if self.telemetry.logs_enabled {
-                    #[cfg(any(feature = "logs", test))]
                     tracing::event!(
                         name: "seatbelt.circuit_breaker.closed",
                         tracing::Level::INFO,

@@ -51,12 +51,18 @@ impl HealthInfo {
         }
     }
 
-    #[cfg(any(feature = "metrics", feature = "logs", test))]
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        expect(dead_code, reason = "trying to avoid dead code here leads to too much conditionals")
+    )]
     pub fn throughput(&self) -> u32 {
         self.throughput
     }
 
-    #[cfg(any(feature = "metrics", feature = "logs", test))]
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        expect(dead_code, reason = "trying to avoid dead code here leads to too much conditionals")
+    )]
     pub fn failure_rate(&self) -> f32 {
         self.failure_rate
     }

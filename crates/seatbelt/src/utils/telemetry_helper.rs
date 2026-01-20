@@ -6,6 +6,7 @@ pub(crate) struct TelemetryHelper {
     pub(crate) strategy_name: std::borrow::Cow<'static, str>,
     #[cfg(any(feature = "metrics", test))]
     pub(crate) event_reporter: Option<opentelemetry::metrics::Counter<u64>>,
+    #[cfg(any(feature = "logs", test))]
     pub(crate) logs_enabled: bool,
 }
 
@@ -20,10 +21,5 @@ impl TelemetryHelper {
         if let Some(reporter) = &self.event_reporter {
             reporter.add(1, attributes);
         }
-    }
-
-    #[cfg(not(any(feature = "metrics", test)))]
-    pub fn metrics_enabled(&self) -> bool {
-        false
     }
 }

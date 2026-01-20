@@ -92,7 +92,7 @@ required-features = ["retry", "timeout"]
 
 [[example]]
 name = "circuit"
-required-features = ["circuit"]
+required-features = ["circuit", "metrics"]
 
 [[bench]]
 name = "observability"
