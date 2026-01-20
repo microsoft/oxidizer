@@ -197,6 +197,8 @@ mod args;
 mod callbacks;
 mod layer;
 mod service;
+
+#[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
 pub use args::{OnTimeoutArgs, TimeoutOutputArgs, TimeoutOverrideArgs};

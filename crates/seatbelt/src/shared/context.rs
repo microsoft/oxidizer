@@ -3,10 +3,7 @@
 
 use std::borrow::Cow;
 
-use opentelemetry::metrics::*;
 use tick::Clock;
-
-use crate::telemetry::metrics::*;
 
 pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 
@@ -80,7 +77,9 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 pub struct Context<In, Out> {
     clock: Clock,
     pipeline_name: Cow<'static, str>,
-    meter: Meter,
+    #[cfg(any(feature = "metrics", test))]
+    meter: Option<opentelemetry::metrics::Meter>,
+    logs_enabled: bool,
     _in: std::marker::PhantomData<fn() -> In>,
     _out: std::marker::PhantomData<fn() -> Out>,
 }
@@ -92,13 +91,12 @@ impl<In, Out> Context<In, Out> {
     /// global provider. Override the provider later via
     /// [`meter_provider`](Self::meter_provider) if needed.
     pub fn new(clock: impl AsRef<Clock>) -> Self {
-        #[cfg(any(feature = "metrics", test))]
-        let meter = create_meter(opentelemetry::global::meter_provider().as_ref());
-
         Self {
             clock: clock.as_ref().clone(),
             pipeline_name: Cow::Borrowed(DEFAULT_PIPELINE_NAME),
-            meter,
+            #[cfg(any(feature = "metrics", test))]
+            meter: None,
+            logs_enabled: false,
             _in: std::marker::PhantomData,
             _out: std::marker::PhantomData,
         }
@@ -109,6 +107,7 @@ impl<In, Out> Context<In, Out> {
     /// Middleware use this to measure duration, track timeouts, and perform
     /// other time-related operations from a consistent source.
     #[must_use]
+    #[cfg(any(feature = "retry", feature = "circuit", feature = "timeout", test))]
     pub(crate) fn get_clock(&self) -> &Clock {
         &self.clock
     }
@@ -125,48 +124,31 @@ impl<In, Out> Context<In, Out> {
         self
     }
 
-    /// Get the configured pipeline name (`default` if not set).
-    #[must_use]
-    pub(crate) fn get_pipeline_name(&self) -> &Cow<'static, str> {
-        &self.pipeline_name
-    }
-
     /// Override the global meter provider with a custom one.
     #[must_use]
-    pub fn meter_provider(self, provider: &dyn MeterProvider) -> Self {
-        let meter = create_meter(provider);
-
-        Self { meter, ..self }
+    #[cfg(any(feature = "metrics", test))]
+    pub fn meter_provider(self, provider: &dyn opentelemetry::metrics::MeterProvider) -> Self {
+        Self {
+            meter: Some(crate::metrics::create_meter(provider)),
+            ..self
+        }
     }
 
-    /// Get the configured OpenTelemetry meter.
-    ///
-    /// Use this to create counters, histograms, and gauges for middleware
-    /// observability. The meter uses:
-    ///
-    /// - Name: `seatbelt`
-    /// - Version: `v0.1.0`
-    /// - Schema URL: `https://opentelemetry.io/schemas/1.47.0`
-    #[must_use]
-    pub(crate) fn get_meter(&self) -> &Meter {
-        &self.meter
-    }
-
-    /// Creates standardized counter for resilience events.
-    ///
-    /// Returns a counter that can be used to report events occurring within
-    /// resilience middleware.
-    ///
-    /// # Required Attributes
-    ///
-    /// When reporting events, the following attributes MUST be added:
-    ///
-    /// - [`PIPELINE_NAME`][crate::telemetry::PIPELINE_NAME]: The name of the pipeline this middleware belongs to
-    /// - [`STRATEGY_NAME`][crate::telemetry::STRATEGY_NAME]: The name of the specific strategy/middleware
-    /// - [`EVENT_NAME`][crate::telemetry::EVENT_NAME]: The name of the event being reported
-    #[must_use]
-    pub(crate) fn create_resilience_event_counter(&self) -> Counter<u64> {
-        create_resilience_event_counter(self.get_meter())
+    #[cfg_attr(
+        not(any(feature = "metrics", feature = "logs")),
+        expect(unused_variables, reason = "unused when logs nor metrics are used")
+    )]
+    #[cfg(any(feature = "retry", feature = "circuit", feature = "timeout", test))]
+    pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {
+        crate::utils::TelemetryHelper {
+            #[cfg(any(feature = "metrics", test))]
+            event_reporter: self.meter.as_ref().map(crate::metrics::create_resilience_event_counter),
+            #[cfg(any(feature = "metrics", feature = "logs", test))]
+            pipeline_name: self.pipeline_name.clone(),
+            #[cfg(any(feature = "metrics", feature = "logs", test))]
+            strategy_name,
+            logs_enabled: self.logs_enabled,
+        }
     }
 }
 
@@ -175,9 +157,11 @@ impl<In, Out> Clone for Context<In, Out> {
         Self {
             clock: self.clock.clone(),
             pipeline_name: self.pipeline_name.clone(),
+            #[cfg(any(feature = "metrics", test))]
             meter: self.meter.clone(),
             _in: std::marker::PhantomData,
             _out: std::marker::PhantomData,
+            logs_enabled: self.logs_enabled,
         }
     }
 }

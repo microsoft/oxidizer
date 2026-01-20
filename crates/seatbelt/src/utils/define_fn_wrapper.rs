@@ -56,49 +56,49 @@ macro_rules! define_fn_wrapper {
 
     // Match pattern without return type (defaults to unit)
     ($name:ident<$($generics:ident),*>(Fn($($param_name:ident: $param_ty:ty),*))) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn($($param_name: $param_ty),*) -> ()));
+        crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn($($param_name: $param_ty),*) -> ()));
     };
 
     // Alternative match for simple cases without explicit parameter names
     // For two parameters
     ($name:ident<$($generics:ident),*>(Fn($param1:ty, $param2:ty) -> $return_ty:ty)) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1, arg2: $param2) -> $return_ty));
+        crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1, arg2: $param2) -> $return_ty));
     };
 
     // For two parameters without return type
     ($name:ident<$($generics:ident),*>(Fn($param1:ty, $param2:ty))) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1, arg2: $param2) -> ()));
+        crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1, arg2: $param2) -> ()));
     };
 
     // For one parameter
     ($name:ident<$($generics:ident),*>(Fn($param1:ty) -> $return_ty:ty)) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1) -> $return_ty));
+        crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1) -> $return_ty));
     };
 
     // For one parameter without return type
     ($name:ident<$($generics:ident),*>(Fn($param1:ty))) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1) -> ()));
+        crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn(arg1: $param1) -> ()));
     };
 
     // For zero parameters
     ($name:ident<$($generics:ident),*>(Fn() -> $return_ty:ty)) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn() -> $return_ty));
+        $crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn() -> $return_ty));
     };
 
     // For zero parameters without return type
     ($name:ident<$($generics:ident),*>(Fn())) => {
-        $crate::define_fn_wrapper!($name<$($generics),*>(Fn() -> ()));
+        $crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn() -> ()));
     };
 
     // Match pattern without return type (defaults to unit)
     ($name:ident(Fn($($param_name:ident: $param_ty:ty),*))) => {
-        $crate::define_fn_wrapper!($name(Fn($($param_name: $param_ty),*) -> ()));
+        $crate::utils::define_fn_wrapper!($name(Fn($($param_name: $param_ty),*) -> ()));
     };
 
     // Alternative match for simple cases without explicit parameter names
     // For two parameters
     ($name:ident(Fn($param1:ty, $param2:ty) -> $return_ty:ty)) => {
-        $crate::define_fn_wrapper!($name(Fn(arg1: $param1, arg2: $param2) -> $return_ty));
+        $crate::utils::define_fn_wrapper!($name(Fn(arg1: $param1, arg2: $param2) -> $return_ty));
     };
 
     // For two parameters without return type
@@ -108,22 +108,22 @@ macro_rules! define_fn_wrapper {
 
     // For one parameter
     ($name:ident(Fn($param1:ty) -> $return_ty:ty)) => {
-        $crate::define_fn_wrapper!($name(Fn(arg1: $param1) -> $return_ty));
+        $crate::utils::define_fn_wrapper!($name(Fn(arg1: $param1) -> $return_ty));
     };
 
     // For one parameter without return type
     ($name:ident(Fn($param1:ty))) => {
-        $crate::define_fn_wrapper!($name(Fn(arg1: $param1) -> ()));
+        $crate::utils::define_fn_wrapper!($name(Fn(arg1: $param1) -> ()));
     };
 
     // For zero parameters
     ($name:ident(Fn() -> $return_ty:ty)) => {
-        $crate::define_fn_wrapper!($name(Fn() -> $return_ty));
+        $crate::utils::define_fn_wrapper!($name(Fn() -> $return_ty));
     };
 
     // For zero parameters without return type
     ($name:ident(Fn())) => {
-        $crate::define_fn_wrapper!($name(Fn() -> ()));
+        $crate::utils::define_fn_wrapper!($name(Fn() -> ()));
     };
 }
 

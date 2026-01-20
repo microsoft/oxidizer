@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use opentelemetry::InstrumentationScope;
-use opentelemetry::metrics::{Counter, Meter, MeterProvider};
+use opentelemetry::metrics::{Meter, MeterProvider};
 
 const METER_NAME: &str = "seatbelt";
 const VERSION: &str = "v0.1.0";
@@ -17,7 +17,8 @@ pub(crate) fn create_meter(meter_provider: &dyn MeterProvider) -> Meter {
     )
 }
 
-pub(crate) fn create_resilience_event_counter(meter: &Meter) -> Counter<u64> {
+#[cfg(any(feature = "retry", feature = "circuit", feature = "timeout", test))]
+pub(crate) fn create_resilience_event_counter(meter: &Meter) -> opentelemetry::metrics::Counter<u64> {
     meter
         .u64_counter("resilience.event")
         .with_description("Emitted upon the occurrence of a resilience event.")

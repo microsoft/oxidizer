@@ -33,20 +33,19 @@ all-features = true
 
 [features]
 default = []
-timeout = ["_middleware"]
-retry = ["_middleware", "dep:fastrand"]
-circuit = ["_middleware", "dep:fastrand"]
+timeout = []
+retry = ["dep:fastrand"]
+circuit = ["dep:fastrand"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
-_middleware = ["dep:tick", "dep:layered", "metrics", "logs"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
 futures = { workspace = true }
-layered = { workspace = true, optional = true }
+layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
-tick = { workspace = true, optional = true }
+tick = { workspace = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]

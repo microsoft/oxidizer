@@ -1,16 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
-
-use opentelemetry::StringValue;
 
 use crate::Layer;
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
-use crate::{Backoff, Context, EnableIf, MaxAttempts, NotSet, Recovery, RecoveryInfo, Set};
+use crate::shared::MaxAttempts;
+use crate::utils::EnableIf;
+use crate::{Backoff, Context, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring retry resilience middleware.
 ///
@@ -30,7 +31,7 @@ pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
     should_recover: Option<ShouldRecover<Out>>,
     on_retry: Option<OnRetry<Out>>,
     enable_if: EnableIf<In>,
-    strategy_name: StringValue,
+    strategy_name: Cow<'static, str>,
     restore_input: Option<RestoreInput<In, Out>>,
     handle_unavailable: bool,
     _state: PhantomData<fn(In, CloneInputState, RecoveryState) -> Out>,
@@ -38,7 +39,7 @@ pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
 
 impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: StringValue, context: &Context<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &Context<In, Out>) -> Self {
         Self {
             context: context.clone(),
             max_attempts: MaxAttempts::Finite(DEFAULT_RETRY_ATTEMPTS.saturating_add(1)),

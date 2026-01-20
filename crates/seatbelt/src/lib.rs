@@ -110,21 +110,8 @@
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
-#[cfg(any(feature = "_middleware", test))]
-pub(crate) mod options;
-
-#[cfg(any(feature = "_middleware", test))]
-pub(crate) use options::EnableIf;
-#[cfg(any(feature = "_middleware", test))]
-pub(crate) use options::define_fn_wrapper;
-
-#[cfg(any(feature = "retry", test))]
-pub(crate) use crate::options::MaxAttempts;
-#[cfg(any(feature = "_middleware", test))]
-pub use crate::options::{Attempt, Backoff, Context, NotSet, Set};
-
-#[cfg(any(feature = "_middleware", test))]
-pub mod telemetry;
+pub(crate) mod shared;
+pub use crate::shared::{Attempt, Backoff, Context, NotSet, Set};
 
 #[cfg(any(feature = "timeout", test))]
 pub mod timeout;
@@ -136,11 +123,16 @@ pub mod retry;
 pub mod circuit;
 
 #[doc(inline)]
-#[cfg(any(feature = "_middleware", test))]
 pub use layered::{Layer, Service, Stack};
 
 #[cfg(any(feature = "retry", feature = "circuit", test))]
 mod rnd;
+
+#[cfg(any(feature = "retry", feature = "circuit", feature = "timeout", test))]
+pub(crate) mod utils;
+
+#[cfg(any(feature = "metrics", test))]
+mod metrics;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]

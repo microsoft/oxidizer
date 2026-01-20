@@ -1,16 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
-
-use opentelemetry::StringValue;
 
 use crate::Layer;
 use crate::timeout::{
     OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
 };
-use crate::{Context, EnableIf, NotSet, Set};
+use crate::utils::EnableIf;
+use crate::utils::TelemetryHelper;
+use crate::{Context, NotSet, Set};
 
 /// Builder for configuring timeout resilience middleware.
 ///
@@ -28,20 +29,20 @@ pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
     timeout_output: Option<TimeoutOutputCallback<Out>>,
     on_timeout: Option<OnTimeout<Out>>,
     enable_if: EnableIf<In>,
-    strategy_name: StringValue,
+    telemetry: TelemetryHelper,
     timeout_override: Option<TimeoutOverride<In>>,
     _state: PhantomData<fn(In, Timeout, TimeoutOutput) -> Out>,
 }
 
 impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: StringValue, context: &Context<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &Context<In, Out>) -> Self {
         Self {
             timeout: None,
             timeout_output: None,
             on_timeout: None,
             enable_if: EnableIf::always(),
-            strategy_name: name,
+            telemetry: context.create_telemetry(name),
             context: context.clone(),
             timeout_override: None,
             _state: PhantomData,
@@ -203,10 +204,8 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
             enable_if: self.enable_if.clone(),
             on_timeout: self.on_timeout.clone(),
             timeout_output: self.timeout_output.clone().expect("timeout_result must be set in Ready state"),
-            name: self.strategy_name.clone(),
-            pipeline_name: self.context.get_pipeline_name().clone().into(),
-            event_reporter: self.context.create_resilience_event_counter(),
             timeout_override: self.timeout_override.clone(),
+            telemetry: self.telemetry.clone(),
         }
     }
 }
@@ -218,7 +217,7 @@ impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutp
             enable_if: self.enable_if,
             timeout_output: self.timeout_output,
             on_timeout: self.on_timeout,
-            strategy_name: self.strategy_name,
+            telemetry: self.telemetry,
             context: self.context,
             timeout_override: self.timeout_override,
             _state: PhantomData,
@@ -247,14 +246,14 @@ mod tests {
         assert!(layer.timeout_output.is_none());
         assert!(layer.on_timeout.is_none());
         assert!(layer.timeout_override.is_none());
-        assert_eq!(layer.strategy_name, StringValue::from("test_timeout"));
+        assert_eq!(layer.telemetry.strategy_name, StringValue::from("test_timeout"));
         assert!(layer.enable_if.call(&"test_input".to_string()));
     }
 
     #[test]
     fn timeout_output_ensure_set_correctly() {
         let context = create_test_context();
-        let layer = TimeoutLayer::new(StringValue::from("test"), &context);
+        let layer = TimeoutLayer::new("test".into(), &context);
 
         let layer: TimeoutLayer<_, _, NotSet, Set> = layer.timeout_output(|args| format!("timeout: {}", args.timeout().as_millis()));
         let result = layer.timeout_output.unwrap().call(TimeoutOutputArgs {

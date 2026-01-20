@@ -6,13 +6,12 @@ use std::time::Duration;
 
 use futures::future::Either;
 use layered::Service;
-use opentelemetry::StringValue;
 use tick::{Clock, FutureExt};
 
-use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
-use crate::timeout::telemetry::TIMEOUT_EVENT_NAME;
 use crate::timeout::{OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs};
-use crate::{Context, EnableIf, NotSet};
+use crate::utils::EnableIf;
+use crate::utils::TelemetryHelper;
+use crate::{Context, NotSet};
 
 /// Applies a timeout to service execution for canceling long-running operations.
 ///
@@ -37,9 +36,7 @@ pub struct Timeout<In, Out, S> {
     pub(super) on_timeout: Option<OnTimeout<Out>>,
     pub(super) timeout_override: Option<TimeoutOverride<In>>,
     pub(super) timeout_output: TimeoutOutput<Out>,
-    pub(super) name: StringValue,
-    pub(super) pipeline_name: StringValue,
-    pub(super) event_reporter: opentelemetry::metrics::Counter<u64>,
+    pub(super) telemetry: TelemetryHelper,
 }
 
 impl<In, Out> Timeout<In, Out, ()> {
@@ -104,24 +101,32 @@ where
             match self.inner.execute(input).timeout(&self.clock, timeout).await {
                 Ok(output) => output,
                 Err(_error) => {
-                    self.event_reporter.add(
-                        1,
-                        &[
-                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.name.clone()),
-                            opentelemetry::KeyValue::new(EVENT_NAME, TIMEOUT_EVENT_NAME),
-                        ],
-                    );
+                    #[cfg(any(feature = "metrics", test))]
+                    if let Some(reporter) = &self.telemetry.event_reporter {
+                        use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+
+                        reporter.add(
+                            1,
+                            &[
+                                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                                opentelemetry::KeyValue::new(EVENT_NAME, super::telemetry::TIMEOUT_EVENT_NAME),
+                            ],
+                        );
+                    }
 
                     let output = self.timeout_output.call(TimeoutOutputArgs { timeout });
 
-                    tracing::event!(
-                        name: "seatbelt.timeout",
-                        tracing::Level::WARN,
-                        pipeline.name = self.pipeline_name.as_str(),
-                        strategy.name = self.name.as_str(),
-                        timeout.ms = timeout.as_millis(),
-                    );
+                    if self.telemetry.logs_enabled {
+                        #[cfg(any(feature = "logs", test))]
+                        tracing::event!(
+                            name: "seatbelt.timeout",
+                            tracing::Level::WARN,
+                            pipeline.name = %self.telemetry.pipeline_name,
+                            strategy.name = %self.telemetry.strategy_name,
+                            timeout.ms = timeout.as_millis(),
+                        );
+                    }
 
                     if let Some(on_timeout) = &self.on_timeout {
                         on_timeout.call(&output, OnTimeoutArgs { timeout });

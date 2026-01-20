@@ -1,21 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
 use std::ops::ControlFlow;
 use std::time::Duration;
 
 use layered::Service;
-use opentelemetry::StringValue;
-use opentelemetry::metrics::Counter;
 use tick::Clock;
 
-use crate::options::MaxAttempts;
 use crate::retry::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
 use crate::retry::{
     CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, ShouldRecover,
 };
+use crate::shared::MaxAttempts;
 use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
-use crate::{Attempt, EnableIf, NotSet, RecoveryInfo, RecoveryKind};
+use crate::utils::EnableIf;
+use crate::{Attempt, NotSet, RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
 ///
@@ -42,9 +42,10 @@ pub struct Retry<In, Out, S> {
     pub(super) should_recover: ShouldRecover<Out>,
     pub(super) on_retry: Option<OnRetry<Out>>,
     pub(super) enable_if: EnableIf<In>,
-    pub(super) strategy_name: StringValue,
-    pub(super) pipeline_name: StringValue,
-    pub(super) event_reporter: Counter<u64>,
+    pub(super) strategy_name: Cow<'static, str>,
+    pub(super) pipeline_name: Cow<'static, str>,
+    #[cfg(any(feature = "metrics", test))]
+    pub(super) event_reporter: Option<opentelemetry::metrics::Counter<u64>>,
     pub(super) restore_input: Option<RestoreInput<In, Out>>,
     pub(super) handle_unavailable: bool,
 }
@@ -176,26 +177,30 @@ enum RecoverableKind {
 
 impl<In, Out, S> Retry<In, Out, S> {
     fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
+        #[cfg(any(feature = "logs", test))]
         tracing::event!(
             name: "seatbelt.retry",
             tracing::Level::WARN,
-            pipeline.name = self.pipeline_name.as_str(),
-            strategy.name = self.strategy_name.as_str(),
+            pipeline.name = %self.pipeline_name,
+            strategy.name = %self.strategy_name,
             resilience.attempt.index = attempt.index(),
             resilience.attempt.is_last = attempt.is_last(),
             resilience.retry.delay = retry_delay.as_secs_f32(),
         );
 
-        self.event_reporter.add(
-            1,
-            &[
-                opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
-                opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
-                opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
-            ],
-        );
+        #[cfg(any(feature = "metrics", test))]
+        if let Some(reporter) = &self.event_reporter {
+            reporter.add(
+                1,
+                &[
+                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
+                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
+                    opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
+                    opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
+                    opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
+                ],
+            );
+        }
     }
 
     #[inline]
@@ -259,8 +264,8 @@ mod tests {
 
     use super::*;
     use crate::Layer;
-    use crate::options::Backoff;
     use crate::retry::RetryLayer;
+    use crate::shared::Backoff;
     use crate::testing::MetricTester;
     use crate::{Context, Set};
 
