@@ -6,7 +6,7 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/favicon.ico")]
 #![cfg_attr(
-    not(all(feature = "retry", feature = "timeout", feature = "circuit")),
+    not(all(feature = "retry", feature = "timeout", feature = "circuit", feature = "metrics", feature = "logs")),
     expect(
         rustdoc::broken_intra_doc_links,
         reason = "too ugly to make 'live links' possible with the combination of features"

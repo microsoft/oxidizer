@@ -110,10 +110,10 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link11]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
  [__link12]: https://docs.rs/seatbelt/0.1.0/seatbelt/retry/index.html
  [__link13]: https://docs.rs/seatbelt/0.1.0/seatbelt/circuit/index.html
- [__link2]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
+ [__link2]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=shared::Context
  [__link3]: https://crates.io/crates/layered/0.1.0
  [__link4]: https://docs.rs/layered/0.1.0/layered/?search=Stack
- [__link5]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=options::Context
+ [__link5]: https://docs.rs/seatbelt/0.1.0/seatbelt/?search=shared::Context
  [__link6]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link7]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
  [__link8]: https://docs.rs/seatbelt/0.1.0/seatbelt/timeout/index.html
