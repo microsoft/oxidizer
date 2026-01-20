@@ -258,4 +258,41 @@ mod tests {
 
         assert_eq!(output, "test input");
     }
+
+    #[tokio::test]
+    async fn timeout_emits_log() {
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        use crate::testing::LogCapture;
+
+        let log_capture = LogCapture::new();
+        let _guard = log_capture.subscriber().set_default();
+
+        let clock = ClockControl::default()
+            .auto_advance(Duration::from_millis(200))
+            .auto_advance_limit(Duration::from_millis(500))
+            .to_clock();
+        let context = Context::new(clock.clone()).enable_logs().pipeline_name("log_test_pipeline");
+
+        let stack = (
+            Timeout::layer("log_test_timeout", &context)
+                .timeout_output(|_| "timed out".to_string())
+                .timeout(Duration::from_millis(100)),
+            Execute::new(move |input| {
+                let clock = clock.clone();
+                async move {
+                    clock.delay(Duration::from_secs(1)).await;
+                    input
+                }
+            }),
+        );
+
+        let service = stack.build();
+        let _ = service.execute("test".to_string()).await;
+
+        log_capture.assert_contains("seatbelt::timeout");
+        log_capture.assert_contains("log_test_pipeline");
+        log_capture.assert_contains("log_test_timeout");
+        log_capture.assert_contains("timeout.ms=100");
+    }
 }

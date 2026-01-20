@@ -453,6 +453,57 @@ mod tests {
         assert_eq!(result, "B");
     }
 
+    #[tokio::test]
+    async fn circuit_breaker_emits_logs() {
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        use crate::testing::LogCapture;
+
+        let log_capture = LogCapture::new();
+        let _guard = log_capture.subscriber().set_default();
+
+        let clock_control = ClockControl::new();
+        let context =
+            Context::<String, String>::new(clock_control.to_clock()).pipeline_name("log_test_pipeline").enable_logs();
+
+        let service = Circuit::layer("log_test_circuit", &context)
+            .min_throughput(3)
+            .half_open_mode(HalfOpenMode::quick())
+            .recovery_with(|output, _| {
+                if output.contains("success") {
+                    RecoveryInfo::never()
+                } else {
+                    RecoveryInfo::retry()
+                }
+            })
+            .rejected_input(|_, _| "rejected".to_string())
+            .layer(Execute::new(|input: String| async move { input }));
+
+        // Trip the circuit by generating failures
+        for _ in 0..3 {
+            let _ = service.execute("fail".to_string()).await;
+        }
+
+        // Verify circuit opened log
+        log_capture.assert_contains("seatbelt::circuit");
+        log_capture.assert_contains("log_test_pipeline");
+        log_capture.assert_contains("log_test_circuit");
+        log_capture.assert_contains("circuit_breaker.state=\"open\"");
+        log_capture.assert_contains("circuit_breaker.health.failure_rate");
+
+        // Request should be rejected (emits another open state log)
+        let _ = service.execute("test".to_string()).await;
+
+        // Advance time past break duration to allow probing
+        clock_control.advance(DEFAULT_BREAK_DURATION);
+
+        // Send a successful probe to close circuit
+        let _ = service.execute("success".to_string()).await;
+        log_capture.assert_contains("circuit_breaker.probe.result");
+        log_capture.assert_contains("circuit_breaker.state=\"closed\"");
+        log_capture.assert_contains("circuit_breaker.open.duration");
+    }
+
     fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitLayer<String, String, Set, Set> {
         let context = Context::<String, String>::new(clock.clone()).pipeline_name("test_pipeline");
         Circuit::layer("test_breaker", &context)

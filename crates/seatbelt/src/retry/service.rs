@@ -606,6 +606,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn retry_emits_log() {
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        use crate::testing::LogCapture;
+
+        let log_capture = LogCapture::new();
+        let _guard = log_capture.subscriber().set_default();
+
+        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let context = Context::<String, String>::new(clock).pipeline_name("log_test_pipeline").enable_logs();
+
+        let service = Retry::layer("log_test_retry", &context)
+            .clone_input()
+            .recovery_with(|_, _| RecoveryInfo::retry())
+            .max_retry_attempts(2)
+            .layer(Execute::new(|v: String| async move { v }));
+
+        let _ = service.execute("test".to_string()).await;
+
+        log_capture.assert_contains("seatbelt::retry");
+        log_capture.assert_contains("log_test_pipeline");
+        log_capture.assert_contains("log_test_retry");
+        log_capture.assert_contains("resilience.attempt.index");
+        log_capture.assert_contains("resilience.retry.delay");
+    }
+
     fn create_ready_retry_layer(clock: &Clock, recover: RecoveryInfo) -> RetryLayer<String, String, Set, Set> {
         let context = Context::new(clock.clone()).pipeline_name("test_pipeline");
         create_ready_retry_layer_core(recover, &context)
