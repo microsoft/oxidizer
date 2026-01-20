@@ -141,10 +141,13 @@ impl LogCapture {
         String::from_utf8_lossy(&self.buffer.lock().unwrap()).to_string()
     }
 
-    /// Asserts that the captured log output contains the given substring.
+    /// Asserts that the captured log output contains the given string.
     pub fn assert_contains(&self, expected: &str) {
         let output = self.output();
-        assert!(output.contains(expected), "log output does not contain '{expected}', got:\n{output}");
+        assert!(
+            output.contains(expected),
+            "log output does not contain '{expected}', got:\n{output}"
+        );
     }
 
     /// Creates a `tracing_subscriber` that writes to this capture buffer.

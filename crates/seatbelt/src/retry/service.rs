@@ -616,7 +616,9 @@ mod tests {
         let _guard = log_capture.subscriber().set_default();
 
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-        let context = Context::<String, String>::new(clock).pipeline_name("log_test_pipeline").enable_logs();
+        let context = Context::<String, String>::new(clock)
+            .pipeline_name("log_test_pipeline")
+            .enable_logs();
 
         let service = Retry::layer("log_test_retry", &context)
             .clone_input()

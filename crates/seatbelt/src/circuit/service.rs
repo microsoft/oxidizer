@@ -463,8 +463,9 @@ mod tests {
         let _guard = log_capture.subscriber().set_default();
 
         let clock_control = ClockControl::new();
-        let context =
-            Context::<String, String>::new(clock_control.to_clock()).pipeline_name("log_test_pipeline").enable_logs();
+        let context = Context::<String, String>::new(clock_control.to_clock())
+            .pipeline_name("log_test_pipeline")
+            .enable_logs();
 
         let service = Circuit::layer("log_test_circuit", &context)
             .min_throughput(3)
