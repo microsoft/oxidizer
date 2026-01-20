@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "many_cpus",
  "mutants",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "mutants",
  "syn",
@@ -1558,7 +1558,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "insta",
  "prettyplease",
