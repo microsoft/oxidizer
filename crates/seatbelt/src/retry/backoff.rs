@@ -129,6 +129,7 @@ fn apply_jitter(delay: Duration, rnd: &Rnd) -> Duration {
 /// - [`Polly V7` implementation](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry/blob/7596d2dacf22d88bbd814bc49c28424fb6e921e9/src/Polly.Contrib.WaitAndRetry/Backoff.DecorrelatedJitterV2.cs#L22)
 /// - [`Polly.Contrib.WaitAndRetry` repo](https://github.com/Polly-Contrib/Polly.Contrib.WaitAndRetry)
 #[inline]
+#[cfg_attr(test, mutants::skip)] // Mutating arithmetic causes infinite loops in retry tests
 fn decorrelated_jitter_backoff_v2(attempt: u32, base_delay: Duration, prev: &mut f64, rnd: &Rnd) -> Duration {
     // The original author/credit for this jitter formula is @george-polevoy .
     // Jitter formula used with permission as described at https://github.com/App-vNext/Polly/issues/530#issuecomment-526555979

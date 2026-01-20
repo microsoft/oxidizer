@@ -45,6 +45,7 @@ impl Rnd {
         Self::Test(std::sync::Arc::new(f))
     }
 
+    #[cfg_attr(test, mutants::skip)] // Mutating return value causes infinite loops in backoff calculations
     pub fn next_f64(&self) -> f64 {
         match self {
             Self::Real => fastrand::f64(),

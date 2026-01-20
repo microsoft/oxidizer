@@ -65,6 +65,7 @@ where
 {
     type Out = Out;
 
+    #[cfg_attr(test, mutants::skip)] // Mutating enable_if check causes infinite loops
     async fn execute(&self, mut input: In) -> Self::Out {
         // Check if retry is enabled for this input
         if !self.enable_if.call(&input) {

@@ -26,3 +26,19 @@ impl TelemetryHelper {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metrics_enabled_returns_false_when_no_reporter() {
+        let helper = TelemetryHelper {
+            pipeline_name: "test".into(),
+            strategy_name: "test".into(),
+            event_reporter: None,
+            logs_enabled: false,
+        };
+        assert!(!helper.metrics_enabled());
+    }
+}
