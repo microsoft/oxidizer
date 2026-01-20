@@ -579,7 +579,7 @@ mod tests {
         let tester = MetricTester::new();
         let context = Context::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
             .pipeline_name("test_pipeline")
-            .meter_provider(tester.meter_provider());
+            .enable_metrics(tester.meter_provider());
 
         let service = create_ready_retry_layer_core(RecoveryInfo::retry(), &context)
             .clone_input_with(move |input, _args| Some(input.clone()))

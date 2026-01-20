@@ -29,7 +29,7 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
 
     // Create common options
-    let context = Context::new(&clock).meter_provider(&meter_provider);
+    let context = Context::new(&clock).enable_metrics(&meter_provider);
 
     // Define stack with timeout layer
     let stack = (

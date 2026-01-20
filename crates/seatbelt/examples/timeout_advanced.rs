@@ -29,7 +29,7 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
 
     // Create service options
-    let context: Context<String, Result<(), AppError>> = Context::new(&clock).pipeline_name("my_pipeline").meter_provider(&meter_provider);
+    let context: Context<String, Result<(), AppError>> = Context::new(&clock).pipeline_name("my_pipeline").enable_metrics(&meter_provider);
 
     // Define stack with timeout layer
     let stack = (

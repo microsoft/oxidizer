@@ -25,7 +25,7 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let context = Context::new(&clock).pipeline_name("retry_advanced").meter_provider(&meter_provider);
+    let context = Context::new(&clock).pipeline_name("retry_advanced").enable_metrics(&meter_provider);
 
     // Define stack with retry layer
     let stack = (

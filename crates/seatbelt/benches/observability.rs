@@ -22,7 +22,7 @@ fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("observability");
     let session = Session::new();
 
-    // With retry middleware (no meter provider listener)
+    // No telemetry
     let context = Context::new(Clock::new_frozen());
     let service = (
         Retry::layer("bench", &context)
@@ -40,9 +40,9 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    // With retry middleware + meter provider listener
+    // Metrics
     let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(EmptyExporter).build();
-    let context = Context::new(Clock::new_frozen()).meter_provider(&meter_provider);
+    let context = Context::new(Clock::new_frozen()).enable_metrics(&meter_provider);
     let service = (
         Retry::layer("bench", &context)
             .clone_input()
@@ -51,8 +51,26 @@ fn entry(c: &mut Criterion) {
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
         .build();
-    let operation = session.operation("retry-telemetry");
-    group.bench_function("retry-telemetry", |b| {
+    let operation = session.operation("retry-metrics");
+    group.bench_function("retry-metrics", |b| {
+        b.iter(|| {
+            let _span = operation.measure_thread();
+            _ = block_on(service.execute(Input));
+        });
+    });
+
+    // Logs
+    let context = Context::new(Clock::new_frozen()).enable_logs();
+    let service = (
+        Retry::layer("bench", &context)
+            .clone_input()
+            .base_delay(Duration::ZERO)
+            .recovery_with(|_, _| RecoveryInfo::retry()),
+        Execute::new(|v: Input| async move { Output::from(v) }),
+    )
+        .build();
+    let operation = session.operation("retry-logs");
+    group.bench_function("retry-logs", |b| {
         b.iter(|| {
             let _span = operation.measure_thread();
             _ = block_on(service.execute(Input));

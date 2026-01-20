@@ -25,7 +25,7 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
 
     // Shared options for resilience middleware
-    let context = Context::new(&clock).meter_provider(&meter_provider).pipeline_name("my_pipeline");
+    let context = Context::new(&clock).enable_metrics(&meter_provider).pipeline_name("my_pipeline");
 
     // Define stack with retry and timeout middlewares
     let stack = (

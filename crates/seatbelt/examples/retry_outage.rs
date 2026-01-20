@@ -32,7 +32,7 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let context = Context::new(&clock).meter_provider(&meter_provider);
+    let context = Context::new(&clock).enable_metrics(&meter_provider);
 
     // Configure retry layer for outage handling with input restoration
     let stack = (

@@ -97,7 +97,7 @@ required-features = ["circuit", "metrics"]
 [[bench]]
 name = "observability"
 harness = false
-required-features = ["_middleware"]
+required-features = ["retry", "logs", "metrics"]
 
 [[bench]]
 name = "timeout"

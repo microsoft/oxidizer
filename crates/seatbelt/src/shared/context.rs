@@ -20,8 +20,8 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// policies in a pipeline, exported metrics and events will carry the same
 /// pipeline attribute, making dashboards and analysis easier.
 ///
-/// You can also override the meter provider via [`meter_provider`](Self::meter_provider)
-/// if you need a non-global provider (e.g., tests or custom SDKs wiring).
+/// You can enable metrics via [`enable_metrics`](Self::enable_metrics) and logs via
+/// [`enable_logs`](Self::enable_logs) if you need telemetry for observability.
 ///
 /// # Examples
 ///
@@ -37,7 +37,7 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 /// // Create a context for a resilience pipeline
 /// let ctx = Context::<String, String>::new(&clock)
 ///     .pipeline_name("auth_pipeline")
-///     .meter_provider(meter_provider);
+///     .enable_metrics(meter_provider);
 ///
 /// // Pass the context to resilience middleware layers
 /// // (e.g., Retry::layer("my_retry", &ctx), Timeout::layer("my_timeout", &ctx))
@@ -88,11 +88,11 @@ pub struct Context<In, Out> {
 }
 
 impl<In, Out> Context<In, Out> {
-    /// Create options with a clock and the global meter provider.
+    /// Create options with a clock.
     ///
-    /// Initializes with `pipeline_name = "default"` and a meter from the
-    /// global provider. Override the provider later via
-    /// [`meter_provider`](Self::meter_provider) if needed.
+    /// Initializes with `pipeline_name = "default"`. Enable metrics via
+    /// [`enable_metrics`](Self::enable_metrics) and logs via
+    /// [`enable_logs`](Self::enable_logs) if needed.
     pub fn new(clock: impl AsRef<Clock>) -> Self {
         Self {
             clock: clock.as_ref().clone(),
@@ -127,12 +127,29 @@ impl<In, Out> Context<In, Out> {
         self
     }
 
-    /// Override the global meter provider with a custom one.
+    /// Enable metrics reporting with a custom meter provider.
+    ///
+    /// Metrics are disabled by default. Call this method to enable metrics
+    /// reporting using the provided OpenTelemetry meter provider.
     #[must_use]
     #[cfg(any(feature = "metrics", test))]
-    pub fn meter_provider(self, provider: &dyn opentelemetry::metrics::MeterProvider) -> Self {
+    pub fn enable_metrics(self, provider: &dyn opentelemetry::metrics::MeterProvider) -> Self {
         Self {
             meter: Some(crate::metrics::create_meter(provider)),
+            ..self
+        }
+    }
+
+    /// Enable structured logging for resilience events.
+    ///
+    /// Logs are disabled by default. Call this method to enable structured
+    /// logging for resilience events like retries, timeouts, and circuit breaker
+    /// state changes.
+    #[must_use]
+    #[cfg(any(feature = "logs", test))]
+    pub fn enable_logs(self) -> Self {
+        Self {
+            logs_enabled: true,
             ..self
         }
     }
@@ -202,7 +219,7 @@ mod tests {
         let clock = tick::Clock::new_frozen();
         let (provider, exporter) = test_meter_provider();
 
-        let ctx = Context::<(), ()>::new(clock).meter_provider(&provider);
+        let ctx = Context::<(), ()>::new(clock).enable_metrics(&provider);
         let telemetry1 = ctx.create_telemetry("test1".into());
         let telemetry2 = ctx.create_telemetry("test2".into());
         let c1 = telemetry1.event_reporter.unwrap();
