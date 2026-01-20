@@ -67,7 +67,7 @@ impl<In, Out> Timeout<In, Out, ()> {
     ///
     /// [timeout module]: crate::timeout
     pub fn layer(name: impl Into<Cow<'static, str>>, context: &Context<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {
-        TimeoutLayer::new(name.into().into(), context)
+        TimeoutLayer::new(name.into(), context)
     }
 }
 
@@ -102,17 +102,14 @@ where
                 Ok(output) => output,
                 Err(_error) => {
                     #[cfg(any(feature = "metrics", test))]
-                    if let Some(reporter) = &self.telemetry.event_reporter {
+                    if self.telemetry.metrics_enabled() {
                         use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
-                        reporter.add(
-                            1,
-                            &[
-                                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                                opentelemetry::KeyValue::new(EVENT_NAME, super::telemetry::TIMEOUT_EVENT_NAME),
-                            ],
-                        );
+                        self.telemetry.report_metrics(&[
+                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                            opentelemetry::KeyValue::new(EVENT_NAME, super::telemetry::TIMEOUT_EVENT_NAME),
+                        ]);
                     }
 
                     let output = self.timeout_output.call(TimeoutOutputArgs { timeout });

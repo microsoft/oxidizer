@@ -49,7 +49,7 @@ impl<In, Out> Circuit<In, Out, ()> {
         name: impl Into<std::borrow::Cow<'static, str>>,
         context: &crate::Context<In, Out>,
     ) -> CircuitLayer<In, Out, NotSet, NotSet> {
-        CircuitLayer::new(name.into().into(), context)
+        CircuitLayer::new(name.into(), context)
     }
 }
 

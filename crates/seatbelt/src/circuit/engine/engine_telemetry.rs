@@ -39,17 +39,14 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
         if matches!(enter_result, EnterCircuitResult::Rejected) {
             #[cfg(any(feature = "metrics", test))]
-            if let Some(reporter) = &self.telemetry.event_reporter {
-                reporter.add(
-                    1,
-                    &[
-                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_REJECTED_EVENT_NAME),
-                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                    ],
-                );
+            if self.telemetry.metrics_enabled() {
+                self.telemetry.report_metrics(&[
+                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                    opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_REJECTED_EVENT_NAME),
+                    opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
+                    opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                ]);
             }
 
             if self.telemetry.logs_enabled {
@@ -102,17 +99,14 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
         match exit_result {
             ExitCircuitResult::Opened(health) => {
                 #[cfg(any(feature = "metrics", test))]
-                if let Some(reporter) = &self.telemetry.event_reporter {
-                    reporter.add(
-                        1,
-                        &[
-                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                            opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_OPENED_EVENT_NAME),
-                            opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
-                            opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                        ],
-                    );
+                if self.telemetry.metrics_enabled() {
+                    self.telemetry.report_metrics(&[
+                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_OPENED_EVENT_NAME),
+                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
+                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                    ]);
                 }
 
                 if self.telemetry.logs_enabled {
@@ -133,17 +127,14 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
             }
             ExitCircuitResult::Closed(ref stats) => {
                 #[cfg(any(feature = "metrics", test))]
-                if let Some(reporter) = &self.telemetry.event_reporter {
-                    reporter.add(
-                        1,
-                        &[
-                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                            opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_CLOSED_EVENT_NAME),
-                            opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Closed.as_str()),
-                            opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                        ],
-                    );
+                if self.telemetry.metrics_enabled() {
+                    self.telemetry.report_metrics(&[
+                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_CLOSED_EVENT_NAME),
+                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Closed.as_str()),
+                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                    ]);
                 }
 
                 if self.telemetry.logs_enabled {

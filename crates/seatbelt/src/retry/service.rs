@@ -54,7 +54,7 @@ impl<In, Out> Retry<In, Out, ()> {
         name: impl Into<std::borrow::Cow<'static, str>>,
         context: &crate::Context<In, Out>,
     ) -> crate::retry::RetryLayer<In, Out, NotSet, NotSet> {
-        crate::retry::RetryLayer::new(name.into().into(), context)
+        crate::retry::RetryLayer::new(name.into(), context)
     }
 }
 
@@ -171,10 +171,7 @@ enum RecoverableKind {
 }
 
 impl<In, Out, S> Retry<In, Out, S> {
-    #[cfg_attr(
-        not(feature = "logs"),
-        expect(unused_variables, reason = "unused when logs feature not used")
-    )]
+    #[cfg_attr(not(feature = "logs"), expect(unused_variables, reason = "unused when logs feature not used"))]
     fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
         if self.telemetry.logs_enabled {
             #[cfg(any(feature = "logs", test))]
@@ -190,20 +187,17 @@ impl<In, Out, S> Retry<In, Out, S> {
         }
 
         #[cfg(any(feature = "metrics", test))]
-        if let Some(reporter) = &self.telemetry.event_reporter {
-            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+        if self.telemetry.metrics_enabled() {
             use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
+            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
-            reporter.add(
-                1,
-                &[
-                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                    opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
-                    opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                    opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
-                ],
-            );
+            self.telemetry.report_metrics(&[
+                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
+                opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
+                opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
+            ]);
         }
     }
 
