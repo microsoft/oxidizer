@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.1] - 2026-01-20
+
+- 🧩 Miscellaneous
+
+  - Version bump to match thread_aware crate
+
 ## [0.5.0] - 2025-12-11
 
 - ✔️ Tasks
