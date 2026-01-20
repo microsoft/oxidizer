@@ -1,20 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::ops::ControlFlow;
 use std::time::Duration;
 
 use layered::Service;
 use tick::Clock;
 
-use crate::retry::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
 use crate::retry::{
     CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, ShouldRecover,
 };
 use crate::shared::MaxAttempts;
-use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 use crate::utils::EnableIf;
+use crate::utils::TelemetryHelper;
 use crate::{Attempt, NotSet, RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
@@ -42,10 +40,7 @@ pub struct Retry<In, Out, S> {
     pub(super) should_recover: ShouldRecover<Out>,
     pub(super) on_retry: Option<OnRetry<Out>>,
     pub(super) enable_if: EnableIf<In>,
-    pub(super) strategy_name: Cow<'static, str>,
-    pub(super) pipeline_name: Cow<'static, str>,
-    #[cfg(any(feature = "metrics", test))]
-    pub(super) event_reporter: Option<opentelemetry::metrics::Counter<u64>>,
+    pub(super) telemetry: TelemetryHelper,
     pub(super) restore_input: Option<RestoreInput<In, Out>>,
     pub(super) handle_unavailable: bool,
 }
@@ -176,25 +171,34 @@ enum RecoverableKind {
 }
 
 impl<In, Out, S> Retry<In, Out, S> {
+    #[cfg_attr(
+        not(feature = "logs"),
+        expect(unused_variables, reason = "unused when logs feature not used")
+    )]
     fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
-        #[cfg(any(feature = "logs", test))]
-        tracing::event!(
-            name: "seatbelt.retry",
-            tracing::Level::WARN,
-            pipeline.name = %self.pipeline_name,
-            strategy.name = %self.strategy_name,
-            resilience.attempt.index = attempt.index(),
-            resilience.attempt.is_last = attempt.is_last(),
-            resilience.retry.delay = retry_delay.as_secs_f32(),
-        );
+        if self.telemetry.logs_enabled {
+            #[cfg(any(feature = "logs", test))]
+            tracing::event!(
+                name: "seatbelt.retry",
+                tracing::Level::WARN,
+                pipeline.name = %self.telemetry.pipeline_name,
+                strategy.name = %self.telemetry.strategy_name,
+                resilience.attempt.index = attempt.index(),
+                resilience.attempt.is_last = attempt.is_last(),
+                resilience.retry.delay = retry_delay.as_secs_f32(),
+            );
+        }
 
         #[cfg(any(feature = "metrics", test))]
-        if let Some(reporter) = &self.event_reporter {
+        if let Some(reporter) = &self.telemetry.event_reporter {
+            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+            use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
+
             reporter.add(
                 1,
                 &[
-                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
+                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                     opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                     opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
                     opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
@@ -277,8 +281,8 @@ mod tests {
 
         let retry = layer.layer(Execute::new(|v: String| async move { v }));
 
-        assert_eq!(retry.pipeline_name.to_string(), "test_pipeline");
-        assert_eq!(retry.strategy_name.to_string(), "test_retry");
+        assert_eq!(retry.telemetry.pipeline_name.to_string(), "test_pipeline");
+        assert_eq!(retry.telemetry.strategy_name.to_string(), "test_retry");
         assert_eq!(retry.max_attempts, MaxAttempts::Finite(4));
         assert_eq!(retry.backoff.0.base_delay, Duration::from_secs(2));
         assert_eq!(retry.backoff.0.backoff_type, Backoff::Exponential);

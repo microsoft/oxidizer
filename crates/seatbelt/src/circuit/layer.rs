@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
-
-use opentelemetry::StringValue;
 
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::{
@@ -13,7 +12,8 @@ use super::{
 };
 use crate::Layer;
 use crate::circuit::engine::probing::ProbesOptions;
-use crate::{Context, EnableIf, NotSet, Recovery, RecoveryInfo, Set};
+use crate::utils::{EnableIf, TelemetryHelper};
+use crate::{Context, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///
@@ -35,7 +35,7 @@ pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> 
     on_probing: Option<OnProbing<In>>,
     partition_key: Option<PartionKeyProvider<In>>,
     enable_if: EnableIf<In>,
-    strategy_name: StringValue,
+    telemetry: TelemetryHelper,
     failure_threshold: f32,
     min_throughput: u32,
     sampling_duration: Duration,
@@ -46,7 +46,7 @@ pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> 
 
 impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: StringValue, context: &Context<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &Context<In, Out>) -> Self {
         Self {
             context: context.clone(),
             recovery: None,
@@ -56,7 +56,7 @@ impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
             on_probing: None,
             partition_key: None,
             enable_if: EnableIf::always(),
-            strategy_name: name,
+            telemetry: context.create_telemetry(name),
             failure_threshold: DEFAULT_FAILURE_THRESHOLD,
             min_throughput: DEFAULT_MIN_THROUGHPUT,
             sampling_duration: DEFAULT_SAMPLING_DURATION,
@@ -423,9 +423,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
                 probes: self.probes_options(),
             },
             self.context.get_clock().clone(),
-            self.strategy_name.clone(),
-            self.context.get_pipeline_name().clone().into(),
-            self.context.create_resilience_event_counter(),
+            self.telemetry.clone(),
         )
     }
 
@@ -439,7 +437,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
             on_probing: self.on_probing,
             partition_key: self.partition_key,
             enable_if: self.enable_if,
-            strategy_name: self.strategy_name,
+            telemetry: self.telemetry.clone(),
             failure_threshold: self.failure_threshold,
             min_throughput: self.min_throughput,
             sampling_duration: self.sampling_duration,

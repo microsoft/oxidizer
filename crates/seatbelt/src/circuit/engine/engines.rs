@@ -4,12 +4,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use opentelemetry::StringValue;
-use opentelemetry::metrics::Counter;
 use tick::Clock;
 
 use crate::circuit::constants::ERR_POISONED_LOCK;
 use crate::circuit::{Engine, EngineCore, EngineOptions, EngineTelemetry, PartitionKey};
+use crate::utils::TelemetryHelper;
 
 /// Manages circuit breaker engines for different partition keys.
 #[derive(Debug)]
@@ -17,26 +16,16 @@ pub(crate) struct Engines {
     map: Mutex<HashMap<PartitionKey, Arc<Engine>>>,
     engine_options: EngineOptions,
     clock: Clock,
-    strategy_name: StringValue,
-    pipeline_name: StringValue,
-    resilience_event_counter: Counter<u64>,
+    telemetry: TelemetryHelper,
 }
 
 impl Engines {
-    pub fn new(
-        engine_options: EngineOptions,
-        clock: Clock,
-        strategy_name: StringValue,
-        pipeline_name: StringValue,
-        resilience_event_counter: Counter<u64>,
-    ) -> Self {
+    pub fn new(engine_options: EngineOptions, clock: Clock, telemetry: TelemetryHelper) -> Self {
         Self {
             map: Mutex::new(HashMap::new()),
             engine_options,
             clock,
-            strategy_name,
-            pipeline_name,
-            resilience_event_counter,
+            telemetry,
         }
     }
 
@@ -61,10 +50,8 @@ impl Engines {
     fn create_engine(&self, key: &PartitionKey) -> Engine {
         EngineTelemetry::new(
             EngineCore::new(self.engine_options.clone(), self.clock.clone()),
-            self.strategy_name.clone(),
-            self.pipeline_name.clone(),
-            key.to_string().into(),
-            self.resilience_event_counter.clone(),
+            self.telemetry.clone(),
+            key.clone().into(),
             self.clock.clone(),
         )
     }

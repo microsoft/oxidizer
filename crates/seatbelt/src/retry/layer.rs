@@ -11,6 +11,7 @@ use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
 use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
+use crate::utils::TelemetryHelper;
 use crate::{Backoff, Context, NotSet, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring retry resilience middleware.
@@ -31,7 +32,7 @@ pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
     should_recover: Option<ShouldRecover<Out>>,
     on_retry: Option<OnRetry<Out>>,
     enable_if: EnableIf<In>,
-    strategy_name: Cow<'static, str>,
+    telemetry: TelemetryHelper,
     restore_input: Option<RestoreInput<In, Out>>,
     handle_unavailable: bool,
     _state: PhantomData<fn(In, CloneInputState, RecoveryState) -> Out>,
@@ -48,7 +49,7 @@ impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
             should_recover: None,
             on_retry: None,
             enable_if: EnableIf::always(),
-            strategy_name: name,
+            telemetry: context.create_telemetry(name),
             restore_input: None,
             handle_unavailable: false,
             _state: PhantomData,
@@ -414,9 +415,7 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
             should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
             on_retry: self.on_retry.clone(),
             enable_if: self.enable_if.clone(),
-            strategy_name: self.strategy_name.clone(),
-            pipeline_name: self.context.get_pipeline_name().clone().into(),
-            event_reporter: self.context.create_resilience_event_counter(),
+            telemetry: self.telemetry.clone(),
             restore_input: self.restore_input.clone(),
             handle_unavailable: self.handle_unavailable,
         }
@@ -497,7 +496,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
             should_recover: self.should_recover,
             on_retry: self.on_retry,
             enable_if: self.enable_if,
-            strategy_name: self.strategy_name,
+            telemetry: self.telemetry,
             restore_input: self.restore_input,
             handle_unavailable: self.handle_unavailable,
             _state: PhantomData,
@@ -532,7 +531,7 @@ mod tests {
         assert!(layer.clone_input.is_none());
         assert!(layer.should_recover.is_none());
         assert!(layer.on_retry.is_none());
-        assert_eq!(layer.strategy_name, StringValue::from("test_retry"));
+        assert_eq!(layer.telemetry.strategy_name, StringValue::from("test_retry"));
         assert!(layer.enable_if.call(&"test_input".to_string()));
     }
 

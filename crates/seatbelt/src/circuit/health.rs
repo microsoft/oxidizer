@@ -51,10 +51,12 @@ impl HealthInfo {
         }
     }
 
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub fn throughput(&self) -> u32 {
         self.throughput
     }
 
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub fn failure_rate(&self) -> f32 {
         self.failure_rate
     }

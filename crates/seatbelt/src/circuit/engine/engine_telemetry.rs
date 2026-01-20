@@ -1,39 +1,32 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use opentelemetry::StringValue;
-use opentelemetry::metrics::Counter;
+use std::borrow::Cow;
+
 use tick::Clock;
 
+#[cfg(any(feature = "metrics", test))]
 use crate::circuit::telemetry::*;
 use crate::circuit::{CircuitEngine, CircuitState, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
-use crate::telemetry::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+
+use crate::utils::TelemetryHelper;
+#[cfg(any(feature = "metrics", test))]
+use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
 /// Wrapper around a circuit engine to add telemetry capabilities.
 #[derive(Debug)]
 pub(crate) struct EngineTelemetry<T> {
     inner: T,
-    pub(super) strategy_name: StringValue,
-    pub(super) pipeline_name: StringValue,
-    pub(super) resilience_events: Counter<u64>,
-    pub(super) partition_key: StringValue,
+    pub(super) telemetry: TelemetryHelper,
+    pub(super) partition_key: Cow<'static, str>,
     pub(super) clock: Clock,
 }
 
 impl<T> EngineTelemetry<T> {
-    pub fn new(
-        inner: T,
-        strategy_name: StringValue,
-        pipeline_name: StringValue,
-        partition_key: StringValue,
-        resilience_events: Counter<u64>,
-        clock: Clock,
-    ) -> Self {
+    pub fn new(inner: T, telemetry: TelemetryHelper, partition_key: Cow<'static, str>, clock: Clock) -> Self {
         Self {
             inner,
-            strategy_name,
-            pipeline_name,
-            resilience_events,
+            telemetry,
             partition_key,
             clock,
         }
@@ -45,25 +38,31 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
         let enter_result = self.inner.enter();
 
         if matches!(enter_result, EnterCircuitResult::Rejected) {
-            self.resilience_events.add(
-                1,
-                &[
-                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
-                    opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_REJECTED_EVENT_NAME),
-                    opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
-                    opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                ],
-            );
+            #[cfg(any(feature = "metrics", test))]
+            if let Some(reporter) = &self.telemetry.event_reporter {
+                reporter.add(
+                    1,
+                    &[
+                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_REJECTED_EVENT_NAME),
+                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
+                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                    ],
+                );
+            }
 
-            tracing::event!(
-                name: "seatbelt.circuit_breaker.rejected",
-                tracing::Level::WARN,
-                pipeline.name = self.pipeline_name.as_str(),
-                strategy.name = self.strategy_name.as_str(),
-                circuit_breaker.state = CircuitState::Open.as_str(),
-                circuit_breaker.partition = self.partition_key.as_str(),
-            );
+            if self.telemetry.logs_enabled {
+                #[cfg(any(feature = "logs", test))]
+                tracing::event!(
+                    name: "seatbelt.circuit_breaker.rejected",
+                    tracing::Level::WARN,
+                    pipeline.name = %self.telemetry.pipeline_name,
+                    strategy.name = %self.telemetry.strategy_name,
+                    circuit_breaker.state = CircuitState::Open.as_str(),
+                    circuit_breaker.partition = %self.partition_key,
+                );
+            }
         }
 
         enter_result
@@ -71,27 +70,33 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
     fn exit(&self, result: ExecutionResult, mode: ExecutionMode) -> ExitCircuitResult {
         if mode == ExecutionMode::Probe {
-            self.resilience_events.add(
-                1,
-                &[
-                    opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                    opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
-                    opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_PROBE_EVENT_NAME),
-                    opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::HalfOpen.as_str()),
-                    opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                    opentelemetry::KeyValue::new(CIRCUIT_PROBE_RESULT, result.as_str()),
-                ],
-            );
+            #[cfg(any(feature = "metrics", test))]
+            if let Some(reporter) = &self.telemetry.event_reporter {
+                reporter.add(
+                    1,
+                    &[
+                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_PROBE_EVENT_NAME),
+                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::HalfOpen.as_str()),
+                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                        opentelemetry::KeyValue::new(CIRCUIT_PROBE_RESULT, result.as_str()),
+                    ],
+                );
+            }
 
-            tracing::event!(
-                name: "seatbelt.circuit_breaker.probe",
-                tracing::Level::INFO,
-                pipeline.name = self.pipeline_name.as_str(),
-                strategy.name = self.strategy_name.as_str(),
-                circuit_breaker.state = CircuitState::HalfOpen.as_str(),
-                circuit_breaker.partition = self.partition_key.as_str(),
-                circuit_breaker.probe.result = result.as_str(),
-            );
+            if self.telemetry.logs_enabled {
+                #[cfg(any(feature = "logs", test))]
+                tracing::event!(
+                    name: "seatbelt.circuit_breaker.probe",
+                    tracing::Level::INFO,
+                    pipeline.name = %self.telemetry.pipeline_name,
+                    strategy.name = %self.telemetry.strategy_name,
+                    circuit_breaker.state = CircuitState::HalfOpen.as_str(),
+                    circuit_breaker.partition = %self.partition_key,
+                    circuit_breaker.probe.result = result.as_str(),
+                );
+            }
         }
 
         let exit_result = self.inner.exit(result, mode);
@@ -99,55 +104,71 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
         // Emit telemetry events for circuit state changes
         match exit_result {
             ExitCircuitResult::Opened(health) => {
-                self.resilience_events.add(
-                    1,
-                    &[
-                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
-                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_OPENED_EVENT_NAME),
-                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                    ],
-                );
+                #[cfg(any(feature = "metrics", test))]
+                if let Some(reporter) = &self.telemetry.event_reporter {
+                    reporter.add(
+                        1,
+                        &[
+                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                            opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_OPENED_EVENT_NAME),
+                            opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
+                            opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                        ],
+                    );
+                }
 
-                tracing::event!(
-                    name: "seatbelt.circuit_breaker.opened",
-                    tracing::Level::WARN,
-                    pipeline.name = self.pipeline_name.as_str(),
-                    strategy.name = self.strategy_name.as_str(),
-                    circuit_breaker.state = CircuitState::Open.as_str(),
-                    circuit_breaker.partition = self.partition_key.as_str(),
-                    circuit_breaker.health.failure_rate = health.failure_rate(),
-                    circuit_breaker.health.throughput = health.throughput(),
-                );
+                if self.telemetry.logs_enabled {
+                    #[cfg(any(feature = "logs", test))]
+                    tracing::event!(
+                        name: "seatbelt.circuit_breaker.opened",
+                        tracing::Level::WARN,
+                        pipeline.name = %self.telemetry.pipeline_name,
+                        strategy.name = %self.telemetry.strategy_name,
+                        circuit_breaker.state = CircuitState::Open.as_str(),
+                        circuit_breaker.partition = %self.partition_key,
+                        circuit_breaker.health.failure_rate = health.failure_rate(),
+                        circuit_breaker.health.throughput = health.throughput(),
+                    );
+                }
+
+                _ = health;
             }
             ExitCircuitResult::Closed(ref stats) => {
-                self.resilience_events.add(
-                    1,
-                    &[
-                        opentelemetry::KeyValue::new(PIPELINE_NAME, self.pipeline_name.clone()),
-                        opentelemetry::KeyValue::new(STRATEGY_NAME, self.strategy_name.clone()),
-                        opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_CLOSED_EVENT_NAME),
-                        opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Closed.as_str()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
-                    ],
-                );
+                #[cfg(any(feature = "metrics", test))]
+                if let Some(reporter) = &self.telemetry.event_reporter {
+                    reporter.add(
+                        1,
+                        &[
+                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                            opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_CLOSED_EVENT_NAME),
+                            opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Closed.as_str()),
+                            opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                        ],
+                    );
+                }
 
-                tracing::event!(
-                    name: "seatbelt.circuit_breaker.closed",
-                    tracing::Level::INFO,
-                    pipeline.name = self.pipeline_name.as_str(),
-                    strategy.name = self.strategy_name.as_str(),
-                    circuit_breaker.state = CircuitState::Closed.as_str(),
-                    circuit_breaker.open.duration = stats.opened_duration(self.clock.instant()).as_secs(),
-                    circuit_breaker.partition = self.partition_key.as_str(),
-                    circuit_breaker.probes.total = stats.probes_total,
-                    circuit_breaker.probes.successfull = stats.probes_successes,
-                    circuit_breaker.probes.failed = stats.probes_failures,
-                    circuit_breaker.probes.lost = stats.probes_lost,
-                    circuit_breaker.rejections = stats.rejected,
-                    circuit_breaker.re_opened = stats.re_opened,
-                );
+                if self.telemetry.logs_enabled {
+                    #[cfg(any(feature = "logs", test))]
+                    tracing::event!(
+                        name: "seatbelt.circuit_breaker.closed",
+                        tracing::Level::INFO,
+                        pipeline.name = %self.telemetry.pipeline_name,
+                        strategy.name = %self.telemetry.strategy_name,
+                        circuit_breaker.state = CircuitState::Closed.as_str(),
+                        circuit_breaker.open.duration = stats.opened_duration(self.clock.instant()).as_secs(),
+                        circuit_breaker.partition = %self.partition_key,
+                        circuit_breaker.probes.total = stats.probes_total,
+                        circuit_breaker.probes.successfull = stats.probes_successes,
+                        circuit_breaker.probes.failed = stats.probes_failures,
+                        circuit_breaker.probes.lost = stats.probes_lost,
+                        circuit_breaker.rejections = stats.rejected,
+                        circuit_breaker.re_opened = stats.re_opened,
+                    );
+                }
+
+                _ = stats;
             }
             ExitCircuitResult::Reopened | ExitCircuitResult::Unchanged => {
                 // We do not report a telemetry event for reopening the circuit
@@ -265,14 +286,13 @@ mod tests {
 
     fn create_engine(engine: EngineFake) -> (MetricTester, EngineTelemetry<EngineFake>) {
         let tester = MetricTester::new();
-        let telemetry_engine = EngineTelemetry::new(
-            engine,
-            "test_strategy".into(),
-            "test_pipeline".into(),
-            "test_partition".into(),
-            create_resilience_event_counter(&create_meter(tester.meter_provider())),
-            Clock::new_frozen(),
-        );
+        let telemetry = TelemetryHelper {
+            pipeline_name: "test_pipeline".into(),
+            strategy_name: "test_strategy".into(),
+            event_reporter: Some(create_resilience_event_counter(&create_meter(tester.meter_provider()))),
+            logs_enabled: true,
+        };
+        let telemetry_engine = EngineTelemetry::new(engine, telemetry, "test_partition".into(), Clock::new_frozen());
         (tester, telemetry_engine)
     }
 }

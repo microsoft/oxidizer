@@ -95,6 +95,16 @@ impl From<String> for PartitionKey {
     }
 }
 
+impl From<PartitionKey> for Cow<'static, str> {
+    fn from(value: PartitionKey) -> Self {
+        match value.0 {
+            PartitionKeyValue::Number(n) => Cow::Owned(n.to_string()),
+            PartitionKeyValue::String(s) => s,
+            PartitionKeyValue::Hashed(_, label) => Cow::Borrowed(label),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PartitionKeyValue {
     Number(u64),

@@ -16,6 +16,7 @@ pub(crate) enum CircuitState {
 }
 
 impl CircuitState {
+    #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Closed => "closed",

@@ -11,7 +11,7 @@ use super::{
     OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput, RejectedInputArgs,
     ShouldRecover,
 };
-use crate::{EnableIf, NotSet};
+use crate::{NotSet, utils::EnableIf};
 
 /// Applies circuit breaker logic to prevent cascading failures.
 ///

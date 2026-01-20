@@ -325,6 +325,8 @@ pub(super) use health::*;
 
 mod constants;
 mod engine;
+
+#[cfg(any(feature = "metrics", test))]
 mod telemetry;
 pub(super) use engine::*;
 
