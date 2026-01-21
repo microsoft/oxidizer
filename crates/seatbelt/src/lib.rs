@@ -65,13 +65,6 @@
 //! # }
 //! ```
 //!
-//! > **Note**: Resilience middleware requires [`Clock`][tick::Clock] from the [`tick`] crate for timing
-//! > operations like delays, timeouts, and backoff calculations. The clock is passed through
-//! > [`PipelineContext`] when creating middleware layers.
-//!
-//! > **Note**: This crate uses the [`layered`] crate for composing middleware. The middleware layers
-//! > can be stacked together using tuples and built into a service using the [`Stack`] trait.
-//!
 //! # Why?
 //!
 //! This crate provides production-ready resilience middleware with excellent telemetry for building
