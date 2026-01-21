@@ -107,9 +107,9 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxCJHvMDzlVbG4wWnwONx-VDG8_fIAgvujggG8jr12bAoHJVYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
- [__link0]: https://crates.io/crates/layered/0.1.0
- [__link1]: https://docs.rs/layered/0.1.0/layered/?search=Stack
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxCJHvMDzlVbG4wWnwONx-VDG8_fIAgvujggG8jr12bAoHJVYWSEgmdsYXllcmVkZTAuMi4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
+ [__link0]: https://crates.io/crates/layered/0.2.0
+ [__link1]: https://docs.rs/layered/0.2.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
  [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
  [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
