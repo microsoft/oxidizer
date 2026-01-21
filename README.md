@@ -18,6 +18,7 @@ This repository contains a set of crates that help you build robust highly scala
     - [Documenting Crates](#documenting-crates)
     - [CI Workflows](#ci-workflows)
     - [Pull Request Gates](#pull-request-gates)
+    - [Tool Versions](#tool-versions)
 - [Trademarks](#trademarks)
 
 ## Crates
@@ -199,6 +200,15 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 
 - **README Content**. We use [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) to ensure each crate's `README.md`
   file matches the crate's current crate-level documentation.
+
+### Tool Versions
+
+We pin the version of the tools we use in CI to ensure hermetic builds as much as possible. We routinely update
+the versions of everything to stay up to date using three scripts:
+
+- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file and in `rust-toolchain.toml`.
+- `scripts/update_tool_versions.ps1` which updates the version of tools in the `constants.env` file.
+- `scripts/update_action_versions.ps1` which updates the version of GitHub actions in the various files in `.github/workflows`.
 
 ## Trademarks
 

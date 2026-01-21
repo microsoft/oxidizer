@@ -122,15 +122,15 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzJtJrZVyApYG61Etog82u5CG8YRisc2odPYG-_MVLrG5Ab5YWSBgmdsYXllcmVkZTAuMS4w
- [__link0]: https://docs.rs/layered/0.1.0/layered/?search=Service
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzJtJrZVyApYG61Etog82u5CG8YRisc2odPYG-_MVLrG5Ab5YWSBgmdsYXllcmVkZTAuMi4w
+ [__link0]: https://docs.rs/layered/0.2.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
- [__link10]: https://docs.rs/layered/0.1.0/layered/tower/index.html
- [__link2]: https://docs.rs/layered/0.1.0/layered/?search=Service
- [__link3]: https://docs.rs/layered/0.1.0/layered/?search=Execute
- [__link4]: https://docs.rs/layered/0.1.0/layered/?search=Layer
+ [__link10]: https://docs.rs/layered/0.2.0/layered/tower/index.html
+ [__link2]: https://docs.rs/layered/0.2.0/layered/?search=Service
+ [__link3]: https://docs.rs/layered/0.2.0/layered/?search=Execute
+ [__link4]: https://docs.rs/layered/0.2.0/layered/?search=Layer
  [__link5]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link6]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
  [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link8]: https://docs.rs/layered/0.1.0/layered/?search=Intercept
- [__link9]: https://docs.rs/layered/0.1.0/layered/?search=DynamicService
+ [__link8]: https://docs.rs/layered/0.2.0/layered/?search=Intercept
+ [__link9]: https://docs.rs/layered/0.2.0/layered/?search=DynamicService
