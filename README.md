@@ -11,9 +11,8 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [The Oxidizer Project](#the-oxidizer-project)
-  - [Crates](#crates)
-  - [About this Repo](#about-this-repo)
+- [Crates](#crates)
+- [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
