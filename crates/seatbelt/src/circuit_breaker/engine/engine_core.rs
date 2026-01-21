@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use tick::Clock;
 
 use super::{EngineOptions, EnterCircuitResult, ExitCircuitResult};
-use crate::circuit::constants::ERR_POISONED_LOCK;
-use crate::circuit::engine::probing::{AllowProbeResult, Probes, ProbingResult};
-use crate::circuit::{CircuitEngine, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
+use crate::circuit_breaker::constants::ERR_POISONED_LOCK;
+use crate::circuit_breaker::engine::probing::{AllowProbeResult, Probes, ProbingResult};
+use crate::circuit_breaker::{CircuitEngine, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
 
 /// Engine that manages the state of the circuit breaker.
 #[derive(Debug)]
@@ -201,8 +201,8 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::circuit::HealthMetricsBuilder;
-    use crate::circuit::engine::probing::ProbesOptions;
+    use crate::circuit_breaker::HealthMetricsBuilder;
+    use crate::circuit_breaker::engine::probing::ProbesOptions;
 
     fn create_test_settings() -> EngineOptions {
         EngineOptions {
@@ -660,7 +660,7 @@ mod tests {
 
     #[test]
     fn exit_when_half_open_with_pending_probe_returns_unchanged() {
-        use crate::circuit::engine::probing::{HealthProbeOptions, ProbeOptions};
+        use crate::circuit_breaker::engine::probing::{HealthProbeOptions, ProbeOptions};
 
         let settings = EngineOptions {
             break_duration: Duration::from_secs(5),

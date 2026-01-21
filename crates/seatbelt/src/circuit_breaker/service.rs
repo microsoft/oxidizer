@@ -25,7 +25,7 @@ use crate::{NotSet, utils::EnableIf};
 /// `Circuit` is configured by calling [`Circuit::layer`] and using the
 /// builder methods on the returned [`CircuitLayer`] instance.
 ///
-/// For comprehensive examples and usage patterns, see the [`circuit_breaker` module][crate::circuit] documentation.
+/// For comprehensive examples and usage patterns, see the [`circuit_breaker` module][crate::circuit_breaker] documentation.
 #[derive(Debug)]
 pub struct Circuit<In, Out, S> {
     pub(super) inner: S,
@@ -171,8 +171,8 @@ mod tests {
 
     use super::*;
     use crate::Layer;
-    use crate::circuit::constants::DEFAULT_BREAK_DURATION;
-    use crate::circuit::{EngineFake, HalfOpenMode, HealthInfo, Stats};
+    use crate::circuit_breaker::constants::DEFAULT_BREAK_DURATION;
+    use crate::circuit_breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
     use crate::{PipelineContext, RecoveryInfo, Set};
 
     #[test]

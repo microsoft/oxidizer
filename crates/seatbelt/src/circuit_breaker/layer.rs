@@ -11,7 +11,7 @@ use super::{
     PartionKeyProvider, PartitionKey, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
 use crate::Layer;
-use crate::circuit::engine::probing::ProbesOptions;
+use crate::circuit_breaker::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{NotSet, PipelineContext, Recovery, RecoveryInfo, Set};
 
@@ -24,7 +24,7 @@ use crate::{NotSet, PipelineContext, Recovery, RecoveryInfo, Set};
 /// - [`recovery`][CircuitLayer::recovery]: Required to determine if an output represents a failure
 /// - [`rejected_input`][CircuitLayer::rejected_input]: Required to specify the output when the circuit is open and inputs are rejected
 ///
-/// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit] documentation.
+/// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit_breaker] documentation.
 #[derive(Debug)]
 pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> {
     context: PipelineContext<In, Out>,
@@ -98,18 +98,18 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
     /// This function determines whether a specific output represents a failure
     /// by examining the output and returning a [`RecoveryInfo`] classification.
     ///
-    /// The function receives the output and [`RecoveryArgs`][crate::circuit::RecoveryArgs]
+    /// The function receives the output and [`RecoveryArgs`][crate::circuit_breaker::RecoveryArgs]
     /// with context about the circuit breaker state.
     ///
     /// # Arguments
     ///
     /// * `recover_fn` - Function that takes a reference to the output and
-    ///   [`RecoveryArgs`][crate::circuit::RecoveryArgs] containing circuit breaker context,
+    ///   [`RecoveryArgs`][crate::circuit_breaker::RecoveryArgs] containing circuit breaker context,
     ///   and returns a [`RecoveryInfo`] decision
     #[must_use]
     pub fn recovery_with(
         mut self,
-        recover_fn: impl Fn(&Out, crate::circuit::RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
+        recover_fn: impl Fn(&Out, crate::circuit_breaker::RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
     ) -> CircuitLayer<In, Out, Set, RejectedInputState> {
         self.recovery = Some(ShouldRecover::new(recover_fn));
         self.into_state::<Set, RejectedInputState>()
@@ -301,7 +301,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
     /// # Example
     ///
     /// ```rust
-    /// # use seatbelt::circuit::{CircuitLayer, PartitionKey};
+    /// # use seatbelt::circuit_breaker::{CircuitLayer, PartitionKey};
     /// // Example HTTP request structure
     /// struct HttpRequest {
     ///     scheme: String,
@@ -457,8 +457,8 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::circuit::RecoveryArgs;
-    use crate::circuit::engine::probing::ProbeOptions;
+    use crate::circuit_breaker::RecoveryArgs;
+    use crate::circuit_breaker::engine::probing::ProbeOptions;
     use crate::testing::RecoverableType;
 
     #[test]

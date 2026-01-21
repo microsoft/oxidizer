@@ -6,10 +6,10 @@ use std::borrow::Cow;
 use tick::Clock;
 
 #[cfg(any(feature = "metrics", feature = "logs", test))]
-use crate::circuit::CircuitState;
+use crate::circuit_breaker::CircuitState;
 #[cfg(any(feature = "metrics", test))]
-use crate::circuit::telemetry::*;
-use crate::circuit::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
+use crate::circuit_breaker::telemetry::*;
+use crate::circuit_breaker::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
 
 use crate::utils::TelemetryHelper;
 #[cfg(any(feature = "metrics", test))]
@@ -189,7 +189,7 @@ mod tests {
     use opentelemetry::KeyValue;
 
     use super::*;
-    use crate::circuit::{EngineFake, HealthInfo, Stats};
+    use crate::circuit_breaker::{EngineFake, HealthInfo, Stats};
     use crate::metrics::{create_meter, create_resilience_event_counter};
     use crate::testing::MetricTester;
 

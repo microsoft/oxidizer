@@ -23,9 +23,9 @@ and **Timeout** prevents operations from hanging indefinitely:
 ```rust
 use seatbelt::retry::Retry;
 use seatbelt::timeout::Timeout;
-use seatbelt::{RecoveryInfo, Context};
+use seatbelt::{RecoveryInfo, PipelineContext};
 
-let context = Context::new(&clock);
+let context = PipelineContext::new(&clock);
 let service = (
     // Retry middleware: Automatically retries failed operations
     Retry::layer("retry", &context)
@@ -50,7 +50,7 @@ let result = service.execute("input data".to_string()).await;
  > 
  > **Note**: Resilience middleware requires [`Clock`][__link0] from the [`tick`][__link1] crate for timing
  > operations like delays, timeouts, and backoff calculations. The clock is passed through
- > [`Context`][__link2] when creating middleware layers.
+ > [`PipelineContext`][__link2] when creating middleware layers.
 
  > 
  > **Note**: This crate uses the [`layered`][__link3] crate for composing middleware. The middleware layers
@@ -73,7 +73,7 @@ scenarios.
 
 ### Core Types
 
-* [`Context`][__link5] - Holds shared state for resilience middleware, including the clock.
+* [`PipelineContext`][__link5] - Holds shared state for resilience middleware, including the clock.
 * [`RecoveryInfo`][__link6] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
 * [`Recovery`][__link7] - A trait for types that can determine their recoverability.
 
@@ -84,7 +84,7 @@ for each module for details on how to use them.
 
 * [`timeout`][__link8] - Middleware that cancels long-running operations.
 * [`retry`][__link9] - Middleware that automatically retries failed operations.
-* [`circuit`][__link10] - Middleware that prevents cascading failures.
+* [`circuit_breaker`][__link10] - Middleware that prevents cascading failures.
 
 ## Features
 
@@ -93,7 +93,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 * **`timeout`** - Enables the [`timeout`][__link11] middleware for canceling long-running operations.
 * **`retry`** - Enables the [`retry`][__link12] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`circuit`** - Enables the [`circuit`][__link13] middleware for preventing cascading failures.
+* **`circuit-breaker`** - Enables the [`circuit_breaker`][__link13] middleware for preventing cascading failures.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
@@ -103,17 +103,17 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8-jxRLAdSUYGz8tFJ1hv_siG0AGq6ysYdCHGyn4hzr6iA3-YWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyn6pS-pNJ0BG8D_ULLoyLY-G_Jceg8SxKmRG_uew5JtfsJUYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
  [__link0]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link1]: https://crates.io/crates/tick/0.1.2
- [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit/index.html
+ [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
  [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
  [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
- [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit/index.html
- [__link2]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::Context
+ [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
+ [__link2]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::PipelineContext
  [__link3]: https://crates.io/crates/layered/0.1.0
  [__link4]: https://docs.rs/layered/0.1.0/layered/?search=Stack
- [__link5]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::Context
+ [__link5]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::PipelineContext
  [__link6]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link7]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
  [__link8]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html

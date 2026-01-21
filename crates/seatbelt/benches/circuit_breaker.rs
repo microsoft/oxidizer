@@ -5,7 +5,7 @@ use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
-use seatbelt::circuit::Circuit;
+use seatbelt::circuit_breaker::Circuit;
 use seatbelt::{PipelineContext, RecoveryInfo};
 use tick::Clock;
 

@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use crate::circuit::constants::MIN_SAMPLING_DURATION;
-use crate::circuit::engine::probing::ProbesOptions;
+use crate::circuit_breaker::constants::MIN_SAMPLING_DURATION;
+use crate::circuit_breaker::engine::probing::ProbesOptions;
 
 /// Defines the behavior of the circuit breaker when transitioning from half-open to closed state.
 ///
@@ -52,7 +52,7 @@ impl HalfOpenMode {
     /// # Arguments
     ///
     /// - `stage_duration` - Optional custom stage duration for each probing stage. If not provided,
-    ///   the value of [`break_duration`][crate::circuit::CircuitLayer::break_duration] is used. The provided stage
+    ///   the value of [`break_duration`][crate::circuit_breaker::CircuitLayer::break_duration] is used. The provided stage
     ///   duration is clamped to a minimum of 1 second.
     #[must_use]
     pub fn reliable(stage_duration: impl Into<Option<Duration>>) -> Self {
@@ -79,7 +79,7 @@ enum Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::circuit::engine::probing::ProbeOptions;
+    use crate::circuit_breaker::engine::probing::ProbeOptions;
 
     #[test]
     fn quick_mode_creates_single_probe() {

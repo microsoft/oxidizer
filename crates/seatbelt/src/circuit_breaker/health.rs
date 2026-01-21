@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use super::ExecutionResult;
-use crate::circuit::constants::MIN_SAMPLING_DURATION;
+use crate::circuit_breaker::constants::MIN_SAMPLING_DURATION;
 
 const WINDOW_COUNT: u32 = 10;
 

@@ -3,8 +3,8 @@
 
 use std::time::Instant;
 
-use crate::circuit::engine::probing::{AllowProbeResult, HealthProbeOptions, ProbeOperation, ProbingResult};
-use crate::circuit::{ExecutionResult, HealthMetrics, HealthStatus};
+use crate::circuit_breaker::engine::probing::{AllowProbeResult, HealthProbeOptions, ProbeOperation, ProbingResult};
+use crate::circuit_breaker::{ExecutionResult, HealthMetrics, HealthStatus};
 use crate::rnd::Rnd;
 
 #[derive(Debug)]

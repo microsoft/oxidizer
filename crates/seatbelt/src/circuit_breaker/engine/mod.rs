@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
-use crate::circuit::{ExecutionResult, HealthInfo, HealthMetricsBuilder};
+use crate::circuit_breaker::{ExecutionResult, HealthInfo, HealthMetricsBuilder};
 
 pub(super) mod probing;
 

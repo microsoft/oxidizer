@@ -18,7 +18,7 @@
 //! ```rust
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::circuit::Circuit;
+//! # use seatbelt::circuit_breaker::Circuit;
 //! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let context = PipelineContext::new(&clock);
@@ -187,7 +187,7 @@
 //! ```rust
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::circuit::Circuit;
+//! # use seatbelt::circuit_breaker::Circuit;
 //! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
@@ -228,7 +228,7 @@
 //! # use std::time::Duration;
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::circuit::{Circuit,  PartitionKey, HalfOpenMode};
+//! # use seatbelt::circuit_breaker::{Circuit,  PartitionKey, HalfOpenMode};
 //! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware.
@@ -289,7 +289,7 @@
 //! The code below will not compile because the circuit breaker layer is missing required configuration.
 //!
 //! ```compile_fail
-//! # use seatbelt::circuit::Circuit;
+//! # use seatbelt::circuit_breaker::Circuit;
 //! # use seatbelt::PipelineContext;
 //! # use layered::Execute;
 //! # fn example(context: PipelineContext<String, Result<String, String>>) {

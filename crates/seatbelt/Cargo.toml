@@ -35,7 +35,7 @@ all-features = true
 default = []
 timeout = []
 retry = ["dep:fastrand"]
-circuit = ["dep:fastrand"]
+circuit-breaker = ["dep:fastrand"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 
@@ -91,8 +91,8 @@ name = "resilience_pipeline"
 required-features = ["retry", "timeout"]
 
 [[example]]
-name = "circuit"
-required-features = ["circuit", "metrics"]
+name = "circuit_breaker"
+required-features = ["circuit-breaker", "metrics"]
 
 [[bench]]
 name = "observability"
@@ -110,9 +110,9 @@ harness = false
 required-features = ["retry"]
 
 [[bench]]
-name = "circuit"
+name = "circuit_breaker"
 harness = false
-required-features = ["circuit"]
+required-features = ["circuit-breaker"]
 
 [lints]
 workspace = true

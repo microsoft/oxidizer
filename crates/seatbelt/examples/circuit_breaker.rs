@@ -15,7 +15,7 @@ use layered::{Execute, Service, Stack};
 use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
-use seatbelt::circuit::Circuit;
+use seatbelt::circuit_breaker::Circuit;
 use seatbelt::{PipelineContext, RecoveryInfo};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;

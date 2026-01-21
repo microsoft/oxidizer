@@ -6,7 +6,13 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/favicon.ico")]
 #![cfg_attr(
-    not(all(feature = "retry", feature = "timeout", feature = "circuit", feature = "metrics", feature = "logs")),
+    not(all(
+        feature = "retry",
+        feature = "timeout",
+        feature = "circuit-breaker",
+        feature = "metrics",
+        feature = "logs"
+    )),
     expect(
         rustdoc::broken_intra_doc_links,
         reason = "too ugly to make 'live links' possible with the combination of features"
@@ -94,7 +100,7 @@
 //!
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
-//! - [`circuit`] - Middleware that prevents cascading failures.
+//! - [`circuit_breaker`] - Middleware that prevents cascading failures.
 //!
 //! # Features
 //!
@@ -103,7 +109,7 @@
 //! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
-//! - **`circuit`** - Enables the [`circuit`] middleware for preventing cascading failures.
+//! - **`circuit-breaker`** - Enables the [`circuit_breaker`] middleware for preventing cascading failures.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
@@ -119,16 +125,16 @@ pub mod timeout;
 #[cfg(any(feature = "retry", test))]
 pub mod retry;
 
-#[cfg(any(feature = "circuit", test))]
-pub mod circuit;
+#[cfg(any(feature = "circuit-breaker", test))]
+pub mod circuit_breaker;
 
 #[doc(inline)]
 pub use layered::{Layer, Service, Stack};
 
-#[cfg(any(feature = "retry", feature = "circuit", test))]
+#[cfg(any(feature = "retry", feature = "circuit-breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "circuit", feature = "timeout", test))]
+#[cfg(any(feature = "retry", feature = "circuit-breaker", feature = "timeout", test))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]
