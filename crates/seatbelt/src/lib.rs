@@ -67,6 +67,12 @@
 //!
 //! # Why?
 //!
+//! Communicating over a network is inherently fraught with problems. The network can go down at any time,
+//! sometimes for a millisecond or two. The endpoint you're connecting to may crash or be rebooted,
+//! network configuration may change from under you, etc. To deliver a robust experience to users, and to
+//! achieve `5` or more `9s` of availability, it is imperative to implement robust resilience patterns to
+//! mask these transient failures.
+//!
 //! This crate provides production-ready resilience middleware with excellent telemetry for building
 //! robust distributed systems that can automatically handle timeouts, retries, and other failure
 //! scenarios.

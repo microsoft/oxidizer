@@ -49,6 +49,12 @@ let result = service.execute("input data".to_string()).await;
 
 ## Why?
 
+Communicating over a network is inherently fraught with problems. The network can go down at any time,
+sometimes for a millisecond or two. The endpoint you’re connecting to may crash or be rebooted,
+network configuration may change from under you, etc. To deliver a robust experience to users, and to
+achieve `5` or more `9s` of availability, it is imperative to implement robust resilience patterns to
+mask these transient failures.
+
 This crate provides production-ready resilience middleware with excellent telemetry for building
 robust distributed systems that can automatically handle timeouts, retries, and other failure
 scenarios.
@@ -101,7 +107,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0sUSiYcHuHeG_lowFs20mWBG06Nt4zQNqe4G-GgJn9zdLYpYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxCJHvMDzlVbG4wWnwONx-VDG8_fIAgvujggG8jr12bAoHJVYWSEgmdsYXllcmVkZTAuMS4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
  [__link0]: https://crates.io/crates/layered/0.1.0
  [__link1]: https://docs.rs/layered/0.1.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
