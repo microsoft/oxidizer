@@ -6,7 +6,7 @@ name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
 version = "0.2.0"
 readme = "README.md"
-keywords = ["oxidizer", "resilience", "tower", "recovery", "retry", "circuit-breaker"]
+keywords = ["oxidizer", "resilience", "layered", "recovery", "retry", "circuit-breaker"]
 categories = ["data-structures"]
 
 edition.workspace = true

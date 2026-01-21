@@ -23,8 +23,8 @@
 //!
 //! # Quick Start
 //!
-//! Add resilience to your services with just a few lines of code. **Retry** handles transient failures
-//! and **Timeout** prevents operations from hanging indefinitely:
+//! Add resilience to fallible operations, such as RPC calls over the network, with just a few lines of code.
+//! **Retry** handles transient failures and **Timeout** prevents operations from hanging indefinitely:
 //!
 //! ```rust
 //! # #[cfg(all(feature = "retry", feature = "timeout"))]
@@ -78,14 +78,21 @@
 //! robust distributed systems that can automatically handle timeouts, retries, and other failure
 //! scenarios.
 //!
-//! - **Runtime agnostic** - Works seamlessly across any async runtime. Use the same resilience
-//!   patterns across different projects and migrate between runtimes without changes.
 //! - **Production-ready** - Battle-tested middleware with sensible defaults and comprehensive
 //!   configuration options.
 //! - **Excellent telemetry** - Built-in support for metrics and structured logging to monitor
 //!   resilience behavior in production.
+//! - **Runtime agnostic** - Works seamlessly across any async runtime. Use the same resilience
+//!   patterns across different projects and migrate between runtimes without changes.
 //!
 //! # Overview
+//!
+//! This crate uses the [`layered`] crate for composing middleware. The middleware layers
+//! can be stacked together using tuples and built into a service using the [`Stack`] trait.
+//!
+//! Resilience middleware also requires [`Clock`][tick::Clock] from the [`tick`] crate for timing
+//! operations like delays, timeouts, and backoff calculations. The clock is passed through
+//! [`PipelineContext`] when creating middleware layers.
 //!
 //! ## Core Types
 //!
