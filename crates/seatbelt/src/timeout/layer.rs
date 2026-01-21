@@ -11,7 +11,7 @@ use crate::timeout::{
 };
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
-use crate::{Context, NotSet, Set};
+use crate::{NotSet, PipelineContext, Set};
 
 /// Builder for configuring timeout resilience middleware.
 ///
@@ -24,7 +24,7 @@ use crate::{Context, NotSet, Set};
 /// For comprehensive examples, see the [timeout module][crate::timeout] documentation.
 #[derive(Debug)]
 pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
-    context: Context<In, Out>,
+    context: PipelineContext<In, Out>,
     timeout: Option<Duration>,
     timeout_output: Option<TimeoutOutputCallback<Out>>,
     on_timeout: Option<OnTimeout<Out>>,
@@ -36,7 +36,7 @@ pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
 
 impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &Context<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &PipelineContext<In, Out>) -> Self {
         Self {
             timeout: None,
             timeout_output: None,
@@ -391,12 +391,12 @@ mod tests {
         static_assertions::assert_impl_all!(TimeoutLayer<String, String, Set, Set>: Debug);
     }
 
-    fn create_test_context() -> Context<String, String> {
-        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context() -> PipelineContext<String, String> {
+        PipelineContext::new(Clock::new_frozen()).name("test_pipeline")
     }
 
-    fn create_test_context_result() -> Context<String, Result<String, String>> {
-        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context_result() -> PipelineContext<String, Result<String, String>> {
+        PipelineContext::new(Clock::new_frozen()).name("test_pipeline")
     }
 
     fn create_ready_layer() -> TimeoutLayer<String, String, Set, Set> {

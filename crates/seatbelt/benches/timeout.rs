@@ -8,7 +8,7 @@ use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
-use seatbelt::Context;
+use seatbelt::PipelineContext;
 use seatbelt::timeout::Timeout;
 use tick::Clock;
 
@@ -30,7 +30,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // With timeout
-    let context = Context::new(Clock::new_frozen());
+    let context = PipelineContext::new(Clock::new_frozen());
 
     let service = (
         Timeout::layer("bench", &context)

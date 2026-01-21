@@ -18,9 +18,9 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::timeout::Timeout;
-//! # use seatbelt::Context;
+//! # use seatbelt::PipelineContext;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
-//! let context = Context::new(&clock).pipeline_name("my_service");
+//! let context = PipelineContext::new(&clock).name("my_service");
 //!
 //! let stack = (
 //!     Timeout::layer("timeout", &context)
@@ -80,7 +80,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted when a timeout occurs
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`][crate::Context::pipeline_name]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`PipelineContext::name`][crate::PipelineContext::name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
 //!   - `resilience.event.name`: Always `timeout`
 //!
@@ -94,12 +94,12 @@
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::Context;
+//! # use seatbelt::PipelineContext;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
-//! let context = Context::new(&clock);
+//! let context = PipelineContext::new(&clock);
 //!
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context)
@@ -134,11 +134,11 @@
 //! # use std::io;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::Context;
+//! # use seatbelt::PipelineContext;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
 //! // Define common options for resilience middleware.
-//! let context = Context::new(&clock);
+//! let context = PipelineContext::new(&clock);
 //!
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context)
@@ -181,9 +181,9 @@
 //! # use std::time::Duration;
 //! # use layered::{Execute, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::Context;
+//! # use seatbelt::PipelineContext;
 //! # use seatbelt::timeout::Timeout;
-//! # fn example(context: Context<String, String>) {
+//! # fn example(context: PipelineContext<String, String>) {
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context), // Missing required configuration!
 //!     Execute::new(|input| async move { input })

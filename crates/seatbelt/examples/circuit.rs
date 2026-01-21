@@ -16,7 +16,7 @@ use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::circuit::Circuit;
-use seatbelt::{Context, RecoveryInfo};
+use seatbelt::{PipelineContext, RecoveryInfo};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -26,7 +26,7 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let context = Context::new(&clock).enable_metrics(&meter_provider);
+    let context = PipelineContext::new(&clock).enable_metrics(&meter_provider);
 
     // Define stack with circuit breaker layer
     let stack = (

@@ -28,10 +28,10 @@
 //! # use layered::{Execute, Service, Stack};
 //! use seatbelt::retry::Retry;
 //! use seatbelt::timeout::Timeout;
-//! use seatbelt::{RecoveryInfo, Context};
+//! use seatbelt::{RecoveryInfo, PipelineContext};
 //!
 //! # async fn main(clock: Clock) {
-//! let context = Context::new(&clock);
+//! let context = PipelineContext::new(&clock);
 //! let service = (
 //!     // Retry middleware: Automatically retries failed operations
 //!     Retry::layer("retry", &context)
@@ -61,7 +61,7 @@
 //!
 //! > **Note**: Resilience middleware requires [`Clock`][tick::Clock] from the [`tick`] crate for timing
 //! > operations like delays, timeouts, and backoff calculations. The clock is passed through
-//! > [`Context`] when creating middleware layers.
+//! > [`PipelineContext`] when creating middleware layers.
 //!
 //! > **Note**: This crate uses the [`layered`] crate for composing middleware. The middleware layers
 //! > can be stacked together using tuples and built into a service using the [`Stack`] trait.
@@ -83,7 +83,7 @@
 //!
 //! ## Core Types
 //!
-//! - [`Context`] - Holds shared state for resilience middleware, including the clock.
+//! - [`PipelineContext`] - Holds shared state for resilience middleware, including the clock.
 //! - [`RecoveryInfo`] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
 //! - [`Recovery`] - A trait for types that can determine their recoverability.
 //!
@@ -111,7 +111,7 @@
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 pub(crate) mod shared;
-pub use crate::shared::{Attempt, Backoff, Context, NotSet, Set};
+pub use crate::shared::{Attempt, Backoff, NotSet, PipelineContext, Set};
 
 #[cfg(any(feature = "timeout", test))]
 pub mod timeout;

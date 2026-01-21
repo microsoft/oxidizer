@@ -16,9 +16,9 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::{Backoff, RecoveryInfo, Context};
+//! # use seatbelt::{Backoff, RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! let context = Context::new(&clock).pipeline_name("my_service");
+//! let context = PipelineContext::new(&clock).name("my_service");
 //!
 //! let stack = (
 //!     Retry::layer("retry", &context)
@@ -90,7 +90,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted for each attempt that should be retried (including the final retry attempt)
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`][crate::Context::pipeline_name]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`PipelineContext::name`][crate::PipelineContext::name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Retry::layer`]
 //!   - `resilience.event.name`: Always `retry`
 //!   - `resilience.attempt.index`: Attempt index (0-based)
@@ -107,11 +107,11 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::{Backoff, RecoveryInfo, Context};
+//! # use seatbelt::{Backoff, RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
-//! let context = Context::new(&clock).pipeline_name("example");
+//! let context = PipelineContext::new(&clock).name("example");
 //!
 //! let stack = (
 //!     Retry::layer("my_retry", &context)
@@ -149,10 +149,10 @@
 //! # use std::io;
 //! # use layered::{Execute, Stack, Service};
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::{RecoveryInfo, Context, Backoff};
+//! # use seatbelt::{RecoveryInfo, PipelineContext, Backoff};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware.
-//! let context = Context::new(&clock);
+//! let context = PipelineContext::new(&clock);
 //!
 //! let stack = (
 //!     Retry::layer("advanced_retry", &context)
@@ -194,9 +194,9 @@
 //!
 //! ```compile_fail
 //! # use seatbelt::retry::Retry;
-//! # use seatbelt::Context;
+//! # use seatbelt::PipelineContext;
 //! # use tick::Clock;
-//! # fn example(context: Context<String, String>) {
+//! # fn example(context: PipelineContext<String, String>) {
 //! let stack = (
 //!     Retry::layer("test", &service_options), // Missing required configuration!
 //!     Execute::new(|input| async move { input })

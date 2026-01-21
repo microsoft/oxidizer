@@ -12,7 +12,7 @@ use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, Re
 use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
-use crate::{Backoff, Context, NotSet, Recovery, RecoveryInfo, Set};
+use crate::{Backoff, NotSet, PipelineContext, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring retry resilience middleware.
 ///
@@ -25,7 +25,7 @@ use crate::{Backoff, Context, NotSet, Recovery, RecoveryInfo, Set};
 /// For comprehensive examples, see the [retry module][crate::retry] documentation.
 #[derive(Debug)]
 pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
-    context: Context<In, Out>,
+    context: PipelineContext<In, Out>,
     max_attempts: MaxAttempts,
     backoff: BackoffOptions,
     clone_input: Option<CloneInput<In>>,
@@ -40,7 +40,7 @@ pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
 
 impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &Context<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &PipelineContext<In, Out>) -> Self {
         Self {
             context: context.clone(),
             max_attempts: MaxAttempts::Finite(DEFAULT_RETRY_ATTEMPTS.saturating_add(1)),
@@ -303,10 +303,10 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     ///
     /// ```rust
     /// # use seatbelt::retry::Retry;
-    /// # use seatbelt::{Attempt, RecoveryInfo, Context};
+    /// # use seatbelt::{Attempt, RecoveryInfo, PipelineContext};
     /// # use tick::Clock;
     /// # fn example() {
-    /// # let context = Context::<String, Result<String, String>>::new(Clock::new_frozen());
+    /// # let context = PipelineContext::<String, Result<String, String>>::new(Clock::new_frozen());
     /// // Service with multiple endpoints that can route around unavailable services
     /// let layer = Retry::layer("multi_endpoint_retry", &context)
     ///     .clone_input_with(|input: &mut String, args| {
@@ -359,11 +359,11 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     /// ```rust
     /// # use std::ops::ControlFlow;
     /// # use seatbelt::retry::{Retry, RestoreInputArgs};
-    /// # use seatbelt::{RecoveryInfo, Context};
+    /// # use seatbelt::{RecoveryInfo, PipelineContext};
     /// # use tick::Clock;
     /// # fn example() {
     /// # let clock = Clock::new_frozen();
-    /// # let context = Context::new(&clock);
+    /// # let context = PipelineContext::new(&clock);
     /// #[derive(Clone)]
     /// struct HttpRequest {
     ///     url: String,
@@ -447,7 +447,7 @@ impl<In, Res, Error, CloneInputState, RecoveryState> RetryLayer<In, Result<Res, 
     /// ```rust
     /// # use tick::Clock;
     /// # use seatbelt::retry::*;
-    /// # use seatbelt::{RecoveryInfo, Context};
+    /// # use seatbelt::{RecoveryInfo, PipelineContext};
     /// # #[derive(Clone)]
     /// # struct HttpRequest { url: String, body: Vec<u8> }
     /// # struct HttpResponse { status: u16 }
@@ -467,7 +467,7 @@ impl<In, Res, Error, CloneInputState, RecoveryState> RetryLayer<In, Result<Res, 
     /// #     }
     /// # }
     /// # fn example(clock: Clock) {
-    /// # let context = Context::<HttpRequest, Result<HttpResponse, HttpError>>::new(&clock);
+    /// # let context = PipelineContext::<HttpRequest, Result<HttpResponse, HttpError>>::new(&clock);
     /// type HttpResult = Result<HttpResponse, HttpError>;
     ///
     /// let layer = Retry::layer("http_retry", &context).restore_input_from_error(
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn recovery_auto_sets_correctly() {
-        let context = Context::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
+        let context = PipelineContext::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
         let layer = RetryLayer::new("test".into(), &context);
 
         let layer: RetryLayer<_, _, NotSet, Set> = layer.recovery();
@@ -740,7 +740,7 @@ mod tests {
 
     #[test]
     fn restore_input_from_error_sets_correctly() {
-        let context: Context<String, Result<String, String>> = Context::new(Clock::new_frozen()).pipeline_name("test");
+        let context: PipelineContext<String, Result<String, String>> = PipelineContext::new(Clock::new_frozen()).name("test");
         let layer = RetryLayer::new("test".into(), &context)
             .restore_input_from_error(|e: &mut String, _| (e == "restore").then(|| std::mem::take(e)));
 
@@ -763,8 +763,8 @@ mod tests {
         static_assertions::assert_impl_all!(RetryLayer<String, String, Set, Set>: Debug);
     }
 
-    fn create_test_context() -> Context<String, String> {
-        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context() -> PipelineContext<String, String> {
+        PipelineContext::new(Clock::new_frozen()).name("test_pipeline")
     }
 
     fn create_ready_layer() -> RetryLayer<String, String, Set, Set> {

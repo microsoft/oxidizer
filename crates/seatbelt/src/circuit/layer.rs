@@ -13,7 +13,7 @@ use super::{
 use crate::Layer;
 use crate::circuit::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{Context, NotSet, Recovery, RecoveryInfo, Set};
+use crate::{NotSet, PipelineContext, Recovery, RecoveryInfo, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///
@@ -27,7 +27,7 @@ use crate::{Context, NotSet, Recovery, RecoveryInfo, Set};
 /// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit] documentation.
 #[derive(Debug)]
 pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> {
-    context: Context<In, Out>,
+    context: PipelineContext<In, Out>,
     recovery: Option<ShouldRecover<Out>>,
     rejected_input: Option<RejectedInput<In, Out>>,
     on_opened: Option<OnOpened<Out>>,
@@ -46,7 +46,7 @@ pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> 
 
 impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &Context<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &PipelineContext<In, Out>) -> Self {
         Self {
             context: context.clone(),
             recovery: None,
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn recovery_auto_sets_correctly() {
-        let context = Context::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
+        let context = PipelineContext::<RecoverableType, RecoverableType>::new(Clock::new_frozen());
         let layer = CircuitLayer::new("test".into(), &context);
 
         let layer: CircuitLayer<_, _, Set, NotSet> = layer.recovery();
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn rejected_input_error_wraps_in_err() {
-        let context: Context<String, Result<String, String>> = Context::new(Clock::new_frozen());
+        let context: PipelineContext<String, Result<String, String>> = PipelineContext::new(Clock::new_frozen());
         let layer = CircuitLayer::new("test".into(), &context);
 
         let layer: CircuitLayer<_, _, NotSet, Set> = layer.rejected_input_error(|input, _| format!("rejected: {input}"));
@@ -697,8 +697,8 @@ mod tests {
         static_assertions::assert_impl_all!(CircuitLayer<String, String, Set, Set>: Debug);
     }
 
-    fn create_test_context() -> Context<String, String> {
-        Context::new(Clock::new_frozen()).pipeline_name("test_pipeline")
+    fn create_test_context() -> PipelineContext<String, String> {
+        PipelineContext::new(Clock::new_frozen()).name("test_pipeline")
     }
 
     fn create_ready_layer() -> CircuitLayer<String, String, Set, Set> {

@@ -12,7 +12,7 @@ use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use seatbelt::retry::Retry;
-use seatbelt::{Context, RecoveryInfo};
+use seatbelt::{PipelineContext, RecoveryInfo};
 use tick::Clock;
 
 #[global_allocator]
@@ -23,7 +23,7 @@ fn entry(c: &mut Criterion) {
     let session = Session::new();
 
     // No telemetry
-    let context = Context::new(Clock::new_frozen());
+    let context = PipelineContext::new(Clock::new_frozen());
     let service = (
         Retry::layer("bench", &context)
             .clone_input()
@@ -42,7 +42,7 @@ fn entry(c: &mut Criterion) {
 
     // Metrics
     let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(EmptyExporter).build();
-    let context = Context::new(Clock::new_frozen()).enable_metrics(&meter_provider);
+    let context = PipelineContext::new(Clock::new_frozen()).enable_metrics(&meter_provider);
     let service = (
         Retry::layer("bench", &context)
             .clone_input()
@@ -60,7 +60,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // Logs
-    let context = Context::new(Clock::new_frozen()).enable_logs();
+    let context = PipelineContext::new(Clock::new_frozen()).enable_logs();
     let service = (
         Retry::layer("bench", &context)
             .clone_input()

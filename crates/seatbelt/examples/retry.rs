@@ -8,13 +8,13 @@ use std::io::Error;
 use layered::{Execute, Service, Stack};
 use ohno::AppError;
 use seatbelt::retry::Retry;
-use seatbelt::{Context, RecoveryInfo};
+use seatbelt::{PipelineContext, RecoveryInfo};
 use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
-    let context = Context::new(&clock);
+    let context = PipelineContext::new(&clock);
 
     // Define stack with retry layer
     let stack = (

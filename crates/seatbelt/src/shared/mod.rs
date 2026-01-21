@@ -12,7 +12,7 @@ pub struct Set;
 pub struct NotSet;
 
 mod context;
-pub use context::Context;
+pub use context::PipelineContext;
 
 mod attempt;
 mod backoff;

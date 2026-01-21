@@ -10,7 +10,7 @@ use tick::{Clock, FutureExt};
 
 use crate::timeout::{OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs};
 use crate::utils::EnableIf;
-use crate::{Context, NotSet};
+use crate::{NotSet, PipelineContext};
 
 /// Applies a timeout to service execution for canceling long-running operations.
 ///
@@ -53,10 +53,10 @@ impl<In, Out> Timeout<In, Out, ()> {
     /// # use std::time::Duration;
     /// # use layered::{Execute, Stack};
     /// # use tick::Clock;
-    /// # use seatbelt::Context;
+    /// # use seatbelt::PipelineContext;
     /// use seatbelt::timeout::Timeout;
     ///
-    /// # fn example(context: Context<String, String>) {
+    /// # fn example(context: PipelineContext<String, String>) {
     /// let timeout_layer = Timeout::layer("my_timeout", &context)
     ///     .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
     ///     .timeout(Duration::from_secs(30));
@@ -66,7 +66,7 @@ impl<In, Out> Timeout<In, Out, ()> {
     /// For comprehensive examples, see the [timeout module] documentation.
     ///
     /// [timeout module]: crate::timeout
-    pub fn layer(name: impl Into<Cow<'static, str>>, context: &Context<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {
+    pub fn layer(name: impl Into<Cow<'static, str>>, context: &PipelineContext<In, Out>) -> TimeoutLayer<In, Out, NotSet, NotSet> {
         TimeoutLayer::new(name.into(), context)
     }
 }
@@ -148,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn no_timeout() {
         let clock = Clock::new_frozen();
-        let context = Context::new(clock);
+        let context = PipelineContext::new(clock);
 
         let stack = (
             Timeout::layer("test_timeout", &context)
@@ -170,7 +170,7 @@ mod tests {
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
             .to_clock();
-        let context = Context::new(clock.clone());
+        let context = PipelineContext::new(clock.clone());
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = std::sync::Arc::clone(&called);
 
@@ -208,7 +208,7 @@ mod tests {
             .to_clock();
 
         let stack = (
-            Timeout::layer("test_timeout", &Context::new(clock.clone()))
+            Timeout::layer("test_timeout", &PipelineContext::new(clock.clone()))
                 .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
                 .timeout(Duration::from_millis(200))
                 .timeout_override(|input, _args| {
@@ -237,7 +237,7 @@ mod tests {
     async fn no_timeout_if_disabled() {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let stack = (
-            Timeout::layer("test_timeout", &Context::new(&clock))
+            Timeout::layer("test_timeout", &PipelineContext::new(&clock))
                 .timeout_output(|_args| "timed out".to_string())
                 .timeout(Duration::from_millis(200))
                 .disable(),
@@ -272,7 +272,7 @@ mod tests {
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
             .to_clock();
-        let context = Context::new(clock.clone()).enable_logs().pipeline_name("log_test_pipeline");
+        let context = PipelineContext::new(clock.clone()).enable_logs().name("log_test_pipeline");
 
         let stack = (
             Timeout::layer("log_test_timeout", &context)
@@ -308,9 +308,9 @@ mod tests {
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
             .to_clock();
-        let context = Context::new(clock.clone())
+        let context = PipelineContext::new(clock.clone())
             .enable_metrics(metrics.meter_provider())
-            .pipeline_name("metrics_pipeline");
+            .name("metrics_pipeline");
 
         let stack = (
             Timeout::layer("metrics_timeout", &context)

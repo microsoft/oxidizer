@@ -13,7 +13,7 @@ use layered::{Execute, Service, Stack};
 use ohno::{AppError, app_err};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
-use seatbelt::Context;
+use seatbelt::PipelineContext;
 use seatbelt::timeout::Timeout;
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
@@ -29,7 +29,7 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
 
     // Create common options
-    let context = Context::new(&clock).enable_metrics(&meter_provider);
+    let context = PipelineContext::new(&clock).enable_metrics(&meter_provider);
 
     // Define stack with timeout layer
     let stack = (

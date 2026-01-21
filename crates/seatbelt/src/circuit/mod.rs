@@ -19,9 +19,9 @@
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
 //! # use seatbelt::circuit::Circuit;
-//! # use seatbelt::{RecoveryInfo, Context};
+//! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! let context = Context::new(&clock);
+//! let context = PipelineContext::new(&clock);
 //!
 //! let stack = (
 //!     Circuit::layer("circuit_breaker", &context)
@@ -166,7 +166,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted when circuit state transitions occur and when requests are rejected
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`Context::pipeline_name`][crate::Context::pipeline_name]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`PipelineContext::name`][crate::PipelineContext::name]
 //!   - `resilience.strategy.name`: Circuit breaker identifier from [`Circuit::layer`]
 //!   - `resilience.event.name`: One of:
 //!     - `circuit_opened`: When the circuit transitions to open state due to failure threshold being exceeded
@@ -188,11 +188,11 @@
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
 //! # use seatbelt::circuit::Circuit;
-//! # use seatbelt::{RecoveryInfo, Context};
+//! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
-//! let context = Context::new(&clock).pipeline_name("example");
+//! let context = PipelineContext::new(&clock).name("example");
 //!
 //! let stack = (
 //!     Circuit::layer("my_breaker", &context)
@@ -229,10 +229,10 @@
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
 //! # use seatbelt::circuit::{Circuit,  PartitionKey, HalfOpenMode};
-//! # use seatbelt::{RecoveryInfo, Context};
+//! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware.
-//! let context = Context::new(&clock).pipeline_name("advanced_example");
+//! let context = PipelineContext::new(&clock).name("advanced_example");
 //!
 //! let stack = (
 //!     Circuit::layer("advanced_breaker", &context)
@@ -290,9 +290,9 @@
 //!
 //! ```compile_fail
 //! # use seatbelt::circuit::Circuit;
-//! # use seatbelt::Context;
+//! # use seatbelt::PipelineContext;
 //! # use layered::Execute;
-//! # fn example(context: Context<String, Result<String, String>>) {
+//! # fn example(context: PipelineContext<String, Result<String, String>>) {
 //! let stack = (
 //!     Circuit::layer("test", &service_options), // Missing required configuration!
 //!     Execute::new(|input| async move { Ok(input) })

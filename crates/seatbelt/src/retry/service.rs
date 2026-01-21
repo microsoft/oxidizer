@@ -52,7 +52,7 @@ impl<In, Out> Retry<In, Out, ()> {
     /// before it can be used to build a retry service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
-        context: &crate::Context<In, Out>,
+        context: &crate::PipelineContext<In, Out>,
     ) -> crate::retry::RetryLayer<In, Out, NotSet, NotSet> {
         crate::retry::RetryLayer::new(name.into(), context)
     }
@@ -269,11 +269,11 @@ mod tests {
     use crate::retry::RetryLayer;
     use crate::shared::Backoff;
     use crate::testing::MetricTester;
-    use crate::{Context, Set};
+    use crate::{PipelineContext, Set};
 
     #[test]
     fn layer_ensure_defaults() {
-        let context = Context::<String, String>::new(Clock::new_frozen()).pipeline_name("test_pipeline");
+        let context = PipelineContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
         let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &context);
         let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
@@ -581,8 +581,8 @@ mod tests {
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
-        let context = Context::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
-            .pipeline_name("test_pipeline")
+        let context = PipelineContext::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
+            .name("test_pipeline")
             .enable_metrics(tester.meter_provider());
 
         let service = create_ready_retry_layer_core(RecoveryInfo::retry(), &context)
@@ -617,8 +617,8 @@ mod tests {
         let _guard = log_capture.subscriber().set_default();
 
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-        let context = Context::<String, String>::new(clock)
-            .pipeline_name("log_test_pipeline")
+        let context = PipelineContext::<String, String>::new(clock)
+            .name("log_test_pipeline")
             .enable_logs();
 
         let service = Retry::layer("log_test_retry", &context)
@@ -637,11 +637,14 @@ mod tests {
     }
 
     fn create_ready_retry_layer(clock: &Clock, recover: RecoveryInfo) -> RetryLayer<String, String, Set, Set> {
-        let context = Context::new(clock.clone()).pipeline_name("test_pipeline");
+        let context = PipelineContext::new(clock.clone()).name("test_pipeline");
         create_ready_retry_layer_core(recover, &context)
     }
 
-    fn create_ready_retry_layer_core(recover: RecoveryInfo, context: &Context<String, String>) -> RetryLayer<String, String, Set, Set> {
+    fn create_ready_retry_layer_core(
+        recover: RecoveryInfo,
+        context: &PipelineContext<String, String>,
+    ) -> RetryLayer<String, String, Set, Set> {
         Retry::layer("test_retry", context)
             .recovery_with(move |_, _| recover.clone())
             .clone_input()
