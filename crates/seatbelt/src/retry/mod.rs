@@ -188,17 +188,19 @@
 //! ```
 
 mod args;
+mod attempt;
 mod backoff;
 mod callbacks;
 mod constants;
 mod layer;
 mod service;
-
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-pub use crate::shared::{Attempt, Backoff};
 pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
+pub use attempt::Attempt;
+pub(crate) use attempt::MaxAttempts;
+pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};
 pub use layer::RetryLayer;

@@ -4,7 +4,6 @@
 use std::cmp::min;
 use std::time::Duration;
 
-use crate::retry::Backoff;
 use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_USE_JITTER};
 use crate::rnd::Rnd;
 
@@ -13,6 +12,29 @@ const JITTER_FACTOR: f64 = 0.5;
 
 /// The default factor used for exponential backoff calculations for cases where jitter is not applied.
 const EXPONENTIAL_FACTOR: f64 = 2.0;
+
+/// Defines the backoff strategy used by resilience middleware for retry operations.
+///
+/// Backoff strategies control how delays between retry attempts are calculated, providing
+/// different approaches to spacing out retries to avoid overwhelming failing systems while
+/// balancing responsiveness and resource utilization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Backoff {
+    /// Constant backoff strategy that maintains consistent delays between attempts.
+    ///
+    /// **Example with `2s` base delay:** `2s, 2s, 2s, 2s, ...`
+    Constant,
+
+    /// Linear backoff strategy that increases delays proportionally with attempt count.
+    ///
+    /// **Example with `2s` base delay:** `2s, 4s, 6s, 8s, 10s, ...`
+    Linear,
+
+    /// Exponential backoff strategy that doubles delays with each attempt.
+    ///
+    /// **Example with `2s` base delay:** `2s, 4s, 8s, 16s, 32s, ...`
+    Exponential,
+}
 
 // The delay generation follows the Polly V8 implementation:
 //

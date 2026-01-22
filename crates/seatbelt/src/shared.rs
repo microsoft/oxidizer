@@ -12,14 +12,3 @@ pub struct Set;
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct NotSet;
-
-mod context;
-pub use context::ResilienceContext;
-
-mod attempt;
-mod backoff;
-
-pub use attempt::Attempt;
-#[cfg(any(feature = "retry", test))]
-pub(crate) use attempt::MaxAttempts;
-pub use backoff::Backoff;

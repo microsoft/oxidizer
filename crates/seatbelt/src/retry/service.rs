@@ -7,10 +7,10 @@ use std::time::Duration;
 use layered::Service;
 use tick::Clock;
 
+use super::MaxAttempts;
 use crate::retry::{
     CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, ShouldRecover,
 };
-use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
 use crate::{NotSet, RecoveryInfo, RecoveryKind, retry::Attempt};
 
@@ -265,8 +265,7 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::retry::RetryLayer;
-    use crate::shared::Backoff;
+    use crate::retry::{Backoff, RetryLayer};
     use crate::testing::MetricTester;
     use crate::{ResilienceContext, Set};
     use layered::Layer;

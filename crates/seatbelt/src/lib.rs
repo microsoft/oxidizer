@@ -122,8 +122,11 @@
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
-pub(crate) mod shared;
-pub use crate::shared::{NotSet, ResilienceContext, Set};
+mod context;
+pub use context::ResilienceContext;
+
+mod shared;
+pub use crate::shared::{NotSet, Set};
 
 #[cfg(any(feature = "timeout", test))]
 pub mod timeout;

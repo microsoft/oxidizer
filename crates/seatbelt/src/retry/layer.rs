@@ -5,10 +5,10 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use super::MaxAttempts;
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
-use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
 use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, retry::Backoff};
