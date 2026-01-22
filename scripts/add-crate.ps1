@@ -93,45 +93,49 @@ Get-ChildItem -Path $destinationDir -Recurse | ForEach-Object {
     Set-Content -Path $filePath -Value $content -NoNewline
 }
 
-# Update root README.md
-$readmePath = Join-Path $repoRoot "README.md"
-$readmeLines = Get-Content $readmePath
-$cratesList = @{}
-$inCratesSection = $false
-$readmeInsertionIndex = -1
-$readmeEndIndex = -1
+# Update root README.md (skip for macro crates)
+if ($crateName -notlike "*_macros*") {
+    $readmePath = Join-Path $repoRoot "README.md"
+    $readmeLines = Get-Content $readmePath
+    $cratesList = @{}
+    $inCratesSection = $false
+    $readmeInsertionIndex = -1
+    $readmeEndIndex = -1
 
-for ($i = 0; $i -lt $readmeLines.Length; $i++) {
-    if ($readmeLines[$i] -eq "## Crates") {
-        $inCratesSection = $true
-        continue
-    }
-    if ($inCratesSection) {
-        if ($readmeLines[$i] -match '^- \[`(.*)`\](.*)') {
-            if($readmeInsertionIndex -eq -1) {
-                $readmeInsertionIndex = $i
+    for ($i = 0; $i -lt $readmeLines.Length; $i++) {
+        if ($readmeLines[$i] -eq "## Crates") {
+            $inCratesSection = $true
+            continue
+        }
+        if ($inCratesSection) {
+            if ($readmeLines[$i] -match '^- \[`(.*)`\](.*)') {
+                if($readmeInsertionIndex -eq -1) {
+                    $readmeInsertionIndex = $i
+                }
+                $cratesList[$Matches[1]] = $readmeLines[$i]
+                $readmeEndIndex = $i
+            } elseif ($readmeLines[$i].Trim() -ne "" -and $readmeInsertionIndex -ne -1) {
+                break
             }
-            $cratesList[$Matches[1]] = $readmeLines[$i]
-            $readmeEndIndex = $i
-        } elseif ($readmeLines[$i].Trim() -ne "" -and $readmeInsertionIndex -ne -1) {
-            break
         }
     }
-}
 
-$cratesList[$crateName] = ('- [`{0}`](./crates/{0}/README.md) - {1}' -f $crateName, $crateDescription)
-$sortedCrateNames = $cratesList.Keys | Sort-Object
+    $cratesList[$crateName] = ('- [`{0}`](./crates/{0}/README.md) - {1}' -f $crateName, $crateDescription)
+    $sortedCrateNames = $cratesList.Keys | Sort-Object
 
-if ($readmeInsertionIndex -ne -1) {
-    $newLines = @()
-    foreach ($name in $sortedCrateNames) {
-        $newLines += $cratesList[$name]
+    if ($readmeInsertionIndex -ne -1) {
+        $newLines = @()
+        foreach ($name in $sortedCrateNames) {
+            $newLines += $cratesList[$name]
+        }
+        $pre = $readmeLines[0..($readmeInsertionIndex-1)]
+        $post = $readmeLines[($readmeEndIndex+1)..$readmeLines.Length]
+        $newReadmeContent = ($pre + $newLines + $post) -join [System.Environment]::NewLine
+        Set-Content -Path $readmePath -Value $newReadmeContent
+        Write-Host "Updated root README.md"
     }
-    $pre = $readmeLines[0..($readmeInsertionIndex-1)]
-    $post = $readmeLines[($readmeEndIndex+1)..$readmeLines.Length]
-    $newReadmeContent = ($pre + $newLines + $post) -join [System.Environment]::NewLine
-    Set-Content -Path $readmePath -Value $newReadmeContent
-    Write-Host "Updated root README.md"
+} else {
+    Write-Host "Skipping README.md update for macro crate"
 }
 
 
