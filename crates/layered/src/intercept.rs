@@ -655,20 +655,17 @@ mod tests {
     }
 
     #[test]
-    fn debug_impls() {
-        let layer = Intercept::<String, String, ()>::layer()
-            .on_input(|_| {})
-            .on_output(|_| {})
-            .modify_input(|s| s)
-            .modify_output(|s| s);
-        assert!(format!("{layer:?}").contains("InterceptLayer"));
-    }
-
-    #[test]
     fn debug_intercept() {
         let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer().layer("inner"));
 
         assert_eq!(debug_str, "Intercept { service: \"inner\", .. }");
+    }
+
+    #[test]
+    fn clone_intercept() {
+        let cloned = Intercept::<String, String, ()>::layer().layer("inner").clone();
+
+        assert_eq!(cloned.service, "inner");
     }
 
     #[test]
