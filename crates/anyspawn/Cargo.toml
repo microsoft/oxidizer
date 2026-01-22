@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [package]
-name = "arty"
+name = "anyspawn"
 description = "A generic task spawner compatible with any async runtime"
 version = "0.1.0"
 readme = "README.md"

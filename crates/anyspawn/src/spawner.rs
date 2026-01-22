@@ -25,7 +25,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 /// Using Tokio:
 ///
 /// ```rust
-/// use arty::Spawner;
+/// use anyspawn::Spawner;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
@@ -40,7 +40,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 /// ## Custom Runtime
 ///
 /// ```rust,ignore
-/// use arty::Spawner;
+/// use anyspawn::Spawner;
 ///
 /// let spawner = Spawner::custom(|fut| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
@@ -57,7 +57,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 /// Await the [`JoinHandle`](crate::JoinHandle) to retrieve a value from the task:
 ///
 /// ```rust
-/// use arty::Spawner;
+/// use anyspawn::Spawner;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
@@ -72,7 +72,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 /// Return a `Result` from the task to propagate errors:
 ///
 /// ```rust
-/// use arty::Spawner;
+/// use anyspawn::Spawner;
 ///
 /// # #[tokio::main]
 /// # async fn main() {
@@ -111,7 +111,7 @@ impl Spawner {
     /// # Examples
     ///
     /// ```rust
-    /// use arty::Spawner;
+    /// use anyspawn::Spawner;
     ///
     /// # #[tokio::main]
     /// # async fn main() {
@@ -135,7 +135,7 @@ impl Spawner {
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use arty::Spawner;
+    /// use anyspawn::Spawner;
     ///
     /// let spawner = Spawner::custom(|fut| {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));
@@ -162,7 +162,7 @@ impl Spawner {
     /// # Examples
     ///
     /// ```rust
-    /// use arty::Spawner;
+    /// use anyspawn::Spawner;
     ///
     /// # #[tokio::main]
     /// # async fn main() {

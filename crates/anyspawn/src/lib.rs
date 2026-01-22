@@ -21,7 +21,7 @@
 //! ## Using Tokio
 //!
 //! ```rust
-//! use arty::Spawner;
+//! use anyspawn::Spawner;
 //!
 //! # #[tokio::main]
 //! # async fn main() {
@@ -34,7 +34,7 @@
 //! ## Custom Runtime
 //!
 //! ```rust,ignore
-//! use arty::Spawner;
+//! use anyspawn::Spawner;
 //!
 //! let spawner = Spawner::custom(|fut| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
@@ -49,8 +49,8 @@
 //! - `tokio` (default): Enables the [`Spawner::tokio`] constructor
 //! - `custom`: Enables the [`Spawner::custom`] constructor
 
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/arty/favicon.ico")]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]
 
 #[cfg(feature = "custom")]
 mod custom;

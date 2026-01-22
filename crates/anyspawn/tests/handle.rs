@@ -1,12 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(missing_docs)]
+#![allow(missing_docs, reason = "test code")]
 #![cfg(any(feature = "tokio", feature = "custom"))]
 
 //! Tests for `JoinHandle` implementations.
 
-use arty::Spawner;
+use anyspawn::Spawner;
 
 #[cfg(feature = "tokio")]
 #[tokio::test]

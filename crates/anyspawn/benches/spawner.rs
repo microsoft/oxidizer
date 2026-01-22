@@ -7,7 +7,7 @@
     reason = "Benchmarks don't require documentation and should fail fast on errors"
 )]
 
-use arty::Spawner;
+use anyspawn::Spawner;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 fn entry(c: &mut Criterion) {

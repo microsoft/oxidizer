@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use arty::Spawner;
+use anyspawn::Spawner;
 use tick::Clock;
 
 #[tokio::main]
