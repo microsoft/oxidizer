@@ -29,7 +29,7 @@ use crate::Service;
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = stack.build();
+/// let service = stack.into_service();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -52,7 +52,7 @@ use crate::Service;
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = stack.build();
+/// let service = stack.into_service();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -77,7 +77,7 @@ pub struct Intercept<In, Out, S> {
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = stack.build();
+/// let service = stack.into_service();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -102,7 +102,7 @@ impl<In, Out> Intercept<In, Out, ()> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -219,7 +219,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -248,7 +248,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -278,7 +278,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -317,7 +317,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -484,7 +484,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let response = block_on(service.execute("test".to_string()));
         assert_eq!(called_clone.load(Ordering::Relaxed), 1);
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
@@ -513,7 +513,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let response = block_on(service.execute("test".to_string()));
         assert_eq!(called_clone.load(Ordering::Relaxed), 1);
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
@@ -542,7 +542,7 @@ mod tests {
             Execute::new(|input: String| async move { Ok::<_, String>(input) }),
         );
 
-        let mut service = stack.build();
+        let mut service = stack.into_service();
         let future = async move {
             poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
             let response = service.call("test".to_string()).await.unwrap();
@@ -665,7 +665,7 @@ mod tests {
             Intercept::layer().input_control_flow(|_: String| ControlFlow::Break("rejected".into())),
             Execute::new(|_: String| async { "should not run".to_string() }),
         );
-        let svc = stack.build();
+        let svc = stack.into_service();
         assert_eq!(block_on(svc.execute("test".into())), "rejected");
     }
 
@@ -675,7 +675,7 @@ mod tests {
             Intercept::layer().input_control_flow(|_: String| ControlFlow::Break(Ok("rejected".into()))),
             Execute::new(|_: String| async { Ok::<_, ()>("should not run".into()) }),
         );
-        let mut svc = stack.build();
+        let mut svc = stack.into_service();
         let res = block_on(async {
             poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
             svc.call("test".into()).await

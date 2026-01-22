@@ -33,7 +33,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let service = (Intercept::layer(), Execute::new(|v| async move { v })).build();
+    let service = (Intercept::layer(), Execute::new(|v| async move { v })).into_service();
     let operation = session.operation("wrapped_typed");
     group.bench_function("wrapped_typed", |b| {
         b.iter(|| {
@@ -42,7 +42,9 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let service = (Intercept::layer(), Execute::new(|v| async move { v })).build().into_dynamic();
+    let service = (Intercept::layer(), Execute::new(|v| async move { v }))
+        .into_service()
+        .into_dynamic();
     let operation = session.operation("wrapped_dynamic");
     group.bench_function("wrapped_dynamic", |b| {
         b.iter(|| {

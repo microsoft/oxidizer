@@ -11,7 +11,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, service) = self;
 
         l1.layer(service)
@@ -25,7 +25,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, service) = self;
 
         (l1, l2).layer(service)
@@ -40,7 +40,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, service) = self;
 
         (l1, l2, l3).layer(service)
@@ -56,7 +56,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, service) = self;
 
         (l1, l2, l3, l4).layer(service)
@@ -73,7 +73,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, service) = self;
 
         (l1, l2, l3, l4, l5).layer(service)
@@ -91,7 +91,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, service) = self;
 
         (l1, l2, l3, l4, l5, l6).layer(service)
@@ -110,7 +110,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7).layer(service)
@@ -130,7 +130,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8).layer(service)
@@ -151,7 +151,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9).layer(service)
@@ -173,7 +173,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10).layer(service)
@@ -196,7 +196,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11).layer(service)
@@ -220,7 +220,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12).layer(service)
@@ -244,7 +244,7 @@ where
     L13: Layer<S>,
 {
     type Service = L1::Service;
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13).layer(service)
@@ -271,7 +271,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14).layer(service)
@@ -299,7 +299,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15).layer(service)
@@ -328,7 +328,7 @@ where
 {
     type Service = L1::Service;
 
-    fn build(self) -> Self::Service {
+    fn into_service(self) -> Self::Service {
         let (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, service) = self;
 
         (l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16).layer(service)
@@ -346,14 +346,14 @@ mod tests {
     #[test]
     #[expect(clippy::too_many_lines, reason = "no need to have 16 different unit tests")]
     fn stack_tuples() {
-        let _: () = (I::new(), ()).build();
-        let _: () = (I::new(), I::new(), ()).build();
-        let _: () = (I::new(), I::new(), I::new(), ()).build();
-        let _: () = (I::new(), I::new(), I::new(), I::new(), ()).build();
-        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
-        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
-        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
-        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).build();
+        let _: () = (I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).into_service();
+        let _: () = (I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), I::new(), ()).into_service();
         let _: () = (
             I::new(),
             I::new(),
@@ -366,7 +366,7 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
         let _: () = (
             I::new(),
             I::new(),
@@ -380,24 +380,8 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
         let _: () = (
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            I::new(),
-            (),
-        )
-            .build();
-        let _: () = (
-            I::new(),
             I::new(),
             I::new(),
             I::new(),
@@ -411,9 +395,8 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
         let _: () = (
-            I::new(),
             I::new(),
             I::new(),
             I::new(),
@@ -428,9 +411,8 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
         let _: () = (
-            I::new(),
             I::new(),
             I::new(),
             I::new(),
@@ -446,9 +428,8 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
         let _: () = (
-            I::new(),
             I::new(),
             I::new(),
             I::new(),
@@ -465,9 +446,8 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
         let _: () = (
-            I::new(),
             I::new(),
             I::new(),
             I::new(),
@@ -485,6 +465,26 @@ mod tests {
             I::new(),
             (),
         )
-            .build();
+            .into_service();
+        let _: () = (
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            I::new(),
+            (),
+        )
+            .into_service();
     }
 }
