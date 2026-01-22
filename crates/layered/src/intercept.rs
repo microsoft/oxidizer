@@ -64,7 +64,7 @@ pub struct Intercept<In, Out, S> {
 impl<In, Out, S: Clone> Clone for Intercept<In, Out, S> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner.clone()),
+            inner: Arc::clone(&self.inner),
             service: self.service.clone(),
         }
     }
@@ -668,7 +668,7 @@ mod tests {
     fn debug_intercept() {
         let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer().layer("inner"));
 
-        assert_eq!(debug_str, "Intercept { service: \"inner\", .. }")
+        assert_eq!(debug_str, "Intercept { service: \"inner\", .. }");
     }
 
     #[test]
