@@ -62,8 +62,8 @@ assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
 * **Service**: A type implementing the [`Service`][__link4] trait that transforms inputs into outputs
   asynchronously. Think of it as `async fn(&self, In) -> Out`.
 * **Middleware**: A service that wraps another service to add cross-cutting behavior such as
-  logging, timeouts, or retries. Middleware receives requests before the inner service and can
-  process responses after.
+  logging, timeouts, or retries. Middleware receives inputs before the inner service and can
+  process outputs after.
 * **Layer**: A type implementing the [`Layer`][__link5] trait that constructs middleware around a
   service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
 
@@ -126,17 +126,17 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6etmL2jiPGkG2U15cVEARvtG-aoM7qgkx-cGw2jf3x68CX1YWSBgmdsYXllcmVkZTAuMi4w
- [__link0]: https://docs.rs/layered/0.2.0/layered/?search=Service
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2s7ZpjZBK-NG9NQa4QbaT-IGwXqFpV_FwWxG6nCK5_0IrsAYWSBgmdsYXllcmVkZTAuMy4w
+ [__link0]: https://docs.rs/layered/0.3.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
- [__link10]: https://docs.rs/layered/0.2.0/layered/?search=Intercept
- [__link11]: https://docs.rs/layered/0.2.0/layered/?search=DynamicService
- [__link12]: https://docs.rs/layered/0.2.0/layered/tower/index.html
- [__link2]: https://docs.rs/layered/0.2.0/layered/?search=Service
- [__link3]: https://docs.rs/layered/0.2.0/layered/?search=Execute
- [__link4]: https://docs.rs/layered/0.2.0/layered/?search=Service
- [__link5]: https://docs.rs/layered/0.2.0/layered/?search=Layer
- [__link6]: https://docs.rs/layered/0.2.0/layered/?search=Layer
+ [__link10]: https://docs.rs/layered/0.3.0/layered/?search=Intercept
+ [__link11]: https://docs.rs/layered/0.3.0/layered/?search=DynamicService
+ [__link12]: https://docs.rs/layered/0.3.0/layered/tower/index.html
+ [__link2]: https://docs.rs/layered/0.3.0/layered/?search=Service
+ [__link3]: https://docs.rs/layered/0.3.0/layered/?search=Execute
+ [__link4]: https://docs.rs/layered/0.3.0/layered/?search=Service
+ [__link5]: https://docs.rs/layered/0.3.0/layered/?search=Layer
+ [__link6]: https://docs.rs/layered/0.3.0/layered/?search=Layer
  [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link8]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
  [__link9]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html

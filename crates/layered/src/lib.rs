@@ -61,8 +61,8 @@
 //! - **Service**: A type implementing the [`Service`] trait that transforms inputs into outputs
 //!   asynchronously. Think of it as `async fn(&self, In) -> Out`.
 //! - **Middleware**: A service that wraps another service to add cross-cutting behavior such as
-//!   logging, timeouts, or retries. Middleware receives requests before the inner service and can
-//!   process responses after.
+//!   logging, timeouts, or retries. Middleware receives inputs before the inner service and can
+//!   process outputs after.
 //! - **Layer**: A type implementing the [`Layer`] trait that constructs middleware around a
 //!   service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
 //!
