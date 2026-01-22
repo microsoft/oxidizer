@@ -92,9 +92,9 @@
 //!
 //! Run benchmarks with `cargo bench -p uniflight`. The suite covers:
 //!
-//! - **single_call**: Baseline latency with no contention
-//! - **high_contention_100**: 100 concurrent tasks on the same key
-//! - **distributed_10x10**: 10 keys with 10 tasks each
+//! - `single_call`: Baseline latency with no contention
+//! - `high_contention_100`: 100 concurrent tasks on the same key
+//! - `distributed_10x10`: 10 keys with 10 tasks each
 //!
 //! Use `--save-baseline` and `--baseline` flags to track regressions over time.
 

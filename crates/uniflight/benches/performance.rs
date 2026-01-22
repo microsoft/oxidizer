@@ -32,11 +32,7 @@ fn bench_single_call(c: &mut Criterion) {
     c.bench_function("single_call", |b| {
         b.to_async(&rt).iter(|| {
             let merger = Arc::clone(&merger);
-            async move {
-                merger
-                    .execute(&unique_key(), || async { "value".to_string() })
-                    .await
-            }
+            async move { merger.execute(&unique_key(), || async { "value".to_string() }).await }
         });
     });
 }
@@ -56,9 +52,7 @@ fn bench_high_contention(c: &mut Criterion) {
                     .map(|_| {
                         let merger = Arc::clone(&merger);
                         let key = key.clone();
-                        tokio::spawn(async move {
-                            merger.execute(&key, || async { "value".to_string() }).await
-                        })
+                        tokio::spawn(async move { merger.execute(&key, || async { "value".to_string() }).await })
                     })
                     .collect();
 
@@ -87,9 +81,7 @@ fn bench_distributed_keys(c: &mut Criterion) {
                         (0..10).map(move |_| {
                             let merger = Arc::clone(&merger);
                             let key = format!("key_{prefix}_{key_id}");
-                            tokio::spawn(async move {
-                                merger.execute(&key, || async { "value".to_string() }).await
-                            })
+                            tokio::spawn(async move { merger.execute(&key, || async { "value".to_string() }).await })
                         })
                     })
                     .collect();
@@ -102,11 +94,6 @@ fn bench_distributed_keys(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    bench_single_call,
-    bench_high_contention,
-    bench_distributed_keys,
-);
+criterion_group!(benches, bench_single_call, bench_high_contention, bench_distributed_keys,);
 
 criterion_main!(benches);
