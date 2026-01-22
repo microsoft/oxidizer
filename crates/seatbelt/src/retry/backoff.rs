@@ -4,7 +4,7 @@
 use std::cmp::min;
 use std::time::Duration;
 
-use crate::Backoff;
+use crate::retry::Backoff;
 use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_USE_JITTER};
 use crate::rnd::Rnd;
 

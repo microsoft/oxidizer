@@ -18,7 +18,7 @@ use std::fmt::Display;
 /// # Examples
 ///
 /// ```
-/// use seatbelt::Attempt;
+/// use seatbelt::retry::Attempt;
 ///
 /// // Create the first attempt (attempt 0)
 /// let attempt = Attempt::new(0, false);
@@ -56,7 +56,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::Attempt;
+    /// use seatbelt::retry::Attempt;
     ///
     /// let attempt = Attempt::new(0, false);
     /// assert_eq!(attempt.index(), 0);
@@ -71,7 +71,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::Attempt;
+    /// use seatbelt::retry::Attempt;
     ///
     /// let first_attempt = Attempt::new(0, false);
     /// assert!(first_attempt.is_first());
@@ -89,7 +89,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::Attempt;
+    /// use seatbelt::retry::Attempt;
     ///
     /// let not_last = Attempt::new(1, false);
     /// assert!(!not_last.is_last());
@@ -107,7 +107,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::Attempt;
+    /// use seatbelt::retry::Attempt;
     ///
     /// let attempt = Attempt::new(3, false);
     /// assert_eq!(attempt.index(), 3);

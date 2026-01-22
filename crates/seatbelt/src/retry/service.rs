@@ -12,7 +12,7 @@ use crate::retry::{
 };
 use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
-use crate::{Attempt, NotSet, RecoveryInfo, RecoveryKind};
+use crate::{NotSet, RecoveryInfo, RecoveryKind, retry::Attempt};
 
 /// Applies retry logic to service execution for transient error handling.
 ///

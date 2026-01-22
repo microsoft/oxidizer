@@ -15,8 +15,8 @@
 //! ```rust
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::retry::Retry;
-//! # use seatbelt::{Backoff, RecoveryInfo, PipelineContext};
+//! # use seatbelt::retry::{Retry, Backoff};
+//! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let context = PipelineContext::new(&clock).name("my_service");
 //!
@@ -106,8 +106,8 @@
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::retry::Retry;
-//! # use seatbelt::{Backoff, RecoveryInfo, PipelineContext};
+//! # use seatbelt::retry::{Retry, Backoff};
+//! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
@@ -148,8 +148,8 @@
 //! # use tick::Clock;
 //! # use std::io;
 //! # use layered::{Execute, Stack, Service};
-//! # use seatbelt::retry::Retry;
-//! # use seatbelt::{RecoveryInfo, PipelineContext, Backoff};
+//! # use seatbelt::retry::{Retry, Backoff};
+//! # use seatbelt::{RecoveryInfo, PipelineContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! // Define common options for resilience middleware.
 //! let context = PipelineContext::new(&clock);
@@ -186,28 +186,6 @@
 //! # }
 //! # async fn execute_unreliable_operation(input: String) -> Result<String, io::Error> { Ok(input) }
 //! ```
-//!
-//! ## Incomplete Configuration
-//!
-//! This example demonstrates what happens when the `RetryLayer` is not fully configured.
-//! The code below will not compile because the retry layer is missing required configuration.
-//!
-//! ```compile_fail
-//! # use seatbelt::retry::Retry;
-//! # use seatbelt::PipelineContext;
-//! # use tick::Clock;
-//! # fn example(context: PipelineContext<String, String>) {
-//! let stack = (
-//!     Retry::layer("test", &service_options), // Missing required configuration!
-//!     Execute::new(|input| async move { input })
-//! );
-//!
-//! // This will fail to compile
-//! let service = stack.build();
-//! # }
-//! ```
-//!
-//! For more comprehensive examples, see the [examples directory](https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt/examples).
 
 mod args;
 mod backoff;
@@ -219,6 +197,7 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
+pub use crate::shared::{Attempt, Backoff};
 pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};

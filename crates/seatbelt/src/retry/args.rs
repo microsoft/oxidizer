@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tick::Clock;
 
-use crate::{Attempt, RecoveryInfo};
+use crate::{RecoveryInfo, retry::Attempt};
 
 /// Arguments for the [`clone_input_with`][super::RetryLayer::clone_input_with] callback function.
 ///

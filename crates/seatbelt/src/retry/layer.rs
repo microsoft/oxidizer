@@ -12,7 +12,7 @@ use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, Re
 use crate::shared::MaxAttempts;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
-use crate::{Backoff, NotSet, PipelineContext, Recovery, RecoveryInfo, Set};
+use crate::{NotSet, PipelineContext, Recovery, RecoveryInfo, Set, retry::Backoff};
 
 /// Builder for configuring retry resilience middleware.
 ///
@@ -302,8 +302,8 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     /// # Example
     ///
     /// ```rust
-    /// # use seatbelt::retry::Retry;
-    /// # use seatbelt::{Attempt, RecoveryInfo, PipelineContext};
+    /// # use seatbelt::retry::{Retry, Attempt};
+    /// # use seatbelt::{RecoveryInfo, PipelineContext};
     /// # use tick::Clock;
     /// # fn example() {
     /// # let context = PipelineContext::<String, Result<String, String>>::new(Clock::new_frozen());
@@ -516,7 +516,7 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::Attempt;
+    use crate::retry::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]

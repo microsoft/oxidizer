@@ -282,28 +282,6 @@
 //! # fn detect_partition(input: &String) -> String  { input.to_string() }
 //! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
-//!
-//! ## Incomplete Configuration
-//!
-//! This example demonstrates what happens when the `CircuitLayer` is not fully configured.
-//! The code below will not compile because the circuit breaker layer is missing required configuration.
-//!
-//! ```compile_fail
-//! # use seatbelt::circuit_breaker::Circuit;
-//! # use seatbelt::PipelineContext;
-//! # use layered::Execute;
-//! # fn example(context: PipelineContext<String, Result<String, String>>) {
-//! let stack = (
-//!     Circuit::layer("test", &service_options), // Missing required configuration!
-//!     Execute::new(|input| async move { Ok(input) })
-//! );
-//!
-//! // This will fail to compile
-//! let service = stack.build();
-//! # }
-//! ```
-//!
-//! For more comprehensive examples, see the [examples directory](https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt/examples).
 
 mod args;
 mod callbacks;

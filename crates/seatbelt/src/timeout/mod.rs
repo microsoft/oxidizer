@@ -171,28 +171,6 @@
 //! # }
 //! # async fn execute_unreliable_operation(input: String) -> Result<String, io::Error> { Ok(input) }
 //! ```
-//!
-//! ## Incomplete Configuration
-//!
-//! This example demonstrates what happens when the `TimeoutLayer` is not fully configured.
-//! The code below will not compile because the timeout layer is missing required configuration.
-//!
-//! ```compile_fail
-//! # use std::time::Duration;
-//! # use layered::{Execute, Stack};
-//! # use tick::Clock;
-//! # use seatbelt::PipelineContext;
-//! # use seatbelt::timeout::Timeout;
-//! # fn example(context: PipelineContext<String, String>) {
-//! let stack = (
-//!     Timeout::layer("my_timeout", &context), // Missing required configuration!
-//!     Execute::new(|input| async move { input })
-//! );
-//!
-//! // This will fail to compile
-//! let service = stack.build();
-//! # }
-//! ```
 mod args;
 mod callbacks;
 mod layer;

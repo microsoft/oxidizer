@@ -123,7 +123,7 @@
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 pub(crate) mod shared;
-pub use crate::shared::{Attempt, Backoff, NotSet, PipelineContext, Set};
+pub use crate::shared::{NotSet, PipelineContext, Set};
 
 #[cfg(any(feature = "timeout", test))]
 pub mod timeout;

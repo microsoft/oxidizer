@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::Backoff;
+use crate::retry::Backoff;
 
 /// Default backoff strategy: exponential backoff.
 ///
