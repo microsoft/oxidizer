@@ -79,7 +79,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let service = (layer.clone(), Execute::new(|v| async move { Ok::<_, ()>(v) })).build();
+    let service = (layer.clone(), Execute::new(|v| async move { Ok::<_, ()>(v) })).into_service();
     group.bench_function("middleware_oxidizer", |b| {
         b.iter(|| {
             block_on(async {
@@ -100,7 +100,7 @@ fn entry(c: &mut Criterion) {
         });
     });
 
-    let service = (tower_layer(layer), Execute::new(|v| async move { Ok::<_, ()>(v) })).build();
+    let service = (tower_layer(layer), Execute::new(|v| async move { Ok::<_, ()>(v) })).into_service();
     group.bench_function("middleware_oxidizer_with_adapter", |b| {
         b.iter(|| {
             block_on(async {
