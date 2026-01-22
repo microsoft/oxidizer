@@ -87,7 +87,7 @@
 //! # Overview
 //!
 //! This crate uses the [`layered`] crate for composing middleware. The middleware layers
-//! can be stacked together using tuples and built into a service using the [`Stack`] trait.
+//! can be stacked together using tuples and built into a service using the [`Stack`][layered::Stack] trait.
 //!
 //! Resilience middleware also requires [`Clock`][tick::Clock] from the [`tick`] crate for timing
 //! operations like delays, timeouts, and backoff calculations. The clock is passed through
