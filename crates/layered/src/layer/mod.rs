@@ -42,7 +42,7 @@ pub use stack::Stack;
 /// The documentation below is from the original [`tower_layer`](https://docs.rs/tower-layer)
 /// crate. Note that it references [`tower::Service`](https://docs.rs/tower/latest/tower/trait.Service.html),
 /// whereas this crate uses its own [`Service`](crate::Service) trait. The concepts
-/// remain the same, but the service trait implementation differs.
+/// remain the same, but the service trait definition differs.
 ///
 /// ---
 pub use tower_layer::Layer;
