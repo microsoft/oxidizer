@@ -23,8 +23,13 @@ use layered::Layer;
 /// - [`recovery`][RetryLayer::recovery]: Required to determine if an output should trigger a retry
 ///
 /// For comprehensive examples, see the [retry module][crate::retry] documentation.
+///
+/// # Type State
+///
+/// - `S1`: Tracks whether [`clone_input`][RetryLayer::clone_input] has been set
+/// - `S2`: Tracks whether [`recovery`][RetryLayer::recovery] has been set
 #[derive(Debug)]
-pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
+pub struct RetryLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     max_attempts: MaxAttempts,
     backoff: BackoffOptions,
@@ -35,7 +40,7 @@ pub struct RetryLayer<In, Out, CloneInputState = Set, RecoveryState = Set> {
     telemetry: TelemetryHelper,
     restore_input: Option<RestoreInput<In, Out>>,
     handle_unavailable: bool,
-    _state: PhantomData<fn(In, CloneInputState, RecoveryState) -> Out>,
+    _state: PhantomData<fn(In, S1, S2) -> Out>,
 }
 
 impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
@@ -57,7 +62,7 @@ impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
     }
 }
 
-impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputState, RecoveryState> {
+impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// Sets the maximum number of retry attempts.
     ///
     /// This specifies the maximum number of retry attempts in addition to the original call.
@@ -153,9 +158,9 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     pub fn clone_input_with(
         mut self,
         clone_fn: impl Fn(&mut In, CloneArgs) -> Option<In> + Send + Sync + 'static,
-    ) -> RetryLayer<In, Out, Set, RecoveryState> {
+    ) -> RetryLayer<In, Out, Set, S2> {
         self.clone_input = Some(CloneInput::new(clone_fn));
-        self.into_state::<Set, RecoveryState>()
+        self.into_state::<Set, S2>()
     }
 
     /// Automatically sets the input cloning function for types that implement [`Clone`].
@@ -171,7 +176,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     ///
     /// This method is only available when the input type `In` implements [`Clone`].
     #[must_use]
-    pub fn clone_input(self) -> RetryLayer<In, Out, Set, RecoveryState>
+    pub fn clone_input(self) -> RetryLayer<In, Out, Set, S2>
     where
         In: Clone,
     {
@@ -195,9 +200,9 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     pub fn recovery_with(
         mut self,
         recover_fn: impl Fn(&Out, RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
-    ) -> RetryLayer<In, Out, CloneInputState, Set> {
+    ) -> RetryLayer<In, Out, S1, Set> {
         self.should_recover = Some(ShouldRecover::new(recover_fn));
-        self.into_state::<CloneInputState, Set>()
+        self.into_state::<S1, Set>()
     }
 
     /// Automatically sets the recovery classification function for types that implement [`Recovery`].
@@ -214,7 +219,7 @@ impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputStat
     ///
     /// This method is only available when the output type `Out` implements [`Recovery`].
     #[must_use]
-    pub fn recovery(self) -> RetryLayer<In, Out, CloneInputState, Set>
+    pub fn recovery(self) -> RetryLayer<In, Out, S1, Set>
     where
         Out: Recovery,
     {
@@ -423,7 +428,7 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
     }
 }
 
-impl<In, Res, Error, CloneInputState, RecoveryState> RetryLayer<In, Result<Res, Error>, CloneInputState, RecoveryState> {
+impl<In, Res, Error, S1, S2> RetryLayer<In, Result<Res, Error>, S1, S2> {
     /// Sets a specialized input restoration callback that operates only on error cases.
     ///
     /// This is a convenience method for working with `Result<Res, Error>` outputs, where you
@@ -487,8 +492,8 @@ impl<In, Res, Error, CloneInputState, RecoveryState> RetryLayer<In, Result<Res, 
     }
 }
 
-impl<In, Out, CloneInputState, RecoveryState> RetryLayer<In, Out, CloneInputState, RecoveryState> {
-    fn into_state<C, S>(self) -> RetryLayer<In, Out, C, S> {
+impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
+    fn into_state<T1, T2>(self) -> RetryLayer<In, Out, T1, T2> {
         RetryLayer {
             context: self.context,
             max_attempts: self.max_attempts,

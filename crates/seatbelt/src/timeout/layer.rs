@@ -22,8 +22,13 @@ use layered::Layer;
 /// - [`timeout`][TimeoutLayer::timeout]: Required to set the timeout duration for operations
 ///
 /// For comprehensive examples, see the [timeout module][crate::timeout] documentation.
+///
+/// # Type State
+///
+/// - `S1`: Tracks whether [`timeout`][TimeoutLayer::timeout] has been set
+/// - `S2`: Tracks whether [`timeout_output`][TimeoutLayer::timeout_output] has been set
 #[derive(Debug)]
-pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
+pub struct TimeoutLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     timeout: Option<Duration>,
     timeout_output: Option<TimeoutOutputCallback<Out>>,
@@ -31,7 +36,7 @@ pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
     timeout_override: Option<TimeoutOverride<In>>,
-    _state: PhantomData<fn(In, Timeout, TimeoutOutput) -> Out>,
+    _state: PhantomData<fn(In, S1, S2) -> Out>,
 }
 
 impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
@@ -50,7 +55,7 @@ impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
     }
 }
 
-impl<In, Out, E, Timeout, TimeoutOutput> TimeoutLayer<In, Result<Out, E>, Timeout, TimeoutOutput> {
+impl<In, Out, E, S1, S2> TimeoutLayer<In, Result<Out, E>, S1, S2> {
     /// Configures the error value to return when a timeout occurs for Result types.
     ///
     /// This is a convenience method for Result types that creates an error value
@@ -64,14 +69,14 @@ impl<In, Out, E, Timeout, TimeoutOutput> TimeoutLayer<In, Result<Out, E>, Timeou
     pub fn timeout_error(
         self,
         timeout_error: impl Fn(TimeoutOutputArgs) -> E + Send + Sync + 'static,
-    ) -> TimeoutLayer<In, Result<Out, E>, Timeout, Set> {
-        self.into_state::<Set, TimeoutOutput>()
+    ) -> TimeoutLayer<In, Result<Out, E>, S1, Set> {
+        self.into_state::<Set, S2>()
             .timeout_output(move |args| Err(timeout_error(args)))
             .into_state()
     }
 }
 
-impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutput> {
+impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// Sets the timeout duration.
     ///
     /// This specifies how long to wait before timing out an operation.
@@ -81,9 +86,9 @@ impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutp
     ///
     /// * `timeout` - The maximum duration to wait for the operation to complete
     #[must_use]
-    pub fn timeout(mut self, timeout: Duration) -> TimeoutLayer<In, Out, Set, TimeoutOutput> {
+    pub fn timeout(mut self, timeout: Duration) -> TimeoutLayer<In, Out, Set, S2> {
         self.timeout = Some(timeout);
-        self.into_state::<Set, TimeoutOutput>()
+        self.into_state::<Set, S2>()
     }
 
     /// Sets the timeout result factory function.
@@ -97,12 +102,9 @@ impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutp
     /// * `output` - Function that takes [`TimeoutOutputArgs`] containing timeout
     ///   context and returns the output value to use when a timeout occurs
     #[must_use]
-    pub fn timeout_output(
-        mut self,
-        output: impl Fn(TimeoutOutputArgs) -> Out + Send + Sync + 'static,
-    ) -> TimeoutLayer<In, Out, Timeout, Set> {
+    pub fn timeout_output(mut self, output: impl Fn(TimeoutOutputArgs) -> Out + Send + Sync + 'static) -> TimeoutLayer<In, Out, S1, Set> {
         self.timeout_output = Some(TimeoutOutputCallback::new(output));
-        self.into_state::<Timeout, Set>()
+        self.into_state::<S1, Set>()
     }
 
     /// Configures a callback invoked when a timeout occurs.
@@ -211,7 +213,7 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
     }
 }
 
-impl<In, Out, Timeout, TimeoutOutput> TimeoutLayer<In, Out, Timeout, TimeoutOutput> {
+impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     fn into_state<T1, T2>(self) -> TimeoutLayer<In, Out, T1, T2> {
         TimeoutLayer {
             timeout: self.timeout,

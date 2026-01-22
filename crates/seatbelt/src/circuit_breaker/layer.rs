@@ -25,8 +25,13 @@ use layered::Layer;
 /// - [`rejected_input`][CircuitLayer::rejected_input]: Required to specify the output when the circuit is open and inputs are rejected
 ///
 /// For comprehensive documentation and examples, see the [`circuit_breaker` module][crate::circuit_breaker] documentation.
+///
+/// # Type State
+///
+/// - `S1`: Tracks whether [`recovery`][CircuitLayer::recovery] has been set
+/// - `S2`: Tracks whether [`rejected_input`][CircuitLayer::rejected_input] has been set
 #[derive(Debug)]
-pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> {
+pub struct CircuitLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     recovery: Option<ShouldRecover<Out>>,
     rejected_input: Option<RejectedInput<In, Out>>,
@@ -41,7 +46,7 @@ pub struct CircuitLayer<In, Out, RecoveryState = Set, RejectedInputState = Set> 
     sampling_duration: Duration,
     break_duration: Duration,
     half_open_mode: HalfOpenMode,
-    _state: PhantomData<fn(In, RecoveryState, RejectedInputState) -> Out>,
+    _state: PhantomData<fn(In, S1, S2) -> Out>,
 }
 
 impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
@@ -67,7 +72,7 @@ impl<In, Out> CircuitLayer<In, Out, NotSet, NotSet> {
     }
 }
 
-impl<In, Out, E, RecoveryState, RejectedInputState> CircuitLayer<In, Result<Out, E>, RecoveryState, RejectedInputState> {
+impl<In, Out, E, S1, S2> CircuitLayer<In, Result<Out, E>, S1, S2> {
     /// Sets the error to return when the circuit breaker is open for Result-returning services.
     ///
     /// When the circuit is open, requests are immediately rejected and this function
@@ -85,14 +90,14 @@ impl<In, Out, E, RecoveryState, RejectedInputState> CircuitLayer<In, Result<Out,
     pub fn rejected_input_error(
         self,
         error_producer: impl Fn(In, RejectedInputArgs) -> E + Send + Sync + 'static,
-    ) -> CircuitLayer<In, Result<Out, E>, RecoveryState, Set> {
-        self.into_state::<RecoveryState, Set>()
+    ) -> CircuitLayer<In, Result<Out, E>, S1, Set> {
+        self.into_state::<Set, S2>()
             .rejected_input(move |input, args| Err(error_producer(input, args)))
             .into_state()
     }
 }
 
-impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryState, RejectedInputState> {
+impl<In, Out, S1, S2> CircuitLayer<In, Out, S1, S2> {
     /// Sets the recovery classification function.
     ///
     /// This function determines whether a specific output represents a failure
@@ -110,9 +115,9 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
     pub fn recovery_with(
         mut self,
         recover_fn: impl Fn(&Out, crate::circuit_breaker::RecoveryArgs) -> RecoveryInfo + Send + Sync + 'static,
-    ) -> CircuitLayer<In, Out, Set, RejectedInputState> {
+    ) -> CircuitLayer<In, Out, Set, S2> {
         self.recovery = Some(ShouldRecover::new(recover_fn));
-        self.into_state::<Set, RejectedInputState>()
+        self.into_state::<Set, S2>()
     }
 
     /// Automatically sets the recovery classification function for types that implement [`Recovery`].
@@ -129,7 +134,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
     ///
     /// This method is only available when the output type `Out` implements [`Recovery`].
     #[must_use]
-    pub fn recovery(self) -> CircuitLayer<In, Out, Set, RejectedInputState>
+    pub fn recovery(self) -> CircuitLayer<In, Out, Set, S2>
     where
         Out: Recovery,
     {
@@ -151,9 +156,9 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
     pub fn rejected_input(
         mut self,
         rejected_fn: impl Fn(In, RejectedInputArgs) -> Out + Send + Sync + 'static,
-    ) -> CircuitLayer<In, Out, RecoveryState, Set> {
+    ) -> CircuitLayer<In, Out, S1, Set> {
         self.rejected_input = Some(RejectedInput::new(rejected_fn));
-        self.into_state::<RecoveryState, Set>()
+        self.into_state::<S1, Set>()
     }
 
     /// Sets the failure threshold for the circuit breaker.
@@ -408,7 +413,7 @@ impl<In, Out, S> Layer<S> for CircuitLayer<In, Out, Set, Set> {
     }
 }
 
-impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryState, RejectedInputState> {
+impl<In, Out, S1, S2> CircuitLayer<In, Out, S1, S2> {
     fn probes_options(&self) -> ProbesOptions {
         self.half_open_mode
             // we will use break duration as the sampling duration for probes
@@ -427,7 +432,7 @@ impl<In, Out, RecoveryState, RejectedInputState> CircuitLayer<In, Out, RecoveryS
         )
     }
 
-    fn into_state<R, O>(self) -> CircuitLayer<In, Out, R, O> {
+    fn into_state<T1, T2>(self) -> CircuitLayer<In, Out, T1, T2> {
         CircuitLayer {
             context: self.context,
             recovery: self.recovery,
