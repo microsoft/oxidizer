@@ -3,7 +3,11 @@
 
 use std::fmt::Debug;
 use std::ops::ControlFlow;
+#[cfg(any(feature = "tower-service", test))]
+use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
+use std::task::{Context, Poll};
 
 use crate::Service;
 
@@ -136,6 +140,28 @@ where
     }
 }
 
+/// Future returned by [`Intercept`] when used as a tower [`Service`](tower_service::Service).
+#[cfg(any(feature = "tower-service", test))]
+pub struct InterceptFuture<Out> {
+    inner: Pin<Box<dyn Future<Output = Out> + Send>>,
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Debug for InterceptFuture<Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InterceptFuture").finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Future for InterceptFuture<Out> {
+    type Output = Out;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.as_mut().poll(cx)
+    }
+}
+
 #[cfg(any(feature = "tower-service", test))]
 impl<Req, Res, Err, S> tower_service::Service<Req> for Intercept<Req, Result<Res, Err>, S>
 where
@@ -147,26 +173,32 @@ where
 {
     type Response = Res;
     type Error = Err;
-    type Future = std::pin::Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = InterceptFuture<Result<Res, Err>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
     fn call(&mut self, req: Req) -> Self::Future {
         let result = self.inner.before_execute(req);
         let req = match result {
-            ControlFlow::Break(result) => return Box::pin(async move { result }),
+            ControlFlow::Break(result) => {
+                return InterceptFuture {
+                    inner: Box::pin(async move { result }),
+                };
+            }
             ControlFlow::Continue(new_req) => new_req,
         };
 
         let inner = Arc::clone(&self.inner);
         let future = self.service.call(req);
 
-        Box::pin(async move {
-            let r = future.await;
-            inner.after_execute(r)
-        })
+        InterceptFuture {
+            inner: Box::pin(async move {
+                let r = future.await;
+                inner.after_execute(r)
+            }),
+        }
     }
 }
 
@@ -416,9 +448,7 @@ impl<In, Out> InterceptInner<In, Out> {
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;
-    use std::pin::Pin;
     use std::sync::atomic::{AtomicU16, Ordering};
-    use std::task::{Context, Poll};
 
     use futures::executor::block_on;
     use tower_service::Service as TowerService;
@@ -618,6 +648,15 @@ mod tests {
             .modify_input(|s| s)
             .modify_output(|s| s);
         assert!(format!("{layer:?}").contains("InterceptLayer"));
+    }
+
+    #[test]
+    fn debug_intercept_future() {
+        let future: InterceptFuture<String> = InterceptFuture {
+            inner: Box::pin(async { "test".to_string() }),
+        };
+        let debug_str = format!("{future:?}");
+        assert!(debug_str.contains("InterceptFuture"));
     }
 
     #[test]

@@ -1,0 +1,9 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/debug.rs
+expression: format_tokens(result)
+---
+impl ::core::fmt::Debug for TestEnum {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct(stringify!(TestEnum)).finish_non_exhaustive()
+    }
+}

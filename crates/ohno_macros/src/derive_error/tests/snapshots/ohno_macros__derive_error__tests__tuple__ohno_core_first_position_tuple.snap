@@ -1,0 +1,55 @@
+---
+source: crates/ohno_macros/src/derive_error/tests/tuple.rs
+expression: format_tokens(result)
+---
+impl FirstPositionTupleError {
+    /// Creates a new error with custom fields and default message.
+    pub(crate) fn new(param_1: impl Into<String>, param_2: impl Into<u32>) -> Self {
+        Self(ohno::OhnoCore::default(), param_1.into(), param_2.into())
+    }
+    /// Creates a new error with custom fields and a specified error.
+    pub(crate) fn caused_by(
+        param_1: impl Into<String>,
+        param_2: impl Into<u32>,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self(ohno::OhnoCore::from(error), param_1.into(), param_2.into())
+    }
+}
+impl From<std::convert::Infallible> for FirstPositionTupleError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!("Infallible should never be converted to Error")
+    }
+}
+impl std::fmt::Display for FirstPositionTupleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.format_error(f, stringify!(FirstPositionTupleError), None)
+    }
+}
+impl std::error::Error for FirstPositionTupleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+impl ohno::Enrichable for FirstPositionTupleError {
+    fn add_enrichment(&mut self, entry: ohno::EnrichmentEntry) {
+        self.0.add_enrichment(entry);
+    }
+}
+impl ::core::fmt::Debug for FirstPositionTupleError {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_tuple(stringify!(FirstPositionTupleError))
+            .field(&self.0)
+            .field(&self.1)
+            .field(&self.2)
+            .finish()
+    }
+}
+impl ohno::ErrorExt for FirstPositionTupleError {
+    fn message(&self) -> String {
+        self.0.format_message(stringify!(FirstPositionTupleError), None)
+    }
+    fn backtrace(&self) -> &std::backtrace::Backtrace {
+        self.0.backtrace()
+    }
+}

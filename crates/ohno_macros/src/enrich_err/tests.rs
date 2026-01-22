@@ -1,8 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use quote::quote;
+
 use super::*;
-use crate::utils::assert_token_streams_equal;
+use crate::utils::assert_formatted_snapshot;
 
 #[test]
 fn empty_enrich_err() {
@@ -17,26 +19,7 @@ fn empty_enrich_err() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_function() -> Result<(), OhnoErrorType> {
-            (|| {
-                let x = 42;
-                let y = x * 2;
-                println!("Result: {}", y);
-                Ok(())
-            })().map_err(|mut e| {
-                let msg = "error in function test_function";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -51,25 +34,7 @@ fn empty_enrich_err_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_function() -> Result<(), OhnoErrorType> {
-            (async || {
-                let data = fetch_data().await?;
-                process_data(&data);
-                Ok(())
-            })().await.map_err(|mut e| {
-                let msg = "error in function test_function";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -84,25 +49,7 @@ fn function_with_regular_string() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_function() -> Result<(), OhnoErrorType> {
-            (|| {
-                let value = compute_value()?;
-                validate(value)?;
-                Ok(())
-            })().map_err(|mut e| {
-                let msg = "custom error message";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -115,21 +62,7 @@ fn function_with_regular_string_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_function() -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = "custom error message";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -146,27 +79,7 @@ fn function_with_inline_format() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_function(code: i32) -> Result<(), OhnoErrorType> {
-            (|| {
-                if code < 0 {
-                    return Err(invalid_code_error());
-                }
-                process_code(code)?;
-                Ok(())
-            })().map_err(|mut e| {
-                let msg = format!("error code: {code}");
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -179,21 +92,7 @@ fn function_with_inline_format_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_function(code: i32) -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = format!("error code: {code}");
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -206,21 +105,7 @@ fn function_with_complex_format_expression() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_function(path: &std::path::Path) -> Result<(), OhnoErrorType> {
-            (|| { Ok(()) })().map_err(|mut e| {
-                let msg = format!("failed to read a file {}", path.as_ref().display());
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -233,21 +118,7 @@ fn function_with_complex_format_expression_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_function(path: &std::path::Path) -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = format!("failed to read a file {}", path.as_ref().display());
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -262,25 +133,7 @@ fn method_with_self_ref() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_method(&self) -> Result<(), OhnoErrorType> {
-            (|| {
-                let state = self.get_state()?;
-                state.validate()?;
-                Ok(())
-            })().map_err(|mut e| {
-                let msg = "error in function test_method";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -293,21 +146,7 @@ fn method_with_self_ref_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_method(&self) -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = "error in function test_method";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -320,21 +159,7 @@ fn method_with_mut_self_ref() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_method(&mut self) -> Result<(), OhnoErrorType> {
-            (|| { Ok(()) })().map_err(|mut e| {
-                let msg = "error in function test_method";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -347,21 +172,7 @@ fn method_with_mut_self_ref_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_method(&mut self) -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = "error in function test_method";
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -374,21 +185,7 @@ fn method_with_self_ref_formatting_self() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_method(&self) -> Result<(), OhnoErrorType> {
-            (|| { Ok(()) })().map_err(|mut e| {
-                let msg = format!("operation failed, id: {}", self.id);
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -401,21 +198,7 @@ fn method_with_self_ref_formatting_self_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_method(&self) -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = format!("operation failed, id: {}", self.id);
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -428,21 +211,7 @@ fn method_with_mut_self_ref_formatting_self() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        fn test_method(&mut self) -> Result<(), OhnoErrorType> {
-            (|| { Ok(()) })().map_err(|mut e| {
-                let msg = format!("operation failed, id: {}", self.id);
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }
 
 #[test]
@@ -455,19 +224,5 @@ fn method_with_mut_self_ref_formatting_self_async() {
     };
 
     let result = impl_enrich_err_attribute(args, input).unwrap();
-
-    let expected: proc_macro2::TokenStream = syn::parse_quote! {
-        async fn test_method(&mut self) -> Result<(), OhnoErrorType> {
-            (async || { Ok(()) })().await.map_err(|mut e| {
-                let msg = format!("operation failed, id: {}", self.id);
-                ohno::Enrichable::add_enrichment(
-                    &mut e,
-                    ohno::EnrichmentEntry::new(msg, file!(), line!())
-                );
-                e
-            })
-        }
-    };
-
-    assert_token_streams_equal!(result, expected);
+    assert_formatted_snapshot!(result);
 }

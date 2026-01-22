@@ -10,7 +10,7 @@ use futures::StreamExt;
 use tick::{Clock, FutureExt, PeriodicTimer, fmt::Iso8601};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), ohno::AppError> {
     // Create a clock for the Tokio runtime.
     let clock = Clock::new_tokio();
 

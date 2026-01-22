@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.1] - 2026-01-20
+
+- ✨ Features
+
+  - Add `__private` module for selective trait reexports
+
 ## [0.6.0] - 2025-12-12
 
 - 🧩 Miscellaneous

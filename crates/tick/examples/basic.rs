@@ -9,7 +9,7 @@ use tick::Clock;
 use tick::fmt::{Iso8601, Rfc2822};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), ohno::AppError> {
     // Create a clock for the Tokio runtime.
     let clock = Clock::new_tokio();
 
