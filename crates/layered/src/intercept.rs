@@ -382,23 +382,11 @@ impl<In> Clone for OnInput<In> {
     }
 }
 
-impl<In> Debug for OnInput<In> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OnInput").finish()
-    }
-}
-
 struct OnOutput<Out>(Arc<dyn Fn(&Out) + Send + Sync>);
 
 impl<Out> Clone for OnOutput<Out> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
-    }
-}
-
-impl<Out> Debug for OnOutput<Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OnOutput").finish()
     }
 }
 
