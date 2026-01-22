@@ -16,8 +16,15 @@ pub use stack::Stack;
 /// # Tower Ecosystem Compatibility
 ///
 /// **Important:** This trait is re-exported from [`tower_layer`](https://docs.rs/tower-layer)
-/// to ensure seamless interoperability with the Tower ecosystem. Any middleware
-/// or layer built for Tower can be used directly with this crate, and vice versa.
+/// to ensure seamless interoperability with the Tower ecosystem.
+///
+/// Layers built in the Tower ecosystem or using this crate can work in both ecosystems,
+/// provided the resulting service implements either [`layered::Service`](crate::Service) or
+/// [`tower_service::Service`](https://docs.rs/tower-service/latest/tower_service/trait.Service.html).
+/// Middleware authors can also choose to implement both service traits for seamless
+/// interoperability across both ecosystems.
+///
+/// See also the `tower-service` feature in this crate for Tower interoperability utilities.
 ///
 /// # How It Works
 ///

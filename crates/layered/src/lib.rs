@@ -5,7 +5,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
     not(all(feature = "intercept", feature = "tower-service", feature = "dynamic-service")),
-    expect(rustdoc::broken_intra_doc_links)
+    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
 )]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/favicon.ico")]
