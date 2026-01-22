@@ -94,19 +94,13 @@ are `Send` when the closure, future, key, and value types are `Send`.
 
 ## Performance
 
-Benchmarks comparing `uniflight` against `singleflight-async`:
+Run benchmarks with `cargo bench -p uniflight`. The suite covers:
 
-|Benchmark|uniflight|singleflight-async|Winner|
-|---------|---------|------------------|------|
-|Single call|777 ns|691 ns|~equal|
-|10 concurrent tasks|58 µs|57 µs|~equal|
-|100 concurrent tasks|218 µs|219 µs|~equal|
-|10 keys × 10 tasks|186 µs|270 µs|uniflight 1.4x|
-|Sequential reuse|799 ns|759 ns|~equal|
+- **single_call**: Baseline latency with no contention
+- **high_contention_100**: 100 concurrent tasks on the same key
+- **distributed_10x10**: 10 keys with 10 tasks each
 
-uniflight’s `DashMap`-based architecture scales well under contention, making it
-well-suited for high-concurrency workloads. For single-call scenarios, both libraries
-perform similarly (sub-microsecond).
+Use `--save-baseline` and `--baseline` flags to track regressions over time.
 
 
 <hr/>

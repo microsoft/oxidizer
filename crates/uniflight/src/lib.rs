@@ -61,7 +61,8 @@
 //! - [`PerCore`]: Separate state per core, no deduplication (useful for already-partitioned work)
 //!
 //! ```
-//! use uniflight::{Merger, PerNuma};
+//! use uniflight::Merger;
+//! use thread_aware::PerNuma;
 //!
 //! # async fn example() {
 //! // NUMA-aware merger - each NUMA node gets its own deduplication scope
@@ -89,19 +90,13 @@
 //!
 //! # Performance
 //!
-//! Benchmarks comparing `uniflight` against `singleflight-async`:
+//! Run benchmarks with `cargo bench -p uniflight`. The suite covers:
 //!
-//! | Benchmark | uniflight | singleflight-async | Winner |
-//! |-----------|-----------|-------------------|--------|
-//! | Single call | 777 ns | 691 ns | ~equal |
-//! | 10 concurrent tasks | 58 µs | 57 µs | ~equal |
-//! | 100 concurrent tasks | 218 µs | 219 µs | ~equal |
-//! | 10 keys × 10 tasks | 186 µs | 270 µs | uniflight 1.4x |
-//! | Sequential reuse | 799 ns | 759 ns | ~equal |
+//! - **single_call**: Baseline latency with no contention
+//! - **high_contention_100**: 100 concurrent tasks on the same key
+//! - **distributed_10x10**: 10 keys with 10 tasks each
 //!
-//! uniflight's `DashMap`-based architecture scales well under contention, making it
-//! well-suited for high-concurrency workloads. For single-call scenarios, both libraries
-//! perform similarly (sub-microsecond).
+//! Use `--save-baseline` and `--baseline` flags to track regressions over time.
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/uniflight/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/uniflight/favicon.ico")]
@@ -119,16 +114,12 @@ use dashmap::{
     Entry::{Occupied, Vacant},
 };
 use thread_aware::{
-    Arc as TaArc, ThreadAware,
+    Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware,
     affinity::{MemoryAffinity, PinnedAffinity},
     storage::Strategy,
 };
 
-// Re-export strategies for convenience
-pub use thread_aware::{PerCore, PerNuma, PerProcess};
-
-/// Represents a class of work and creates a space in which units of work
-/// can be executed with duplicate suppression.
+/// Suppresses duplicate async operations identified by a key.
 ///
 /// The `S` type parameter controls the thread-aware scoping strategy:
 /// - [`PerProcess`]: Single global scope (default, maximum deduplication)
@@ -179,7 +170,8 @@ where
     /// # Examples
     ///
     /// ```
-    /// use uniflight::{Merger, PerNuma, PerCore};
+    /// use uniflight::Merger;
+    /// use thread_aware::{PerNuma, PerCore};
     ///
     /// // Default (PerProcess) - type can be inferred
     /// let global: Merger<String, String> = Merger::new();
