@@ -29,7 +29,7 @@ use crate::Service;
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = stack.build();
+/// let service = stack.into_service();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
@@ -52,14 +52,28 @@ use crate::Service;
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = stack.build();
+/// let service = stack.into_service();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
-#[derive(Clone, Debug)]
 pub struct Intercept<In, Out, S> {
     inner: Arc<InterceptInner<In, Out>>,
     service: S,
+}
+
+impl<In, Out, S: Clone> Clone for Intercept<In, Out, S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            service: self.service.clone(),
+        }
+    }
+}
+
+impl<In, Out, S: Debug> Debug for Intercept<In, Out, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Intercept").field("service", &self.service).finish_non_exhaustive()
+    }
 }
 
 /// Builder for creating `Intercept` middleware.
@@ -77,16 +91,27 @@ pub struct Intercept<In, Out, S> {
 ///     Execute::new(|input: String| async move { input }),
 /// );
 ///
-/// let service = stack.build();
+/// let service = stack.into_service();
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct InterceptLayer<In, Out> {
     on_input: Vec<OnInput<In>>,
     modify_input: Vec<ModifyInput<In, Out>>,
     modify_output: Vec<ModifyOutput<Out>>,
     on_output: Vec<OnOutput<Out>>,
+}
+
+impl<In, Out> Debug for InterceptLayer<In, Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InterceptLayer")
+            .field("on_input", &self.on_input.len())
+            .field("modify_input", &self.modify_input.len())
+            .field("modify_output", &self.modify_output.len())
+            .field("on_output", &self.on_output.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<In, Out> Intercept<In, Out, ()> {
@@ -102,7 +127,7 @@ impl<In, Out> Intercept<In, Out, ()> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -219,7 +244,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -248,7 +273,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -278,7 +303,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -317,7 +342,7 @@ impl<In, Out> InterceptLayer<In, Out> {
     ///     Execute::new(|input: String| async move { input }),
     /// );
     ///
-    /// let service = stack.build();
+    /// let service = stack.into_service();
     /// let response = service.execute("input".to_string()).await;
     /// # }
     /// ```
@@ -357,23 +382,11 @@ impl<In> Clone for OnInput<In> {
     }
 }
 
-impl<In> Debug for OnInput<In> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OnInput").finish()
-    }
-}
-
 struct OnOutput<Out>(Arc<dyn Fn(&Out) + Send + Sync>);
 
 impl<Out> Clone for OnOutput<Out> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
-    }
-}
-
-impl<Out> Debug for OnOutput<Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OnOutput").finish()
     }
 }
 
@@ -385,12 +398,6 @@ impl<In, Out> Clone for ModifyInput<In, Out> {
     }
 }
 
-impl<In, Out> Debug for ModifyInput<In, Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModifyInput").finish()
-    }
-}
-
 struct ModifyOutput<Out>(Arc<dyn Fn(Out) -> Out + Send + Sync>);
 
 impl<Out> Clone for ModifyOutput<Out> {
@@ -399,13 +406,6 @@ impl<Out> Clone for ModifyOutput<Out> {
     }
 }
 
-impl<Out> Debug for ModifyOutput<Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModifyOutput").finish()
-    }
-}
-
-#[derive(Debug)]
 struct InterceptInner<In, Out> {
     modify_input: Arc<[ModifyInput<In, Out>]>,
     on_input: Arc<[OnInput<In>]>,
@@ -484,7 +484,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let response = block_on(service.execute("test".to_string()));
         assert_eq!(called_clone.load(Ordering::Relaxed), 1);
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
@@ -513,7 +513,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let response = block_on(service.execute("test".to_string()));
         assert_eq!(called_clone.load(Ordering::Relaxed), 1);
         assert_eq!(called2_clone.load(Ordering::Relaxed), 1);
@@ -542,7 +542,7 @@ mod tests {
             Execute::new(|input: String| async move { Ok::<_, String>(input) }),
         );
 
-        let mut service = stack.build();
+        let mut service = stack.into_service();
         let future = async move {
             poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
             let response = service.call("test".to_string()).await.unwrap();
@@ -641,13 +641,27 @@ mod tests {
     }
 
     #[test]
-    fn debug_impls() {
-        let layer = Intercept::<String, String, ()>::layer()
-            .on_input(|_| {})
-            .on_output(|_| {})
-            .modify_input(|s| s)
-            .modify_output(|s| s);
-        assert!(format!("{layer:?}").contains("InterceptLayer"));
+    fn debug_intercept() {
+        let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer().layer("inner"));
+
+        assert_eq!(debug_str, "Intercept { service: \"inner\", .. }");
+    }
+
+    #[test]
+    fn debug_intercept_layer() {
+        let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer());
+
+        assert_eq!(
+            debug_str,
+            "InterceptLayer { on_input: 0, modify_input: 0, modify_output: 0, on_output: 0, .. }"
+        );
+    }
+
+    #[test]
+    fn clone_intercept() {
+        let cloned = Intercept::<String, String, ()>::layer().layer("inner").clone();
+
+        assert_eq!(cloned.service, "inner");
     }
 
     #[test]
@@ -665,7 +679,7 @@ mod tests {
             Intercept::layer().input_control_flow(|_: String| ControlFlow::Break("rejected".into())),
             Execute::new(|_: String| async { "should not run".to_string() }),
         );
-        let svc = stack.build();
+        let svc = stack.into_service();
         assert_eq!(block_on(svc.execute("test".into())), "rejected");
     }
 
@@ -675,7 +689,7 @@ mod tests {
             Intercept::layer().input_control_flow(|_: String| ControlFlow::Break(Ok("rejected".into()))),
             Execute::new(|_: String| async { Ok::<_, ()>("should not run".into()) }),
         );
-        let mut svc = stack.build();
+        let mut svc = stack.into_service();
         let res = block_on(async {
             poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
             svc.call("test".into()).await
