@@ -56,10 +56,24 @@ use crate::Service;
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
-#[derive(Clone, Debug)]
 pub struct Intercept<In, Out, S> {
     inner: Arc<InterceptInner<In, Out>>,
     service: S,
+}
+
+impl<In, Out, S: Clone> Clone for Intercept<In, Out, S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner.clone()),
+            service: self.service.clone(),
+        }
+    }
+}
+
+impl<In, Out, S: Debug> Debug for Intercept<In, Out, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Intercept").field("service", &self.service).finish_non_exhaustive()
+    }
 }
 
 /// Builder for creating `Intercept` middleware.
@@ -648,6 +662,13 @@ mod tests {
             .modify_input(|s| s)
             .modify_output(|s| s);
         assert!(format!("{layer:?}").contains("InterceptLayer"));
+    }
+
+    #[test]
+    fn debug_intercept() {
+        let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer().layer("inner"));
+
+        assert_eq!(debug_str, "Intercept { service: \"inner\", .. }")
     }
 
     #[test]
