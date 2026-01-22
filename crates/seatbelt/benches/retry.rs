@@ -9,7 +9,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
 use seatbelt::retry::Retry;
-use seatbelt::{PipelineContext, RecoveryInfo};
+use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 
 #[global_allocator]
@@ -30,7 +30,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // With retry
-    let context = PipelineContext::new(Clock::new_frozen());
+    let context = ResilienceContext::new(Clock::new_frozen());
 
     let service = (
         Retry::layer("bench", &context)
@@ -49,7 +49,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // With retry and recovery
-    let context = PipelineContext::new(Clock::new_frozen());
+    let context = ResilienceContext::new(Clock::new_frozen());
 
     let service = (
         Retry::layer("bench", &context)

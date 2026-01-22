@@ -34,10 +34,10 @@
 //! # use layered::{Execute, Service, Stack};
 //! use seatbelt::retry::Retry;
 //! use seatbelt::timeout::Timeout;
-//! use seatbelt::{RecoveryInfo, PipelineContext};
+//! use seatbelt::{RecoveryInfo, ResilienceContext};
 //!
 //! # async fn main(clock: Clock) {
-//! let context = PipelineContext::new(&clock);
+//! let context = ResilienceContext::new(&clock);
 //! let service = (
 //!     // Retry middleware: Automatically retries failed operations
 //!     Retry::layer("retry", &context)
@@ -91,11 +91,11 @@
 //!
 //! Resilience middleware also requires [`Clock`][tick::Clock] from the [`tick`] crate for timing
 //! operations like delays, timeouts, and backoff calculations. The clock is passed through
-//! [`PipelineContext`] when creating middleware layers.
+//! [`ResilienceContext`] when creating middleware layers.
 //!
 //! ## Core Types
 //!
-//! - [`PipelineContext`] - Holds shared state for resilience middleware, including the clock.
+//! - [`ResilienceContext`] - Holds shared state for resilience middleware, including the clock.
 //! - [`RecoveryInfo`] - Classifies errors as recoverable (transient) or non-recoverable (permanent).
 //! - [`Recovery`] - A trait for types that can determine their recoverability.
 //!
@@ -123,7 +123,7 @@
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 pub(crate) mod shared;
-pub use crate::shared::{NotSet, PipelineContext, Set};
+pub use crate::shared::{NotSet, ResilienceContext, Set};
 
 #[cfg(any(feature = "timeout", test))]
 pub mod timeout;
@@ -133,9 +133,6 @@ pub mod retry;
 
 #[cfg(any(feature = "circuit-breaker", test))]
 pub mod circuit_breaker;
-
-#[doc(inline)]
-pub use layered::{Layer, Service, Stack};
 
 #[cfg(any(feature = "retry", feature = "circuit-breaker", test))]
 mod rnd;

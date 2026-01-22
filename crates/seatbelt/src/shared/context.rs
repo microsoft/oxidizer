@@ -9,11 +9,11 @@ pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
 
 /// Shared configuration and dependencies for a pipeline of resilience middleware.
 ///
-/// Pass a single `PipelineContext` to all middleware in a pipeline (retry, timeout,
+/// Pass a single `ResilienceContext` to all middleware in a pipeline (retry, timeout,
 /// circuit breaker, etc.) to share a clock and telemetry configuration.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct PipelineContext<In, Out> {
+pub struct ResilienceContext<In, Out> {
     clock: Clock,
     name: Cow<'static, str>,
     #[cfg(any(feature = "metrics", test))]
@@ -23,7 +23,7 @@ pub struct PipelineContext<In, Out> {
     _out: std::marker::PhantomData<fn() -> Out>,
 }
 
-impl<In, Out> PipelineContext<In, Out> {
+impl<In, Out> ResilienceContext<In, Out> {
     /// Create a context with a clock. Initializes with `name = "default"`.
     pub fn new(clock: impl AsRef<Clock>) -> Self {
         Self {
@@ -90,7 +90,7 @@ impl<In, Out> PipelineContext<In, Out> {
     }
 }
 
-impl<In, Out> Clone for PipelineContext<In, Out> {
+impl<In, Out> Clone for ResilienceContext<In, Out> {
     fn clone(&self) -> Self {
         Self {
             clock: self.clock.clone(),
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn test_new_with_clock_sets_default_pipeline_name() {
         let clock = tick::Clock::new_frozen();
-        let ctx = PipelineContext::<(), ()>::new(clock);
+        let ctx = ResilienceContext::<(), ()>::new(clock);
         let telemetry = ctx.create_telemetry("test".into());
         assert_eq!(telemetry.pipeline_name.as_ref(), DEFAULT_PIPELINE_NAME);
         // Ensure clock reference behaves (timestamp monotonic relative behaviour not required, just accessible)
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn test_name_with_custom_value_sets_name_and_is_owned() {
         let clock = tick::Clock::new_frozen();
-        let ctx = PipelineContext::<(), ()>::new(clock).name(String::from("custom_pipeline"));
+        let ctx = ResilienceContext::<(), ()>::new(clock).name(String::from("custom_pipeline"));
         let telemetry = ctx.create_telemetry("test".into());
         assert_eq!(telemetry.pipeline_name.as_ref(), "custom_pipeline");
         assert!(matches!(telemetry.pipeline_name, Cow::Owned(_)));
@@ -135,7 +135,7 @@ mod tests {
         let clock = tick::Clock::new_frozen();
         let (provider, exporter) = test_meter_provider();
 
-        let ctx = PipelineContext::<(), ()>::new(clock).enable_metrics(&provider);
+        let ctx = ResilienceContext::<(), ()>::new(clock).enable_metrics(&provider);
         let telemetry1 = ctx.create_telemetry("test1".into());
         let telemetry2 = ctx.create_telemetry("test2".into());
         let c1 = telemetry1.event_reporter.unwrap();

@@ -47,7 +47,7 @@ impl<In, Out> Circuit<In, Out, ()> {
     /// before it can be used to build a circuit breaker service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
-        context: &crate::PipelineContext<In, Out>,
+        context: &crate::ResilienceContext<In, Out>,
     ) -> CircuitLayer<In, Out, NotSet, NotSet> {
         CircuitLayer::new(name.into(), context)
     }
@@ -170,14 +170,14 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::Layer;
     use crate::circuit_breaker::constants::DEFAULT_BREAK_DURATION;
     use crate::circuit_breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
-    use crate::{PipelineContext, RecoveryInfo, Set};
+    use crate::{RecoveryInfo, ResilienceContext, Set};
+    use layered::Layer;
 
     #[test]
     fn layer_ensure_defaults() {
-        let context = PipelineContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
+        let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
         let layer: CircuitLayer<String, String, NotSet, NotSet> = Circuit::layer("test_breaker", &context);
         let layer = layer
             .recovery_with(|_, _| RecoveryInfo::never())
@@ -463,7 +463,7 @@ mod tests {
         let _guard = log_capture.subscriber().set_default();
 
         let clock_control = ClockControl::new();
-        let context = PipelineContext::<String, String>::new(clock_control.to_clock())
+        let context = ResilienceContext::<String, String>::new(clock_control.to_clock())
             .name("log_test_pipeline")
             .enable_logs();
 
@@ -506,7 +506,7 @@ mod tests {
     }
 
     fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitLayer<String, String, Set, Set> {
-        let context = PipelineContext::<String, String>::new(clock.clone()).name("test_pipeline");
+        let context = ResilienceContext::<String, String>::new(clock.clone()).name("test_pipeline");
         Circuit::layer("test_breaker", &context)
             .recovery_with(|output, _| {
                 if output.contains("error") {

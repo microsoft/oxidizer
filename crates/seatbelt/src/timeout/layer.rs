@@ -5,13 +5,13 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use crate::Layer;
 use crate::timeout::{
     OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
 };
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
-use crate::{NotSet, PipelineContext, Set};
+use crate::{NotSet, ResilienceContext, Set};
+use layered::Layer;
 
 /// Builder for configuring timeout resilience middleware.
 ///
@@ -24,7 +24,7 @@ use crate::{NotSet, PipelineContext, Set};
 /// For comprehensive examples, see the [timeout module][crate::timeout] documentation.
 #[derive(Debug)]
 pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
-    context: PipelineContext<In, Out>,
+    context: ResilienceContext<In, Out>,
     timeout: Option<Duration>,
     timeout_output: Option<TimeoutOutputCallback<Out>>,
     on_timeout: Option<OnTimeout<Out>>,
@@ -36,7 +36,7 @@ pub struct TimeoutLayer<In, Out, Timeout = Set, TimeoutOutput = Set> {
 
 impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &PipelineContext<In, Out>) -> Self {
+    pub(crate) fn new(name: Cow<'static, str>, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             timeout: None,
             timeout_output: None,
@@ -391,12 +391,12 @@ mod tests {
         static_assertions::assert_impl_all!(TimeoutLayer<String, String, Set, Set>: Debug);
     }
 
-    fn create_test_context() -> PipelineContext<String, String> {
-        PipelineContext::new(Clock::new_frozen()).name("test_pipeline")
+    fn create_test_context() -> ResilienceContext<String, String> {
+        ResilienceContext::new(Clock::new_frozen()).name("test_pipeline")
     }
 
-    fn create_test_context_result() -> PipelineContext<String, Result<String, String>> {
-        PipelineContext::new(Clock::new_frozen()).name("test_pipeline")
+    fn create_test_context_result() -> ResilienceContext<String, Result<String, String>> {
+        ResilienceContext::new(Clock::new_frozen()).name("test_pipeline")
     }
 
     fn create_ready_layer() -> TimeoutLayer<String, String, Set, Set> {

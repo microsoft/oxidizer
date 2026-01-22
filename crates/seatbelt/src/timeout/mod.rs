@@ -18,9 +18,9 @@
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
 //! # use seatbelt::timeout::Timeout;
-//! # use seatbelt::PipelineContext;
+//! # use seatbelt::ResilienceContext;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
-//! let context = PipelineContext::new(&clock).name("my_service");
+//! let context = ResilienceContext::new(&clock).name("my_service");
 //!
 //! let stack = (
 //!     Timeout::layer("timeout", &context)
@@ -80,7 +80,7 @@
 //! - **Metric**: `resilience.event` (counter)
 //! - **When**: Emitted when a timeout occurs
 //! - **Attributes**:
-//!   - `resilience.pipeline.name`: Pipeline identifier from [`PipelineContext::name`][crate::PipelineContext::name]
+//!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
 //!   - `resilience.event.name`: Always `timeout`
 //!
@@ -94,12 +94,12 @@
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::PipelineContext;
+//! # use seatbelt::ResilienceContext;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
 //! // must be provided. See its documentation for details.
-//! let context = PipelineContext::new(&clock);
+//! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context)
@@ -134,11 +134,11 @@
 //! # use std::io;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::PipelineContext;
+//! # use seatbelt::ResilienceContext;
 //! # use seatbelt::timeout::Timeout;
 //! # async fn example(clock: Clock) -> Result<(), io::Error> {
 //! // Define common options for resilience middleware.
-//! let context = PipelineContext::new(&clock);
+//! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
 //!     Timeout::layer("my_timeout", &context)

@@ -52,7 +52,7 @@ impl<In, Out> Retry<In, Out, ()> {
     /// before it can be used to build a retry service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
-        context: &crate::PipelineContext<In, Out>,
+        context: &crate::ResilienceContext<In, Out>,
     ) -> crate::retry::RetryLayer<In, Out, NotSet, NotSet> {
         crate::retry::RetryLayer::new(name.into(), context)
     }
@@ -265,15 +265,15 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::Layer;
     use crate::retry::RetryLayer;
     use crate::shared::Backoff;
     use crate::testing::MetricTester;
-    use crate::{PipelineContext, Set};
+    use crate::{ResilienceContext, Set};
+    use layered::Layer;
 
     #[test]
     fn layer_ensure_defaults() {
-        let context = PipelineContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
+        let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
         let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &context);
         let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
@@ -581,7 +581,7 @@ mod tests {
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
-        let context = PipelineContext::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
+        let context = ResilienceContext::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
             .name("test_pipeline")
             .enable_metrics(tester.meter_provider());
 
@@ -617,7 +617,7 @@ mod tests {
         let _guard = log_capture.subscriber().set_default();
 
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-        let context = PipelineContext::<String, String>::new(clock)
+        let context = ResilienceContext::<String, String>::new(clock)
             .name("log_test_pipeline")
             .enable_logs();
 
@@ -637,13 +637,13 @@ mod tests {
     }
 
     fn create_ready_retry_layer(clock: &Clock, recover: RecoveryInfo) -> RetryLayer<String, String, Set, Set> {
-        let context = PipelineContext::new(clock.clone()).name("test_pipeline");
+        let context = ResilienceContext::new(clock.clone()).name("test_pipeline");
         create_ready_retry_layer_core(recover, &context)
     }
 
     fn create_ready_retry_layer_core(
         recover: RecoveryInfo,
-        context: &PipelineContext<String, String>,
+        context: &ResilienceContext<String, String>,
     ) -> RetryLayer<String, String, Set, Set> {
         Retry::layer("test_retry", context)
             .recovery_with(move |_, _| recover.clone())

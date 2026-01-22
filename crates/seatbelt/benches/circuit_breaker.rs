@@ -6,7 +6,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
 use seatbelt::circuit_breaker::Circuit;
-use seatbelt::{PipelineContext, RecoveryInfo};
+use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 
 #[global_allocator]
@@ -27,7 +27,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // With circuit breaker (closed state)
-    let context = PipelineContext::new(Clock::new_frozen());
+    let context = ResilienceContext::new(Clock::new_frozen());
 
     let service = (
         Circuit::layer("bench", &context)
