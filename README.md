@@ -9,7 +9,7 @@
 
 </div>
 
-This repository contains a set of crates that help you build robust highly scalable services in Rust.
+This repository contains a set of crates that help you build robust highly scalable services in Rust.XX
 
 - [Crates](#crates)
 - [About This Repo](#about-this-repo)
