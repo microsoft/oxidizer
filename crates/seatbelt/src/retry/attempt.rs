@@ -9,8 +9,10 @@ use std::fmt::Display;
 /// first or last attempt.
 ///
 /// The default attempt has:
+///
 /// - `attempt`: 0 (first attempt, 0-based indexing)
-/// - `is_last`: true (indicating this is both the first and last attempt)
+/// - `is_first`: true
+/// - `is_last`: true
 ///
 /// This represents a single-shot operation with no retries, where the first
 /// attempt is also the final attempt.
