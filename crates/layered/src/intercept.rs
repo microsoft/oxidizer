@@ -95,12 +95,23 @@ impl<In, Out, S: Debug> Debug for Intercept<In, Out, S> {
 /// let response = service.execute("input".to_string()).await;
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct InterceptLayer<In, Out> {
     on_input: Vec<OnInput<In>>,
     modify_input: Vec<ModifyInput<In, Out>>,
     modify_output: Vec<ModifyOutput<Out>>,
     on_output: Vec<OnOutput<Out>>,
+}
+
+impl<In, Out> Debug for InterceptLayer<In, Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InterceptLayer")
+            .field("on_input", &self.on_input.len())
+            .field("modify_input", &self.modify_input.len())
+            .field("modify_output", &self.modify_output.len())
+            .field("on_output", &self.on_output.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<In, Out> Intercept<In, Out, ()> {
@@ -399,12 +410,6 @@ impl<In, Out> Clone for ModifyInput<In, Out> {
     }
 }
 
-impl<In, Out> Debug for ModifyInput<In, Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModifyInput").finish()
-    }
-}
-
 struct ModifyOutput<Out>(Arc<dyn Fn(Out) -> Out + Send + Sync>);
 
 impl<Out> Clone for ModifyOutput<Out> {
@@ -413,13 +418,6 @@ impl<Out> Clone for ModifyOutput<Out> {
     }
 }
 
-impl<Out> Debug for ModifyOutput<Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModifyOutput").finish()
-    }
-}
-
-#[derive(Debug)]
 struct InterceptInner<In, Out> {
     modify_input: Arc<[ModifyInput<In, Out>]>,
     on_input: Arc<[OnInput<In>]>,
@@ -659,6 +657,16 @@ mod tests {
         let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer().layer("inner"));
 
         assert_eq!(debug_str, "Intercept { service: \"inner\", .. }");
+    }
+
+    #[test]
+    fn debug_intercept_layer() {
+        let debug_str = format!("{:?}", Intercept::<String, String, ()>::layer());
+
+        assert_eq!(
+            debug_str,
+            "InterceptLayer { on_input: 0, modify_input: 0, modify_output: 0, on_output: 0, .. }"
+        );
     }
 
     #[test]
