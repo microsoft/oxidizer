@@ -10,5 +10,5 @@ pub trait Stack {
     type Service;
 
     /// Builds the composed service with all layers applied.
-    fn build(self) -> Self::Service;
+    fn into_service(self) -> Self::Service;
 }

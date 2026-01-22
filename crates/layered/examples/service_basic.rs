@@ -21,7 +21,7 @@ async fn main() {
     );
 
     // Build the service
-    let service = stack.build();
+    let service = stack.into_service();
 
     // Execute an input
     let _output = service.execute("Hello, World!".to_string()).await;
