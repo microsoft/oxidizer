@@ -12,7 +12,7 @@
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
 - [Crates](#crates)
-- [About This Repo](#about-this-repo)
+- [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
@@ -35,7 +35,7 @@ These are the primary crates built out of this repo:
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 
-## About This Repo
+## About this Repo
 
 The following sections explain the overall engineering process we use
 in this repo.
