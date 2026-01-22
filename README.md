@@ -12,7 +12,7 @@
 This repository contains a set of crates that help you build robust highly scalable services in Rust.XX
 
 - [Crates](#crates)
-- [About This Repo](#about-this-repo)
+- [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
@@ -35,7 +35,7 @@ These are the primary crates built out of this repo:
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 
-## About This Repo
+## About this Repo
 
 The following sections explain the overall engineering process we use
 in this repo.
@@ -151,7 +151,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
   unsafe code doesn't induce undefined behaviors.
 
-- **External Type Exposure**. We use [`cargo-external-types`](https://crates.io/crates/cargo-external-types) to track
+- **External Type Exposure**. We use [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
   the exporter
   of the type which can be problematic over time. This check is there to prevent unintentional exposure. If the exposure
