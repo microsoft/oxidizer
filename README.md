@@ -12,7 +12,7 @@
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
 - [Crates](#crates)
-- [About this Repo](#about-this-repo)
+- [About This Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
@@ -23,26 +23,19 @@ This repository contains a set of crates that help you build robust highly scala
 
 ## Crates
 
-These are the crates built out of this repo:
+These are the primary crates built out of this repo:
 
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
-- [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros for the `data_privacy` crate.
-- [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/README.md) - Macros for the `data_privacy` crate.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
-- [`fundle_macros`](crates/fundle_macros/README.md) - Macros for the `fundle` crate.
-- [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Macros for the `fundle` crate.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
-- [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
-- [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.
-- [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/README.md) - Macros for the `thread_aware` crate.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 
-## About this Repo
+## About This Repo
 
 The following sections explain the overall engineering process we use
 in this repo.
