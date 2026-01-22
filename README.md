@@ -151,7 +151,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
   unsafe code doesn't induce undefined behaviors.
 
-- **External Type Exposure**. We use [`cargo-external-types`](https://crates.io/crates/cargo-external-types) to track
+- **External Type Exposure**. We use [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
   the exporter
   of the type which can be problematic over time. This check is there to prevent unintentional exposure. If the exposure
