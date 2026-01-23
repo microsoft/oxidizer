@@ -97,9 +97,9 @@ are `Send` when the closure, future, key, and value types are `Send`.
 
 Run benchmarks with `cargo bench -p uniflight`. The suite covers:
 
-* **single_call**: Baseline latency with no contention
-* **high_contention_100**: 100 concurrent tasks on the same key
-* **distributed_10x10**: 10 keys with 10 tasks each
+* `single_call`: Baseline latency with no contention
+* `high_contention_100`: 100 concurrent tasks on the same key
+* `distributed_10x10`: 10 keys with 10 tasks each
 
 Use `--save-baseline` and `--baseline` flags to track regressions over time.
 
@@ -109,7 +109,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7377t2ZpTeEGzAOjWIcwZYsG8xBz1ZJEGjgG3_fpjW3KImqYWSCgmx0aHJlYWRfYXdhcmVlMC42LjGCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8jiDViul9t_G_p-49ux8lFbG5S25MCW3zg6Gwon4MHzwXdKYWSCgmx0aHJlYWRfYXdhcmVlMC42LjGCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.1.0/uniflight/?search=Merger::execute
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow

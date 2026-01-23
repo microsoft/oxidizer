@@ -7,7 +7,7 @@
 //! Save baseline: cargo bench -p uniflight -- --save-baseline main
 //! Compare to baseline: cargo bench -p uniflight -- --baseline main
 
-#![allow(missing_docs)]
+#![allow(missing_docs, reason = "benchmark code")]
 
 use std::sync::{
     Arc,
@@ -26,7 +26,7 @@ fn unique_key() -> String {
 /// Baseline: single call, no contention.
 /// This measures the fixed overhead of the merger.
 fn bench_single_call(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
     let merger = Arc::new(Merger::<String, String>::new());
 
     c.bench_function("single_call", |b| {
@@ -40,7 +40,7 @@ fn bench_single_call(c: &mut Criterion) {
 /// Stress test: 100 concurrent tasks on the same key.
 /// This hammers the synchronization primitives.
 fn bench_high_contention(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
     let merger = Arc::new(Merger::<String, String>::new());
 
     c.bench_function("high_contention_100", |b| {
@@ -57,7 +57,7 @@ fn bench_high_contention(c: &mut Criterion) {
                     .collect();
 
                 for task in tasks {
-                    task.await.unwrap();
+                    task.await.expect("Task panicked");
                 }
             }
         });
@@ -67,7 +67,7 @@ fn bench_high_contention(c: &mut Criterion) {
 /// Distributed load: 10 keys with 10 concurrent tasks each.
 /// This exercises the hash map under concurrent access.
 fn bench_distributed_keys(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
     let merger = Arc::new(Merger::<String, String>::new());
 
     c.bench_function("distributed_10x10", |b| {
@@ -87,7 +87,7 @@ fn bench_distributed_keys(c: &mut Criterion) {
                     .collect();
 
                 for task in tasks {
-                    task.await.unwrap();
+                    task.await.expect("Task panicked");
                 }
             }
         });
