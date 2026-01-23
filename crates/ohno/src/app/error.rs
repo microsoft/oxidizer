@@ -113,7 +113,7 @@ impl AppError {
     /// Creates a new [`AppError`] from any type that can be converted into an error.
     pub fn new<E>(error: E) -> Self
     where
-        E: Into<Box<dyn StdError + Send + Sync>>,
+        E: Into<Box<dyn StdError + Send + Sync + 'static>>,
     {
         Self {
             inner: Inner {
@@ -176,6 +176,12 @@ impl AppError {
     pub fn into_std_error(self) -> Box<dyn StdError + Send + Sync + 'static> {
         Box::new(self.inner)
     }
+
+    /// Attempts to downcast the source error to a specific type.
+    #[must_use]
+    pub fn downcast_ref<T: StdError + 'static>(&self) -> Option<&T> {
+        self.source().and_then(|source| source.downcast_ref::<T>())
+    }
 }
 
 impl fmt::Debug for AppError {
@@ -190,16 +196,17 @@ impl fmt::Display for AppError {
         fmt::Display::fmt(&self.inner, f)
     }
 }
+
 impl<E> From<E> for AppError
 where
-    E: Into<Box<dyn StdError + Send + Sync>>,
+    E: StdError + Send + Sync + 'static,
 {
     fn from(error: E) -> Self {
         Self::new(error)
     }
 }
 
-impl AsRef<dyn StdError + Send + Sync> for AppError {
+impl AsRef<dyn StdError + Send + Sync + 'static> for AppError {
     fn as_ref(&self) -> &(dyn StdError + Send + Sync + 'static) {
         &self.inner
     }
@@ -208,5 +215,11 @@ impl AsRef<dyn StdError + Send + Sync> for AppError {
 impl Enrichable for AppError {
     fn add_enrichment(&mut self, entry: crate::EnrichmentEntry) {
         self.inner.add_enrichment(entry);
+    }
+}
+
+impl From<AppError> for Box<dyn StdError + Send + Sync + 'static> {
+    fn from(err: AppError) -> Self {
+        err.into_std_error()
     }
 }
