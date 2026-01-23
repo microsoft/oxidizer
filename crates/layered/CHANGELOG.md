@@ -1,12 +1,20 @@
 # Changelog
 
-## [0.1.0] - 2025-12-30
+## [0.3.0] - 2026-01-22
 
 - ✨ Features
 
-  - Introduce the layered crate with `Service` trait and layer composition system
-  - Add `Execute` wrapper for turning async functions into services
-  - Add `Stack` trait for composing layers with tuples
-  - Add `Intercept` middleware for observing and modifying inputs/outputs (`intercept` feature)
-  - Add `DynamicService` for type-erased services (`dynamic-service` feature)
-  - Add Tower interoperability via `Adapter` (`tower-service` feature)
+  - rename Stack::build into Stack::into_service
+  - documentation improvements
+
+## [0.2.0] - 2026-01-21
+
+- ✨ Features
+
+  - add typed InterceptFuture for tower Service impl ([#207](https://github.com/microsoft/oxidizer/pull/207))
+
+## [0.1.0] - 2026-01-12
+
+- ✨ Features
+
+  - introduce layered crate ([#189](https://github.com/microsoft/oxidizer/pull/189))

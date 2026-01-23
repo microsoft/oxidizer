@@ -59,14 +59,18 @@ assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
 
 ### Key Concepts
 
-* **Service**: An async function `In → Out` that processes inputs.
-* **Middleware**: A service that wraps another service to add behavior (logging, timeouts, retries).
-* **Layer**: A factory that wraps any service with middleware. Stack layers using tuples
-  like `(layer1, layer2, service)`.
+* **Service**: A type implementing the [`Service`][__link4] trait that transforms inputs into outputs
+  asynchronously. Think of it as `async fn(&self, In) -> Out`.
+* **Middleware**: A service that wraps another service to add cross-cutting behavior such as
+  logging, timeouts, or retries. Middleware receives inputs before the inner service and can
+  process outputs after.
+* **Layer**: A type implementing the [`Layer`][__link5] trait that constructs middleware around a
+  service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
 
 ### Layers and Middleware
 
-A [`Layer`][__link4] wraps a service with additional behavior:
+A [`Layer`][__link6] wraps a service with additional behavior. In this example, we create a logging
+middleware that prints inputs before passing them to the inner service:
 
 ```rust
 use layered::{Execute, Layer, Service, Stack};
@@ -100,21 +104,21 @@ where
 let service = (
     LogLayer,
     Execute::new(|x: i32| async move { x * 2 }),
-).build();
+).into_service();
 
 let result = service.execute(21).await;
 ```
 
 ### Thread Safety
 
-All services must implement [`Send`][__link5] and [`Sync`][__link6], and returned futures must be [`Send`][__link7].
+All services must implement [`Send`][__link7] and [`Sync`][__link8], and returned futures must be [`Send`][__link9].
 This ensures compatibility with multi-threaded async runtimes like Tokio.
 
 ### Features
 
-* **`intercept`**: Enables [`Intercept`][__link8] middleware
-* **`dynamic-service`**: Enables [`DynamicService`][__link9] for type erasure
-* **`tower-service`**: Enables Tower interoperability via the [`tower`][__link10] module
+* **`intercept`**: Enables [`Intercept`][__link10] middleware
+* **`dynamic-service`**: Enables [`DynamicService`][__link11] for type erasure
+* **`tower-service`**: Enables Tower interoperability via the [`tower`][__link12] module
 
 
 <hr/>
@@ -122,15 +126,17 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzJtJrZVyApYG61Etog82u5CG8YRisc2odPYG-_MVLrG5Ab5YWSBgmdsYXllcmVkZTAuMS4w
- [__link0]: https://docs.rs/layered/0.1.0/layered/?search=Service
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2s7ZpjZBK-NG9NQa4QbaT-IGwXqFpV_FwWxG6nCK5_0IrsAYWSBgmdsYXllcmVkZTAuMy4w
+ [__link0]: https://docs.rs/layered/0.3.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
- [__link10]: https://docs.rs/layered/0.1.0/layered/tower/index.html
- [__link2]: https://docs.rs/layered/0.1.0/layered/?search=Service
- [__link3]: https://docs.rs/layered/0.1.0/layered/?search=Execute
- [__link4]: https://docs.rs/layered/0.1.0/layered/?search=Layer
- [__link5]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link6]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
+ [__link10]: https://docs.rs/layered/0.3.0/layered/?search=Intercept
+ [__link11]: https://docs.rs/layered/0.3.0/layered/?search=DynamicService
+ [__link12]: https://docs.rs/layered/0.3.0/layered/tower/index.html
+ [__link2]: https://docs.rs/layered/0.3.0/layered/?search=Service
+ [__link3]: https://docs.rs/layered/0.3.0/layered/?search=Execute
+ [__link4]: https://docs.rs/layered/0.3.0/layered/?search=Service
+ [__link5]: https://docs.rs/layered/0.3.0/layered/?search=Layer
+ [__link6]: https://docs.rs/layered/0.3.0/layered/?search=Layer
  [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link8]: https://docs.rs/layered/0.1.0/layered/?search=Intercept
- [__link9]: https://docs.rs/layered/0.1.0/layered/?search=DynamicService
+ [__link8]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
+ [__link9]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
