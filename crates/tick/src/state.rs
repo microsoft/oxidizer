@@ -6,11 +6,17 @@ use std::time::Instant;
 
 use crate::timers::Timers;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum ClockState {
+    System(SynchronizedTimers),
     #[cfg(any(feature = "test-util", test))]
     ClockControl(crate::ClockControl),
-    System(SynchronizedTimers),
+}
+
+impl Default for ClockState {
+    fn default() -> Self {
+        Self::System(SynchronizedTimers::default())
+    }
 }
 
 impl ClockState {
@@ -21,9 +27,17 @@ impl ClockState {
             Self::System(timers) => timers.with_timers(|t| t.len()),
         }
     }
+
+    pub fn ownership_count(&self) -> usize {
+        match self {
+            Self::System(timers) => timers.ownership_count(),
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(control) => control.ownership_count(),
+        }
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct SynchronizedTimers {
     // The mutex here is not accessed on a hot path. Timers are accessed only when:
     //
@@ -38,7 +52,7 @@ pub(crate) struct SynchronizedTimers {
     // with `RefCell`. The `RefCell` variant is around 7% faster. In practice, in real applications,
     // the difference is negligible. The real performance improvement comes from isolating the `Clock` to each thread.
     // This reduces lock contention and provides linear scalability.
-    timers: Mutex<Timers>,
+    timers: Arc<Mutex<Timers>>,
 }
 
 impl SynchronizedTimers {
@@ -54,23 +68,9 @@ impl SynchronizedTimers {
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
         self.with_timers(|timers| timers.advance_timers(now))
     }
-}
 
-#[derive(Debug, Clone, Default)]
-pub(crate) enum GlobalState {
-    #[default]
-    System,
-    #[cfg(any(feature = "test-util", test))]
-    ClockControl(crate::ClockControl),
-}
-
-impl GlobalState {
-    pub fn into_clock_state(self) -> Arc<ClockState> {
-        Arc::new(match self {
-            #[cfg(any(feature = "test-util", test))]
-            Self::ClockControl(control) => ClockState::ClockControl(control),
-            Self::System => ClockState::System(SynchronizedTimers::default()),
-        })
+    pub fn ownership_count(&self) -> usize {
+        Arc::strong_count(&self.timers)
     }
 }
 

@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Arc;
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -142,7 +141,7 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Clock(pub(crate) Arc<ClockState>);
+pub struct Clock(pub(crate) ClockState);
 
 impl Clock {
     /// Creates a new clock driven by the Tokio runtime.
@@ -183,7 +182,7 @@ impl Clock {
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
-        Self(crate::state::GlobalState::System.into_clock_state())
+        Self(ClockState::default())
     }
 
     /// Creates a new frozen clock.
@@ -419,7 +418,7 @@ impl Clock {
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {
-        self.0.as_ref()
+        &self.0
     }
 }
 
