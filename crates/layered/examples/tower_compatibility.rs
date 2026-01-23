@@ -40,7 +40,7 @@ async fn example_oxidizer() {
         Execute::new(execute),
     );
 
-    let mut service = stack.build();
+    let mut service = stack.into_service();
     poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
     service.call("hello world from Oxidizer".to_string()).await.unwrap();
 }
@@ -55,7 +55,7 @@ async fn example_oxidizer_native() {
         Execute::new(execute),
     );
 
-    let service = stack.build();
+    let service = stack.into_service();
 
     // Direct execution - no polling required
     service.execute("hello world from Oxidizer Native".to_string()).await.unwrap();
