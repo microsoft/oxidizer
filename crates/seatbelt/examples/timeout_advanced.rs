@@ -62,7 +62,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Create the service from the stack
-    let service = stack.build();
+    let service = stack.into_service();
 
     for i in 0..10 {
         // Execute the service, results in a timeout error

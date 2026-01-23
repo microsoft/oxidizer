@@ -55,7 +55,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Create the service from the stack
-    let service = stack.build();
+    let service = stack.into_service();
 
     // Create a request that will initially fail but can be restored
     let request = Request::builder()

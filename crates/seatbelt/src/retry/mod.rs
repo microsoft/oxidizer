@@ -30,7 +30,7 @@
 //!     Execute::new(my_operation),
 //! );
 //!
-//! let service = stack.build();
+//! let service = stack.into_service();
 //! let result = service.execute("input".to_string()).await;
 //! # let _result = result;
 //! # Ok(())
@@ -128,7 +128,7 @@
 //! );
 //!
 //! // Build the service
-//! let service = stack.build();
+//! let service = stack.into_service();
 //!
 //! // Execute the service
 //! let result = service.execute("test input".to_string()).await;
@@ -179,7 +179,7 @@
 //! );
 //!
 //! // Build and execute the service
-//! let service = stack.build();
+//! let service = stack.into_service();
 //! let result = service.execute("test_timeout".to_string()).await;
 //! # let _result = result;
 //! # Ok(())

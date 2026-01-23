@@ -55,7 +55,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Create the service from the stack
-    let service = stack.build();
+    let service = stack.into_service();
 
     // Execute multiple attempts, the circuit breaker will eventually open because the
     // failure rate exceeds the threshold. You can play with this value an increase it to 300

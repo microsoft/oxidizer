@@ -42,7 +42,7 @@ let service = (
     // Your core business logic
     Execute::new(my_string_operation),
 )
-    .build();
+    .into_service();
 
 let result = service.execute("input data".to_string()).await;
 ```
@@ -107,17 +107,17 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-K4p0z0fzk6G-4Djif9GAJ_GxL0iP3D0ueKG8TczT6iIBrHYWSFgmVTdGFja_aCZ2xheWVyZWRlMC4yLjCCa3JlY292ZXJhYmxlZTAuMS4wgmhzZWF0YmVsdGUwLjIuMIJkdGlja2UwLjEuMg
- [__link0]: https://crates.io/crates/layered/0.2.0
- [__link1]: https://crates.io/crates/Stack
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5bw60hngnQRG76QZSWWI79pG7-oEvcoPz3VGzVGNfifez53YWSEgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
+ [__link0]: https://crates.io/crates/layered/0.3.0
+ [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
  [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
  [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
  [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
  [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link3]: https://crates.io/crates/tick/0.1.2
- [__link4]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::ResilienceContext
- [__link5]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=shared::ResilienceContext
+ [__link4]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=ResilienceContext
+ [__link5]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=ResilienceContext
  [__link6]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link7]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
  [__link8]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html

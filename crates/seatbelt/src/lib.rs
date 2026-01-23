@@ -54,7 +54,7 @@
 //!     // Your core business logic
 //!     Execute::new(my_string_operation),
 //! )
-//!     .build();
+//!     .into_service();
 //!
 //! let result = service.execute("input data".to_string()).await;
 //! # }

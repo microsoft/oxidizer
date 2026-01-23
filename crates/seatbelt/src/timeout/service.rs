@@ -157,7 +157,7 @@ mod tests {
             Execute::new(|input: String| async move { input }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
 
         let output = service.execute("test input".to_string()).await;
 
@@ -192,7 +192,7 @@ mod tests {
             }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
 
         let output = service.execute("test input".to_string()).await;
 
@@ -227,7 +227,7 @@ mod tests {
             }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
 
         assert_eq!(service.execute("test input".to_string()).await, "timed out after 150ms");
         assert_eq!(service.execute("ignore".to_string()).await, "timed out after 200ms");
@@ -253,7 +253,7 @@ mod tests {
             }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let output = service.execute("test input".to_string()).await;
 
         assert_eq!(output, "test input");
@@ -287,7 +287,7 @@ mod tests {
             }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let _ = service.execute("test".to_string()).await;
 
         log_capture.assert_contains("seatbelt::timeout");
@@ -325,7 +325,7 @@ mod tests {
             }),
         );
 
-        let service = stack.build();
+        let service = stack.into_service();
         let _ = service.execute("test".to_string()).await;
 
         metrics.assert_attributes(

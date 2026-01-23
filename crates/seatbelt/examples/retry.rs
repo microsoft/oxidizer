@@ -28,7 +28,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Create the service from the stack
-    let service = stack.build();
+    let service = stack.into_service();
 
     match service.execute("value".to_string()).await {
         Ok(output) => println!("execution succeeded, result: {output}"),

@@ -38,7 +38,7 @@ fn entry(c: &mut Criterion) {
             .recovery_with(|_, _| RecoveryInfo::never()),
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
-        .build();
+        .into_service();
 
     let operation = session.operation("with-retry");
     group.bench_function("with-retry", |b| {
@@ -59,7 +59,7 @@ fn entry(c: &mut Criterion) {
             .recovery_with(|_, _| RecoveryInfo::retry()),
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
-        .build();
+        .into_service();
 
     let operation = session.operation("with-retry-and-recovery");
     group.bench_function("with-retry-and-recovery", |b| {

@@ -36,7 +36,7 @@ fn entry(c: &mut Criterion) {
             .min_throughput(1000), // High threshold to keep circuit closed
         Execute::new(|_input: Input| async move { Ok(Output) }),
     )
-        .build();
+        .into_service();
 
     let operation = session.operation("with-circuit-breaker");
     group.bench_function("with-circuit-breaker", |b| {

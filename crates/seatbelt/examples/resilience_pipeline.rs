@@ -44,7 +44,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Build the service
-    let service = stack.build();
+    let service = stack.into_service();
 
     // Execute the service with an input
     let output = service.execute("value".to_string()).await;

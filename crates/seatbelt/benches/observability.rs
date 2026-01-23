@@ -31,7 +31,7 @@ fn entry(c: &mut Criterion) {
             .recovery_with(|_, _| RecoveryInfo::retry()),
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
-        .build();
+        .into_service();
     let operation = session.operation("retry-no-telemetry");
     group.bench_function("retry-no-telemetry", |b| {
         b.iter(|| {
@@ -50,7 +50,7 @@ fn entry(c: &mut Criterion) {
             .recovery_with(|_, _| RecoveryInfo::retry()),
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
-        .build();
+        .into_service();
     let operation = session.operation("retry-metrics");
     group.bench_function("retry-metrics", |b| {
         b.iter(|| {
@@ -68,7 +68,7 @@ fn entry(c: &mut Criterion) {
             .recovery_with(|_, _| RecoveryInfo::retry()),
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
-        .build();
+        .into_service();
     let operation = session.operation("retry-logs");
     group.bench_function("retry-logs", |b| {
         b.iter(|| {

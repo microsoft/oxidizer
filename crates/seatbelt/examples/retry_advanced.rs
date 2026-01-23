@@ -57,7 +57,7 @@ async fn main() -> Result<(), AppError> {
     );
 
     // Create the service from the stack
-    let service = stack.build();
+    let service = stack.into_service();
 
     let request = Request::builder().uri("https://example.com").body("value".to_string())?;
 

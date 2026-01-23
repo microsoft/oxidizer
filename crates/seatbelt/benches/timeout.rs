@@ -38,7 +38,7 @@ fn entry(c: &mut Criterion) {
             .timeout(Duration::from_secs(10)),
         Execute::new(|v: Input| async move { Output::from(v) }),
     )
-        .build();
+        .into_service();
 
     let operation = session.operation("with-timeout");
     group.bench_function("with-timeout", |b| {
