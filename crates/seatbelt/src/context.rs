@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use tick::Clock;
 
-pub(crate) const DEFAULT_PIPELINE_NAME: &str = "default";
+pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 
 /// Shared configuration and dependencies for a pipeline of resilience middleware.
 ///
@@ -28,7 +28,7 @@ impl<In, Out> ResilienceContext<In, Out> {
     pub fn new(clock: impl AsRef<Clock>) -> Self {
         Self {
             clock: clock.as_ref().clone(),
-            name: Cow::Borrowed(DEFAULT_PIPELINE_NAME),
+            name: Cow::Borrowed(DEFAULT_CONTEXT_NAME),
             #[cfg(any(feature = "metrics", test))]
             meter: None,
             logs_enabled: false,
@@ -115,7 +115,7 @@ mod tests {
         let clock = tick::Clock::new_frozen();
         let ctx = ResilienceContext::<(), ()>::new(clock);
         let telemetry = ctx.create_telemetry("test".into());
-        assert_eq!(telemetry.pipeline_name.as_ref(), DEFAULT_PIPELINE_NAME);
+        assert_eq!(telemetry.pipeline_name.as_ref(), DEFAULT_CONTEXT_NAME);
         // Ensure clock reference behaves (timestamp monotonic relative behaviour not required, just accessible)
         let _ = ctx.get_clock().system_time();
     }
