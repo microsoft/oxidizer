@@ -10,9 +10,13 @@ use std::hash::Hasher;
 ///
 /// Each unique `BreakerId` maintains its own independent circuit breaker state, including
 /// failure counts, health metrics, and open/closed status. This allows you to have separate
-/// circuit breakers for different backends, services, or logical groupings of requests.
+/// circuit breakers for different backends, services, or logical groupings of inputs.
 ///
-/// For maximum performance, prefer using integer IDs or static string IDs (i.e. `&'static str`).
+/// Breaker IDs should be **long-lived and low-cardinality**, representing distinct failure
+/// domains (e.g., backend hosts, service endpoints). Avoid high-cardinality IDs like user IDs
+/// or request IDs—these cause unbounded memory growth and prevent detection of systemic failures.
+///
+/// For maximum performance, prefer integer IDs or static string IDs (`&'static str`).
 ///
 /// # Examples
 ///

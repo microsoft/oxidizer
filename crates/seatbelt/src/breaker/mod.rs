@@ -10,7 +10,7 @@
 //! - [`BreakerLayer`] is used to configure and construct the circuit breaker middleware
 //!
 //! A circuit breaker monitors the success and failure rates of operations and can temporarily
-//! block requests when the failure rate exceeds a configured threshold. This prevents cascading failures
+//! block inputs when the failure rate exceeds a configured threshold. This prevents cascading failures
 //! and gives downstream services time to recover.
 //!
 //! # Quick Start
@@ -68,10 +68,10 @@
 //!
 //! The circuit breaker operates in three states:
 //!
-//! - **Closed**: Normal operation. Requests pass through and failures are tracked.
-//! - **Open**: The circuit is broken. Requests are immediately rejected without calling
+//! - **Closed**: Normal operation. Inputs pass through and failures are tracked.
+//! - **Open**: The circuit is broken. Inputs are immediately rejected without calling
 //!   the underlying service.
-//! - **Half-Open**: Testing if the service has recovered. A limited number of probing requests are
+//! - **Half-Open**: Testing if the service has recovered. A limited number of probe inputs are
 //!   allowed through to assess the health of the underlying service.
 //!
 //! ```text
@@ -90,7 +90,7 @@
 //!
 //! The circuit starts in the closed state and operates normally:
 //!
-//! - All requests pass through to the underlying service
+//! - All inputs pass through to the underlying service
 //! - Failures are tracked and evaluated against the failure threshold
 //! - When the failure threshold is exceeded, transitions to **Open**
 //! - You can observe transitions into the closed state by providing
@@ -100,7 +100,7 @@
 //!
 //! When the circuit is open:
 //!
-//! - Requests are immediately rejected with the output provided by [`rejected_input`][BreakerLayer::rejected_input]
+//! - Inputs are immediately rejected with the output provided by [`rejected_input`][BreakerLayer::rejected_input]
 //! - No calls are made to the underlying service
 //! - After the break duration elapsed, transitions to **Half-Open**
 //! - You can observe transitions into the open state by providing
@@ -110,11 +110,11 @@
 //!
 //! The circuit enters a testing phase:
 //!
-//! - A limited number of probing requests are allowed through
+//! - A limited number of probe inputs are allowed through
 //! - Success rate is carefully monitored
-//! - If sufficient successful probing requests occur, transitions back to **Closed**
+//! - If sufficient successful probes occur, transitions back to **Closed**
 //! - If failures continue, the circuit stays in the Half-Open state until the underlying service recovers.
-//!   Half-open state respects the break duration before allowing more probing requests.
+//!   Half-open state respects the break duration before allowing more probes.
 //! - You can observe when the circuit is probing in half-open state by providing
 //!   the [`on_probing`][BreakerLayer::on_probing] callback.
 //! - You can configure the probing behavior and the sensitivity of how quickly the circuit
@@ -130,16 +130,12 @@
 //!
 //! # Isolated Circuit Breaker Instances
 //!
-//! Circuit breakers can maintain separate circuit states for different logical groups of requests
-//! by providing a [`breaker_id`][BreakerLayer::breaker_id] function. This allows
-//! the creation of multiple independent circuits based on the input properties.
+//! Circuit breakers can maintain separate states for different logical groups of inputs
+//! by providing a [`breaker_id`][BreakerLayer::breaker_id] function. A typical use case is
+//! HTTP requests where the breaker ID is derived from scheme, host, and port to isolate
+//! circuit states for different downstream endpoints.
 //!
-//! For example, a typical scenario where separate breakers are useful is HTTP requests where the breaker ID
-//! is extracted from the request scheme, host, and port. This allows isolation of circuit states
-//! for different downstream endpoints.
-//!
-//! > **Note**: Each unique breaker ID creates a separate circuit state. Be mindful of memory usage
-//! > with high-cardinality breaker IDs.
+//! See [`BreakerId`] for guidance on choosing appropriate IDs.
 //!
 //! # Defaults
 //!
@@ -149,12 +145,12 @@
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
 //! | Failure threshold | `0.1` (10%) | Circuit opens when failure rate exceeds this percentage | [`failure_threshold`][BreakerLayer::failure_threshold] |
-//! | Minimum throughput | `100` requests | Minimum request volume required before circuit can open | [`min_throughput`][BreakerLayer::min_throughput] |
+//! | Minimum throughput | `100` executions | Minimum volume required before circuit can open | [`min_throughput`][BreakerLayer::min_throughput] |
 //! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][BreakerLayer::sampling_duration] |
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
-//! | Breaker isolation | Single global circuit | All requests share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
+//! | Breaker isolation | Single global circuit | All inputs share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
 //! | Half-open mode | `Reliable` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
-//! | Enable condition | Always enabled | Circuit breaker protection is applied to all requests | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
+//! | Enable condition | Always enabled | Circuit breaker protection is applied to all inputs | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
 //! These defaults provide a reasonable starting point for most use cases, offering a balance
 //! between resilience and responsiveness to service recovery.
@@ -164,15 +160,15 @@
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when circuit state transitions occur and when requests are rejected
+//! - **When**: Emitted when circuit state transitions occur and when inputs are rejected
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Circuit breaker identifier from [`Breaker::layer`]
 //!   - `resilience.event.name`: One of:
 //!     - `circuit_opened`: When the circuit transitions to open state due to failure threshold being exceeded
 //!     - `circuit_closed`: When the circuit transitions to closed state after successful probing
-//!     - `circuit_rejected`: When a request is rejected due to the circuit being in open state
-//!     - `circuit_probe`: When a probing request is executed in half-open state
+//!     - `circuit_rejected`: When an input is rejected due to the circuit being in open state
+//!     - `circuit_probe`: When a probe is executed in half-open state
 //!   - `resilience.circuit_breaker.id`: The breaker ID identifying the circuit breaker instance
 //!   - `resilience.circuit_breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
 //!   - `resilience.circuit_breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
@@ -252,7 +248,7 @@
 //!         // Optional configuration
 //!         .half_open_mode(HalfOpenMode::reliable(None)) // close the circuit gradually (default)
 //!         .failure_threshold(0.05) // Trip at 5% failure threshold (less sensitive than default 10%)
-//!         .min_throughput(50)  // Require minimum 50 requests before considering circuit open
+//!         .min_throughput(50)  // Require minimum 50 executions before considering circuit open
 //!         .sampling_duration(Duration::from_secs(60)) // Evaluate failures over 60-second window
 //!         .break_duration(Duration::from_secs(30))    // Stay open for 30 seconds before testing
 //!         // You can provide your own breaker ID logic if needed. The default is a single global
@@ -269,7 +265,7 @@
 //!         })
 //!         .on_probing(|input, _args| {
 //!             println!("circuit breaker PROBING with input: {:?}", input);
-//!             // Optionally modify input for probing requests
+//!             // Optionally modify input for probes
 //!         }),
 //!     Execute::new(execute_unreliable_operation),
 //! );

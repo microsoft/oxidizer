@@ -17,7 +17,7 @@ use crate::{NotSet, utils::EnableIf};
 ///
 /// `Breaker` wraps an inner [`Service`] and monitors the success and failure rates
 /// of operations. When the failure rate exceeds a configured threshold, the circuit breaker opens
-/// and temporarily blocks requests to give the downstream service time to recover.
+/// and temporarily blocks inputs to give the downstream service time to recover.
 ///
 /// This middleware is designed to be used across services, applications, and libraries
 /// to prevent cascading failures in distributed systems.

@@ -90,7 +90,7 @@ impl OnClosedArgs<'_> {
 
 /// Arguments for the [`on_opened`][super::BreakerLayer::on_opened] callback function.
 ///
-/// Provides context when the circuit breaker transitions to the open state, blocking requests due to failures.
+/// Provides context when the circuit breaker transitions to the open state, blocking inputs due to failures.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnOpenedArgs<'a> {

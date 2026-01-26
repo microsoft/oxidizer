@@ -9,13 +9,13 @@ use crate::breaker::engine::probing::ProbesOptions;
 /// Defines the behavior of the circuit breaker when transitioning from half-open to closed state.
 ///
 /// The half-open state is a transitional phase where the circuit breaker allows a limited number of
-/// requests to pass through to test if the underlying service has recovered. The chosen mode
+/// inputs to pass through to test if the underlying service has recovered. The chosen mode
 /// determines how aggressively the circuit breaker probes the service during this phase.
 ///
 /// Currently, two modes are supported:
 ///
-/// - [`HalfOpenMode::quick`]: Allows a single probe request to determine if the service has recovered.
-/// - [`HalfOpenMode::reliable`]: Gradually increases the percentage of probing requests over multiple stages (default).
+/// - [`HalfOpenMode::quick`]: Allows a single probe to determine if the service has recovered.
+/// - [`HalfOpenMode::reliable`]: Gradually increases the percentage of probes over multiple stages (default).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HalfOpenMode {
     inner: Mode,
@@ -29,16 +29,16 @@ impl HalfOpenMode {
     ///
     /// The downside of this approach is that it relies on a single execution to determine
     /// the health of the service. If that execution happens to succeed by chance, the circuit
-    /// closes and later requests may fail again, leading to instability and re-opening the circuit
+    /// closes and later inputs may fail again, leading to instability and re-opening the circuit
     /// again.
     #[must_use]
     pub fn quick() -> Self {
         Self { inner: Mode::Quick }
     }
 
-    /// Gradually increase the percentage of probing requests over multiple stages.
+    /// Gradually increase the percentage of probes over multiple stages.
     ///
-    /// This approach allows more requests to pass through in a controlled manner,
+    /// This approach allows more inputs to pass through in a controlled manner,
     /// increasing the probing rate over time. This can help more reliably evaluate the
     /// health of the underlying service over time rather than relying on a single execution.
     ///

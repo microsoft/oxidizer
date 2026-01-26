@@ -75,12 +75,12 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
 impl<In, Out, E, S1, S2> BreakerLayer<In, Result<Out, E>, S1, S2> {
     /// Sets the error to return when the circuit breaker is open for Result-returning services.
     ///
-    /// When the circuit is open, requests are immediately rejected and this function
+    /// When the circuit is open, inputs are immediately rejected and this function
     /// is called to generate the error that should be returned to the caller.
     /// The error is automatically wrapped in a `Result::Err`.
     ///
     /// This is a convenience method for Result-returning services that allows you to
-    /// provide a meaningful error when the circuit breaker prevents a request from
+    /// provide a meaningful error when the circuit breaker prevents an input from
     /// reaching the underlying service.
     ///
     /// # Arguments
@@ -143,11 +143,11 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the output to return when the circuit breaker is open.
     ///
-    /// When the circuit is open, requests are immediately rejected and this function
+    /// When the circuit is open, inputs are immediately rejected and this function
     /// is called to generate the output that should be returned to the caller.
     ///
     /// This allows you to provide a meaningful error message or fallback value
-    /// when the circuit breaker prevents a request from reaching the underlying service.
+    /// when the circuit breaker prevents an input from reaching the underlying service.
     ///
     /// # Arguments
     ///
@@ -180,15 +180,15 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the minimum throughput required before the circuit breaker can open.
     ///
-    /// The circuit breaker will only consider opening if at least this many requests
+    /// The circuit breaker will only consider opening if at least this many executions
     /// have been processed during the sampling duration. This prevents the circuit
     /// from opening due to a small number of failures when overall traffic is low.
     ///
-    /// **Default**: 100 requests
+    /// **Default**: 100 executions
     ///
     /// # Arguments
     ///
-    /// * `throughput` - The minimum number of requests required
+    /// * `throughput` - The minimum number of executions required
     #[must_use]
     pub fn min_throughput(mut self, throughput: u32) -> Self {
         self.min_throughput = throughput;
@@ -198,7 +198,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// Sets the sampling duration for calculating failure rates.
     ///
     /// The circuit breaker calculates failure rates over this time window.
-    /// Only requests within this duration are considered when determining
+    /// Only executions within this duration are considered when determining
     /// whether the failure rate exceeds the threshold.
     ///
     /// **Default**: 30 seconds
@@ -285,19 +285,11 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Sets the breaker ID provider function.
     ///
-    /// The breaker ID identifies an isolated circuit breaker instance. Each unique ID
-    /// maintains its own independent state including failure counts, health metrics,
-    /// and open/closed status. This allows separate circuit breakers for different
-    /// backends, services, or logical groupings of requests.
+    /// Each unique [`BreakerId`] maintains its own independent circuit breaker state.
+    /// A typical use case is HTTP requests where the breaker ID is derived from scheme,
+    /// host, and port to isolate failures per backend service.
     ///
-    /// **Default**: Single global circuit - all requests share the same circuit breaker state
-    ///
-    /// If no breaker ID provider is set, a default ID is used, meaning all requests
-    /// share the same circuit breaker state.
-    ///
-    /// The typical scenario is HTTP requests where the breaker ID could be derived from
-    /// the combination of scheme and authority (host and port). This allows separate
-    /// circuit breaker states for different backend services.
+    /// **Default**: Single global circuit - all inputs share the same circuit breaker state
     ///
     /// # Arguments
     ///
@@ -323,9 +315,9 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// });
     ///
     /// // This ensures that:
-    /// // - Requests to https://api.service1.com share one circuit breaker instance
-    /// // - Requests to https://api.service2.com:8080 share another circuit breaker instance
-    /// // - Requests to http://localhost:3000 share yet another circuit breaker instance
+    /// // - Inputs targeting https://api.service1.com share one circuit breaker instance
+    /// // - Inputs targeting https://api.service2.com:8080 share another circuit breaker instance
+    /// // - Inputs targeting http://localhost:3000 share yet another circuit breaker instance
     /// # }
     /// ```
     ///
@@ -355,7 +347,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Optionally enables the circuit breaker middleware based on a condition.
     ///
-    /// When disabled, requests pass through without circuit breaker protection.
+    /// When disabled, inputs pass through without circuit breaker protection.
     /// This call replaces any previous condition.
     ///
     /// **Default**: Always enabled
@@ -363,7 +355,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// # Arguments
     ///
     /// * `is_enabled` - Function that takes a reference to the input and returns
-    ///   `true` if circuit breaker protection should be enabled for this request
+    ///   `true` if circuit breaker protection should be enabled for this input
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::new(is_enabled);
@@ -372,7 +364,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Enables the circuit breaker middleware unconditionally.
     ///
-    /// All requests will have circuit breaker protection applied.
+    /// All inputs will have circuit breaker protection applied.
     /// This call replaces any previous condition.
     ///
     /// **Note**: This is the default behavior - circuit breaker is enabled by default.
@@ -384,7 +376,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
     /// Disables the circuit breaker middleware completely.
     ///
-    /// All requests will pass through without circuit breaker protection.
+    /// All inputs will pass through without circuit breaker protection.
     /// This call replaces any previous condition.
     ///
     /// **Note**: This overrides the default enabled behavior.
