@@ -582,7 +582,7 @@ mod tests {
         let tester = MetricTester::new();
         let context = ResilienceContext::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
             .name("test_pipeline")
-            .enable_metrics(tester.meter_provider());
+            .use_metrics(tester.meter_provider());
 
         let service = create_ready_retry_layer_core(RecoveryInfo::retry(), &context)
             .clone_input_with(move |input, _args| Some(input.clone()))
@@ -618,7 +618,7 @@ mod tests {
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let context = ResilienceContext::<String, String>::new(clock)
             .name("log_test_pipeline")
-            .enable_logs();
+            .use_logs();
 
         let service = Retry::layer("log_test_retry", &context)
             .clone_input()

@@ -30,7 +30,7 @@ async fn main() -> Result<(), AppError> {
 
     // Create service options
     let context: ResilienceContext<String, Result<(), AppError>> =
-        ResilienceContext::new(&clock).name("my_pipeline").enable_metrics(&meter_provider);
+        ResilienceContext::new(&clock).name("my_pipeline").use_metrics(&meter_provider);
 
     // Define stack with timeout layer
     let stack = (

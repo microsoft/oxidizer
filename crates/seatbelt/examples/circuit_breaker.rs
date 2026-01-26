@@ -26,7 +26,7 @@ async fn main() -> Result<(), AppError> {
     let meter_provider = configure_telemetry();
 
     let clock = Clock::new_tokio();
-    let context = ResilienceContext::new(&clock).enable_metrics(&meter_provider);
+    let context = ResilienceContext::new(&clock).use_metrics(&meter_provider);
 
     // Define stack with circuit breaker layer
     let stack = (

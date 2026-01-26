@@ -54,7 +54,7 @@ impl<In, Out> ResilienceContext<In, Out> {
     /// Enable metrics reporting with the given OpenTelemetry meter provider.
     #[must_use]
     #[cfg(any(feature = "metrics", test))]
-    pub fn enable_metrics(self, provider: &dyn opentelemetry::metrics::MeterProvider) -> Self {
+    pub fn use_metrics(self, provider: &dyn opentelemetry::metrics::MeterProvider) -> Self {
         Self {
             meter: Some(crate::metrics::create_meter(provider)),
             ..self
@@ -64,7 +64,7 @@ impl<In, Out> ResilienceContext<In, Out> {
     /// Enable structured logging for resilience events.
     #[must_use]
     #[cfg(any(feature = "logs", test))]
-    pub fn enable_logs(self) -> Self {
+    pub fn use_logs(self) -> Self {
         Self {
             logs_enabled: true,
             ..self
@@ -135,7 +135,7 @@ mod tests {
         let clock = tick::Clock::new_frozen();
         let (provider, exporter) = test_meter_provider();
 
-        let ctx = ResilienceContext::<(), ()>::new(clock).enable_metrics(&provider);
+        let ctx = ResilienceContext::<(), ()>::new(clock).use_metrics(&provider);
         let telemetry1 = ctx.create_telemetry("test1".into());
         let telemetry2 = ctx.create_telemetry("test2".into());
         let c1 = telemetry1.event_reporter.unwrap();

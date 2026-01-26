@@ -272,7 +272,7 @@ mod tests {
             .auto_advance(Duration::from_millis(200))
             .auto_advance_limit(Duration::from_millis(500))
             .to_clock();
-        let context = ResilienceContext::new(clock.clone()).enable_logs().name("log_test_pipeline");
+        let context = ResilienceContext::new(clock.clone()).use_logs().name("log_test_pipeline");
 
         let stack = (
             Timeout::layer("log_test_timeout", &context)
@@ -309,7 +309,7 @@ mod tests {
             .auto_advance_limit(Duration::from_millis(500))
             .to_clock();
         let context = ResilienceContext::new(clock.clone())
-            .enable_metrics(metrics.meter_provider())
+            .use_metrics(metrics.meter_provider())
             .name("metrics_pipeline");
 
         let stack = (

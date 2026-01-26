@@ -42,7 +42,7 @@ fn entry(c: &mut Criterion) {
 
     // Metrics
     let meter_provider = SdkMeterProvider::builder().with_periodic_exporter(EmptyExporter).build();
-    let context = ResilienceContext::new(Clock::new_frozen()).enable_metrics(&meter_provider);
+    let context = ResilienceContext::new(Clock::new_frozen()).use_metrics(&meter_provider);
     let service = (
         Retry::layer("bench", &context)
             .clone_input()
@@ -60,7 +60,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // Logs
-    let context = ResilienceContext::new(Clock::new_frozen()).enable_logs();
+    let context = ResilienceContext::new(Clock::new_frozen()).use_logs();
     let service = (
         Retry::layer("bench", &context)
             .clone_input()

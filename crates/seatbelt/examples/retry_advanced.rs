@@ -27,7 +27,7 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock)
         .name("retry_advanced")
-        .enable_metrics(&meter_provider);
+        .use_metrics(&meter_provider);
 
     // Define stack with retry layer
     let stack = (

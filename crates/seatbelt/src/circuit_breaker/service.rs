@@ -465,7 +465,7 @@ mod tests {
         let clock_control = ClockControl::new();
         let context = ResilienceContext::<String, String>::new(clock_control.to_clock())
             .name("log_test_pipeline")
-            .enable_logs();
+            .use_logs();
 
         let service = Circuit::layer("log_test_circuit", &context)
             .min_throughput(3)
