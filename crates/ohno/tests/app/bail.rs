@@ -72,3 +72,28 @@ fn bail_with_expr() {
     let io_err = err.source().unwrap().downcast_ref::<std::io::Error>().unwrap();
     assert!(io_err.kind() == std::io::ErrorKind::Other);
 }
+
+#[test]
+fn downcast_ref() {
+    let err = AppError::new(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"));
+    assert!(err.downcast_ref::<std::fmt::Error>().is_none());
+    let io_err: &std::io::Error = err.downcast_ref().unwrap();
+    assert!(io_err.kind() == std::io::ErrorKind::PermissionDenied);
+
+    let err = AppError::new(std::fmt::Error);
+    assert!(err.downcast_ref::<std::io::Error>().is_none());
+    let _ = err.downcast_ref::<std::fmt::Error>().unwrap();
+
+    let err = AppError::new("a string error");
+    assert!(err.downcast_ref::<std::io::Error>().is_none());
+    assert!(err.downcast_ref::<std::fmt::Error>().is_none());
+}
+
+#[test]
+fn into_boxed() {
+    let err = AppError::new(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken"));
+    let boxed: Box<dyn std::error::Error + Send + Sync + 'static> = err.into();
+    assert!(boxed.downcast_ref::<std::io::Error>().is_none()); // this is an AppError instance with io::Error inside
+    let io_err: &std::io::Error = boxed.source().unwrap().downcast_ref().unwrap();
+    assert!(io_err.kind() == std::io::ErrorKind::BrokenPipe);
+}
