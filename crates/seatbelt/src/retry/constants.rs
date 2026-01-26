@@ -28,6 +28,6 @@ pub(super) const DEFAULT_USE_JITTER: bool = true;
 
 /// Default maximum retry attempts: 3.
 ///
-/// The default is inherited from `Polly v8` which is a widely used resilience library
-/// and also uses 3 retry attempts.
+/// Three retry attempts is a widely used default in resilience libraries,
+/// providing a balance between recovery opportunity and avoiding excessive delays.
 pub(super) const DEFAULT_RETRY_ATTEMPTS: u32 = 3;
