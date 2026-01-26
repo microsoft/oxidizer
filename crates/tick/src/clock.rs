@@ -182,7 +182,7 @@ impl Clock {
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
-        Self(ClockState::default())
+        Self(ClockState::new_system())
     }
 
     /// Creates a new frozen clock.

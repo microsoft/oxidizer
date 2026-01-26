@@ -13,8 +13,8 @@ pub(crate) enum ClockState {
     ClockControl(crate::ClockControl),
 }
 
-impl Default for ClockState {
-    fn default() -> Self {
+impl ClockState {
+    pub fn new_system() -> Self {
         Self::System(SynchronizedTimers::default())
     }
 }
@@ -28,6 +28,7 @@ impl ClockState {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
         match self {
             Self::System(timers) => timers.is_unique(),

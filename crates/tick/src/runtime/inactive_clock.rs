@@ -35,8 +35,14 @@ use crate::state::ClockState;
 /// Thread-per-core runtimes can activate separate clock instances per thread by cloning
 /// the [`InactiveClock`] before activation. This eliminates lock contention and improves
 /// performance.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct InactiveClock(ClockState);
+
+impl Default for InactiveClock {
+    fn default() -> Self {
+        Self(ClockState::new_system())
+    }
+}
 
 impl InactiveClock {
     /// Activates the clock for time operations.
@@ -55,7 +61,7 @@ impl InactiveClock {
 
         if matches!(state, ClockState::System(_)) {
             // if this is system clock, create a new instance to avoid sharing timers
-            state = ClockState::default();
+            state = ClockState::new_system();
         }
 
         let clock = Clock(state.clone());
