@@ -212,7 +212,7 @@ mod tests {
         let props = BackoffOptions::default();
 
         assert_eq!(props.backoff_type, Backoff::Exponential);
-        assert_eq!(props.base_delay, Duration::from_secs(2));
+        assert_eq!(props.base_delay, Duration::from_millis(10));
         assert_eq!(props.max_delay, None);
         assert!(props.use_jitter);
     }

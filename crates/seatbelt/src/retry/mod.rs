@@ -65,7 +65,7 @@
 //!    is used directly.
 //!
 //! 2. **Backoff Strategy**: When no recovery delay is specified, delays are calculated using
-//!    the configured backoff strategy (Constant, Linear, or Exponential with default `2s` base delay).
+//!    the configured backoff strategy (Constant, Linear, or Exponential with default `10ms` base delay).
 //!
 //! # Defaults
 //!
@@ -74,14 +74,15 @@
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
 //! | Max retry attempts | `3` (4 total) | Maximum retry attempts plus original call | [`max_retry_attempts`][RetryLayer::max_retry_attempts], [`infinite_retry_attempts`][RetryLayer::infinite_retry_attempts] |
-//! | Base delay | `2` seconds | Base delay used for backoff calculations | [`base_delay`][RetryLayer::base_delay] |
+//! | Base delay | `10` milliseconds | Base delay used for backoff calculations | [`base_delay`][RetryLayer::base_delay] |
 //! | Backoff strategy | `Exponential` | Exponential backoff with base multiplier of 2 | [`backoff`][RetryLayer::backoff] |
 //! | Jitter | `Enabled` | Adds randomness to delays to prevent thundering herds | [`use_jitter`][RetryLayer::use_jitter] |
 //! | Max delay | `None` | No limit on maximum delay between retries | [`max_delay`][RetryLayer::max_delay] |
 //! | Enable condition | Always enabled | Retry protection is applied to all requests | [`enable_if`][RetryLayer::enable_if], [`enable_always`][RetryLayer::enable_always], [`disable`][RetryLayer::disable] |
 //!
-//! These defaults provide a reasonable starting point for most use cases, offering a balance
-//! between resilience and avoiding an excessive load on downstream services.
+//! The default base delay is optimized for **service-to-service** communication where low latency
+//! is critical. For **client-to-service** scenarios (e.g., mobile apps, web frontends), consider
+//! increasing the base delay to 1-2 seconds using [`base_delay`][RetryLayer::base_delay].
 //!
 //! # Telemetry
 //!

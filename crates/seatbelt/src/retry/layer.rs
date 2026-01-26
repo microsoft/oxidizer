@@ -109,7 +109,9 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// - **Linear**: Initial delay; subsequent delays are `base_delay × attempt_number`
     /// - **Exponential**: Initial delay; subsequent delays grow exponentially
     ///
-    /// **Default**: 2 seconds
+    /// **Default**: 10 milliseconds (optimized for service-to-service communication)
+    ///
+    /// For client-to-service scenarios, consider increasing to 1-2 seconds.
     #[must_use]
     pub fn base_delay(mut self, delay: Duration) -> Self {
         self.backoff.base_delay = delay;
@@ -531,7 +533,7 @@ mod tests {
 
         assert_eq!(layer.max_attempts, MaxAttempts::Finite(4)); // 3 retries + 1 original = 4 total
         assert!(matches!(layer.backoff.backoff_type, Backoff::Exponential));
-        assert_eq!(layer.backoff.base_delay, Duration::from_secs(2));
+        assert_eq!(layer.backoff.base_delay, Duration::from_millis(10));
         assert!(layer.backoff.max_delay.is_none());
         assert!(layer.backoff.use_jitter); // Default is true
         assert!(layer.clone_input.is_none());

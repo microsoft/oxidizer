@@ -13,12 +13,15 @@ use crate::retry::Backoff;
 /// to avoid thundering herds.
 pub(super) const DEFAULT_BACKOFF: Backoff = Backoff::Exponential;
 
-/// Base delay for the backoff schedule; conservative 2 seconds by default.
+/// Base delay for the backoff schedule; 10 milliseconds by default.
 ///
-/// A `2s` starting delay prevents aggressive retry storms during partial outages
-/// while still enabling fast recovery for short-lived failures. Workloads with
-/// different needs can override this via configuration.
-pub(super) const DEFAULT_BASE_DELAY: Duration = Duration::from_secs(2);
+/// This default is optimized for **service-to-service** communication where low
+/// latency is critical and transient failures are typically short-lived.
+///
+/// For **client-to-service** scenarios (e.g., mobile apps, web frontends), consider
+/// increasing the base delay to 1-2 seconds to reduce load on potentially struggling
+/// services and improve overall system stability.
+pub(super) const DEFAULT_BASE_DELAY: Duration = Duration::from_millis(10);
 
 /// Enable jitter by default to de-synchronize clients and reduce contention.
 ///

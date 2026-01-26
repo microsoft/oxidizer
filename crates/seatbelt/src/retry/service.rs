@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(retry.telemetry.pipeline_name.to_string(), "test_pipeline");
         assert_eq!(retry.telemetry.strategy_name.to_string(), "test_retry");
         assert_eq!(retry.max_attempts, MaxAttempts::Finite(4));
-        assert_eq!(retry.backoff.0.base_delay, Duration::from_secs(2));
+        assert_eq!(retry.backoff.0.base_delay, Duration::from_millis(10));
         assert_eq!(retry.backoff.0.backoff_type, Backoff::Exponential);
         assert!(retry.backoff.0.use_jitter);
         assert!(retry.on_retry.is_none());
@@ -383,10 +383,10 @@ mod tests {
         assert_eq!(
             delays.lock().unwrap().to_vec(),
             vec![
-                Duration::from_secs(2),
-                Duration::from_secs(4),
-                Duration::from_secs(6),
-                Duration::from_secs(8),
+                Duration::from_millis(10),
+                Duration::from_millis(20),
+                Duration::from_millis(30),
+                Duration::from_millis(40),
             ]
         );
     }
