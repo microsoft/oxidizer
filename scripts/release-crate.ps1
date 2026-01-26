@@ -341,6 +341,11 @@ function Update-CrateVersion {
     $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
     (Get-Content $rootCargoToml -Raw) -replace $regex, $newVersion | Set-Content $rootCargoToml -NoNewline
 
+    cargo check -p $crateName --quiet | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Cargo check failed after version update. Please verify the changes." -ErrorAction Stop
+    }
+
     return $newVersion
 }
 
