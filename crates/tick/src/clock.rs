@@ -581,17 +581,17 @@ mod tests {
     fn owners_count() {
         let (clock, driver) = InactiveClock::default().activate();
 
-        assert_eq!(clock.0.ownership_count(), 2);
+        assert!(!clock.0.is_unique());
         drop(clock);
-        assert_eq!(driver.0.ownership_count(), 1);
+        assert!(driver.0.is_unique());
     }
 
     #[test]
     fn owners_count_clock_control() {
         let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
 
-        assert_eq!(clock.0.ownership_count(), 2);
+        assert!(!driver.0.is_unique());
         drop(clock);
-        assert_eq!(driver.0.ownership_count(), 1);
+        assert!(driver.0.is_unique());
     }
 }

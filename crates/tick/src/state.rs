@@ -28,11 +28,11 @@ impl ClockState {
         }
     }
 
-    pub fn ownership_count(&self) -> usize {
+    pub fn is_unique(&self) -> bool {
         match self {
-            Self::System(timers) => timers.ownership_count(),
+            Self::System(timers) => timers.is_unique(),
             #[cfg(any(feature = "test-util", test))]
-            Self::ClockControl(control) => control.ownership_count(),
+            Self::ClockControl(control) => control.is_unique(),
         }
     }
 }
@@ -69,8 +69,8 @@ impl SynchronizedTimers {
         self.with_timers(|timers| timers.advance_timers(now))
     }
 
-    pub fn ownership_count(&self) -> usize {
-        Arc::strong_count(&self.timers)
+    pub fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.timers) == 1
     }
 }
 

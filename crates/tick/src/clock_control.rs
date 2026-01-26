@@ -364,8 +364,8 @@ impl ClockControl {
         f(&mut self.state.lock().expect("acquiring lock must always succeed"))
     }
 
-    pub(crate) fn ownership_count(&self) -> usize {
-        Arc::strong_count(&self.state)
+    pub(crate) fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.state) == 1
     }
 }
 

@@ -39,7 +39,7 @@ impl ClockDriver {
         match next_timer {
             Some(next) => Ok(Some(next)),
             // Check if this is the last reference to the clock state
-            None if self.0.ownership_count() == 1 => Err(ClockGone::new()),
+            None if self.0.is_unique() => Err(ClockGone::new()),
             None => Ok(None),
         }
     }
