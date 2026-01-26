@@ -49,11 +49,9 @@ impl HalfOpenMode {
     /// metrics indicate that the failure rate is below the configured threshold. If any probing stage
     /// fails, the circuit reopens immediately and the cycle starts over.
     ///
-    /// # Arguments
-    ///
-    /// - `stage_duration` - Optional custom stage duration for each probing stage. If not provided,
-    ///   the value of [`break_duration`][crate::breaker::BreakerLayer::break_duration] is used. The provided stage
-    ///   duration is clamped to a minimum of 1 second.
+    /// The optional `stage_duration` specifies how long each probing stage lasts. If not
+    /// provided, the value of [`break_duration`][crate::breaker::BreakerLayer::break_duration]
+    /// is used. The provided stage duration is clamped to a minimum of 1 second.
     #[must_use]
     pub fn reliable(stage_duration: impl Into<Option<Duration>>) -> Self {
         Self {

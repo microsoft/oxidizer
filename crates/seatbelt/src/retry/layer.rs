@@ -132,13 +132,10 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// Sets the input cloning function.
     ///
     /// Called before each retry attempt to produce a fresh input value, since
-    /// the inner service consumes the input on each attempt. Return `Some(cloned_input)`
-    /// to proceed with retry, or `None` to abort and return the last failed result.
-    ///
-    /// # Arguments
-    ///
-    /// * `clone_fn` - Function that takes a mutable reference to the input and [`CloneArgs`]
-    ///   containing context about the retry attempt, and returns an optional cloned input
+    /// the inner service consumes the input on each attempt. The `clone_fn` receives
+    /// a mutable reference to the input and [`CloneArgs`] containing context about
+    /// the retry attempt. Return `Some(cloned_input)` to proceed with retry, or `None`
+    /// to abort and return the last failed result.
     #[must_use]
     pub fn clone_input_with(
         mut self,
@@ -172,15 +169,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     ///
     /// This function determines whether a specific output should trigger a retry
     /// by examining the output and returning a [`RecoveryInfo`] classification.
-    ///
-    /// The function receives the output and [`RecoveryArgs`] with context
-    /// about the current attempt.
-    ///
-    /// # Arguments
-    ///
-    /// * `recover_fn` - Function that takes a reference to the output and
-    ///   [`RecoveryArgs`] containing retry attempt context, and returns
-    ///   a [`RecoveryInfo`] decision
+    /// The `recover_fn` receives a reference to the output and [`RecoveryArgs`]
+    /// with context about the current attempt, and returns a [`RecoveryInfo`] decision.
     #[must_use]
     pub fn recovery_with(
         mut self,
@@ -214,17 +204,12 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// Configures a callback invoked before each retry attempt.
     ///
     /// This callback is useful for logging, metrics, or other observability
-    /// purposes. It receives the output that triggered the retry and
-    /// [`OnRetryArgs`] with detailed retry information.
+    /// purposes. The `retry_fn` receives the output that triggered the retry
+    /// and [`OnRetryArgs`] with detailed retry information.
     ///
     /// The callback does not affect retry behavior - it's purely for observation.
     ///
     /// **Default**: None (no observability by default)
-    ///
-    /// # Arguments
-    ///
-    /// * `retry_fn` - Function that takes a reference to the output and
-    ///   [`OnRetryArgs`] containing retry context information
     #[must_use]
     pub fn on_retry(mut self, retry_fn: impl Fn(&Out, OnRetryArgs) + Send + Sync + 'static) -> Self {
         self.on_retry = Some(OnRetry::new(retry_fn));
@@ -234,14 +219,11 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// Optionally enables the retry middleware based on a condition.
     ///
     /// When disabled, requests pass through without retry protection.
-    /// This call replaces any previous condition.
+    /// This call replaces any previous condition. The `is_enabled` function
+    /// receives a reference to the input and returns `true` if retry protection
+    /// should be enabled for this request.
     ///
     /// **Default**: Always enabled
-    ///
-    /// # Arguments
-    ///
-    /// * `is_enabled` - Function that takes a reference to the input and returns
-    ///   `true` if retry protection should be enabled for this request
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         self.enable_if = EnableIf::new(is_enabled);
@@ -283,11 +265,10 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// mechanism can attempt the operation against a different resource in subsequent
     /// attempts, potentially allowing the operation to succeed despite the unavailability.
     ///
+    /// Set `enable` to `true` to enable unavailable recovery, or `false` to treat
+    /// unavailable responses as permanent failures.
+    ///
     /// **Default**: false (unavailable responses are not retried)
-    ///
-    /// # Arguments
-    ///
-    /// * `enable` - `true` to enable unavailable recovery, `false` to treat unavailable responses as permanent failures
     ///
     /// # Example
     ///
@@ -323,7 +304,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     ///
     /// This function is called when the original input could not be cloned for a retry
     /// attempt (i.e., when [`clone_input_with`][RetryLayer::clone_input_with] returns `None`).
-    /// The restore function receives the output from the failed attempt and can attempt
+    /// The `restore_fn` receives a mutable reference to the output from the failed attempt
+    /// and [`RestoreInputArgs`] containing context about the retry attempt. It can attempt
     /// to extract and reconstruct the input for the next retry.
     ///
     /// This is particularly useful when a service is unavailable and the input was not actually
@@ -337,12 +319,6 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     ///
     /// This enables retry scenarios where input cloning is expensive or impossible, but
     /// the input can be extracted from error responses or failure contexts.
-    ///
-    /// # Arguments
-    ///
-    /// * `restore_fn` - Function that takes the output and [`RestoreInputArgs`] containing
-    ///   context about the retry attempt, and returns either a restored input and modified
-    ///   output, or just the output to abort retry
     ///
     /// # Example
     ///
