@@ -11,7 +11,7 @@ use crate::{runtime::ClockGone, state::ClockState};
 /// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
 /// ensure timers fire at the correct time.
 #[derive(Debug)]
-pub struct ClockDriver(pub(super) ClockState);
+pub struct ClockDriver(pub(crate) ClockState);
 
 impl ClockDriver {
     pub(super) const fn new(state: ClockState) -> Self {

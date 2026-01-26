@@ -435,7 +435,7 @@ mod tests {
 
     use std::{fmt::Debug, thread::sleep};
 
-    use crate::ClockControl;
+    use crate::{ClockControl, runtime::InactiveClock};
 
     use super::*;
 
@@ -575,5 +575,23 @@ mod tests {
     fn as_ref_ok() {
         let clock = Clock::new_frozen();
         let _: &Clock = clock.as_ref();
+    }
+
+    #[test]
+    fn owners_count() {
+        let (clock, driver) = InactiveClock::default().activate();
+
+        assert_eq!(clock.0.ownership_count(), 2);
+        drop(clock);
+        assert_eq!(driver.0.ownership_count(), 1);
+    }
+
+    #[test]
+    fn owners_count_clock_control() {
+        let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
+
+        assert_eq!(clock.0.ownership_count(), 2);
+        drop(clock);
+        assert_eq!(driver.0.ownership_count(), 1);
     }
 }

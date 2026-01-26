@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-
 use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::ClockState;
