@@ -55,7 +55,7 @@ futures = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
-insta = { version = "1.44.1", default-features = false }
+insta = { version = "1.46.1", default-features = false }
 jiff = { version = "0.2.16", default-features = false }
 libc = { version = "0.2.178", default-features = false }
 many_cpus = { version = "1.1.0", default-features = false }
