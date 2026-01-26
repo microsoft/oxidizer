@@ -7,7 +7,7 @@ use layered::Service;
 use tick::Clock;
 
 use super::{
-    CircuitEngine, CircuitLayer, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed, OnClosedArgs,
+    CircuitEngine, BreakerLayer, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed, OnClosedArgs,
     OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput, RejectedInputArgs,
     ShouldRecover,
 };
@@ -15,19 +15,19 @@ use crate::{NotSet, utils::EnableIf};
 
 /// Applies circuit breaker logic to prevent cascading failures.
 ///
-/// `Circuit` wraps an inner [`Service`] and monitors the success and failure rates
+/// `Breaker` wraps an inner [`Service`] and monitors the success and failure rates
 /// of operations. When the failure rate exceeds a configured threshold, the circuit breaker opens
 /// and temporarily blocks requests to give the downstream service time to recover.
 ///
 /// This middleware is designed to be used across services, applications, and libraries
 /// to prevent cascading failures in distributed systems.
 ///
-/// `Circuit` is configured by calling [`Circuit::layer`] and using the
-/// builder methods on the returned [`CircuitLayer`] instance.
+/// `Breaker` is configured by calling [`Breaker::layer`] and using the
+/// builder methods on the returned [`BreakerLayer`] instance.
 ///
-/// For comprehensive examples and usage patterns, see the [`circuit_breaker` module][crate::circuit_breaker] documentation.
+/// For comprehensive examples and usage patterns, see the [`breaker` module][crate::breaker] documentation.
 #[derive(Debug)]
-pub struct Circuit<In, Out, S> {
+pub struct Breaker<In, Out, S> {
     pub(super) inner: S,
     pub(super) clock: Clock,
     pub(super) recovery: ShouldRecover<Out>,
@@ -40,20 +40,20 @@ pub struct Circuit<In, Out, S> {
     pub(super) on_probing: Option<OnProbing<In>>,
 }
 
-impl<In, Out> Circuit<In, Out, ()> {
+impl<In, Out> Breaker<In, Out, ()> {
     /// Creates a new circuit breaker layer with the specified name and options.
     ///
-    /// Returns a [`CircuitLayer`] that must be configured with required parameters
+    /// Returns a [`BreakerLayer`] that must be configured with required parameters
     /// before it can be used to build a circuit breaker service.
     pub fn layer(
         name: impl Into<std::borrow::Cow<'static, str>>,
         context: &crate::ResilienceContext<In, Out>,
-    ) -> CircuitLayer<In, Out, NotSet, NotSet> {
-        CircuitLayer::new(name.into(), context)
+    ) -> BreakerLayer<In, Out, NotSet, NotSet> {
+        BreakerLayer::new(name.into(), context)
     }
 }
 
-impl<In, Out: Send, S> Service<In> for Circuit<In, Out, S>
+impl<In, Out: Send, S> Service<In> for Breaker<In, Out, S>
 where
     In: Send,
     S: Service<In, Out = Out>,
@@ -91,7 +91,7 @@ where
     }
 }
 
-impl<In, Out, S> Circuit<In, Out, S> {
+impl<In, Out, S> Breaker<In, Out, S> {
     #[inline]
     fn before_execute(
         &self,
@@ -170,15 +170,15 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::circuit_breaker::constants::DEFAULT_BREAK_DURATION;
-    use crate::circuit_breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
+    use crate::breaker::constants::DEFAULT_BREAK_DURATION;
+    use crate::breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
     use crate::{RecoveryInfo, ResilienceContext, Set};
     use layered::Layer;
 
     #[test]
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
-        let layer: CircuitLayer<String, String, NotSet, NotSet> = Circuit::layer("test_breaker", &context);
+        let layer: BreakerLayer<String, String, NotSet, NotSet> = Breaker::layer("test_breaker", &context);
         let layer = layer
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input(|_, _| "rejected".to_string());
@@ -189,9 +189,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn circuit_breaker_disabled_no_inner_calls() {
+    async fn breaker_disabled_no_inner_calls() {
         let clock = Clock::new_frozen();
-        let service = create_ready_circuit_breaker_layer(&clock)
+        let service = create_ready_breaker_layer(&clock)
             .disable()
             .layer(Execute::new(move |v: String| async move { v }));
 
@@ -203,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn passthrough_behavior() {
         let clock = Clock::new_frozen();
-        let service = create_ready_circuit_breaker_layer(&clock).layer(Execute::new(move |v: String| async move { v }));
+        let service = create_ready_breaker_layer(&clock).layer(Execute::new(move |v: String| async move { v }));
 
         let result = service.execute("test".to_string()).await;
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn before_execute_accepted() {
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_probing(|_, _| panic!("should not be called"))
             .layer(Execute::new(move |v: String| async move { v }));
 
@@ -235,7 +235,7 @@ mod tests {
         let probing_called = Arc::new(AtomicBool::new(false));
         let probing_called_clone = Arc::clone(&probing_called);
 
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_probing(move |value, _| {
                 assert_eq!(value, "test");
                 probing_called.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn before_execute_rejected() {
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .rejected_input(|_, _| "rejected".to_string())
             .layer(Execute::new(move |v: String| async move { v }));
 
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn after_execute_unchanged() {
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_opened(|_, _| panic!("should not be called"))
             .on_closed(|_, _| panic!("should not be called"))
             .layer(Execute::new(move |v: String| async move { v }));
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn after_execute_reopened() {
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_opened(|_, _| panic!("should not be called"))
             .on_closed(|_, _| panic!("should not be called"))
             .layer(Execute::new(move |v: String| async move { v }));
@@ -313,7 +313,7 @@ mod tests {
         let opened_called = Arc::new(AtomicBool::new(false));
         let opened_called_clone = Arc::clone(&opened_called);
 
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_opened(move |output, _| {
                 assert_eq!(output, "error_response");
                 opened_called.store(true, Ordering::SeqCst);
@@ -342,7 +342,7 @@ mod tests {
         let closed_called = Arc::new(AtomicBool::new(false));
         let closed_called_clone = Arc::clone(&closed_called);
 
-        let service = create_ready_circuit_breaker_layer(&Clock::new_frozen())
+        let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_opened(|_, _| panic!("on_opened should not be called"))
             .on_closed(move |output, _| {
                 assert_eq!(output, "success_response");
@@ -379,7 +379,7 @@ mod tests {
         let clock_control = ClockControl::new();
 
         // Create a service that transforms input and can trigger different circuit states
-        let service = create_ready_circuit_breaker_layer(&clock_control.to_clock())
+        let service = create_ready_breaker_layer(&clock_control.to_clock())
             .min_throughput(5)
             .half_open_mode(HalfOpenMode::quick())
             .on_probing(move |input, _| {
@@ -432,7 +432,7 @@ mod tests {
     #[tokio::test]
     async fn different_partitions_ensure_isolated() {
         let clock = Clock::new_frozen();
-        let service = create_ready_circuit_breaker_layer(&clock)
+        let service = create_ready_breaker_layer(&clock)
             .partition_key(|input| PartitionKey::from(input.clone()))
             .min_throughput(3)
             .recovery_with(|_, _| RecoveryInfo::retry())
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn circuit_breaker_emits_logs() {
+    async fn breaker_emits_logs() {
         use tracing_subscriber::util::SubscriberInitExt;
 
         use crate::testing::LogCapture;
@@ -467,7 +467,7 @@ mod tests {
             .name("log_test_pipeline")
             .use_logs();
 
-        let service = Circuit::layer("log_test_circuit", &context)
+        let service = Breaker::layer("log_test_circuit", &context)
             .min_throughput(3)
             .half_open_mode(HalfOpenMode::quick())
             .recovery_with(|output, _| {
@@ -486,7 +486,7 @@ mod tests {
         }
 
         // Verify circuit opened log
-        log_capture.assert_contains("seatbelt::circuit");
+        log_capture.assert_contains("seatbelt::breaker");
         log_capture.assert_contains("log_test_pipeline");
         log_capture.assert_contains("log_test_circuit");
         log_capture.assert_contains("circuit_breaker.state=\"open\"");
@@ -505,9 +505,9 @@ mod tests {
         log_capture.assert_contains("circuit_breaker.open.duration");
     }
 
-    fn create_ready_circuit_breaker_layer(clock: &Clock) -> CircuitLayer<String, String, Set, Set> {
+    fn create_ready_breaker_layer(clock: &Clock) -> BreakerLayer<String, String, Set, Set> {
         let context = ResilienceContext::<String, String>::new(clock.clone()).name("test_pipeline");
-        Circuit::layer("test_breaker", &context)
+        Breaker::layer("test_breaker", &context)
             .recovery_with(|output, _| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

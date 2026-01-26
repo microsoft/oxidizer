@@ -5,7 +5,7 @@ use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
-use seatbelt::circuit_breaker::Circuit;
+use seatbelt::breaker::Breaker;
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 
@@ -13,13 +13,13 @@ use tick::Clock;
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn entry(c: &mut Criterion) {
-    let mut group = c.benchmark_group("circuit_breaker");
+    let mut group = c.benchmark_group("breaker");
     let session = Session::new();
 
     // No circuit breaker
     let service = Execute::new(|_input: Input| async move { Output });
-    let operation = session.operation("no-circuit-breaker");
-    group.bench_function("no-circuit-breaker", |b| {
+    let operation = session.operation("no-breaker");
+    group.bench_function("no-breaker", |b| {
         b.iter(|| {
             let _span = operation.measure_thread();
             _ = block_on(service.execute(Input));
@@ -30,7 +30,7 @@ fn entry(c: &mut Criterion) {
     let context = ResilienceContext::new(Clock::new_frozen());
 
     let service = (
-        Circuit::layer("bench", &context)
+        Breaker::layer("bench", &context)
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input_error(|_input, _args| Output)
             .min_throughput(1000), // High threshold to keep circuit closed
@@ -38,8 +38,8 @@ fn entry(c: &mut Criterion) {
     )
         .into_service();
 
-    let operation = session.operation("with-circuit-breaker");
-    group.bench_function("with-circuit-breaker", |b| {
+    let operation = session.operation("with-breaker");
+    group.bench_function("with-breaker", |b| {
         b.iter(|| {
             let _span = operation.measure_thread();
             _ = block_on(service.execute(Input));

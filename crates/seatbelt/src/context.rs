@@ -39,7 +39,7 @@ impl<In, Out> ResilienceContext<In, Out> {
 
     /// Get the configured clock for timing operations.
     #[must_use]
-    #[cfg(any(feature = "retry", feature = "circuit-breaker", feature = "timeout", test))]
+    #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
     pub(crate) fn get_clock(&self) -> &Clock {
         &self.clock
     }
@@ -75,7 +75,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         not(any(feature = "metrics", feature = "logs", test)),
         expect(unused_variables, reason = "unused when logs nor metrics are used")
     )]
-    #[cfg(any(feature = "retry", feature = "circuit-breaker", feature = "timeout", test))]
+    #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
     pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {
         crate::utils::TelemetryHelper {
             #[cfg(any(feature = "metrics", test))]

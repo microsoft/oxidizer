@@ -9,7 +9,7 @@
     not(all(
         feature = "retry",
         feature = "timeout",
-        feature = "circuit-breaker",
+        feature = "breaker",
         feature = "metrics",
         feature = "logs"
     )),
@@ -106,7 +106,7 @@
 //!
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
-//! - [`circuit_breaker`] - Middleware that prevents cascading failures.
+//! - [`breaker`] - Middleware that prevents cascading failures.
 //!
 //! # Features
 //!
@@ -115,7 +115,7 @@
 //! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
-//! - **`circuit-breaker`** - Enables the [`circuit_breaker`] middleware for preventing cascading failures.
+//! - **`circuit-breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
@@ -134,13 +134,13 @@ pub mod timeout;
 #[cfg(any(feature = "retry", test))]
 pub mod retry;
 
-#[cfg(any(feature = "circuit-breaker", test))]
-pub mod circuit_breaker;
+#[cfg(any(feature = "breaker", test))]
+pub mod breaker;
 
-#[cfg(any(feature = "retry", feature = "circuit-breaker", test))]
+#[cfg(any(feature = "retry", feature = "breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "circuit-breaker", feature = "timeout", test))]
+#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]

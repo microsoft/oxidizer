@@ -6,8 +6,8 @@
 //! This module provides automatic circuit breaking capabilities with configurable failure
 //! thresholds, break duration, and comprehensive telemetry. The primary types are:
 //!
-//! - [`Circuit`] is the middleware that wraps an inner service and monitors failure rates
-//! - [`CircuitLayer`] is used to configure and construct the circuit breaker middleware
+//! - [`Breaker`] is the middleware that wraps an inner service and monitors failure rates
+//! - [`BreakerLayer`] is used to configure and construct the circuit breaker middleware
 //!
 //! A circuit breaker monitors the success and failure rates of operations and can temporarily
 //! block requests when the failure rate exceeds a configured threshold. This prevents cascading failures
@@ -18,13 +18,13 @@
 //! ```rust
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::circuit_breaker::Circuit;
+//! # use seatbelt::breaker::Breaker;
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
-//!     Circuit::layer("circuit_breaker", &context)
+//!     Breaker::layer("breaker", &context)
 //!         // Required: determine if output indicates a failure by using recovery metadata
 //!         .recovery_with(|result: &Result<String, String>, _| match result {
 //!             Ok(_) => RecoveryInfo::never(),
@@ -45,14 +45,14 @@
 //!
 //! # Configuration
 //!
-//! The [`CircuitLayer`] uses a type state pattern to enforce that all required properties
+//! The [`BreakerLayer`] uses a type state pattern to enforce that all required properties
 //! are configured before the layer can be built. This compile-time safety ensures that you cannot
 //! accidentally create a circuit breaker layer without properly specifying recovery logic and
 //! rejected input handling. The properties that must be configured are:
 //!
-//! - [`recovery`][CircuitLayer::recovery]: Detects the recovery classification for output.
+//! - [`recovery`][BreakerLayer::recovery]: Detects the recovery classification for output.
 //!   This is used to determine if an operation succeeded or failed.
-//! - [`rejected_input`][CircuitLayer::rejected_input]: Provide the output to return when the
+//! - [`rejected_input`][BreakerLayer::rejected_input]: Provide the output to return when the
 //!   circuit is open and execution is being rejected.
 //!
 //! Each circuit breaker layer requires an identifier for telemetry purposes. This identifier
@@ -60,7 +60,7 @@
 //!
 //! # Thread Safety
 //!
-//! The [`Circuit`] type is thread-safe and implements both `Send` and `Sync` as enforced
+//! The [`Breaker`] type is thread-safe and implements both `Send` and `Sync` as enforced
 //! by the `Service` trait it implements. This allows circuit breaker middleware to be safely
 //! shared across multiple threads and used in concurrent environments.
 //!
@@ -94,17 +94,17 @@
 //! - Failures are tracked and evaluated against the failure threshold
 //! - When the failure threshold is exceeded, transitions to **Open**
 //! - You can observe transitions into the closed state by providing
-//!   the [`on_closed`][CircuitLayer::on_closed] callback.
+//!   the [`on_closed`][BreakerLayer::on_closed] callback.
 //!
 //! ## Open State
 //!
 //! When the circuit is open:
 //!
-//! - Requests are immediately rejected with the output provided by [`rejected_input`][CircuitLayer::rejected_input]
+//! - Requests are immediately rejected with the output provided by [`rejected_input`][BreakerLayer::rejected_input]
 //! - No calls are made to the underlying service
 //! - After the break duration elapsed, transitions to **Half-Open**
 //! - You can observe transitions into the open state by providing
-//!   the [`on_opened`][CircuitLayer::on_opened] callback.
+//!   the [`on_opened`][BreakerLayer::on_opened] callback.
 //!
 //! ## Half-Open State
 //!
@@ -116,9 +116,9 @@
 //! - If failures continue, the circuit stays in the Half-Open state until the underlying service recovers.
 //!   Half-open state respects the break duration before allowing more probing requests.
 //! - You can observe when the circuit is probing in half-open state by providing
-//!   the [`on_probing`][CircuitLayer::on_probing] callback.
+//!   the [`on_probing`][BreakerLayer::on_probing] callback.
 //! - You can configure the probing behavior and the sensitivity of how quickly the circuit
-//!   closes again after successful probes by using [`half_open_mode`][CircuitLayer::half_open_mode]
+//!   closes again after successful probes by using [`half_open_mode`][BreakerLayer::half_open_mode]
 //!
 //! # Recovery Classification
 //!
@@ -131,7 +131,7 @@
 //! # Partitioning
 //!
 //! Circuit breakers can maintain separate circuit states for different logical groups of requests
-//! by providing a [`partition_key`][CircuitLayer::partition_key] function. This allows
+//! by providing a [`partition_key`][BreakerLayer::partition_key] function. This allows
 //! the creation of multiple independent circuits based on the input properties.
 //!
 //! For example, a typical scenario where partitioning is useful is HTTP request where the partition key
@@ -148,13 +148,13 @@
 //!
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
-//! | Failure threshold | `0.1` (10%) | Circuit opens when failure rate exceeds this percentage | [`failure_threshold`][CircuitLayer::failure_threshold] |
-//! | Minimum throughput | `100` requests | Minimum request volume required before circuit can open | [`min_throughput`][CircuitLayer::min_throughput] |
-//! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][CircuitLayer::sampling_duration] |
-//! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][CircuitLayer::break_duration] |
-//! | Partitioning | Single global circuit | All requests share the same circuit breaker state | [`partition_key`][CircuitLayer::partition_key] |
-//! | Half-open mode | `Reliable` | Gradual recovery with increasing probe percentages | [`half_open_mode`][CircuitLayer::half_open_mode] |
-//! | Enable condition | Always enabled | Circuit breaker protection is applied to all requests | [`enable_if`][CircuitLayer::enable_if], [`enable_always`][CircuitLayer::enable_always], [`disable`][CircuitLayer::disable] |
+//! | Failure threshold | `0.1` (10%) | Circuit opens when failure rate exceeds this percentage | [`failure_threshold`][BreakerLayer::failure_threshold] |
+//! | Minimum throughput | `100` requests | Minimum request volume required before circuit can open | [`min_throughput`][BreakerLayer::min_throughput] |
+//! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][BreakerLayer::sampling_duration] |
+//! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
+//! | Partitioning | Single global circuit | All requests share the same circuit breaker state | [`partition_key`][BreakerLayer::partition_key] |
+//! | Half-open mode | `Reliable` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
+//! | Enable condition | Always enabled | Circuit breaker protection is applied to all requests | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
 //! These defaults provide a reasonable starting point for most use cases, offering a balance
 //! between resilience and responsiveness to service recovery.
@@ -167,14 +167,14 @@
 //! - **When**: Emitted when circuit state transitions occur and when requests are rejected
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
-//!   - `resilience.strategy.name`: Circuit breaker identifier from [`Circuit::layer`]
+//!   - `resilience.strategy.name`: Circuit breaker identifier from [`Breaker::layer`]
 //!   - `resilience.event.name`: One of:
 //!     - `circuit_opened`: When the circuit transitions to open state due to failure threshold being exceeded
 //!     - `circuit_closed`: When the circuit transitions to closed state after successful probing
 //!     - `circuit_rejected`: When a request is rejected due to the circuit being in open state
 //!     - `circuit_probe`: When a probing request is executed in half-open state
-//!   - `resilience.circuit_breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
-//!   - `resilience.circuit_breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
+//!   - `resilience.breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
+//!   - `resilience.breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
 //!
 //! Additional structured logging events are emitted with detailed health metrics (failure rate, throughput) for circuit state transitions.
 //!
@@ -187,7 +187,7 @@
 //! ```rust
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::circuit_breaker::Circuit;
+//! # use seatbelt::breaker::Breaker;
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware. The clock is runtime-specific and
@@ -195,7 +195,7 @@
 //! let context = ResilienceContext::new(&clock).name("example");
 //!
 //! let stack = (
-//!     Circuit::layer("my_breaker", &context)
+//!     Breaker::layer("my_breaker", &context)
 //!         // Required: determine if output indicates failure
 //!         .recovery_with(|result: &Result<String, String>, _args| match result {
 //!             // These are demonstrative, real code will have more meaningful recovery detection
@@ -228,14 +228,14 @@
 //! # use std::time::Duration;
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::circuit_breaker::{Circuit,  PartitionKey, HalfOpenMode};
+//! # use seatbelt::breaker::{Breaker, PartitionKey, HalfOpenMode};
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware.
 //! let context = ResilienceContext::new(&clock).name("advanced_example");
 //!
 //! let stack = (
-//!     Circuit::layer("advanced_breaker", &context)
+//!     Breaker::layer("advanced_breaker", &context)
 //!         // Required: determine if output indicates failure
 //!         .recovery_with(|result: &Result<String, String>, _args| match result {
 //!             Err(msg) if msg.contains("rate_limit") => RecoveryInfo::unavailable(),
@@ -291,9 +291,9 @@ mod service;
 pub use args::{OnClosedArgs, OnOpenedArgs, OnProbingArgs, RecoveryArgs, RejectedInputArgs};
 pub(super) use callbacks::*;
 #[doc(inline)]
-pub use layer::CircuitLayer;
+pub use layer::BreakerLayer;
 #[doc(inline)]
-pub use service::Circuit;
+pub use service::Breaker;
 
 mod execution_result;
 pub(super) use execution_result::ExecutionResult;

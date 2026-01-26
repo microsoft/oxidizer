@@ -6,7 +6,7 @@ name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
 version = "0.2.0"
 readme = "README.md"
-keywords = ["oxidizer", "resilience", "layered", "recovery", "retry", "circuit-breaker"]
+keywords = ["oxidizer", "resilience", "layered", "recovery", "retry", "breaker"]
 categories = ["data-structures"]
 
 edition.workspace = true
@@ -35,7 +35,7 @@ all-features = true
 default = []
 timeout = []
 retry = ["dep:fastrand"]
-circuit-breaker = ["dep:fastrand"]
+breaker = ["dep:fastrand"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 
@@ -91,8 +91,8 @@ name = "resilience_pipeline"
 required-features = ["retry", "timeout"]
 
 [[example]]
-name = "circuit_breaker"
-required-features = ["circuit-breaker", "metrics"]
+name = "breaker"
+required-features = ["breaker", "metrics"]
 
 [[bench]]
 name = "observability"
@@ -110,9 +110,9 @@ harness = false
 required-features = ["retry"]
 
 [[bench]]
-name = "circuit_breaker"
+name = "breaker"
 harness = false
-required-features = ["circuit-breaker"]
+required-features = ["breaker"]
 
 [lints]
 workspace = true

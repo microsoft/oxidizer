@@ -5,7 +5,7 @@ use std::time::Instant;
 use std::vec;
 
 use super::{AllowProbeResult, Probe, ProbeOperation, ProbeOptions, ProbesOptions, ProbingResult};
-use crate::circuit_breaker::ExecutionResult;
+use crate::breaker::ExecutionResult;
 
 /// Manages a sequence of probes.
 #[derive(Debug)]
@@ -56,7 +56,7 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::circuit_breaker::engine::probing::HealthProbeOptions;
+    use crate::breaker::engine::probing::HealthProbeOptions;
 
     #[test]
     fn multiple_probes_ok() {

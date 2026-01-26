@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use super::{AllowProbeResult, ProbeOperation, ProbingResult};
-use crate::circuit_breaker::ExecutionResult;
+use crate::breaker::ExecutionResult;
 
 /// Allows a single probe to get in and based on the result either closes the circuit
 /// or goes back to open state.

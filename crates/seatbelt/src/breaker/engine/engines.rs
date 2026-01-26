@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use tick::Clock;
 
-use crate::circuit_breaker::constants::ERR_POISONED_LOCK;
-use crate::circuit_breaker::{Engine, EngineCore, EngineOptions, EngineTelemetry, PartitionKey};
+use crate::breaker::constants::ERR_POISONED_LOCK;
+use crate::breaker::{Engine, EngineCore, EngineOptions, EngineTelemetry, PartitionKey};
 use crate::utils::TelemetryHelper;
 
 /// Manages circuit breaker engines for different partition keys.
@@ -63,8 +63,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::circuit_breaker::HealthMetricsBuilder;
-    use crate::circuit_breaker::engine::probing::ProbesOptions;
+    use crate::breaker::HealthMetricsBuilder;
+    use crate::breaker::engine::probing::ProbesOptions;
     use crate::metrics::create_resilience_event_counter;
 
     #[test]

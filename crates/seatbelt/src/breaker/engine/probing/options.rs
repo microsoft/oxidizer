@@ -4,7 +4,7 @@
 use std::time::Duration;
 use std::vec::IntoIter;
 
-use crate::circuit_breaker::HealthMetricsBuilder;
+use crate::breaker::HealthMetricsBuilder;
 
 /// The minimum throughput during probing stage is set to 1, so at least one request must come
 /// through in each probing stage to evaluate the health.
