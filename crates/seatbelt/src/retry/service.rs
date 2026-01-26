@@ -124,16 +124,14 @@ where
             },
         );
 
-        // Detect if we can recover from output
-        let recovery_kind = match recovery.kind() {
+        // Return early if we cannot recover
+        match recovery.kind() {
             RecoveryKind::Unavailable => {
-                if self.handle_unavailable {
-                    RecoverableKind::Retry
-                } else {
+                if !self.handle_unavailable {
                     return ControlFlow::Break(out);
                 }
             }
-            RecoveryKind::Retry => RecoverableKind::Retry,
+            RecoveryKind::Retry => (),
             // Handle future variants - treat unknown variants as non-recoverable
             RecoveryKind::Never | RecoveryKind::Unknown | _ => return ControlFlow::Break(out),
         };
@@ -154,9 +152,7 @@ where
 
         // At this point, we know that the output is recoverable and that we have more attempts left.
         // Determine the delay before the next attempt based on the recovery kind.
-        let flow_control = match recovery_kind {
-            RecoverableKind::Retry => self.finalize_retryable_attempt(original_input, out, attempt, next_attempt, retry_delay, recovery),
-        };
+        let flow_control = self.finalize_retryable_attempt(original_input, out, attempt, next_attempt, retry_delay, recovery);
 
         // Only ever delay if we have a next attempt
         if matches!(flow_control, ControlFlow::Continue(_)) {
@@ -165,10 +161,6 @@ where
 
         flow_control
     }
-}
-
-enum RecoverableKind {
-    Retry,
 }
 
 impl<In, Out, S> Retry<In, Out, S> {
