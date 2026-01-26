@@ -133,7 +133,7 @@ where
             RecoveryKind::Retry => (),
             // Handle future variants - treat unknown variants as non-recoverable
             RecoveryKind::Never | RecoveryKind::Unknown | _ => return ControlFlow::Break(out),
-        };
+        }
 
         // If no more attempts left, report telemetry, and return the last output
         let Some(next_attempt) = attempt.increment(self.max_attempts) else {
