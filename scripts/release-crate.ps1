@@ -69,6 +69,7 @@ $script:TypeGroupMapping = @{
 
 # Maps the final group key to a user-friendly header in the changelog.
 $script:HeaderNameMapping = @{
+    'breaking'      = '⚠️ Breaking';
     'build'         = '🏗️ Build System';
     'ci'            = '🔄 Continuous Integration';
     'docs'          = '📚 Documentation';
@@ -82,15 +83,15 @@ $script:HeaderNameMapping = @{
 }
 
 # Defines the preferred order for commit type sections in the changelog.
-$script:TypeOrder = @('feat', 'fix', 'perf', 'docs', 'task', 'refactor', 'build', 'ci', 'style')
+$script:TypeOrder = @('breaking', 'feat', 'fix', 'perf', 'docs', 'task', 'refactor', 'build', 'ci', 'style')
 
 # Defines commit types that should be excluded from the changelog.
 $script:IgnoredTypes = @('test')
 
 # --- COMPILED REGEX PATTERNS ---
 
-# Pattern for conventional commit format: type(scope): description
-$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?:\s*(.*)'
+# Pattern for conventional commit format: type(scope)!: description (! indicates breaking change)
+$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?(!)?:\s*(.*)'
 
 # Pattern for PR references: (#123)
 $script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
@@ -230,9 +231,11 @@ function Format-ConventionalCommits {
         $isConventional = $false
 
         $conventionalMatch = $script:ConventionalCommitRegex.Match($message)
+        $isBreaking = $false
         if ($conventionalMatch.Success) {
             $type = $conventionalMatch.Groups[1].Value
-            $description = $conventionalMatch.Groups[2].Value
+            $isBreaking = $conventionalMatch.Groups[2].Value -eq '!'
+            $description = $conventionalMatch.Groups[3].Value
             $isConventional = $true
         }
 
@@ -250,7 +253,14 @@ function Format-ConventionalCommits {
             }
         }
 
-        $groupKey = if ($script:TypeGroupMapping.ContainsKey($type)) { $script:TypeGroupMapping[$type] } else { $type }
+        # Breaking changes are grouped separately, regardless of the commit type
+        $groupKey = if ($isBreaking) {
+            'breaking'
+        } elseif ($script:TypeGroupMapping.ContainsKey($type)) {
+            $script:TypeGroupMapping[$type]
+        } else {
+            $type
+        }
 
         if (-not $groupedCommits.Contains($groupKey)) {
             $groupedCommits[$groupKey] = [System.Collections.ArrayList]::new()
