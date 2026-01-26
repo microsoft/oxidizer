@@ -81,7 +81,7 @@
 //! | Enable condition | Always enabled | Retry protection is applied to all requests | [`enable_if`][RetryLayer::enable_if], [`enable_always`][RetryLayer::enable_always], [`disable`][RetryLayer::disable] |
 //!
 //! The default base delay is optimized for **service-to-service** communication where low latency
-//! is critical. For **client-to-service** scenarios (e.g., mobile apps, web frontends), consider
+//! is critical. For **client-to-service** scenarios (e.g., mobile apps, web frontend), consider
 //! increasing the base delay to 1-2 seconds using [`base_delay`][RetryLayer::base_delay].
 //!
 //! # Telemetry

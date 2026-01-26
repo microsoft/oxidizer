@@ -18,7 +18,7 @@ pub(super) const DEFAULT_BACKOFF: Backoff = Backoff::Exponential;
 /// This default is optimized for **service-to-service** communication where low
 /// latency is critical and transient failures are typically short-lived.
 ///
-/// For **client-to-service** scenarios (e.g., mobile apps, web frontends), consider
+/// For **client-to-service** scenarios (e.g., mobile apps, web frontend), consider
 /// increasing the base delay to 1-2 seconds to reduce load on potentially struggling
 /// services and improve overall system stability.
 pub(super) const DEFAULT_BASE_DELAY: Duration = Duration::from_millis(10);

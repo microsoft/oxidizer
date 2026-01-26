@@ -14,7 +14,7 @@ use std::hash::Hasher;
 ///
 /// Breaker IDs should be **long-lived and low-cardinality**, representing distinct failure
 /// domains (e.g., backend hosts, service endpoints). Avoid high-cardinality IDs like user IDs
-/// or request IDs—these cause unbounded memory growth and prevent detection of systemic failures.
+/// or request IDs as these cause unbounded memory growth and prevent detection of systemic failures.
 ///
 /// For maximum performance, prefer integer IDs or static string IDs (`&'static str`).
 ///
