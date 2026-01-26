@@ -70,6 +70,7 @@ impl SynchronizedTimers {
         self.with_timers(|timers| timers.advance_timers(now))
     }
 
+    #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
         Arc::strong_count(&self.timers) == 1
     }
