@@ -7,4 +7,4 @@ pub(super) const CIRCUIT_REJECTED_EVENT_NAME: &str = "circuit_rejected";
 pub(super) const CIRCUIT_PROBE_EVENT_NAME: &str = "circuit_probe";
 pub(super) const CIRCUIT_STATE: &str = "resilience.circuit_breaker.state";
 pub(super) const CIRCUIT_PROBE_RESULT: &str = "resilience.circuit_breaker.probe.result";
-pub(super) const CIRCUIT_PARTITION: &str = "resilience.circuit_breaker.partition";
+pub(super) const CIRCUIT_ID: &str = "resilience.circuit_breaker.id";

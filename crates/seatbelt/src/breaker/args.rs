@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tick::Clock;
 
-use crate::breaker::PartitionKey;
+use crate::breaker::BreakerId;
 
 /// Arguments for the [`recovery_with`][super::BreakerLayer::recovery_with] callback function.
 ///
@@ -13,15 +13,15 @@ use crate::breaker::PartitionKey;
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RecoveryArgs<'a> {
-    pub(crate) partition_key: &'a PartitionKey,
+    pub(crate) breaker_id: &'a BreakerId,
     pub(crate) clock: &'a Clock,
 }
 
 impl RecoveryArgs<'_> {
-    /// Returns the partition key associated with the recovery evaluation.
+    /// Returns the breaker ID associated with the recovery evaluation.
     #[must_use]
-    pub fn partition_key(&self) -> &PartitionKey {
-        self.partition_key
+    pub fn breaker_id(&self) -> &BreakerId {
+        self.breaker_id
     }
 
     /// Returns a reference to the clock use by the circuit breaker.
@@ -36,14 +36,14 @@ impl RecoveryArgs<'_> {
 /// Provides context for generating outputs when the inputs are rejected by the circuit breaker.
 #[derive(Debug)]
 pub struct RejectedInputArgs<'a> {
-    pub(crate) partition_key: &'a PartitionKey,
+    pub(crate) breaker_id: &'a BreakerId,
 }
 
 impl RejectedInputArgs<'_> {
-    /// Returns the partition key associated with the rejected input.
+    /// Returns the breaker ID associated with the rejected input.
     #[must_use]
-    pub fn partition_key(&self) -> &PartitionKey {
-        self.partition_key
+    pub fn breaker_id(&self) -> &BreakerId {
+        self.breaker_id
     }
 }
 
@@ -53,14 +53,14 @@ impl RejectedInputArgs<'_> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnProbingArgs<'a> {
-    pub(crate) partition_key: &'a PartitionKey,
+    pub(crate) breaker_id: &'a BreakerId,
 }
 
 impl OnProbingArgs<'_> {
-    /// Returns the partition key associated with the probing execution.
+    /// Returns the breaker ID associated with the probing execution.
     #[must_use]
-    pub fn partition_key(&self) -> &PartitionKey {
-        self.partition_key
+    pub fn breaker_id(&self) -> &BreakerId {
+        self.breaker_id
     }
 }
 
@@ -70,15 +70,15 @@ impl OnProbingArgs<'_> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnClosedArgs<'a> {
-    pub(crate) partition_key: &'a PartitionKey,
+    pub(crate) breaker_id: &'a BreakerId,
     pub(crate) open_duration: std::time::Duration,
 }
 
 impl OnClosedArgs<'_> {
-    /// Returns the partition key associated with this event.
+    /// Returns the breaker ID associated with this event.
     #[must_use]
-    pub fn partition_key(&self) -> &PartitionKey {
-        self.partition_key
+    pub fn breaker_id(&self) -> &BreakerId {
+        self.breaker_id
     }
 
     /// Returns the duration the circuit was open before closing.
@@ -94,14 +94,14 @@ impl OnClosedArgs<'_> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct OnOpenedArgs<'a> {
-    pub(crate) partition_key: &'a PartitionKey,
+    pub(crate) breaker_id: &'a BreakerId,
 }
 
 impl OnOpenedArgs<'_> {
-    /// Returns the partition key associated with this event.
+    /// Returns the breaker ID associated with this event.
     #[must_use]
-    pub fn partition_key(&self) -> &PartitionKey {
-        self.partition_key
+    pub fn breaker_id(&self) -> &BreakerId {
+        self.breaker_id
     }
 }
 
@@ -111,51 +111,51 @@ mod tests {
 
     #[test]
     fn recovery_args_accessors() {
-        let key = PartitionKey::from("test");
+        let key = BreakerId::from("test");
         let clock = Clock::new_frozen();
         let args = RecoveryArgs {
-            partition_key: &key,
+            breaker_id: &key,
             clock: &clock,
         };
-        assert_eq!(args.partition_key(), &key);
+        assert_eq!(args.breaker_id(), &key);
         let _ = args.clock();
         assert!(format!("{args:?}").contains("RecoveryArgs"));
     }
 
     #[test]
     fn rejected_input_args_accessors() {
-        let key = PartitionKey::from("rejected");
-        let args = RejectedInputArgs { partition_key: &key };
-        assert_eq!(args.partition_key(), &key);
+        let key = BreakerId::from("rejected");
+        let args = RejectedInputArgs { breaker_id: &key };
+        assert_eq!(args.breaker_id(), &key);
         assert!(format!("{args:?}").contains("RejectedInputArgs"));
     }
 
     #[test]
     fn on_probing_args_accessors() {
-        let key = PartitionKey::from("probing");
-        let args = OnProbingArgs { partition_key: &key };
-        assert_eq!(args.partition_key(), &key);
+        let key = BreakerId::from("probing");
+        let args = OnProbingArgs { breaker_id: &key };
+        assert_eq!(args.breaker_id(), &key);
         assert!(format!("{args:?}").contains("OnProbingArgs"));
     }
 
     #[test]
     fn on_closed_args_accessors() {
-        let key = PartitionKey::from("closed");
+        let key = BreakerId::from("closed");
         let duration = Duration::from_secs(5);
         let args = OnClosedArgs {
-            partition_key: &key,
+            breaker_id: &key,
             open_duration: duration,
         };
-        assert_eq!(args.partition_key(), &key);
+        assert_eq!(args.breaker_id(), &key);
         assert_eq!(args.open_duration(), duration);
         assert!(format!("{args:?}").contains("OnClosedArgs"));
     }
 
     #[test]
     fn on_opened_args_accessors() {
-        let key = PartitionKey::from("opened");
-        let args = OnOpenedArgs { partition_key: &key };
-        assert_eq!(args.partition_key(), &key);
+        let key = BreakerId::from("opened");
+        let args = OnOpenedArgs { breaker_id: &key };
+        assert_eq!(args.breaker_id(), &key);
         assert!(format!("{args:?}").contains("OnOpenedArgs"));
     }
 }

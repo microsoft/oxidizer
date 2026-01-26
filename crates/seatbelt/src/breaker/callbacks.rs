@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use super::{OnClosedArgs, OnOpenedArgs, OnProbingArgs, PartitionKey, RecoveryArgs, RejectedInputArgs};
+use super::{BreakerId, OnClosedArgs, OnOpenedArgs, OnProbingArgs, RecoveryArgs, RejectedInputArgs};
 use crate::RecoveryInfo;
 
-crate::utils::define_fn_wrapper!(PartionKeyProvider<In>(Fn(&In) -> PartitionKey));
+crate::utils::define_fn_wrapper!(BreakerIdProvider<In>(Fn(&In) -> BreakerId));
 crate::utils::define_fn_wrapper!(ShouldRecover<Out>(Fn(&Out, RecoveryArgs) -> RecoveryInfo));
 crate::utils::define_fn_wrapper!(RejectedInput<In, Out>(Fn(In, RejectedInputArgs) -> Out));
 crate::utils::define_fn_wrapper!(OnProbing<In>(Fn(&mut In, OnProbingArgs)));

@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::{
-    Breaker, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs,
-    PartionKeyProvider, PartitionKey, RejectedInput, RejectedInputArgs, ShouldRecover,
+    Breaker, BreakerId, BreakerIdProvider, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs,
+    OnProbing, OnProbingArgs, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
 use crate::breaker::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};
@@ -38,7 +38,7 @@ pub struct BreakerLayer<In, Out, S1 = Set, S2 = Set> {
     on_opened: Option<OnOpened<Out>>,
     on_closed: Option<OnClosed<Out>>,
     on_probing: Option<OnProbing<In>>,
-    partition_key: Option<PartionKeyProvider<In>>,
+    breaker_id: Option<BreakerIdProvider<In>>,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
     failure_threshold: f32,
@@ -59,7 +59,7 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
             on_opened: None,
             on_closed: None,
             on_probing: None,
-            partition_key: None,
+            breaker_id: None,
             enable_if: EnableIf::always(),
             telemetry: context.create_telemetry(name),
             failure_threshold: DEFAULT_FAILURE_THRESHOLD,
@@ -283,30 +283,31 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
         self
     }
 
-    /// Sets the partition key provider function.
+    /// Sets the breaker ID provider function.
     ///
-    /// The partitioning key is used to maintain separate circuit breaker states
-    /// for different inputs. The idea is to extract the partition key from the input
-    /// so that requests with the same key share the same circuit breaker state.
+    /// The breaker ID identifies an isolated circuit breaker instance. Each unique ID
+    /// maintains its own independent state including failure counts, health metrics,
+    /// and open/closed status. This allows separate circuit breakers for different
+    /// backends, services, or logical groupings of requests.
     ///
-    /// **Default**: Single global circuit (no partitioning) - all requests share the same circuit breaker state
+    /// **Default**: Single global circuit - all requests share the same circuit breaker state
     ///
-    /// If no partition key provider is set, a default key is used, meaning all requests
+    /// If no breaker ID provider is set, a default ID is used, meaning all requests
     /// share the same circuit breaker state.
     ///
-    /// The typical scenario is HTTP request where the partition key could be derived from
+    /// The typical scenario is HTTP requests where the breaker ID could be derived from
     /// the combination of scheme and authority (host and port). This allows separate
     /// circuit breaker states for different backend services.
     ///
     /// # Arguments
     ///
-    /// * `key_provider` - Function that takes a reference to the input and returns
-    ///   a [`PartitionKey`] identifying the partition for circuit breaker state
+    /// * `id_provider` - Function that takes a reference to the input and returns
+    ///   a [`BreakerId`] identifying the circuit breaker instance to use
     ///
     /// # Example
     ///
     /// ```rust
-    /// # use seatbelt::breaker::{BreakerLayer, PartitionKey};
+    /// # use seatbelt::breaker::{BreakerLayer, BreakerId};
     /// // Example HTTP request structure
     /// struct HttpRequest {
     ///     scheme: String,
@@ -315,28 +316,28 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     ///     path: String,
     /// }
     /// # fn example(breaker_layer: BreakerLayer<HttpRequest, ()>) {
-    /// // Configure circuit breaker with a partition key based on a scheme, host and port.
-    /// let layer = breaker_layer.partition_key(|request: &HttpRequest| {
-    ///     let partition = format!("{}://{}:{}", request.scheme, request.host, request.port);
-    ///     PartitionKey::from(partition)
+    /// // Configure circuit breaker with a breaker ID based on scheme, host and port.
+    /// let layer = breaker_layer.breaker_id(|request: &HttpRequest| {
+    ///     let id = format!("{}://{}:{}", request.scheme, request.host, request.port);
+    ///     BreakerId::from(id)
     /// });
     ///
     /// // This ensures that:
-    /// // - Requests to https://api.service1.com share one circuit breaker state
-    /// // - Requests to https://api.service2.com:8080 share another circuit breaker state
-    /// // - Requests to http://localhost:3000 share yet another circuit breaker state
+    /// // - Requests to https://api.service1.com share one circuit breaker instance
+    /// // - Requests to https://api.service2.com:8080 share another circuit breaker instance
+    /// // - Requests to http://localhost:3000 share yet another circuit breaker instance
     /// # }
     /// ```
     ///
     /// # Telemetry
     ///
-    /// The values used to create partition keys are included in telemetry data (logs and metrics)
-    /// for observability purposes. **Important**: Ensure that the values from which partition keys
+    /// The values used to create breaker IDs are included in telemetry data (logs and metrics)
+    /// for observability purposes. **Important**: Ensure that the values from which breaker IDs
     /// are created do not contain any sensitive data such as authentication tokens, personal
     /// identifiable information (PII), or other confidential data.
     #[must_use]
-    pub fn partition_key(mut self, key_provider: impl Fn(&In) -> PartitionKey + Send + Sync + 'static) -> Self {
-        self.partition_key = Some(PartionKeyProvider::new(key_provider));
+    pub fn breaker_id(mut self, id_provider: impl Fn(&In) -> BreakerId + Send + Sync + 'static) -> Self {
+        self.breaker_id = Some(BreakerIdProvider::new(id_provider));
         self
     }
 
@@ -408,7 +409,7 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
             on_opened: self.on_opened.clone(),
             on_closed: self.on_closed.clone(),
             on_probing: self.on_probing.clone(),
-            partition_key: self.partition_key.clone(),
+            id_provider: self.breaker_id.clone(),
         }
     }
 }
@@ -440,7 +441,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
             on_opened: self.on_opened,
             on_closed: self.on_closed,
             on_probing: self.on_probing,
-            partition_key: self.partition_key,
+            breaker_id: self.breaker_id,
             enable_if: self.enable_if,
             telemetry: self.telemetry.clone(),
             failure_threshold: self.failure_threshold,
@@ -497,7 +498,7 @@ mod tests {
         let result = layer.recovery.as_ref().unwrap().call(
             &"error message".to_string(),
             RecoveryArgs {
-                partition_key: &PartitionKey::default(),
+                breaker_id: &BreakerId::default(),
                 clock: &Clock::new_frozen(),
             },
         );
@@ -506,7 +507,7 @@ mod tests {
         let result = layer.recovery.as_ref().unwrap().call(
             &"success".to_string(),
             RecoveryArgs {
-                partition_key: &PartitionKey::default(),
+                breaker_id: &BreakerId::default(),
                 clock: &Clock::new_frozen(),
             },
         );
@@ -523,7 +524,7 @@ mod tests {
         let result = layer.recovery.as_ref().unwrap().call(
             &RecoverableType::from(RecoveryInfo::retry()),
             RecoveryArgs {
-                partition_key: &PartitionKey::default(),
+                breaker_id: &BreakerId::default(),
                 clock: &Clock::new_frozen(),
             },
         );
@@ -532,7 +533,7 @@ mod tests {
         let result = layer.recovery.as_ref().unwrap().call(
             &RecoverableType::from(RecoveryInfo::never()),
             RecoveryArgs {
-                partition_key: &PartitionKey::default(),
+                breaker_id: &BreakerId::default(),
                 clock: &Clock::new_frozen(),
             },
         );
@@ -549,7 +550,7 @@ mod tests {
         let result = layer.rejected_input.as_ref().unwrap().call(
             "test".to_string(),
             RejectedInputArgs {
-                partition_key: &PartitionKey::default(),
+                breaker_id: &BreakerId::default(),
             },
         );
         assert_eq!(result, "rejected");
@@ -565,7 +566,7 @@ mod tests {
         let result = layer.rejected_input.as_ref().unwrap().call(
             "test_input".to_string(),
             RejectedInputArgs {
-                partition_key: &PartitionKey::default(),
+                breaker_id: &BreakerId::default(),
             },
         );
         assert_eq!(result, Err("rejected: test_input".to_string()));

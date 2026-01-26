@@ -7,9 +7,9 @@ use layered::Service;
 use tick::Clock;
 
 use super::{
-    CircuitEngine, BreakerLayer, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult, OnClosed, OnClosedArgs,
-    OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, PartionKeyProvider, PartitionKey, RecoveryArgs, RejectedInput, RejectedInputArgs,
-    ShouldRecover,
+    BreakerId, BreakerIdProvider, BreakerLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult,
+    ExitCircuitResult, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, RecoveryArgs, RejectedInput,
+    RejectedInputArgs, ShouldRecover,
 };
 use crate::{NotSet, utils::EnableIf};
 
@@ -34,7 +34,7 @@ pub struct Breaker<In, Out, S> {
     pub(super) rejected_input: RejectedInput<In, Out>,
     pub(super) enable_if: EnableIf<In>,
     pub(super) engines: Engines,
-    pub(super) partition_key: Option<PartionKeyProvider<In>>,
+    pub(super) id_provider: Option<BreakerIdProvider<In>>,
     pub(super) on_opened: Option<OnOpened<Out>>,
     pub(super) on_closed: Option<OnClosed<Out>>,
     pub(super) on_probing: Option<OnProbing<In>>,
@@ -66,17 +66,17 @@ where
             return self.inner.execute(input).await;
         }
 
-        // Determine the partition key for this input
-        let partition_key = self
-            .partition_key
+        // Determine the breaker ID for this input
+        let breaker_id = self
+            .id_provider
             .as_ref()
-            .map_or_else(PartitionKey::default, |partition_key| partition_key.call(&input));
+            .map_or_else(BreakerId::default, |breaker_id| breaker_id.call(&input));
 
-        // Retrieve the engine for this partition
-        let engine = self.engines.get_engine(&partition_key);
+        // Retrieve the engine for this breaker instance
+        let engine = self.engines.get_engine(&breaker_id);
 
         // Before
-        let (input, mode) = match self.before_execute(engine.as_ref(), input, &partition_key) {
+        let (input, mode) = match self.before_execute(engine.as_ref(), input, &breaker_id) {
             ControlFlow::Continue(input) => input,
             ControlFlow::Break(output) => return output,
         };
@@ -85,7 +85,7 @@ where
         let output = self.inner.execute(input).await;
 
         // After
-        self.after_execute(engine.as_ref(), &output, mode, &partition_key);
+        self.after_execute(engine.as_ref(), &output, mode, &breaker_id);
 
         output
     }
@@ -93,12 +93,7 @@ where
 
 impl<In, Out, S> Breaker<In, Out, S> {
     #[inline]
-    fn before_execute(
-        &self,
-        engine: &impl CircuitEngine,
-        mut input: In,
-        partition_key: &PartitionKey,
-    ) -> ControlFlow<Out, (In, ExecutionMode)> {
+    fn before_execute(&self, engine: &impl CircuitEngine, mut input: In, breaker_id: &BreakerId) -> ControlFlow<Out, (In, ExecutionMode)> {
         // Try to enter the circuit
         match engine.enter() {
             EnterCircuitResult::Accepted { mode } => {
@@ -109,7 +104,7 @@ impl<In, Out, S> Breaker<In, Out, S> {
                     // Invoke the on_probing callback if configured.
                     ExecutionMode::Probe => {
                         if let Some(on_probing) = &self.on_probing {
-                            on_probing.call(&mut input, OnProbingArgs { partition_key });
+                            on_probing.call(&mut input, OnProbingArgs { breaker_id });
                         }
 
                         ControlFlow::Continue((input, ExecutionMode::Probe))
@@ -117,15 +112,15 @@ impl<In, Out, S> Breaker<In, Out, S> {
                 }
             }
             // Circuit is open, return rejected input output
-            EnterCircuitResult::Rejected => ControlFlow::Break(self.rejected_input.call(input, RejectedInputArgs { partition_key })),
+            EnterCircuitResult::Rejected => ControlFlow::Break(self.rejected_input.call(input, RejectedInputArgs { breaker_id })),
         }
     }
 
-    fn after_execute(&self, engine: &impl CircuitEngine, output: &Out, mode: ExecutionMode, partition_key: &PartitionKey) {
+    fn after_execute(&self, engine: &impl CircuitEngine, output: &Out, mode: ExecutionMode, breaker_id: &BreakerId) {
         let recovery = self.recovery.call(
             output,
             RecoveryArgs {
-                partition_key,
+                breaker_id,
                 clock: &self.clock,
             },
         );
@@ -140,7 +135,7 @@ impl<In, Out, S> Breaker<In, Out, S> {
             }
             ExitCircuitResult::Opened(_health) => {
                 if let Some(on_opened) = &self.on_opened {
-                    on_opened.call(output, OnOpenedArgs { partition_key });
+                    on_opened.call(output, OnOpenedArgs { breaker_id });
                 }
             }
             ExitCircuitResult::Closed(stats) => {
@@ -148,7 +143,7 @@ impl<In, Out, S> Breaker<In, Out, S> {
                     on_closed.call(
                         output,
                         OnClosedArgs {
-                            partition_key,
+                            breaker_id,
                             open_duration: stats.opened_duration(self.clock.instant()),
                         },
                     );
@@ -224,7 +219,7 @@ mod tests {
         );
 
         let result = service
-            .before_execute(&engine, "test".to_string(), &PartitionKey::default())
+            .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .continue_value()
             .unwrap();
         assert_eq!(result, ("test".to_string(), ExecutionMode::Normal));
@@ -250,7 +245,7 @@ mod tests {
         );
 
         let result = service
-            .before_execute(&engine, "test".to_string(), &PartitionKey::default())
+            .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .continue_value()
             .unwrap();
         assert_eq!(result, ("test".to_string(), ExecutionMode::Probe));
@@ -266,7 +261,7 @@ mod tests {
         let engine = EngineFake::new(EnterCircuitResult::Rejected, ExitCircuitResult::Unchanged);
 
         let result = service
-            .before_execute(&engine, "test".to_string(), &PartitionKey::default())
+            .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .break_value()
             .unwrap();
         assert_eq!(result, "rejected");
@@ -287,7 +282,7 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &PartitionKey::default());
+        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
     #[test]
@@ -305,7 +300,7 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &PartitionKey::default());
+        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
     #[test]
@@ -328,12 +323,7 @@ mod tests {
             ExitCircuitResult::Opened(HealthInfo::new(1, 1, 1.0, 1)),
         );
 
-        service.after_execute(
-            &engine,
-            &"error_response".to_string(),
-            ExecutionMode::Normal,
-            &PartitionKey::default(),
-        );
+        service.after_execute(&engine, &"error_response".to_string(), ExecutionMode::Normal, &BreakerId::default());
         assert!(opened_called_clone.load(Ordering::SeqCst));
     }
 
@@ -361,7 +351,7 @@ mod tests {
             &engine,
             &"success_response".to_string(),
             ExecutionMode::Normal,
-            &PartitionKey::default(),
+            &BreakerId::default(),
         );
         assert!(closed_called_clone.load(Ordering::SeqCst));
     }
@@ -433,10 +423,10 @@ mod tests {
     async fn different_partitions_ensure_isolated() {
         let clock = Clock::new_frozen();
         let service = create_ready_breaker_layer(&clock)
-            .partition_key(|input| PartitionKey::from(input.clone()))
+            .breaker_id(|input| BreakerId::from(input.clone()))
             .min_throughput(3)
             .recovery_with(|_, _| RecoveryInfo::retry())
-            .rejected_input(|_, args| format!("circuit is open, partition: {}", args.partition_key))
+            .rejected_input(|_, args| format!("circuit is open, breaker: {}", args.breaker_id()))
             .layer(Execute::new(|input: String| async move { input }));
 
         // break the circuit for partition "A"
@@ -446,7 +436,7 @@ mod tests {
         }
 
         let result = service.execute("A".to_string()).await;
-        assert_eq!(result, "circuit is open, partition: A");
+        assert_eq!(result, "circuit is open, breaker: A");
 
         // Execute on partition "B" should pass through
         let result = service.execute("B".to_string()).await;

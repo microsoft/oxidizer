@@ -22,24 +22,24 @@ pub(crate) struct EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) telemetry: TelemetryHelper,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub(super) partition_key: Cow<'static, str>,
+    pub(super) breaker_id: Cow<'static, str>,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) clock: Clock,
 }
 
 impl<T> EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub fn new(inner: T, telemetry: TelemetryHelper, partition_key: Cow<'static, str>, clock: Clock) -> Self {
+    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: Cow<'static, str>, clock: Clock) -> Self {
         Self {
             inner,
             telemetry,
-            partition_key,
+            breaker_id,
             clock,
         }
     }
 
     #[cfg(not(any(feature = "metrics", feature = "logs", test)))]
-    pub fn new(inner: T, _telemetry: TelemetryHelper, _partition_key: Cow<'static, str>, _clock: Clock) -> Self {
+    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: Cow<'static, str>, _clock: Clock) -> Self {
         Self { inner }
     }
 }
@@ -56,7 +56,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                     opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                     opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_REJECTED_EVENT_NAME),
                     opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
-                    opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                    opentelemetry::KeyValue::new(CIRCUIT_ID, self.breaker_id.clone()),
                 ]);
             }
 
@@ -68,7 +68,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                     pipeline.name = %self.telemetry.pipeline_name,
                     strategy.name = %self.telemetry.strategy_name,
                     circuit_breaker.state = CircuitState::Open.as_str(),
-                    circuit_breaker.partition = %self.partition_key,
+                    circuit_breaker.id = %self.breaker_id,
                 );
             }
         }
@@ -85,7 +85,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                     opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                     opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_PROBE_EVENT_NAME),
                     opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::HalfOpen.as_str()),
-                    opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                    opentelemetry::KeyValue::new(CIRCUIT_ID, self.breaker_id.clone()),
                     opentelemetry::KeyValue::new(CIRCUIT_PROBE_RESULT, result.as_str()),
                 ]);
             }
@@ -98,7 +98,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                     pipeline.name = %self.telemetry.pipeline_name,
                     strategy.name = %self.telemetry.strategy_name,
                     circuit_breaker.state = CircuitState::HalfOpen.as_str(),
-                    circuit_breaker.partition = %self.partition_key,
+                    circuit_breaker.id = %self.breaker_id,
                     circuit_breaker.probe.result = result.as_str(),
                 );
             }
@@ -116,7 +116,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                         opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_OPENED_EVENT_NAME),
                         opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                        opentelemetry::KeyValue::new(CIRCUIT_ID, self.breaker_id.clone()),
                     ]);
                 }
 
@@ -128,7 +128,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         pipeline.name = %self.telemetry.pipeline_name,
                         strategy.name = %self.telemetry.strategy_name,
                         circuit_breaker.state = CircuitState::Open.as_str(),
-                        circuit_breaker.partition = %self.partition_key,
+                        circuit_breaker.id = %self.breaker_id,
                         circuit_breaker.health.failure_rate = health.failure_rate(),
                         circuit_breaker.health.throughput = health.throughput(),
                     );
@@ -144,7 +144,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                         opentelemetry::KeyValue::new(EVENT_NAME, CIRCUIT_CLOSED_EVENT_NAME),
                         opentelemetry::KeyValue::new(CIRCUIT_STATE, CircuitState::Closed.as_str()),
-                        opentelemetry::KeyValue::new(CIRCUIT_PARTITION, self.partition_key.clone()),
+                        opentelemetry::KeyValue::new(CIRCUIT_ID, self.breaker_id.clone()),
                     ]);
                 }
 
@@ -157,7 +157,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         strategy.name = %self.telemetry.strategy_name,
                         circuit_breaker.state = CircuitState::Closed.as_str(),
                         circuit_breaker.open.duration = stats.opened_duration(self.clock.instant()).as_secs(),
-                        circuit_breaker.partition = %self.partition_key,
+                        circuit_breaker.id = %self.breaker_id,
                         circuit_breaker.probes.total = stats.probes_total,
                         circuit_breaker.probes.successfull = stats.probes_successes,
                         circuit_breaker.probes.failed = stats.probes_failures,
@@ -207,7 +207,7 @@ mod tests {
                 KeyValue::new(PIPELINE_NAME, "test_pipeline"),
                 KeyValue::new(STRATEGY_NAME, "test_strategy"),
                 KeyValue::new(EVENT_NAME, CIRCUIT_REJECTED_EVENT_NAME),
-                KeyValue::new(CIRCUIT_PARTITION, "test_partition"),
+                KeyValue::new(CIRCUIT_ID, "test_id"),
                 KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
             ],
             Some(5),
@@ -230,7 +230,7 @@ mod tests {
                 KeyValue::new(PIPELINE_NAME, "test_pipeline"),
                 KeyValue::new(STRATEGY_NAME, "test_strategy"),
                 KeyValue::new(EVENT_NAME, CIRCUIT_PROBE_EVENT_NAME),
-                KeyValue::new(CIRCUIT_PARTITION, "test_partition"),
+                KeyValue::new(CIRCUIT_ID, "test_id"),
                 KeyValue::new(CIRCUIT_STATE, CircuitState::HalfOpen.as_str()),
                 KeyValue::new(CIRCUIT_PROBE_RESULT, ExecutionResult::Success.as_str()),
             ],
@@ -254,7 +254,7 @@ mod tests {
                 KeyValue::new(PIPELINE_NAME, "test_pipeline"),
                 KeyValue::new(STRATEGY_NAME, "test_strategy"),
                 KeyValue::new(EVENT_NAME, CIRCUIT_CLOSED_EVENT_NAME),
-                KeyValue::new(CIRCUIT_PARTITION, "test_partition"),
+                KeyValue::new(CIRCUIT_ID, "test_id"),
                 KeyValue::new(CIRCUIT_STATE, CircuitState::Closed.as_str()),
             ],
             Some(5),
@@ -276,7 +276,7 @@ mod tests {
                 KeyValue::new(PIPELINE_NAME, "test_pipeline"),
                 KeyValue::new(STRATEGY_NAME, "test_strategy"),
                 KeyValue::new(EVENT_NAME, CIRCUIT_OPENED_EVENT_NAME),
-                KeyValue::new(CIRCUIT_PARTITION, "test_partition"),
+                KeyValue::new(CIRCUIT_ID, "test_id"),
                 KeyValue::new(CIRCUIT_STATE, CircuitState::Open.as_str()),
             ],
             Some(5),
@@ -291,7 +291,7 @@ mod tests {
             event_reporter: Some(create_resilience_event_counter(&create_meter(tester.meter_provider()))),
             logs_enabled: true,
         };
-        let telemetry_engine = EngineTelemetry::new(engine, telemetry, "test_partition".into(), Clock::new_frozen());
+        let telemetry_engine = EngineTelemetry::new(engine, telemetry, "test_id".into(), Clock::new_frozen());
         (tester, telemetry_engine)
     }
 }

@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 use tick::Clock;
 
 use crate::breaker::constants::ERR_POISONED_LOCK;
-use crate::breaker::{Engine, EngineCore, EngineOptions, EngineTelemetry, PartitionKey};
+use crate::breaker::{BreakerId, Engine, EngineCore, EngineOptions, EngineTelemetry};
 use crate::utils::TelemetryHelper;
 
-/// Manages circuit breaker engines for different partition keys.
+/// Manages circuit breaker engines for different breaker IDs.
 #[derive(Debug)]
 pub(crate) struct Engines {
-    map: Mutex<HashMap<PartitionKey, Arc<Engine>>>,
+    map: Mutex<HashMap<BreakerId, Arc<Engine>>>,
     engine_options: EngineOptions,
     clock: Clock,
     telemetry: TelemetryHelper,
@@ -29,7 +29,7 @@ impl Engines {
         }
     }
 
-    pub fn get_engine(&self, key: &PartitionKey) -> Arc<Engine> {
+    pub fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
         let mut map = self.map.lock().expect(ERR_POISONED_LOCK);
 
         if let Some(engine) = map.get(key) {
@@ -47,7 +47,7 @@ impl Engines {
         map.len()
     }
 
-    fn create_engine(&self, key: &PartitionKey) -> Engine {
+    fn create_engine(&self, key: &BreakerId) -> Engine {
         EngineTelemetry::new(
             EngineCore::new(self.engine_options.clone(), self.clock.clone()),
             self.telemetry.clone(),
@@ -86,12 +86,12 @@ mod tests {
         );
 
         assert!(Arc::ptr_eq(
-            &engines.get_engine(&PartitionKey::from("test")),
-            &engines.get_engine(&PartitionKey::from("test"))
+            &engines.get_engine(&BreakerId::from("test")),
+            &engines.get_engine(&BreakerId::from("test"))
         ));
         assert_eq!(engines.len(), 1);
 
-        _ = engines.get_engine(&PartitionKey::from("test2"));
+        _ = engines.get_engine(&BreakerId::from("test2"));
         assert_eq!(engines.len(), 2);
     }
 }

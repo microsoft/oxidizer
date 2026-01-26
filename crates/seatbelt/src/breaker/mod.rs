@@ -128,18 +128,18 @@
 //! - [`RecoveryKind::Retry`][crate::RecoveryKind::Retry]
 //! - [`RecoveryKind::Unavailable`][crate::RecoveryKind::Unavailable]
 //!
-//! # Partitioning
+//! # Isolated Circuit Breaker Instances
 //!
 //! Circuit breakers can maintain separate circuit states for different logical groups of requests
-//! by providing a [`partition_key`][BreakerLayer::partition_key] function. This allows
+//! by providing a [`breaker_id`][BreakerLayer::breaker_id] function. This allows
 //! the creation of multiple independent circuits based on the input properties.
 //!
-//! For example, a typical scenario where partitioning is useful is HTTP request where the partition key
+//! For example, a typical scenario where separate breakers are useful is HTTP requests where the breaker ID
 //! is extracted from the request scheme, host, and port. This allows isolation of circuit states
 //! for different downstream endpoints.
 //!
-//! > **Note**: Each unique partition key creates a separate circuit state. Be mindful of memory usage
-//! > with high-cardinality partition keys.
+//! > **Note**: Each unique breaker ID creates a separate circuit state. Be mindful of memory usage
+//! > with high-cardinality breaker IDs.
 //!
 //! # Defaults
 //!
@@ -152,7 +152,7 @@
 //! | Minimum throughput | `100` requests | Minimum request volume required before circuit can open | [`min_throughput`][BreakerLayer::min_throughput] |
 //! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][BreakerLayer::sampling_duration] |
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
-//! | Partitioning | Single global circuit | All requests share the same circuit breaker state | [`partition_key`][BreakerLayer::partition_key] |
+//! | Breaker isolation | Single global circuit | All requests share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
 //! | Half-open mode | `Reliable` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
 //! | Enable condition | Always enabled | Circuit breaker protection is applied to all requests | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
@@ -173,8 +173,9 @@
 //!     - `circuit_closed`: When the circuit transitions to closed state after successful probing
 //!     - `circuit_rejected`: When a request is rejected due to the circuit being in open state
 //!     - `circuit_probe`: When a probing request is executed in half-open state
-//!   - `resilience.breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
-//!   - `resilience.breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
+//!   - `resilience.circuit_breaker.id`: The breaker ID identifying the circuit breaker instance
+//!   - `resilience.circuit_breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
+//!   - `resilience.circuit_breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
 //!
 //! Additional structured logging events are emitted with detailed health metrics (failure rate, throughput) for circuit state transitions.
 //!
@@ -228,7 +229,7 @@
 //! # use std::time::Duration;
 //! # use layered::{Execute, Service, Stack};
 //! # use tick::Clock;
-//! # use seatbelt::breaker::{Breaker, PartitionKey, HalfOpenMode};
+//! # use seatbelt::breaker::{Breaker, BreakerId, HalfOpenMode};
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! // Define common options for resilience middleware.
@@ -254,9 +255,9 @@
 //!         .min_throughput(50)  // Require minimum 50 requests before considering circuit open
 //!         .sampling_duration(Duration::from_secs(60)) // Evaluate failures over 60-second window
 //!         .break_duration(Duration::from_secs(30))    // Stay open for 30 seconds before testing
-//!         // You can provide your own partitioning logic if needed. The default is a single global
-//!         // circuit. By partitioning, you can have separate circuits for different inputs.
-//!         .partition_key(|input| PartitionKey::from(detect_partition(input)))
+//!         // You can provide your own breaker ID logic if needed. The default is a single global
+//!         // circuit. By providing distinct IDs, you can have separate circuits for different inputs.
+//!         .breaker_id(|input| BreakerId::from(detect_breaker_id(input)))
 //!         // State change callbacks for monitoring and alerting
 //!         .on_opened(|output, _args| {
 //!             println!("circuit breaker OPENED due to failure: {:?}", output);
@@ -279,7 +280,7 @@
 //! # let _result = result;
 //! # Ok(())
 //! # }
-//! # fn detect_partition(input: &String) -> String  { input.to_string() }
+//! # fn detect_breaker_id(input: &String) -> String  { input.to_string() }
 //! # async fn execute_unreliable_operation(input: String) -> Result<String, String> { Ok(input) }
 //! ```
 
@@ -308,8 +309,8 @@ mod engine;
 mod telemetry;
 pub(super) use engine::*;
 
-mod partition_key;
-pub use partition_key::PartitionKey;
+mod breaker_id;
+pub use breaker_id::BreakerId;
 
 mod half_open_mode;
 pub use half_open_mode::HalfOpenMode;

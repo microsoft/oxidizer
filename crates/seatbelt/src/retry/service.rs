@@ -616,9 +616,7 @@ mod tests {
         let _guard = log_capture.subscriber().set_default();
 
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-        let context = ResilienceContext::<String, String>::new(clock)
-            .name("log_test_pipeline")
-            .use_logs();
+        let context = ResilienceContext::<String, String>::new(clock).name("log_test_pipeline").use_logs();
 
         let service = Retry::layer("log_test_retry", &context)
             .clone_input()
