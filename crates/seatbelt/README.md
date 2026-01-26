@@ -88,7 +88,7 @@ for each module for details on how to use them.
 
 * [`timeout`][__link8] - Middleware that cancels long-running operations.
 * [`retry`][__link9] - Middleware that automatically retries failed operations.
-* [`circuit_breaker`][__link10] - Middleware that prevents cascading failures.
+* [`breaker`][__link10] - Middleware that prevents cascading failures.
 
 ## Features
 
@@ -97,7 +97,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 * **`timeout`** - Enables the [`timeout`][__link11] middleware for canceling long-running operations.
 * **`retry`** - Enables the [`retry`][__link12] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`circuit-breaker`** - Enables the [`circuit_breaker`][__link13] middleware for preventing cascading failures.
+* **`breaker`** - Enables the [`breaker`][__link13] middleware for preventing cascading failures.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
@@ -107,13 +107,13 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5bw60hngnQRG76QZSWWI79pG7-oEvcoPz3VGzVGNfifez53YWSEgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9sXzDeRPG_DG6evSGBhoksVGwhuoclj88Z5G5rSe9VPPBqIYWSEgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
- [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
+ [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/breaker/index.html
  [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
  [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
- [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/circuit_breaker/index.html
+ [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/breaker/index.html
  [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link3]: https://crates.io/crates/tick/0.1.2
  [__link4]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=ResilienceContext

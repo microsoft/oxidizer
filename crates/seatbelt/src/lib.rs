@@ -115,7 +115,7 @@
 //! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
-//! - **`circuit-breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
+//! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 
