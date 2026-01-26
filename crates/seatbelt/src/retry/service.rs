@@ -7,7 +7,6 @@ use std::time::Duration;
 use layered::Service;
 use tick::Clock;
 
-use super::MaxAttempts;
 use crate::retry::{
     CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, ShouldRecover,
 };
@@ -33,7 +32,7 @@ use crate::{NotSet, RecoveryInfo, RecoveryKind, retry::Attempt};
 pub struct Retry<In, Out, S> {
     pub(super) inner: S,
     pub(super) clock: Clock,
-    pub(super) max_attempts: MaxAttempts,
+    pub(super) max_attempts: u32,
     pub(super) backoff: DelayBackoff,
     pub(super) clone_input: CloneInput<In>,
     pub(super) should_recover: ShouldRecover<Out>,
@@ -72,7 +71,7 @@ where
             return self.inner.execute(input).await;
         }
 
-        let mut attempt = self.max_attempts.first_attempt();
+        let mut attempt = Attempt::first(self.max_attempts);
         let mut delays = self.backoff.delays();
         let mut previous_recovery = None;
 
@@ -272,7 +271,7 @@ mod tests {
 
         assert_eq!(retry.telemetry.pipeline_name.to_string(), "test_pipeline");
         assert_eq!(retry.telemetry.strategy_name.to_string(), "test_retry");
-        assert_eq!(retry.max_attempts, MaxAttempts::Finite(4));
+        assert_eq!(retry.max_attempts, 4);
         assert_eq!(retry.backoff.0.base_delay, Duration::from_millis(10));
         assert_eq!(retry.backoff.0.backoff_type, Backoff::Exponential);
         assert!(retry.backoff.0.use_jitter);

@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use super::MaxAttempts;
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
@@ -31,7 +30,7 @@ use layered::Layer;
 #[derive(Debug)]
 pub struct RetryLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
-    max_attempts: MaxAttempts,
+    max_attempts: u32,
     backoff: BackoffOptions,
     clone_input: Option<CloneInput<In>>,
     should_recover: Option<ShouldRecover<Out>>,
@@ -48,7 +47,7 @@ impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
     pub(crate) fn new(name: Cow<'static, str>, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             context: context.clone(),
-            max_attempts: MaxAttempts::Finite(DEFAULT_RETRY_ATTEMPTS.saturating_add(1)),
+            max_attempts: DEFAULT_RETRY_ATTEMPTS.saturating_add(1),
             backoff: BackoffOptions::default(),
             clone_input: None,
             should_recover: None,
@@ -72,20 +71,7 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// **Default**: 3 retry attempts
     #[must_use]
     pub fn max_retry_attempts(mut self, max_attempts: u32) -> Self {
-        self.max_attempts = MaxAttempts::Finite(max_attempts.saturating_add(1));
-        self
-    }
-
-    /// Configures infinite retry attempts.
-    ///
-    /// This setting will cause the operation to be retried indefinitely until it succeeds
-    /// or the retry is aborted by other means (e.g., cancellation, timeout).
-    ///
-    /// **Warning**: Use with caution as this can cause infinite loops if the operation
-    /// consistently fails.
-    #[must_use]
-    pub fn infinite_retry_attempts(mut self) -> Self {
-        self.max_attempts = MaxAttempts::Infinite;
+        self.max_attempts = max_attempts.saturating_add(1);
         self
     }
 
@@ -531,7 +517,7 @@ mod tests {
         let context = create_test_context();
         let layer: RetryLayer<_, _, NotSet, NotSet> = RetryLayer::new("test_retry".into(), &context);
 
-        assert_eq!(layer.max_attempts, MaxAttempts::Finite(4)); // 3 retries + 1 original = 4 total
+        assert_eq!(layer.max_attempts, 4); // 3 retries + 1 original = 4 total
         assert!(matches!(layer.backoff.backoff_type, Backoff::Exponential));
         assert_eq!(layer.backoff.base_delay, Duration::from_millis(10));
         assert!(layer.backoff.max_delay.is_none());
@@ -627,7 +613,7 @@ mod tests {
             .max_delay(Duration::from_secs(30))
             .use_jitter(true);
 
-        assert_eq!(layer.max_attempts, MaxAttempts::Finite(6));
+        assert_eq!(layer.max_attempts, 6);
         assert!(matches!(layer.backoff.backoff_type, Backoff::Exponential));
         assert_eq!(layer.backoff.base_delay, Duration::from_millis(500));
         assert_eq!(layer.backoff.max_delay, Some(Duration::from_secs(30)));
@@ -736,13 +722,6 @@ mod tests {
             }
             Some(_) => panic!("Expected None, got Some"),
         }
-    }
-
-    #[test]
-    fn infinite_retry_attempts_sets_correctly() {
-        let context = create_test_context();
-        let layer = RetryLayer::new("test".into(), &context).infinite_retry_attempts();
-        assert_eq!(layer.max_attempts, MaxAttempts::Infinite);
     }
 
     #[test]

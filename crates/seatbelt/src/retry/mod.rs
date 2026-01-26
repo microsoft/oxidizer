@@ -73,7 +73,7 @@
 //!
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
-//! | Max retry attempts | `3` (4 total) | Maximum retry attempts plus original call | [`max_retry_attempts`][RetryLayer::max_retry_attempts], [`infinite_retry_attempts`][RetryLayer::infinite_retry_attempts] |
+//! | Max retry attempts | `3` (4 total) | Maximum retry attempts plus original call | [`max_retry_attempts`][RetryLayer::max_retry_attempts] |
 //! | Base delay | `10` milliseconds | Base delay used for backoff calculations | [`base_delay`][RetryLayer::base_delay] |
 //! | Backoff strategy | `Exponential` | Exponential backoff with base multiplier of 2 | [`backoff`][RetryLayer::backoff] |
 //! | Jitter | `Enabled` | Adds randomness to delays to prevent thundering herds | [`use_jitter`][RetryLayer::use_jitter] |
@@ -200,7 +200,6 @@ mod telemetry;
 
 pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 pub use attempt::Attempt;
-pub(crate) use attempt::MaxAttempts;
 pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};

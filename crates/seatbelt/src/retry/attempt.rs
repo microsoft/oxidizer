@@ -121,55 +121,27 @@ impl Attempt {
 
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
     #[cfg(any(feature = "retry", test))]
-    pub(crate) fn increment(self, max_attempts: MaxAttempts) -> Option<Self> {
+    pub(crate) fn increment(self, max_attempts: u32) -> Option<Self> {
         let next = self.index.saturating_add(1);
 
-        match max_attempts {
-            MaxAttempts::Finite(index) => {
-                // If we've reached or exceeded the maximum number of attempts, return None.
-                if next >= index {
-                    return None;
-                }
-
-                let is_last = next == index.saturating_sub(1);
-                Some(Self::new(next, is_last))
-            }
-            MaxAttempts::Infinite => Some(Self::new(next, false)),
+        // If we've reached or exceeded the maximum number of attempts, return None.
+        if next >= max_attempts {
+            return None;
         }
+
+        let is_last = next == max_attempts.saturating_sub(1);
+        Some(Self::new(next, is_last))
+    }
+
+    #[cfg(any(feature = "retry", test))]
+    pub(crate) fn first(max_attempts: u32) -> Self {
+        Self::new(0, max_attempts == 1)
     }
 }
 
 impl Display for Attempt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.index.fmt(f)
-    }
-}
-
-/// Represents the maximum number of retry attempts allowed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(any(feature = "retry", test))]
-#[non_exhaustive]
-pub(crate) enum MaxAttempts {
-    /// A finite number of retry attempts.
-    Finite(u32),
-
-    /// An infinite number of retry attempts.
-    #[cfg(any(feature = "retry", test))] // currently, only used with retry feature
-    Infinite,
-}
-
-#[cfg(any(feature = "retry", test))]
-impl MaxAttempts {
-    #[cfg(any(feature = "retry", test))]
-    pub fn first_attempt(self) -> Attempt {
-        Attempt::new(0, matches!(self, Self::Finite(1)))
-    }
-}
-
-#[cfg(any(feature = "retry", test))]
-impl From<u32> for MaxAttempts {
-    fn from(value: u32) -> Self {
-        Self::Finite(value)
     }
 }
 
@@ -202,7 +174,7 @@ mod tests {
 
     #[test]
     fn increment_correct_behavior() {
-        let max_attempts = MaxAttempts::Finite(2);
+        let max_attempts = 2;
         let a = Attempt::new(0, false);
         assert_eq!(a.index(), 0);
         assert!(!a.is_last());
@@ -216,44 +188,20 @@ mod tests {
     }
 
     #[test]
-    fn increment_with_infinite_preserves_number() {
-        let a = Attempt::new(u32::MAX, false);
-        let next = a.increment(MaxAttempts::Infinite).unwrap();
-        assert!(!next.is_last());
-        assert_eq!(next.index(), u32::MAX);
-    }
-
-    #[test]
     fn display_shows_index() {
         let a = Attempt::new(42, false);
         assert_eq!(format!("{a}"), "42");
     }
 
     #[test]
-    fn from_u32_to_max_attempts() {
-        let finite: MaxAttempts = 5u32.into();
-        assert_eq!(finite, MaxAttempts::Finite(5));
-
-        let infinite: MaxAttempts = u32::MAX.into();
-        assert_eq!(infinite, MaxAttempts::Finite(u32::MAX));
-    }
-
-    #[test]
     fn first_attempt_returns_correct_attempt() {
-        let max_finite = MaxAttempts::Finite(3);
-        let first = max_finite.first_attempt();
+        let first = Attempt::first(3);
         assert_eq!(first.index(), 0);
         assert!(!first.is_last());
 
-        let max_one = MaxAttempts::Finite(1);
-        let first_one = max_one.first_attempt();
+        let first_one = Attempt::first(1);
         assert_eq!(first_one.index(), 0);
         assert!(first_one.is_last());
-
-        let max_infinite = MaxAttempts::Infinite;
-        let first_infinite = max_infinite.first_attempt();
-        assert_eq!(first_infinite.index(), 0);
-        assert!(!first_infinite.is_last());
     }
 
     #[test]
