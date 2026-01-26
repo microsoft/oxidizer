@@ -131,16 +131,13 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 
     /// Sets the input cloning function.
     ///
-    /// This function is called before retry attempts to clone the input.
-    /// Return `Some(cloned_input)` to proceed with retry, or `None` to abort
-    /// retry and return the last failed result.
-    ///
-    /// This is required because Rust's ownership model doesn't allow reusing
-    /// the same input value across multiple attempts.
+    /// Called before each retry attempt to produce a fresh input value, since
+    /// the inner service consumes the input on each attempt. Return `Some(cloned_input)`
+    /// to proceed with retry, or `None` to abort and return the last failed result.
     ///
     /// # Arguments
     ///
-    /// * `clone_fn` - Function that takes a reference to the input and [`CloneArgs`]
+    /// * `clone_fn` - Function that takes a mutable reference to the input and [`CloneArgs`]
     ///   containing context about the retry attempt, and returns an optional cloned input
     #[must_use]
     pub fn clone_input_with(
