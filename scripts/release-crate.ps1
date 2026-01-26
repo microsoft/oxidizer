@@ -436,6 +436,38 @@ function Write-Changelog {
     Write-Host "✅ Changelog created at '$changelogFile'."
 }
 
+function Update-Readme {
+    param(
+        [string]$crateName,
+        [string]$crateFolder
+    )
+
+    $readmeTemplate = Join-Path $crateFolder "../README.j2"
+    if (-not (Test-Path $readmeTemplate)) {
+        Write-Warning "README template not found at '$readmeTemplate'. Skipping README generation."
+        return
+    }
+
+    if (-not (Test-CommandExists -command "cargo-doc2readme")) {
+        Write-Warning "cargo-doc2readme is not installed. Skipping README generation. Install with: cargo install cargo-doc2readme"
+        return
+    }
+
+    Write-Host "📝 Updating README.md..."
+    Push-Location $crateFolder
+    try {
+        $result = cargo doc2readme --lib --template ../README.j2 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to generate README: $result"
+        } else {
+            Write-Host "✅ README.md updated."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Show-FinalMessage {
     param(
         [string]$crateName,
@@ -533,6 +565,7 @@ try {
     }
 
     Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
+    Update-Readme -crateName $CrateName -crateFolder $crateFolder
     Show-FinalMessage -crateName $CrateName -newVersion $newVersion
 }
 catch {
