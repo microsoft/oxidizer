@@ -59,7 +59,7 @@ use crate::timers::TimerKey;
 ///
 /// # Cloning and shared state
 ///
-/// Cloning a clock is inexpensive (just an [`Arc`] clone) and every clone shares the same underlying state,
+/// Cloning a clock is inexpensive and every clone shares the same underlying state,
 /// including registered timers and, when the `test-util` feature is enabled, the controlled passage of time.
 /// Any timers you register or time adjustments you perform through one clone are visible to every other clone
 /// created from the same clock.
