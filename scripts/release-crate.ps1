@@ -264,7 +264,7 @@ function Format-ConventionalCommits {
     foreach ($type in $sortedKeys) {
         if ($groupedCommits[$type].Count -gt 0) {
             $headerName = if ($script:HeaderNameMapping.ContainsKey($type)) { $script:HeaderNameMapping[$type] } else { $type.Substring(0, 1).ToUpper() + $type.Substring(1) }
-            $formattedLines += "- $headerName", "", $groupedCommits[$type], ""
+            $formattedLines += @("- $headerName", "") + @($groupedCommits[$type]) + @("")
         }
     }
 
@@ -359,25 +359,22 @@ function Write-Changelog {
     )
 
     $tags = Invoke-GitCommand -Command "tag --list `"$crateName-v*`"" -ErrorMessage "Failed to retrieve git tags"
+    $latestTag = $null
     if ($null -eq $tags -or $tags.Count -eq 0) {
         Write-Warning "No tags found for crate '$crateName'. Generating changelog from all history."
-        $tags = @()
     } else {
         $filteredTags = @($tags | Where-Object { $_ -match "^${crateName}-v\d+\.\d+\.\d+$" })
         if ($filteredTags.Count -gt 0) {
-            $tags = @($filteredTags | Sort-Object { [version]($_ -replace "${crateName}-v", '') })
+            $sortedTags = @($filteredTags | Sort-Object { [version]($_ -replace "${crateName}-v", '') })
+            $latestTag = $sortedTags[-1]
         } else {
             Write-Warning "No valid semantic version tags found for crate '$crateName'. Generating changelog from all history."
-            $tags = @()
         }
     }
 
-    $changelogContent = @("# Changelog", "")
     $currentDate = (Get-Date).ToString('yyyy-MM-dd')
-    $hasContent = $false
 
-    # Process unreleased commits
-    $latestTag = if ($tags.Count -gt 0) { $tags[-1] } else { $null }
+    # Get commits since the latest tag (unreleased commits)
     $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
     $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for unreleased commits"
     if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
@@ -386,52 +383,47 @@ function Write-Changelog {
         $rawCommits = @($rawCommits)
     }
 
-    if ($rawCommits) {
-        $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
-        if ($formattedCommits) {
-            $changelogContent += "## [$newVersion] - $currentDate", ""
-            $changelogContent += $formattedCommits
-            $changelogContent += ""
-            $hasContent = $true
-        }
+    if (-not $rawCommits) {
+        Write-Warning "No unreleased commits found to add to the changelog."
+        return
     }
 
-    # Process commits from previous tags
-    for ($i = $tags.Count - 1; $i -ge 0; $i--) {
-        $currentTag = $tags[$i]
-        $previousTag = if ($i -gt 0) { $tags[$i-1] } else { $null }
-        $range = if ($previousTag) { "$previousTag..$currentTag" } else { $currentTag }
-        $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for tag $currentTag"
-        if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
-            $rawCommits = @()
-        } else {
-            $rawCommits = @($rawCommits)
-        }
-        if ($rawCommits.Count -eq 0) {
-            continue
-        }
+    $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
+    if (-not $formattedCommits) {
+        Write-Warning "No relevant commits found to add to the changelog (all commits may be filtered out)."
+        return
+    }
 
-        if ($rawCommits) {
-            $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
-            if ($formattedCommits) {
-                $currentTagVersion = $currentTag -replace "${crateName}-v", ''
-                $tagDateResult = Invoke-GitCommand -Command "log -1 --format=%ai `"$currentTag`"" -ErrorMessage "Failed to get date for tag $currentTag"
-                $tagDate = if ($tagDateResult) { $tagDateResult.Split(' ')[0] } else { "unknown" }
-                $changelogContent += "## [$currentTagVersion] - $tagDate", ""
-                $changelogContent += $formattedCommits
-                $changelogContent += ""
-                $hasContent = $true
+    # Build the new version section
+    $newVersionSection = @("## [$newVersion] - $currentDate", "")
+    $newVersionSection += $formattedCommits
+    $newVersionSection += ""
+
+    # Check if changelog file exists and has content
+    if (Test-Path $changelogFile) {
+        $existingContent = Get-Content $changelogFile -Raw
+        if ($existingContent) {
+            # Find the position after "# Changelog" header and any blank lines
+            # Insert the new version section there
+            $headerPattern = '^# Changelog\s*\r?\n(\r?\n)*'
+            if ($existingContent -match $headerPattern) {
+                $headerMatch = [regex]::Match($existingContent, $headerPattern)
+                $insertPosition = $headerMatch.Index + $headerMatch.Length
+                $newContent = $existingContent.Substring(0, $insertPosition) +
+                              ($newVersionSection -join "`n") + "`n" +
+                              $existingContent.Substring($insertPosition)
+                $newContent | Set-Content $changelogFile -NoNewline
+                Write-Host "✅ Changelog updated at '$changelogFile'."
+                return
             }
         }
     }
 
-    if (-not $hasContent) {
-        Write-Warning "No relevant commits found to generate a changelog."
-        return
-    }
-
+    # If no existing changelog or couldn't parse it, create a new one
+    $changelogContent = @("# Changelog", "")
+    $changelogContent += $newVersionSection
     $changelogContent | Out-File -FilePath $changelogFile -Encoding utf8
-    Write-Host "✅ Changelog written to '$changelogFile'."
+    Write-Host "✅ Changelog created at '$changelogFile'."
 }
 
 function Show-FinalMessage {
