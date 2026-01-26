@@ -4,7 +4,7 @@
 [package]
 name = "ohno"
 description = "High-quality Rust error handling."
-version = "0.2.1"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]

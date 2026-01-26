@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-01-26
+
+- ✨ Features
+
+  - add AppError::downcast_ref and Into<StdError> ([#225](https://github.com/microsoft/oxidizer/pull/225))
+
 ## [0.2.0] - 2025-12-01
 
 - ⚠️ Breaking
