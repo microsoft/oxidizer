@@ -1,13 +1,23 @@
 version: 2
 updates:
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    # only security updates will be opened automatically
-    open-pull-requests-limit: 0
+- package-ecosystem: "cargo"
+  directory: "/"
+  schedule:
+    interval: "weekly"
+    day: "monday"
+    time: "07:00"
+    timezone: "UTC"
+  commit-message:
+    prefix: "chore: "
+  ignore:
+    # ignore minor updates for tokio as they are semver compatible
+    - dependency-name: "tokio"
+      versions: ["1.x"]
+    # ignore patch updates for all dependencies
+    - dependency-name: "*"
+      update-types: ["version-update:semver-patch"]
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "monthly"
+- package-ecosystem: "github-actions"
+  directory: "/"
+  schedule:
+    interval: "monthly"

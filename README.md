@@ -103,7 +103,7 @@ automation processes:
 To generate documentation locally with all features enabled (including feature-gated items), run:
 
 ```shell
-.\scripts\generate-docs.ps1
+just docs
 ```
 
 This requires the Rust nightly toolchain to be installed. The script will generate documentation
