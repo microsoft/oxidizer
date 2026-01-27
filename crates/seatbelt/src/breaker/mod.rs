@@ -148,7 +148,7 @@
 //! | Minimum throughput | `100` executions | Minimum volume required before circuit can open | [`min_throughput`][BreakerLayer::min_throughput] |
 //! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][BreakerLayer::sampling_duration] |
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
-//! | Breaker isolation | Single global circuit | All inputs share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
+//! | Breaker isolation | Shared circuit (default) | All inputs share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
 //! | Half-open mode | `Reliable` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
 //! | Enable condition | Always enabled | Circuit breaker protection is applied to all inputs | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
@@ -251,8 +251,8 @@
 //!         .min_throughput(50)  // Require minimum 50 executions before considering circuit open
 //!         .sampling_duration(Duration::from_secs(60)) // Evaluate failures over 60-second window
 //!         .break_duration(Duration::from_secs(30))    // Stay open for 30 seconds before testing
-//!         // You can provide your own breaker ID logic if needed. The default is a single global
-//!         // circuit. By providing distinct IDs, you can have separate circuits for different inputs.
+//!         // You can provide your own breaker ID logic if needed. By default, all inputs share the
+//!         // same circuit. By providing distinct IDs, you can partition into separate circuits.
 //!         .breaker_id(|input| BreakerId::from(detect_breaker_id(input)))
 //!         // State change callbacks for monitoring and alerting
 //!         .on_opened(|output, _args| {

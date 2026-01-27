@@ -250,7 +250,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// function receives a reference to the input and returns a [`BreakerId`]
     /// identifying the circuit breaker instance to use.
     ///
-    /// **Default**: Single global circuit - all inputs share the same circuit breaker state
+    /// **Default**: Shared circuit - all inputs share the same circuit breaker state
     ///
     /// # Example
     ///
