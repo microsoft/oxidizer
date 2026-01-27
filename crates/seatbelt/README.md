@@ -21,6 +21,7 @@ Add resilience to fallible operations, such as RPC calls over the network, with 
 **Retry** handles transient failures and **Timeout** prevents operations from hanging indefinitely:
 
 ```rust
+use layered::{Execute, Service, Stack};
 use seatbelt::retry::Retry;
 use seatbelt::timeout::Timeout;
 use seatbelt::{RecoveryInfo, ResilienceContext};
@@ -107,7 +108,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9sXzDeRPG_DG6evSGBhoksVGwhuoclj88Z5G5rSe9VPPBqIYWSEgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-dV5_BMYStiGz3ob6YYJlksG_4wPpDb0HzfG4spY1f17r0dYWSEgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjI
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/breaker/index.html
