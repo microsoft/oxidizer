@@ -6,7 +6,7 @@ name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
 version = "0.2.0"
 readme = "README.md"
-keywords = ["oxidizer", "resilience", "layered", "recovery", "retry", "breaker"]
+keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
 
 edition.workspace = true
@@ -41,7 +41,6 @@ logs = ["dep:tracing"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
-futures = { workspace = true }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }

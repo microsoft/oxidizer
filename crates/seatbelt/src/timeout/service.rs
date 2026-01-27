@@ -5,11 +5,10 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::Either;
 use layered::Service;
 use tick::{Clock, FutureExt};
 
-use crate::timeout::{OnTimeout, OnTimeoutArgs, TimeoutLayer, TimeoutOutput, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs};
+use crate::timeout::*;
 use crate::utils::EnableIf;
 use crate::{NotSet, ResilienceContext};
 
@@ -103,20 +102,17 @@ where
     type Out = Out;
 
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
-    fn execute(&self, input: In) -> impl Future<Output = Self::Out> + Send {
+    async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
-            return Either::Left(self.inner.execute(input));
+            return self.inner.execute(input).await;
         }
 
         let timeout = self.shared.get_timeout(&input);
-        let shared = Arc::clone(&self.shared);
 
-        Either::Right(async move {
-            match self.inner.execute(input).timeout(&shared.clock, timeout).await {
-                Ok(output) => output,
-                Err(_error) => self.shared.handle_timeout_error(timeout),
-            }
-        })
+        match self.inner.execute(input).timeout(&self.shared.clock, timeout).await {
+            Ok(output) => output,
+            Err(_error) => self.shared.handle_timeout_error(timeout),
+        }
     }
 }
 

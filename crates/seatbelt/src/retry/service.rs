@@ -8,11 +8,9 @@ use std::time::Duration;
 use layered::Service;
 use tick::Clock;
 
-use crate::retry::{
-    CloneArgs, CloneInput, DelayBackoff, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, ShouldRecover,
-};
+use super::*;
 use crate::utils::EnableIf;
-use crate::{NotSet, RecoveryInfo, RecoveryKind, retry::Attempt};
+use crate::{NotSet, RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
 ///
@@ -100,8 +98,11 @@ where
 
         loop {
             let (original_input, attempt_input) = self.shared.clone_input(input, attempt, previous_recovery.clone());
+
+            // execute inner service
             let out = self.inner.execute(attempt_input).await;
 
+            // evaluate whether to retry
             match self.shared.evaluate_attempt(original_input, out, attempt, &mut delays) {
                 ControlFlow::Continue(state) => {
                     self.shared.clock.delay(state.delay).await;
@@ -117,13 +118,12 @@ where
 
 impl<In, Out> RetryShared<In, Out> {
     fn clone_input(&self, mut input: In, attempt: Attempt, previous_recovery: Option<RecoveryInfo>) -> (Option<In>, In) {
-        match self.clone_input.call(
-            &mut input,
-            CloneArgs {
-                attempt,
-                previous_recovery,
-            },
-        ) {
+        let args = CloneArgs {
+            attempt,
+            previous_recovery,
+        };
+
+        match self.clone_input.call(&mut input, args) {
             Some(cloned) => (Some(input), cloned),
             None => (None, input),
         }
