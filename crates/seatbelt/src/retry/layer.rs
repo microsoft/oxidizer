@@ -9,12 +9,10 @@ use std::sync::Arc;
 
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
-use crate::retry::{
-    CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, RetryShared, ShouldRecover,
-};
+use crate::retry::*;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
-use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, retry::Backoff};
+use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 use layered::Layer;
 
 /// Builder for configuring retry resilience middleware.
@@ -489,7 +487,6 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::retry::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]

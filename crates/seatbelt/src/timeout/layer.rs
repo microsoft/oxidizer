@@ -7,10 +7,7 @@ use std::time::Duration;
 
 use std::sync::Arc;
 
-use crate::timeout::{
-    OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
-    TimeoutShared,
-};
+use crate::timeout::*;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
 use crate::{NotSet, ResilienceContext, Set};
@@ -34,7 +31,7 @@ use layered::Layer;
 pub struct TimeoutLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     timeout: Option<Duration>,
-    timeout_output: Option<TimeoutOutputCallback<Out>>,
+    timeout_output: Option<TimeoutOutput<Out>>,
     on_timeout: Option<OnTimeout<Out>>,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
@@ -95,7 +92,7 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// timeout output handler.
     #[must_use]
     pub fn timeout_output(mut self, output: impl Fn(TimeoutOutputArgs) -> Out + Send + Sync + 'static) -> TimeoutLayer<In, Out, S1, Set> {
-        self.timeout_output = Some(TimeoutOutputCallback::new(output));
+        self.timeout_output = Some(TimeoutOutput::new(output));
         self.into_state::<S1, Set>()
     }
 

@@ -272,7 +272,6 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::retry::{Backoff, RetryLayer};
     use crate::testing::MetricTester;
     use crate::{ResilienceContext, Set};
     use layered::Layer;

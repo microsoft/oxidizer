@@ -171,7 +171,6 @@ mod tests {
 
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
-    use crate::breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
     use crate::{RecoveryInfo, ResilienceContext, Set};
     use layered::Layer;
 
