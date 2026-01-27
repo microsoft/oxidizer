@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::Either;
@@ -25,18 +26,41 @@ use crate::{NotSet, ResilienceContext};
 /// For comprehensive examples and usage patterns, see the [timeout module] documentation.
 ///
 /// [timeout module]: crate::timeout
-#[derive(Debug)]
-#[expect(clippy::struct_field_names, reason = "fields are named for clarity")]
 pub struct Timeout<In, Out, S> {
+    pub(super) shared: Arc<TimeoutShared<In, Out>>,
     pub(super) inner: S,
-    pub(super) clock: Clock,
-    pub(super) timeout: Duration,
-    pub(super) enable_if: EnableIf<In>,
-    pub(super) on_timeout: Option<OnTimeout<Out>>,
-    pub(super) timeout_override: Option<TimeoutOverride<In>>,
-    pub(super) timeout_output: TimeoutOutput<Out>,
+}
+
+/// Shared configuration for [`Timeout`] middleware.
+///
+/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+pub(crate) struct TimeoutShared<In, Out> {
+    pub(crate) clock: Clock,
+    pub(crate) timeout: Duration,
+    pub(crate) enable_if: EnableIf<In>,
+    pub(crate) on_timeout: Option<OnTimeout<Out>>,
+    pub(crate) timeout_override: Option<TimeoutOverride<In>>,
+    pub(crate) timeout_output: TimeoutOutput<Out>,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
-    pub(super) telemetry: crate::utils::TelemetryHelper,
+    pub(crate) telemetry: crate::utils::TelemetryHelper,
+}
+
+impl<In, Out, S: Clone> Clone for Timeout<In, Out, S> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<In, Out, S: std::fmt::Debug> std::fmt::Debug for Timeout<In, Out, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Timeout")
+            .field("timeout", &self.shared.timeout)
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<In, Out> Timeout<In, Out, ()> {
@@ -80,59 +104,67 @@ where
 
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn execute(&self, input: In) -> impl Future<Output = Self::Out> + Send {
-        if !self.enable_if.call(&input) {
+        if !self.shared.enable_if.call(&input) {
             return Either::Left(self.inner.execute(input));
         }
 
-        let timeout = self
-            .timeout_override
+        let timeout = self.shared.get_timeout(&input);
+        let shared = Arc::clone(&self.shared);
+
+        Either::Right(async move {
+            match self.inner.execute(input).timeout(&shared.clock, timeout).await {
+                Ok(output) => output,
+                Err(_error) => self.shared.handle_timeout_error(timeout),
+            }
+        })
+    }
+}
+
+impl<In, Out> TimeoutShared<In, Out> {
+    fn get_timeout(&self, input: &In) -> Duration {
+        self.timeout_override
             .as_ref()
             .and_then(|provider| {
                 provider.call(
-                    &input,
+                    input,
                     TimeoutOverrideArgs {
                         default_timeout: self.timeout,
                     },
                 )
             })
-            .unwrap_or(self.timeout);
+            .unwrap_or(self.timeout)
+    }
 
-        Either::Right(async move {
-            match self.inner.execute(input).timeout(&self.clock, timeout).await {
-                Ok(output) => output,
-                Err(_error) => {
-                    #[cfg(any(feature = "metrics", test))]
-                    if self.telemetry.metrics_enabled() {
-                        use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+    fn handle_timeout_error(&self, timeout: Duration) -> Out {
+        #[cfg(any(feature = "metrics", test))]
+        if self.telemetry.metrics_enabled() {
+            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
-                        self.telemetry.report_metrics(&[
-                            opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                            opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                            opentelemetry::KeyValue::new(EVENT_NAME, super::telemetry::TIMEOUT_EVENT_NAME),
-                        ]);
-                    }
+            self.telemetry.report_metrics(&[
+                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+                opentelemetry::KeyValue::new(EVENT_NAME, super::telemetry::TIMEOUT_EVENT_NAME),
+            ]);
+        }
 
-                    let output = self.timeout_output.call(TimeoutOutputArgs { timeout });
+        let output = self.timeout_output.call(TimeoutOutputArgs { timeout });
 
-                    #[cfg(any(feature = "logs", test))]
-                    if self.telemetry.logs_enabled {
-                        tracing::event!(
-                            name: "seatbelt.timeout",
-                            tracing::Level::WARN,
-                            pipeline.name = %self.telemetry.pipeline_name,
-                            strategy.name = %self.telemetry.strategy_name,
-                            timeout.ms = timeout.as_millis(),
-                        );
-                    }
+        #[cfg(any(feature = "logs", test))]
+        if self.telemetry.logs_enabled {
+            tracing::event!(
+                name: "seatbelt.timeout",
+                tracing::Level::WARN,
+                pipeline.name = %self.telemetry.pipeline_name,
+                strategy.name = %self.telemetry.strategy_name,
+                timeout.ms = timeout.as_millis(),
+            );
+        }
 
-                    if let Some(on_timeout) = &self.on_timeout {
-                        on_timeout.call(&output, OnTimeoutArgs { timeout });
-                    }
+        if let Some(on_timeout) = &self.on_timeout {
+            on_timeout.call(&output, OnTimeoutArgs { timeout });
+        }
 
-                    output
-                }
-            }
-        })
+        output
     }
 }
 

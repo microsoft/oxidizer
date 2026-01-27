@@ -5,8 +5,11 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use crate::timeout::{
     OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
+    TimeoutShared,
 };
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
@@ -175,8 +178,7 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
     type Service = Timeout<In, Out, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Timeout {
-            inner,
+        let shared = TimeoutShared {
             clock: self.context.get_clock().clone(),
             timeout: self.timeout.expect("timeout must be set in Ready state"),
             enable_if: self.enable_if.clone(),
@@ -185,6 +187,11 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
             timeout_override: self.timeout_override.clone(),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),
+        };
+
+        Timeout {
+            shared: Arc::new(shared),
+            inner,
         }
     }
 }
@@ -208,7 +215,6 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use layered::Execute;

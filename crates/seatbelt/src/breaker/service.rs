@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use layered::Service;
 use tick::Clock;
@@ -26,18 +27,39 @@ use crate::{NotSet, utils::EnableIf};
 /// builder methods on the returned [`BreakerLayer`] instance.
 ///
 /// For comprehensive examples and usage patterns, see the [`breaker` module][crate::breaker] documentation.
-#[derive(Debug)]
 pub struct Breaker<In, Out, S> {
+    pub(super) shared: Arc<BreakerShared<In, Out>>,
     pub(super) inner: S,
-    pub(super) clock: Clock,
-    pub(super) recovery: ShouldRecover<Out>,
-    pub(super) rejected_input: RejectedInput<In, Out>,
-    pub(super) enable_if: EnableIf<In>,
-    pub(super) engines: Engines,
-    pub(super) id_provider: Option<BreakerIdProvider<In>>,
-    pub(super) on_opened: Option<OnOpened<Out>>,
-    pub(super) on_closed: Option<OnClosed<Out>>,
-    pub(super) on_probing: Option<OnProbing<In>>,
+}
+
+/// Shared configuration for [`Breaker`] middleware.
+///
+/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+pub(crate) struct BreakerShared<In, Out> {
+    pub(crate) clock: Clock,
+    pub(crate) recovery: ShouldRecover<Out>,
+    pub(crate) rejected_input: RejectedInput<In, Out>,
+    pub(crate) enable_if: EnableIf<In>,
+    pub(crate) engines: Engines,
+    pub(crate) id_provider: Option<BreakerIdProvider<In>>,
+    pub(crate) on_opened: Option<OnOpened<Out>>,
+    pub(crate) on_closed: Option<OnClosed<Out>>,
+    pub(crate) on_probing: Option<OnProbing<In>>,
+}
+
+impl<In, Out, S: Clone> Clone for Breaker<In, Out, S> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<In, Out, S: std::fmt::Debug> std::fmt::Debug for Breaker<In, Out, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Breaker").field("inner", &self.inner).finish_non_exhaustive()
+    }
 }
 
 impl<In, Out> Breaker<In, Out, ()> {
@@ -62,18 +84,19 @@ where
 
     async fn execute(&self, input: In) -> Self::Out {
         // Check if a circuit breaker is enabled for this input
-        if !self.enable_if.call(&input) {
+        if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
         // Determine the breaker ID for this input
         let breaker_id = self
+            .shared
             .id_provider
             .as_ref()
             .map_or_else(BreakerId::default, |breaker_id| breaker_id.call(&input));
 
         // Retrieve the engine for this breaker instance
-        let engine = self.engines.get_engine(&breaker_id);
+        let engine = self.shared.engines.get_engine(&breaker_id);
 
         // Before
         let (input, mode) = match self.before_execute(engine.as_ref(), input, &breaker_id) {
@@ -103,7 +126,7 @@ impl<In, Out, S> Breaker<In, Out, S> {
                     // This is a probing execution that happens when the circuit is half-open.
                     // Invoke the on_probing callback if configured.
                     ExecutionMode::Probe => {
-                        if let Some(on_probing) = &self.on_probing {
+                        if let Some(on_probing) = &self.shared.on_probing {
                             on_probing.call(&mut input, OnProbingArgs { breaker_id });
                         }
 
@@ -112,16 +135,16 @@ impl<In, Out, S> Breaker<In, Out, S> {
                 }
             }
             // Circuit is open, return rejected input output
-            EnterCircuitResult::Rejected => ControlFlow::Break(self.rejected_input.call(input, RejectedInputArgs { breaker_id })),
+            EnterCircuitResult::Rejected => ControlFlow::Break(self.shared.rejected_input.call(input, RejectedInputArgs { breaker_id })),
         }
     }
 
     fn after_execute(&self, engine: &impl CircuitEngine, output: &Out, mode: ExecutionMode, breaker_id: &BreakerId) {
-        let recovery = self.recovery.call(
+        let recovery = self.shared.recovery.call(
             output,
             RecoveryArgs {
                 breaker_id,
-                clock: &self.clock,
+                clock: &self.shared.clock,
             },
         );
 
@@ -134,17 +157,17 @@ impl<In, Out, S> Breaker<In, Out, S> {
                 // we explicitly do nothing here
             }
             ExitCircuitResult::Opened(_health) => {
-                if let Some(on_opened) = &self.on_opened {
+                if let Some(on_opened) = &self.shared.on_opened {
                     on_opened.call(output, OnOpenedArgs { breaker_id });
                 }
             }
             ExitCircuitResult::Closed(stats) => {
-                if let Some(on_closed) = &self.on_closed {
+                if let Some(on_closed) = &self.shared.on_closed {
                     on_closed.call(
                         output,
                         OnClosedArgs {
                             breaker_id,
-                            open_duration: stats.opened_duration(self.clock.instant()),
+                            open_duration: stats.opened_duration(self.shared.clock.instant()),
                         },
                     );
                 }
@@ -157,7 +180,6 @@ impl<In, Out, S> Breaker<In, Out, S> {
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
@@ -180,7 +202,7 @@ mod tests {
 
         let breaker = layer.layer(Execute::new(|v: String| async move { v }));
 
-        assert!(breaker.enable_if.call(&"str".to_string()));
+        assert!(breaker.shared.enable_if.call(&"str".to_string()));
     }
 
     #[tokio::test]

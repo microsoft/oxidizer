@@ -5,9 +5,11 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::{
-    Breaker, BreakerId, BreakerIdProvider, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs,
+    Breaker, BreakerId, BreakerIdProvider, BreakerShared, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs,
     OnProbing, OnProbingArgs, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
 use crate::breaker::engine::probing::ProbesOptions;
@@ -344,8 +346,7 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
     type Service = Breaker<In, Out, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Breaker {
-            inner,
+        let shared = BreakerShared {
             clock: self.context.get_clock().clone(),
             recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
             rejected_input: self.rejected_input.clone().expect("rejected_input must be set in Ready state"),
@@ -355,6 +356,11 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
             on_closed: self.on_closed.clone(),
             on_probing: self.on_probing.clone(),
             id_provider: self.breaker_id.clone(),
+        };
+
+        Breaker {
+            shared: Arc::new(shared),
+            inner,
         }
     }
 }

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Duration;
 
 use layered::Service;
@@ -27,21 +28,44 @@ use crate::{NotSet, RecoveryInfo, RecoveryKind, retry::Attempt};
 /// builder methods on the returned [`RetryLayer`][crate::retry::RetryLayer] instance.
 ///
 /// For comprehensive examples and usage patterns, see the [retry module][crate::retry] documentation.
-#[derive(Debug)]
-#[expect(clippy::struct_field_names, reason = "Fields are named for clarity")]
 pub struct Retry<In, Out, S> {
+    pub(super) shared: Arc<RetryShared<In, Out>>,
     pub(super) inner: S,
-    pub(super) clock: Clock,
-    pub(super) max_attempts: u32,
-    pub(super) backoff: DelayBackoff,
-    pub(super) clone_input: CloneInput<In>,
-    pub(super) should_recover: ShouldRecover<Out>,
-    pub(super) on_retry: Option<OnRetry<Out>>,
-    pub(super) enable_if: EnableIf<In>,
+}
+
+/// Shared configuration for [`Retry`] middleware.
+///
+/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+pub(crate) struct RetryShared<In, Out> {
+    pub(crate) clock: Clock,
+    pub(crate) max_attempts: u32,
+    pub(crate) backoff: DelayBackoff,
+    pub(crate) clone_input: CloneInput<In>,
+    pub(crate) should_recover: ShouldRecover<Out>,
+    pub(crate) on_retry: Option<OnRetry<Out>>,
+    pub(crate) enable_if: EnableIf<In>,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
-    pub(super) telemetry: crate::utils::TelemetryHelper,
-    pub(super) restore_input: Option<RestoreInput<In, Out>>,
-    pub(super) handle_unavailable: bool,
+    pub(crate) telemetry: crate::utils::TelemetryHelper,
+    pub(crate) restore_input: Option<RestoreInput<In, Out>>,
+    pub(crate) handle_unavailable: bool,
+}
+
+impl<In, Out, S: Clone> Clone for Retry<In, Out, S> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<In, Out, S: std::fmt::Debug> std::fmt::Debug for Retry<In, Out, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Retry")
+            .field("max_attempts", &self.shared.max_attempts)
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<In, Out> Retry<In, Out, ()> {
@@ -67,12 +91,12 @@ where
     #[cfg_attr(test, mutants::skip)] // Mutating enable_if check causes infinite loops
     async fn execute(&self, mut input: In) -> Self::Out {
         // Check if retry is enabled for this input
-        if !self.enable_if.call(&input) {
+        if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
-        let mut attempt = Attempt::first(self.max_attempts);
-        let mut delays = self.backoff.delays();
+        let mut attempt = Attempt::first(self.shared.max_attempts);
+        let mut delays = self.shared.backoff.delays();
         let mut previous_recovery = None;
 
         loop {
@@ -100,7 +124,7 @@ where
         delays: &mut impl Iterator<Item = Duration>,
         previous_recovery: Option<RecoveryInfo>,
     ) -> ControlFlow<Out, (In, Attempt, RecoveryInfo)> {
-        let (original_input, attempt_input) = match self.clone_input.call(
+        let (original_input, attempt_input) = match self.shared.clone_input.call(
             &mut input,
             CloneArgs {
                 attempt,
@@ -115,18 +139,18 @@ where
         let out = self.inner.execute(attempt_input).await;
 
         // Check if we should recover from this output
-        let recovery = self.should_recover.call(
+        let recovery = self.shared.should_recover.call(
             &out,
             RecoveryArgs {
                 attempt,
-                clock: &self.clock,
+                clock: &self.shared.clock,
             },
         );
 
         // Return early if we cannot recover
         match recovery.kind() {
             RecoveryKind::Unavailable => {
-                if !self.handle_unavailable {
+                if !self.shared.handle_unavailable {
                     return ControlFlow::Break(out);
                 }
             }
@@ -136,7 +160,7 @@ where
         }
 
         // If no more attempts left, report telemetry, and return the last output
-        let Some(next_attempt) = attempt.increment(self.max_attempts) else {
+        let Some(next_attempt) = attempt.increment(self.shared.max_attempts) else {
             self.emit_attempt_telemetry(attempt, Duration::ZERO);
             return ControlFlow::Break(out);
         };
@@ -155,7 +179,7 @@ where
 
         // Only ever delay if we have a next attempt
         if matches!(flow_control, ControlFlow::Continue(_)) {
-            self.clock.delay(retry_delay).await;
+            self.shared.clock.delay(retry_delay).await;
         }
 
         flow_control
@@ -169,12 +193,12 @@ impl<In, Out, S> Retry<In, Out, S> {
     )]
     fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
         #[cfg(any(feature = "logs", test))]
-        if self.telemetry.logs_enabled {
+        if self.shared.telemetry.logs_enabled {
             tracing::event!(
                 name: "seatbelt.retry",
                 tracing::Level::WARN,
-                pipeline.name = %self.telemetry.pipeline_name,
-                strategy.name = %self.telemetry.strategy_name,
+                pipeline.name = %self.shared.telemetry.pipeline_name,
+                strategy.name = %self.shared.telemetry.strategy_name,
                 resilience.attempt.index = attempt.index(),
                 resilience.attempt.is_last = attempt.is_last(),
                 resilience.retry.delay = retry_delay.as_secs_f32(),
@@ -182,13 +206,13 @@ impl<In, Out, S> Retry<In, Out, S> {
         }
 
         #[cfg(any(feature = "metrics", test))]
-        if self.telemetry.metrics_enabled() {
+        if self.shared.telemetry.metrics_enabled() {
             use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
             use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
-            self.telemetry.report_metrics(&[
-                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
+            self.shared.telemetry.report_metrics(&[
+                opentelemetry::KeyValue::new(PIPELINE_NAME, self.shared.telemetry.pipeline_name.clone()),
+                opentelemetry::KeyValue::new(STRATEGY_NAME, self.shared.telemetry.strategy_name.clone()),
                 opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
                 opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
@@ -212,7 +236,7 @@ impl<In, Out, S> Retry<In, Out, S> {
         // If we have a restore input callback, we can use it to restore the input for the next attempt if
         // the original input was not clonable.
         if original_input.is_none()
-            && let Some(restore) = &self.restore_input
+            && let Some(restore) = &self.shared.restore_input
             && let Some(input) = restore.call(
                 &mut out,
                 RestoreInputArgs {
@@ -227,7 +251,7 @@ impl<In, Out, S> Retry<In, Out, S> {
         match original_input {
             Some(input) => {
                 // Only invoke on-retry if there will be next attempt
-                if let Some(ref on_retry) = self.on_retry {
+                if let Some(on_retry) = &self.shared.on_retry {
                     on_retry.call(
                         &out,
                         OnRetryArgs {
@@ -249,7 +273,7 @@ impl<In, Out, S> Retry<In, Out, S> {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     use layered::Execute;
     use opentelemetry::KeyValue;
@@ -269,14 +293,14 @@ mod tests {
 
         let retry = layer.layer(Execute::new(|v: String| async move { v }));
 
-        assert_eq!(retry.telemetry.pipeline_name.to_string(), "test_pipeline");
-        assert_eq!(retry.telemetry.strategy_name.to_string(), "test_retry");
-        assert_eq!(retry.max_attempts, 4);
-        assert_eq!(retry.backoff.0.base_delay, Duration::from_millis(10));
-        assert_eq!(retry.backoff.0.backoff_type, Backoff::Exponential);
-        assert!(retry.backoff.0.use_jitter);
-        assert!(retry.on_retry.is_none());
-        assert!(retry.enable_if.call(&"str".to_string()));
+        assert_eq!(retry.shared.telemetry.pipeline_name.to_string(), "test_pipeline");
+        assert_eq!(retry.shared.telemetry.strategy_name.to_string(), "test_retry");
+        assert_eq!(retry.shared.max_attempts, 4);
+        assert_eq!(retry.shared.backoff.0.base_delay, Duration::from_millis(10));
+        assert_eq!(retry.shared.backoff.0.backoff_type, Backoff::Exponential);
+        assert!(retry.shared.backoff.0.use_jitter);
+        assert!(retry.shared.on_retry.is_none());
+        assert!(retry.shared.enable_if.call(&"str".to_string()));
     }
 
     #[tokio::test]

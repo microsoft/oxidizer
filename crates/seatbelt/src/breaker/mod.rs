@@ -291,6 +291,7 @@ pub(super) use callbacks::*;
 pub use layer::BreakerLayer;
 #[doc(inline)]
 pub use service::Breaker;
+pub(crate) use service::BreakerShared;
 
 mod execution_result;
 pub(super) use execution_result::ExecutionResult;
