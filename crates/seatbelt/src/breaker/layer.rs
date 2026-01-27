@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::{
-    Breaker, BreakerId, BreakerIdProvider, BreakerShared, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs,
-    OnProbing, OnProbingArgs, RejectedInput, RejectedInputArgs, ShouldRecover,
+    Breaker, BreakerId, BreakerIdProvider, BreakerShared, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened,
+    OnOpenedArgs, OnProbing, OnProbingArgs, RejectedInput, RejectedInputArgs, ShouldRecover,
 };
 use crate::breaker::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};

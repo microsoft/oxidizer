@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
-use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, RetryShared, ShouldRecover};
+use crate::retry::{
+    CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, RetryShared, ShouldRecover,
+};
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
 use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, retry::Backoff};

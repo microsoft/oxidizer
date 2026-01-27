@@ -90,7 +90,6 @@ where
 
     #[cfg_attr(test, mutants::skip)] // Mutating enable_if check causes infinite loops
     async fn execute(&self, mut input: In) -> Self::Out {
-        // Check if retry is enabled for this input
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
@@ -100,11 +99,15 @@ where
         let mut previous_recovery = None;
 
         loop {
-            match self.execute_attempt(input, attempt, &mut delays, previous_recovery).await {
-                ControlFlow::Continue((next_input, next_attempt, recovery)) => {
-                    input = next_input;
-                    attempt = next_attempt;
-                    previous_recovery = Some(recovery);
+            let (original_input, attempt_input) = self.shared.clone_input(input, attempt, previous_recovery.clone());
+            let out = self.inner.execute(attempt_input).await;
+
+            match self.shared.evaluate_attempt(original_input, out, attempt, &mut delays) {
+                ControlFlow::Continue(state) => {
+                    self.shared.clock.delay(state.delay).await;
+                    input = state.input;
+                    attempt = state.attempt;
+                    previous_recovery = Some(state.recovery);
                 }
                 ControlFlow::Break(out) => return out,
             }
@@ -112,19 +115,9 @@ where
     }
 }
 
-impl<In, Out: Send, S> Retry<In, Out, S>
-where
-    In: Send,
-    S: Service<In, Out = Out>,
-{
-    async fn execute_attempt(
-        &self,
-        mut input: In,
-        attempt: Attempt,
-        delays: &mut impl Iterator<Item = Duration>,
-        previous_recovery: Option<RecoveryInfo>,
-    ) -> ControlFlow<Out, (In, Attempt, RecoveryInfo)> {
-        let (original_input, attempt_input) = match self.shared.clone_input.call(
+impl<In, Out> RetryShared<In, Out> {
+    fn clone_input(&self, mut input: In, attempt: Attempt, previous_recovery: Option<RecoveryInfo>) -> (Option<In>, In) {
+        match self.clone_input.call(
             &mut input,
             CloneArgs {
                 attempt,
@@ -133,72 +126,105 @@ where
         ) {
             Some(cloned) => (Some(input), cloned),
             None => (None, input),
-        };
+        }
+    }
 
-        // Execute the operation
-        let out = self.inner.execute(attempt_input).await;
-
-        // Check if we should recover from this output
-        let recovery = self.shared.should_recover.call(
+    fn evaluate_attempt(
+        &self,
+        mut original_input: Option<In>,
+        mut out: Out,
+        attempt: Attempt,
+        delays: &mut impl Iterator<Item = Duration>,
+    ) -> ControlFlow<Out, ContinueRetry<In>> {
+        let recovery = self.should_recover.call(
             &out,
             RecoveryArgs {
                 attempt,
-                clock: &self.shared.clock,
+                clock: &self.clock,
             },
         );
 
-        // Return early if we cannot recover
-        match recovery.kind() {
-            RecoveryKind::Unavailable => {
-                if !self.shared.handle_unavailable {
-                    return ControlFlow::Break(out);
-                }
-            }
-            RecoveryKind::Retry => (),
-            // Handle future variants - treat unknown variants as non-recoverable
-            RecoveryKind::Never | RecoveryKind::Unknown | _ => return ControlFlow::Break(out),
+        if !self.is_recoverable(&recovery) {
+            return ControlFlow::Break(out);
         }
 
-        // If no more attempts left, report telemetry, and return the last output
-        let Some(next_attempt) = attempt.increment(self.shared.max_attempts) else {
-            self.emit_attempt_telemetry(attempt, Duration::ZERO);
+        let Some(next_attempt) = attempt.increment(self.max_attempts) else {
+            self.emit_telemetry(attempt, Duration::ZERO);
             return ControlFlow::Break(out);
         };
 
-        // Always get the next delay, even if we won't use it. This is because we want to
-        // advance the backoff strategy (e.g., exponential backoff), so the next retry uses the
-        // correct delay when it's not explicitly overridden by the recovery.
-        let retry_delay = delays.next().unwrap_or(Duration::ZERO);
+        let retry_delay = compute_retry_delay(&recovery, delays);
 
-        // Use the recovery delay if provided, otherwise use the backoff delay
-        let retry_delay = recovery.get_delay().unwrap_or(retry_delay);
+        self.emit_telemetry(attempt, retry_delay);
 
-        // At this point, we know that the output is recoverable and that we have more attempts left.
-        // Determine the delay before the next attempt based on the recovery kind.
-        let flow_control = self.finalize_retryable_attempt(original_input, out, attempt, next_attempt, retry_delay, recovery);
-
-        // Only ever delay if we have a next attempt
-        if matches!(flow_control, ControlFlow::Continue(_)) {
-            self.shared.clock.delay(retry_delay).await;
+        if let Some(input) = self.try_restore_input(original_input.as_ref(), &mut out, attempt, &recovery) {
+            original_input = Some(input);
         }
 
-        flow_control
+        match original_input {
+            Some(input) => {
+                self.invoke_on_retry(&out, attempt, retry_delay, &recovery);
+                ControlFlow::Continue(ContinueRetry {
+                    input,
+                    attempt: next_attempt,
+                    recovery,
+                    delay: retry_delay,
+                })
+            }
+            None => ControlFlow::Break(out),
+        }
     }
-}
 
-impl<In, Out, S> Retry<In, Out, S> {
+    fn is_recoverable(&self, recovery: &RecoveryInfo) -> bool {
+        match recovery.kind() {
+            RecoveryKind::Unavailable => self.handle_unavailable,
+            RecoveryKind::Retry => true,
+            RecoveryKind::Never | RecoveryKind::Unknown | _ => false,
+        }
+    }
+
+    fn try_restore_input(&self, original_input: Option<&In>, out: &mut Out, attempt: Attempt, recovery: &RecoveryInfo) -> Option<In> {
+        if original_input.is_some() {
+            return None;
+        }
+
+        match &self.restore_input {
+            Some(restore) => restore.call(
+                out,
+                RestoreInputArgs {
+                    attempt,
+                    recovery: recovery.clone(),
+                },
+            ),
+            None => None,
+        }
+    }
+
+    fn invoke_on_retry(&self, out: &Out, attempt: Attempt, retry_delay: Duration, recovery: &RecoveryInfo) {
+        if let Some(on_retry) = &self.on_retry {
+            on_retry.call(
+                out,
+                OnRetryArgs {
+                    attempt,
+                    retry_delay,
+                    recovery: recovery.clone(),
+                },
+            );
+        }
+    }
+
     #[cfg_attr(
         not(any(feature = "logs", test)),
         expect(unused_variables, reason = "unused when logs feature not used")
     )]
-    fn emit_attempt_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
+    fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
         #[cfg(any(feature = "logs", test))]
-        if self.shared.telemetry.logs_enabled {
+        if self.telemetry.logs_enabled {
             tracing::event!(
                 name: "seatbelt.retry",
                 tracing::Level::WARN,
-                pipeline.name = %self.shared.telemetry.pipeline_name,
-                strategy.name = %self.shared.telemetry.strategy_name,
+                pipeline.name = %self.telemetry.pipeline_name,
+                strategy.name = %self.telemetry.strategy_name,
                 resilience.attempt.index = attempt.index(),
                 resilience.attempt.is_last = attempt.is_last(),
                 resilience.retry.delay = retry_delay.as_secs_f32(),
@@ -206,74 +232,40 @@ impl<In, Out, S> Retry<In, Out, S> {
         }
 
         #[cfg(any(feature = "metrics", test))]
-        if self.shared.telemetry.metrics_enabled() {
+        if self.telemetry.metrics_enabled() {
             use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
             use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
-            self.shared.telemetry.report_metrics(&[
-                opentelemetry::KeyValue::new(PIPELINE_NAME, self.shared.telemetry.pipeline_name.clone()),
-                opentelemetry::KeyValue::new(STRATEGY_NAME, self.shared.telemetry.strategy_name.clone()),
+            self.telemetry.report_metrics(&[
+                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
+                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                 opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
                 opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
             ]);
         }
     }
+}
 
-    #[inline]
-    fn finalize_retryable_attempt(
-        &self,
-        mut original_input: Option<In>,
-        mut out: Out,
-        attempt: Attempt,
-        next_attempt: Attempt,
-        retry_delay: Duration,
-        recovery: RecoveryInfo,
-    ) -> ControlFlow<Out, (In, Attempt, RecoveryInfo)> {
-        // we emit attempt telemetry even if the next attempt does not happen
-        self.emit_attempt_telemetry(attempt, retry_delay);
+fn compute_retry_delay(recovery: &RecoveryInfo, delays: &mut impl Iterator<Item = Duration>) -> Duration {
+    let backoff_delay = delays.next().unwrap_or(Duration::ZERO);
+    recovery.get_delay().unwrap_or(backoff_delay)
+}
 
-        // If we have a restore input callback, we can use it to restore the input for the next attempt if
-        // the original input was not clonable.
-        if original_input.is_none()
-            && let Some(restore) = &self.shared.restore_input
-            && let Some(input) = restore.call(
-                &mut out,
-                RestoreInputArgs {
-                    attempt,
-                    recovery: recovery.clone(),
-                },
-            )
-        {
-            original_input = Some(input);
-        }
-
-        match original_input {
-            Some(input) => {
-                // Only invoke on-retry if there will be next attempt
-                if let Some(on_retry) = &self.shared.on_retry {
-                    on_retry.call(
-                        &out,
-                        OnRetryArgs {
-                            attempt,
-                            retry_delay,
-                            recovery: recovery.clone(),
-                        },
-                    );
-                }
-                ControlFlow::Continue((input, next_attempt, recovery))
-            }
-            None => ControlFlow::Break(out),
-        }
-    }
+/// State passed between retry attempts when continuing the retry loop.
+struct ContinueRetry<In> {
+    input: In,
+    attempt: Attempt,
+    recovery: RecoveryInfo,
+    delay: Duration,
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(not(miri))] // Oxidizer runtime does not support Miri.
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     use layered::Execute;
     use opentelemetry::KeyValue;

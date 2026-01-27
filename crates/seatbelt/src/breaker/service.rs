@@ -83,95 +83,82 @@ where
     type Out = Out;
 
     async fn execute(&self, input: In) -> Self::Out {
-        // Check if a circuit breaker is enabled for this input
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
-        // Determine the breaker ID for this input
-        let breaker_id = self
-            .shared
-            .id_provider
-            .as_ref()
-            .map_or_else(BreakerId::default, |breaker_id| breaker_id.call(&input));
-
-        // Retrieve the engine for this breaker instance
+        let breaker_id = self.shared.get_breaker_id(&input);
         let engine = self.shared.engines.get_engine(&breaker_id);
 
-        // Before
-        let (input, mode) = match self.before_execute(engine.as_ref(), input, &breaker_id) {
-            ControlFlow::Continue(input) => input,
+        let (input, mode) = match self.shared.before_execute(engine.as_ref(), input, &breaker_id) {
+            ControlFlow::Continue(result) => result,
             ControlFlow::Break(output) => return output,
         };
 
-        // Execute the inner service
         let output = self.inner.execute(input).await;
 
-        // After
-        self.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+        self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
 
         output
     }
 }
 
-impl<In, Out, S> Breaker<In, Out, S> {
-    #[inline]
+impl<In, Out> BreakerShared<In, Out> {
+    fn get_breaker_id(&self, input: &In) -> BreakerId {
+        self.id_provider
+            .as_ref()
+            .map_or_else(BreakerId::default, |provider| provider.call(input))
+    }
+
     fn before_execute(&self, engine: &impl CircuitEngine, mut input: In, breaker_id: &BreakerId) -> ControlFlow<Out, (In, ExecutionMode)> {
-        // Try to enter the circuit
         match engine.enter() {
             EnterCircuitResult::Accepted { mode } => {
-                match mode {
-                    // regular execution, do nothing special
-                    ExecutionMode::Normal => ControlFlow::Continue((input, ExecutionMode::Normal)),
-                    // This is a probing execution that happens when the circuit is half-open.
-                    // Invoke the on_probing callback if configured.
-                    ExecutionMode::Probe => {
-                        if let Some(on_probing) = &self.shared.on_probing {
-                            on_probing.call(&mut input, OnProbingArgs { breaker_id });
-                        }
-
-                        ControlFlow::Continue((input, ExecutionMode::Probe))
-                    }
+                if mode == ExecutionMode::Probe {
+                    self.invoke_on_probing(&mut input, breaker_id);
                 }
+                ControlFlow::Continue((input, mode))
             }
-            // Circuit is open, return rejected input output
-            EnterCircuitResult::Rejected => ControlFlow::Break(self.shared.rejected_input.call(input, RejectedInputArgs { breaker_id })),
+            EnterCircuitResult::Rejected => ControlFlow::Break(self.rejected_input.call(input, RejectedInputArgs { breaker_id })),
         }
     }
 
     fn after_execute(&self, engine: &impl CircuitEngine, output: &Out, mode: ExecutionMode, breaker_id: &BreakerId) {
-        let recovery = self.shared.recovery.call(
+        let recovery = self.recovery.call(
             output,
             RecoveryArgs {
                 breaker_id,
-                clock: &self.shared.clock,
+                clock: &self.clock,
             },
         );
 
-        // Evaluate the execution result based on recovery decision
         let execution_result = ExecutionResult::from_recovery(&recovery);
 
-        // Exit the circuit and handle state transitions
         match engine.exit(execution_result, mode) {
-            ExitCircuitResult::Unchanged | ExitCircuitResult::Reopened => {
-                // we explicitly do nothing here
-            }
+            ExitCircuitResult::Unchanged | ExitCircuitResult::Reopened => {}
             ExitCircuitResult::Opened(_health) => {
-                if let Some(on_opened) = &self.shared.on_opened {
-                    on_opened.call(output, OnOpenedArgs { breaker_id });
-                }
+                self.invoke_on_opened(output, breaker_id);
             }
             ExitCircuitResult::Closed(stats) => {
-                if let Some(on_closed) = &self.shared.on_closed {
-                    on_closed.call(
-                        output,
-                        OnClosedArgs {
-                            breaker_id,
-                            open_duration: stats.opened_duration(self.shared.clock.instant()),
-                        },
-                    );
-                }
+                self.invoke_on_closed(output, breaker_id, stats.opened_duration(self.clock.instant()));
             }
+        }
+    }
+
+    fn invoke_on_probing(&self, input: &mut In, breaker_id: &BreakerId) {
+        if let Some(on_probing) = &self.on_probing {
+            on_probing.call(input, OnProbingArgs { breaker_id });
+        }
+    }
+
+    fn invoke_on_opened(&self, output: &Out, breaker_id: &BreakerId) {
+        if let Some(on_opened) = &self.on_opened {
+            on_opened.call(output, OnOpenedArgs { breaker_id });
+        }
+    }
+
+    fn invoke_on_closed(&self, output: &Out, breaker_id: &BreakerId, open_duration: std::time::Duration) {
+        if let Some(on_closed) = &self.on_closed {
+            on_closed.call(output, OnClosedArgs { breaker_id, open_duration });
         }
     }
 }
@@ -241,6 +228,7 @@ mod tests {
         );
 
         let result = service
+            .shared
             .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .continue_value()
             .unwrap();
@@ -267,6 +255,7 @@ mod tests {
         );
 
         let result = service
+            .shared
             .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .continue_value()
             .unwrap();
@@ -283,6 +272,7 @@ mod tests {
         let engine = EngineFake::new(EnterCircuitResult::Rejected, ExitCircuitResult::Unchanged);
 
         let result = service
+            .shared
             .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .break_value()
             .unwrap();
@@ -304,7 +294,9 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
+        service
+            .shared
+            .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
     #[test]
@@ -322,7 +314,9 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
+        service
+            .shared
+            .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
     #[test]
@@ -345,7 +339,9 @@ mod tests {
             ExitCircuitResult::Opened(HealthInfo::new(1, 1, 1.0, 1)),
         );
 
-        service.after_execute(&engine, &"error_response".to_string(), ExecutionMode::Normal, &BreakerId::default());
+        service
+            .shared
+            .after_execute(&engine, &"error_response".to_string(), ExecutionMode::Normal, &BreakerId::default());
         assert!(opened_called_clone.load(Ordering::SeqCst));
     }
 
@@ -369,7 +365,7 @@ mod tests {
             ExitCircuitResult::Closed(Stats::new(Instant::now())),
         );
 
-        service.after_execute(
+        service.shared.after_execute(
             &engine,
             &"success_response".to_string(),
             ExecutionMode::Normal,
