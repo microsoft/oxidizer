@@ -32,7 +32,7 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = []
+default = ["timeout", "retry", "breaker"]
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]

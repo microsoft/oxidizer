@@ -25,7 +25,7 @@
 //! # {
 //! # use std::time::Duration;
 //! # use tick::Clock;
-//! # use layered::{Execute, Service, Stack};
+//! use layered::{Execute, Service, Stack};
 //! use seatbelt::retry::Retry;
 //! use seatbelt::timeout::Timeout;
 //! use seatbelt::{RecoveryInfo, ResilienceContext};

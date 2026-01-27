@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::breaker::constants::MIN_SAMPLING_DURATION;
 use crate::breaker::engine::probing::ProbesOptions;
 
-/// Defines the behavior of the circuit breaker when transitioning from half-open to closed state.
+/// The behavior of the circuit breaker when transitioning from half-open to closed state.
 ///
 /// The half-open state is a transitional phase where the circuit breaker allows a limited number of
 /// inputs to pass through to test if the underlying service has recovered. The chosen mode
