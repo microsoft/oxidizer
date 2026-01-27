@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "futures",
  "mutants",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "insta",
  "mutants",
