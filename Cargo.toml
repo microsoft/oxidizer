@@ -44,6 +44,7 @@ tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
 # external dependencies
+ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 async-once-cell = { version = "0.5", default-features = false }

@@ -57,7 +57,7 @@ fn bench_high_contention(c: &mut Criterion) {
                     .collect();
 
                 for task in tasks {
-                    task.await.expect("Task panicked");
+                    task.await.expect("Task panicked").expect("Leader panicked");
                 }
             }
         });
@@ -87,7 +87,7 @@ fn bench_distributed_keys(c: &mut Criterion) {
                     .collect();
 
                 for task in tasks {
-                    task.await.expect("Task panicked");
+                    task.await.expect("Task panicked").expect("Leader panicked");
                 }
             }
         });

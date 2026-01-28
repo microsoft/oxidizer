@@ -3,7 +3,7 @@
 
 [package]
 name = "uniflight"
-description = "Coalesces multiple ongoing tasks into a leader which does the work, and follower tasks that wait on the result, to prevent duplicate I/O or other downstream overhead."
+description = "Coalesces duplicate async tasks into a single execution."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "coalescing", "stempede", "singleflight", "deduplication"]
@@ -24,8 +24,10 @@ allowed_external_types = [
 ]
 
 [dependencies]
+ahash = { workspace = true, default-features = false, features = ["std"] }
 async-once-cell.workspace = true
 dashmap.workspace = true
+futures-util = { workspace = true, default-features = false, features = ["std", "alloc"] }
 thread_aware.workspace = true
 
 [dev-dependencies]

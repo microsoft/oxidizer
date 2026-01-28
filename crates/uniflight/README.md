@@ -42,7 +42,7 @@ let group: Merger<String, String> = Merger::new();
 let result = group.execute("user:123", || async {
     // This expensive operation runs only once, even if called concurrently
     "expensive_result".to_string()
-}).await;
+}).await.expect("leader should not panic");
 ```
 
 ## Flexible Key Types
@@ -55,7 +55,8 @@ directly without allocating:
 let merger: Merger<String, i32> = Merger::new();
 
 // Pass &str directly - no need to call .to_string()
-merger.execute("my-key", || async { 42 }).await;
+let result = merger.execute("my-key", || async { 42 }).await;
+assert_eq!(result, Ok(42));
 ```
 
 ## Thread-Aware Scoping
@@ -75,22 +76,41 @@ use thread_aware::PerNuma;
 let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
 ```
 
-## Cancellation and Panic Safety
+## Cancellation and Panic Handling
 
-`Merger` handles task cancellation and panics gracefully:
+`Merger` handles task cancellation and panics explicitly:
 
 * If the leader task is cancelled or dropped, a follower becomes the new leader
-* If the leader task panics, a follower becomes the new leader and executes its work
-* Followers that join before the leader completes receive the cached result
+* If the leader task panics, followers receive [`LeaderPanicked`][__link7] error with the panic message
+* Followers that join before the leader completes receive the value the leader returns
+
+When a panic occurs, followers are notified via the error type rather than silently
+retrying. The panic message is captured and available via [`LeaderPanicked::message`][__link8]:
+
+```rust
+let merger: Merger<String, String> = Merger::new();
+match merger.execute("key", || async { "result".to_string() }).await {
+    Ok(value) => println!("got {value}"),
+    Err(err) => {
+        println!("leader panicked: {}", err.message());
+        // Decide whether to retry
+    }
+}
+```
 
 ## Memory Management
 
 Completed entries are automatically removed from the internal map when the last caller
 finishes. This ensures no stale entries accumulate over time.
 
+## Type Requirements
+
+The value type `T` must implement [`Clone`][__link9] because followers receive a clone of the
+leader’s result. The key type `K` must implement [`Hash`][__link10] and [`Eq`][__link11].
+
 ## Thread Safety
 
-[`Merger`][__link7] is `Send` and `Sync`, and can be shared across threads. The returned futures
+[`Merger`][__link12] is `Send` and `Sync`, and can be shared across threads. The returned futures
 are `Send` when the closure, future, key, and value types are `Send`.
 
 ## Performance
@@ -109,12 +129,17 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8jiDViul9t_G_p-49ux8lFbG5S25MCW3zg6Gwon4MHzwXdKYWSCgmx0aHJlYWRfYXdhcmVlMC42LjGCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxgwNFq9VUtfG5xaBNm6U4VGG97W2YkyKkPjG4KVgSbTgdOrYWSCgmx0aHJlYWRfYXdhcmVlMC42LjGCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.1.0/uniflight/?search=Merger::execute
+ [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
+ [__link11]: https://doc.rust-lang.org/stable/std/cmp/trait.Eq.html
+ [__link12]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
  [__link3]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=storage::Strategy
  [__link4]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=PerProcess
  [__link5]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=PerNuma
  [__link6]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=PerCore
- [__link7]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
+ [__link7]: https://docs.rs/uniflight/0.1.0/uniflight/struct.LeaderPanicked.html
+ [__link8]: https://docs.rs/uniflight/0.1.0/uniflight/?search=LeaderPanicked::message
+ [__link9]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html

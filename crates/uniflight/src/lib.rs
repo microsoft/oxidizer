@@ -31,7 +31,7 @@
 //! let result = group.execute("user:123", || async {
 //!     // This expensive operation runs only once, even if called concurrently
 //!     "expensive_result".to_string()
-//! }).await;
+//! }).await.expect("leader should not panic");
 //! # }
 //! ```
 //!
@@ -47,7 +47,8 @@
 //! let merger: Merger<String, i32> = Merger::new();
 //!
 //! // Pass &str directly - no need to call .to_string()
-//! merger.execute("my-key", || async { 42 }).await;
+//! let result = merger.execute("my-key", || async { 42 }).await;
+//! assert_eq!(result, Ok(42));
 //! # }
 //! ```
 //!
@@ -70,18 +71,40 @@
 //! # }
 //! ```
 //!
-//! # Cancellation and Panic Safety
+//! # Cancellation and Panic Handling
 //!
-//! `Merger` handles task cancellation and panics gracefully:
+//! `Merger` handles task cancellation and panics explicitly:
 //!
 //! - If the leader task is cancelled or dropped, a follower becomes the new leader
-//! - If the leader task panics, a follower becomes the new leader and executes its work
-//! - Followers that join before the leader completes receive the cached result
+//! - If the leader task panics, followers receive [`LeaderPanicked`] error with the panic message
+//! - Followers that join before the leader completes receive the value the leader returns
+//!
+//! When a panic occurs, followers are notified via the error type rather than silently
+//! retrying. The panic message is captured and available via [`LeaderPanicked::message`]:
+//!
+//! ```
+//! # use uniflight::Merger;
+//! # async fn example() {
+//! let merger: Merger<String, String> = Merger::new();
+//! match merger.execute("key", || async { "result".to_string() }).await {
+//!     Ok(value) => println!("got {value}"),
+//!     Err(err) => {
+//!         println!("leader panicked: {}", err.message());
+//!         // Decide whether to retry
+//!     }
+//! }
+//! # }
+//! ```
 //!
 //! # Memory Management
 //!
 //! Completed entries are automatically removed from the internal map when the last caller
 //! finishes. This ensures no stale entries accumulate over time.
+//!
+//! # Type Requirements
+//!
+//! The value type `T` must implement [`Clone`] because followers receive a clone of the
+//! leader's result. The key type `K` must implement [`Hash`] and [`Eq`].
 //!
 //! # Thread Safety
 //!
@@ -105,14 +128,17 @@ use std::{
     borrow::Borrow,
     fmt::Debug,
     hash::Hash,
+    panic::AssertUnwindSafe,
     sync::{Arc, Weak},
 };
 
+use ahash::RandomState;
 use async_once_cell::OnceCell;
 use dashmap::{
     DashMap,
     Entry::{Occupied, Vacant},
 };
+use futures_util::FutureExt; // catch_unwind, map
 use thread_aware::{
     Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware,
     affinity::{MemoryAffinity, PinnedAffinity},
@@ -126,7 +152,7 @@ use thread_aware::{
 /// - [`PerNuma`]: Per-NUMA-node scope (NUMA-local memory access)
 /// - [`PerCore`]: Per-core scope (no deduplication)
 pub struct Merger<K, T, S: Strategy = PerProcess> {
-    inner: TaArc<DashMap<K, Weak<OnceCell<T>>>, S>,
+    inner: TaArc<DashMap<K, Weak<PanicAwareCell<T>>, RandomState>, S>,
 }
 
 impl<K, T, S: Strategy> Debug for Merger<K, T, S> {
@@ -144,12 +170,12 @@ impl<K, T, S: Strategy> Clone for Merger<K, T, S> {
 impl<K, T, S> Default for Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
-    S: Strategy + Send + Sync,
+    T: Send + Sync + 'static,
+    S: Strategy,
 {
     fn default() -> Self {
         Self {
-            inner: TaArc::new(DashMap::new),
+            inner: TaArc::new(|| DashMap::with_hasher(RandomState::new())),
         }
     }
 }
@@ -157,8 +183,8 @@ where
 impl<K, T, S> Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
-    S: Strategy + Send + Sync,
+    T: Send + Sync + 'static,
+    S: Strategy,
 {
     /// Creates a new `Merger` instance.
     ///
@@ -192,7 +218,7 @@ where
 impl<K, T> Merger<K, T, PerProcess>
 where
     K: Hash + Eq + Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
+    T: Send + Sync + 'static,
 {
     /// Creates a new `Merger` with process-wide scoping (default).
     ///
@@ -217,7 +243,7 @@ where
 impl<K, T> Merger<K, T, PerNuma>
 where
     K: Hash + Eq + Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
+    T: Send + Sync + 'static,
 {
     /// Creates a new `Merger` with per-NUMA-node scoping.
     ///
@@ -242,7 +268,7 @@ where
 impl<K, T> Merger<K, T, PerCore>
 where
     K: Hash + Eq + Send + Sync + 'static,
-    T: Clone + Send + Sync + 'static,
+    T: Send + Sync + 'static,
 {
     /// Creates a new `Merger` with per-core scoping.
     ///
@@ -295,12 +321,19 @@ where
 impl<K, T, S> Merger<K, T, S>
 where
     K: Hash + Eq + Send + Sync,
-    T: Clone + Send + Sync,
+    T: Send + Sync,
     S: Strategy + Send + Sync,
 {
     /// Execute and return the value for a given function, making sure that only one
     /// operation is in-flight at a given moment. If a duplicate call comes in,
     /// that caller will wait until the leader completes and return the same value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LeaderPanicked`] if the leader task panicked during execution.
+    /// Callers can retry by calling `execute` again if desired.
+    ///
+    /// # Example
     ///
     /// The key can be passed as any borrowed form of `K`. For example, if `K` is `String`,
     /// you can pass `&str` directly:
@@ -310,14 +343,16 @@ where
     /// # async fn example() {
     /// let merger: Merger<String, i32> = Merger::new();
     /// let result = merger.execute("my-key", || async { 42 }).await;
+    /// assert_eq!(result, Ok(42));
     /// # }
     /// ```
-    pub fn execute<Q, F, Fut>(&self, key: &Q, func: F) -> impl Future<Output = T> + Send + use<Q, F, Fut, K, T, S>
+    pub fn execute<Q, F, Fut>(&self, key: &Q, func: F) -> impl Future<Output = Result<T, LeaderPanicked>> + Send + use<Q, F, Fut, K, T, S>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
         F: FnOnce() -> Fut + Send,
         Fut: Future<Output = T> + Send,
+        T: Clone,
     {
         // Clone the TaArc - the async block owns this clone
         let inner = self.inner.clone();
@@ -332,8 +367,8 @@ where
         }
     }
 
-    /// Gets an existing `OnceCell` for the key, or creates a new one.
-    fn get_or_create_cell<Q>(map: &DashMap<K, Weak<OnceCell<T>>>, key: &Q) -> Arc<OnceCell<T>>
+    /// Gets an existing cell for the key, or creates a new one.
+    fn get_or_create_cell<Q>(map: &DashMap<K, Weak<PanicAwareCell<T>>, RandomState>, key: &Q) -> Arc<PanicAwareCell<T>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
@@ -354,12 +389,12 @@ where
     /// This is the slow path of `get_or_create_cell`, separated for testability.
     /// It handles the case where another thread may have inserted a cell between
     /// our fast-path check and this insertion attempt.
-    fn insert_or_get_existing<Q>(map: &DashMap<K, Weak<OnceCell<T>>>, key: &Q) -> Arc<OnceCell<T>>
+    fn insert_or_get_existing<Q>(map: &DashMap<K, Weak<PanicAwareCell<T>>, RandomState>, key: &Q) -> Arc<PanicAwareCell<T>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized,
     {
-        let cell = Arc::new(OnceCell::new());
+        let cell = Arc::new(PanicAwareCell::new());
         let weak = Arc::downgrade(&cell);
 
         // Use Entry enum to atomically check-and-return or insert
@@ -380,6 +415,72 @@ where
 
         // We inserted our cell, return it
         cell
+    }
+}
+
+/// Error returned when the leader task panicked during execution.
+///
+/// When a leader task panics, followers receive this error instead of
+/// silently retrying. Callers can decide whether to retry by calling
+/// `execute` again.
+///
+/// The panic message is captured and available via [`Display`] or [`LeaderPanicked::message`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaderPanicked {
+    message: Arc<str>,
+}
+
+impl LeaderPanicked {
+    /// Returns the panic message from the leader task.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for LeaderPanicked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "leader task panicked: {}", self.message)
+    }
+}
+
+impl std::error::Error for LeaderPanicked {}
+
+/// Extracts a message from a panic payload.
+///
+/// Tries to downcast to `&str` or `String`, falling back to a default message.
+fn extract_panic_message(payload: &(dyn std::any::Any + Send)) -> Arc<str> {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        return Arc::from(*s);
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return Arc::from(s.as_str());
+    }
+    Arc::from("unknown panic")
+}
+
+struct PanicAwareCell<T> {
+    inner: OnceCell<Result<T, LeaderPanicked>>,
+}
+
+impl<T> PanicAwareCell<T> {
+    fn new() -> Self {
+        Self { inner: OnceCell::new() }
+    }
+
+    #[expect(clippy::future_not_send, reason = "Send bounds enforced by Merger::execute")]
+    async fn get_or_init<F>(&self, f: F) -> &Result<T, LeaderPanicked>
+    where
+        F: Future<Output = T>,
+    {
+        // Use map combinator instead of async block to avoid extra state machine
+        self.inner
+            .get_or_init(AssertUnwindSafe(f).catch_unwind().map(|result| {
+                result.map_err(|payload| LeaderPanicked {
+                    message: extract_panic_message(&*payload),
+                })
+            }))
+            .await
     }
 }
 
@@ -404,8 +505,8 @@ mod tests {
 
     #[test]
     fn fast_path_returns_existing() {
-        let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
-        let existing_cell = Arc::new(OnceCell::new());
+        let map: DashMap<String, Weak<PanicAwareCell<String>>, RandomState> = DashMap::with_hasher(RandomState::new());
+        let existing_cell = Arc::new(PanicAwareCell::new());
         map.insert("key".to_string(), Arc::downgrade(&existing_cell));
 
         let result = Merger::<String, String>::get_or_create_cell(&map, "key");
@@ -415,8 +516,8 @@ mod tests {
 
     #[test]
     fn replaces_expired_entry() {
-        let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
-        let expired_weak = Arc::downgrade(&Arc::new(OnceCell::<String>::new()));
+        let map: DashMap<String, Weak<PanicAwareCell<String>>, RandomState> = DashMap::with_hasher(RandomState::new());
+        let expired_weak = Arc::downgrade(&Arc::new(PanicAwareCell::<String>::new()));
         map.insert("key".to_string(), expired_weak);
 
         let result = Merger::<String, String>::get_or_create_cell(&map, "key");
@@ -428,8 +529,8 @@ mod tests {
     /// Simulates a race where another thread inserted between fast-path check and `entry()`.
     #[test]
     fn race_returns_existing() {
-        let map: DashMap<String, Weak<OnceCell<String>>> = DashMap::new();
-        let other_cell = Arc::new(OnceCell::new());
+        let map: DashMap<String, Weak<PanicAwareCell<String>>, RandomState> = DashMap::with_hasher(RandomState::new());
+        let other_cell = Arc::new(PanicAwareCell::new());
         map.insert("key".to_string(), Arc::downgrade(&other_cell));
 
         let result = Merger::<String, String>::insert_or_get_existing(&map, "key");
@@ -444,7 +545,7 @@ mod tests {
 
         // Single call should clean up after completion
         let result = group.execute("key1", || async { "Result".to_string() }).await;
-        assert_eq!(result, "Result");
+        assert_eq!(result, Ok("Result".to_string()));
         assert!(group.is_empty(), "Map should be empty after single call completes");
 
         // Multiple concurrent calls should clean up after all complete
@@ -461,7 +562,7 @@ mod tests {
         assert_eq!(group.len(), 1);
 
         for fut in futures {
-            assert_eq!(fut.await, "Result");
+            assert_eq!(fut.await, Ok("Result".to_string()));
         }
 
         assert!(group.is_empty(), "Map should be empty after all concurrent calls complete");
@@ -474,10 +575,41 @@ mod tests {
         assert_eq!(group.len(), 3);
 
         let (r1, r2, r3) = tokio::join!(fut1, fut2, fut3);
-        assert_eq!(r1, "A");
-        assert_eq!(r2, "B");
-        assert_eq!(r3, "C");
+        assert_eq!(r1, Ok("A".to_string()));
+        assert_eq!(r2, Ok("B".to_string()));
+        assert_eq!(r3, Ok("C".to_string()));
 
         assert!(group.is_empty(), "Map should be empty after all keys complete");
+    }
+
+    #[tokio::test]
+    async fn catch_unwind_works() {
+        // Verify that catch_unwind actually catches panics in async code
+        let result = AssertUnwindSafe(async {
+            panic!("test panic");
+            #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
+            42i32
+        })
+        .catch_unwind()
+        .await;
+
+        assert!(result.is_err(), "catch_unwind should catch the panic");
+    }
+
+    #[tokio::test]
+    async fn panic_aware_cell_catches_panic() {
+        let cell = PanicAwareCell::<String>::new();
+        let result = cell
+            .get_or_init(async {
+                panic!("test panic");
+                #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
+                "never".to_string()
+            })
+            .await;
+
+        let Err(err) = result else {
+            panic!("expected Err, got Ok");
+        };
+        assert_eq!(err.message(), "test panic");
     }
 }

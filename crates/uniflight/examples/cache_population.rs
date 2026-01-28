@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates using `UniFlight` to prevent thundering herd when populating a cache.
+//! Demonstrates using `Merger` to prevent thundering herd when populating a cache.
 //!
-//! Multiple concurrent requests for the same cache key will share a single execution,
-//! with the first request (leader) performing the work and subsequent requests (followers)
-//! receiving a copy of the result.
+//! Multiple concurrent requests for the same cache key share a single execution.
+//! The first request (leader) performs the work while others (followers) wait and
+//! receive a clone of the result.
 
 use std::{
     sync::{
@@ -15,56 +15,36 @@ use std::{
     time::Duration,
 };
 
-use tick::Clock;
 use uniflight::Merger;
 
 #[tokio::main]
 async fn main() {
-    // Create a shared UniFlight instance for cache operations
-    let cache_group = Arc::new(Merger::<String, String>::new());
-
-    // Track how many times the work closure actually executes
+    let merger = Arc::new(Merger::<String, String>::new());
     let execution_count = Arc::new(AtomicUsize::new(0));
 
-    println!("Starting 5 concurrent requests for user:123...\n");
+    // Spawn 5 concurrent requests for the same key
+    let handles: Vec<_> = (0..5)
+        .map(|_| {
+            let merger = Arc::clone(&merger);
+            let counter = Arc::clone(&execution_count);
+            tokio::spawn(async move {
+                merger
+                    .execute("user:123", || async {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        "UserData { name: Alice }".to_string()
+                    })
+                    .await
+            })
+        })
+        .collect();
 
-    // Simulate 5 concurrent requests for the same user data
-    let mut handles = Vec::new();
-    for i in 1..=5 {
-        let group = Arc::clone(&cache_group);
-        let counter = Arc::clone(&execution_count);
-        let handle = tokio::spawn(async move {
-            let clock = Clock::new_tokio();
-            let start = clock.instant();
-
-            let result = group
-                .execute("user:123", || async {
-                    let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    println!("  [Request {i}] I'm the leader! Fetching from database... (execution #{count})");
-
-                    // Simulate expensive database query
-                    clock.delay(Duration::from_millis(500)).await;
-
-                    "UserData(name: Alice, age: 30)".to_string()
-                })
-                .await;
-
-            let elapsed = start.elapsed();
-            println!("  [Request {i}] Got result in {elapsed:?}: {result}");
-        });
-
-        handles.push(handle);
-
-        // Stagger the requests slightly to see the deduplication in action
-        let clock = Clock::new_tokio();
-        clock.delay(Duration::from_millis(10)).await;
-    }
-
-    // Wait for all requests to complete
+    // All requests complete with the same result
     for handle in handles {
-        handle.await.expect("Task panicked");
+        let result = handle.await.expect("task panicked");
+        assert_eq!(result, Ok("UserData { name: Alice }".to_string()));
     }
 
-    let total_executions = execution_count.load(Ordering::SeqCst);
-    println!("\nAll requests completed! Database query executed {total_executions} time(s) for 5 requests.");
+    // Work executed only once despite 5 concurrent requests
+    assert_eq!(execution_count.load(Ordering::SeqCst), 1);
 }

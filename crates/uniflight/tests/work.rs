@@ -30,7 +30,7 @@ async fn direct_call() {
             "Result".to_string()
         })
         .await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
@@ -47,7 +47,7 @@ async fn parallel_call() {
         }));
     }
 
-    assert!(futures.all(|out| async move { out == "Result" }).await);
+    assert!(futures.all(|out| async move { out == Ok("Result".to_string()) }).await);
     assert_eq!(call_counter.load(Acquire), 1);
 }
 
@@ -66,7 +66,7 @@ async fn parallel_call_seq_await() {
     }
 
     for fut in futures {
-        assert_eq!(fut.await, "Result");
+        assert_eq!(fut.await, Ok("Result".to_string()));
     }
     assert_eq!(call_counter.load(Acquire), 1);
 }
@@ -80,7 +80,7 @@ async fn call_with_static_str_key() {
             "Result".to_string()
         })
         .await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
@@ -92,7 +92,7 @@ async fn call_with_static_string_key() {
             "Result".to_string()
         })
         .await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn call_with_custom_key() {
             "Result".to_string()
         })
         .await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
@@ -117,9 +117,9 @@ async fn late_wait() {
         "Result".to_string()
     });
     let fut_late = group.execute("key", unreachable_future);
-    assert_eq!(fut_early.await, "Result");
+    assert_eq!(fut_early.await, Ok("Result".to_string()));
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(fut_late.await, "Result");
+    assert_eq!(fut_late.await, Ok("Result".to_string()));
 }
 
 #[tokio::test]
@@ -130,7 +130,7 @@ async fn cancel() {
     let fut_cancel = group.execute(&"key".to_string(), unreachable_future);
     let _ = tokio::time::timeout(Duration::from_millis(10), fut_cancel).await;
     let fut_late = group.execute("key", || async { "Result2".to_string() });
-    assert_eq!(fut_late.await, "Result2");
+    assert_eq!(fut_late.await, Ok("Result2".to_string()));
 
     // the first executer is slow but not dropped, so the result will be the first ones.
     let begin = tokio::time::Instant::now();
@@ -140,23 +140,22 @@ async fn cancel() {
     });
     let fut_2 = group.execute(&"key".to_string(), unreachable_future);
     let (v1, v2) = tokio::join!(fut_1, fut_2);
-    assert_eq!(v1, "Result1");
-    assert_eq!(v2, "Result1");
+    assert_eq!(v1, Ok("Result1".to_string()));
+    assert_eq!(v2, Ok("Result1".to_string()));
     assert!(begin.elapsed() > Duration::from_millis(1500));
 }
 
 #[tokio::test]
-async fn leader_panic_in_spawned_task() {
-    let call_counter = AtomicUsize::default();
+async fn leader_panic_returns_error_to_all() {
     let group: Arc<Merger<String, String>> = Arc::new(Merger::new());
 
-    // First task will panic in a spawned task (no catch_unwind)
+    // First task will panic (caught by catch_unwind)
     let group_clone = Arc::clone(&group);
-    let handle = tokio::spawn(async move {
+    let leader_handle = tokio::spawn(async move {
         group_clone
             .execute("key", || async {
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                panic!("leader panicked in spawned task");
+                panic!("leader panicked");
                 #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
                 "never".to_string()
             })
@@ -166,21 +165,30 @@ async fn leader_panic_in_spawned_task() {
     // Give time for the spawned task to register and start
     tokio::time::sleep(Duration::from_millis(10)).await;
 
-    // Second task should become the new leader after the first panics
+    // Second task joins as a follower
     let group_clone = Arc::clone(&group);
-    let call_counter_ref = &call_counter;
-    let fut_follower = group_clone.execute("key", || async {
-        call_counter_ref.fetch_add(1, AcqRel);
-        "Result".to_string()
+    let follower_handle = tokio::spawn(async move {
+        group_clone
+            .execute("key", || async {
+                // This should never run - we're a follower
+                "follower result".to_string()
+            })
+            .await
     });
 
-    // Wait for the spawned task to panic
-    handle.await.unwrap_err();
+    // Leader gets LeaderPanicked error (panic is caught, not propagated)
+    let leader_result = leader_handle.await.expect("task should not panic - panic is caught");
+    let Err(leader_err) = leader_result else {
+        panic!("expected Err, got Ok");
+    };
+    assert_eq!(leader_err.message(), "leader panicked");
 
-    // The follower should succeed - Rust's drop semantics ensure the mutex is released
-    let result = fut_follower.await;
-    assert_eq!(result, "Result");
-    assert_eq!(call_counter.load(Acquire), 1);
+    // Follower also gets LeaderPanicked error with same message
+    let follower_result = follower_handle.await.expect("follower task should not panic");
+    let Err(follower_err) = follower_result else {
+        panic!("expected Err, got Ok");
+    };
+    assert_eq!(follower_err.message(), "leader panicked");
 }
 
 #[tokio::test]
@@ -204,28 +212,28 @@ async fn debug_impl() {
     assert!(debug_str.contains("DashMap"));
 
     // Complete the work
-    assert_eq!(fut.await, "Result");
+    assert_eq!(fut.await, Ok("Result".to_string()));
 }
 
 #[tokio::test]
 async fn per_process_strategy() {
     let group = Merger::<String, String, _>::new_per_process();
     let result = group.execute("key", || async { "Result".to_string() }).await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
 async fn per_numa_strategy() {
     let group = Merger::<String, String, _>::new_per_numa();
     let result = group.execute("key", || async { "Result".to_string() }).await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
 async fn per_core_strategy() {
     let group = Merger::<String, String, _>::new_per_core();
     let result = group.execute("key", || async { "Result".to_string() }).await;
-    assert_eq!(result, "Result");
+    assert_eq!(result, Ok("Result".to_string()));
 }
 
 #[tokio::test]
@@ -249,8 +257,160 @@ async fn clone_shares_state() {
     });
 
     let (r1, r2) = tokio::join!(fut1, fut2);
-    assert_eq!(r1, "Result");
-    assert_eq!(r2, "Result");
+    assert_eq!(r1, Ok("Result".to_string()));
+    assert_eq!(r2, Ok("Result".to_string()));
     // Work should only execute once
     assert_eq!(call_counter.load(Acquire), 1);
+}
+
+#[tokio::test]
+async fn leader_panicked_error_traits() {
+    // Create an error by triggering a panic
+    let group: Merger<String, String> = Merger::new();
+    let result = group
+        .execute("key", || async {
+            panic!("test message");
+            #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
+            "never".to_string()
+        })
+        .await;
+    let Err(error) = result else {
+        panic!("expected Err");
+    };
+
+    // Test message()
+    assert_eq!(error.message(), "test message");
+
+    // Test Display - includes the panic message
+    let display = format!("{error}");
+    assert!(display.contains("leader task panicked"));
+    assert!(display.contains("test message"));
+
+    // Test Debug
+    let debug_str = format!("{error:?}");
+    assert!(debug_str.contains("LeaderPanicked"));
+
+    // Test Clone
+    let cloned = error.clone();
+    assert_eq!(cloned.message(), error.message());
+
+    // Test PartialEq and Eq
+    assert_eq!(error, cloned);
+
+    // Test Error trait (can be used as a source error)
+    let std_error: &dyn std::error::Error = &error;
+    assert!(std_error.source().is_none());
+}
+
+#[tokio::test]
+async fn retry_after_panic_succeeds() {
+    let group: Merger<String, String> = Merger::new();
+
+    // First call panics
+    let result = group
+        .execute("key", || async {
+            panic!("intentional panic");
+            #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
+            "never".to_string()
+        })
+        .await;
+    let Err(err) = result else {
+        panic!("expected Err");
+    };
+    assert_eq!(err.message(), "intentional panic");
+
+    // Retry with the same key should succeed
+    let result = group.execute("key", || async { "success".to_string() }).await;
+    assert_eq!(result, Ok("success".to_string()));
+}
+
+#[tokio::test]
+async fn default_impl() {
+    // Test that Default::default() works the same as new()
+    let group1: Merger<String, String> = Merger::default();
+    let group2: Merger<String, String> = Merger::new();
+
+    let result1 = group1.execute("key", || async { "value".to_string() }).await;
+    let result2 = group2.execute("key", || async { "value".to_string() }).await;
+
+    assert_eq!(result1, Ok("value".to_string()));
+    assert_eq!(result2, Ok("value".to_string()));
+}
+
+#[tokio::test]
+async fn mixed_panic_and_success() {
+    let group: Merger<String, String> = Merger::new();
+
+    // Start multiple keys concurrently - some panic, some succeed
+    let panic_fut = group.execute("panic_key", || async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        panic!("intentional panic");
+        #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
+        "never".to_string()
+    });
+
+    let success_fut = group.execute("success_key", || async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        "success".to_string()
+    });
+
+    let (panic_result, success_result) = tokio::join!(panic_fut, success_fut);
+
+    // Panic key returns error with message
+    let Err(err) = panic_result else {
+        panic!("expected Err");
+    };
+    assert_eq!(err.message(), "intentional panic");
+
+    // Success key returns value
+    assert_eq!(success_result, Ok("success".to_string()));
+}
+
+#[tokio::test]
+async fn follower_closure_not_called_on_panic() {
+    let group: Arc<Merger<String, String>> = Arc::new(Merger::new());
+    let follower_called = Arc::new(AtomicUsize::new(0));
+
+    // Leader will panic
+    let group_clone = Arc::clone(&group);
+    let leader_handle = tokio::spawn(async move {
+        group_clone
+            .execute("key", || async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                panic!("leader panic");
+                #[expect(unreachable_code, reason = "Required to satisfy return type after panic")]
+                "never".to_string()
+            })
+            .await
+    });
+
+    // Give leader time to start
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    // Follower joins - its closure should NOT be called
+    let group_clone = Arc::clone(&group);
+    let follower_called_clone = Arc::clone(&follower_called);
+    let follower_handle = tokio::spawn(async move {
+        group_clone
+            .execute("key", || async {
+                follower_called_clone.fetch_add(1, Acquire);
+                "follower result".to_string()
+            })
+            .await
+    });
+
+    let (leader_result, follower_result) = tokio::join!(leader_handle, follower_handle);
+
+    let Err(leader_err) = leader_result.expect("task join") else {
+        panic!("expected Err");
+    };
+    assert_eq!(leader_err.message(), "leader panic");
+
+    let Err(follower_err) = follower_result.expect("task join") else {
+        panic!("expected Err");
+    };
+    assert_eq!(follower_err.message(), "leader panic");
+
+    // Follower's closure was never called
+    assert_eq!(follower_called.load(Acquire), 0);
 }
