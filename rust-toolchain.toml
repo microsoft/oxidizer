@@ -3,7 +3,7 @@
 
 [toolchain]
 # This needs to match RUST_LATEST in constants.env.
-channel = "1.92"
+channel = "1.93"
 
 # Additional targets to install for all builds (in both cloud and local builds).
 # The toolchain will always come with support for the host platform.

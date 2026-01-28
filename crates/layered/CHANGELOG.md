@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-01-22
+
+- ✨ Features
+
+  - rename Stack::build into Stack::into_service
+  - documentation improvements
+
 ## [0.2.0] - 2026-01-21
 
 - ✨ Features
