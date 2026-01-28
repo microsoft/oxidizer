@@ -151,7 +151,7 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn to_clock(&self) -> Clock {
-        Clock(Arc::new(ClockState::ClockControl(self.clone())))
+        Clock(ClockState::ClockControl(self.clone()))
     }
 
     /// Sets the duration by which the clock will auto-advance when accessing the current time.
@@ -362,6 +362,10 @@ impl ClockControl {
         F: FnOnce(&mut State) -> R,
     {
         f(&mut self.state.lock().expect("acquiring lock must always succeed"))
+    }
+
+    pub(crate) fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.state) == 1
     }
 }
 

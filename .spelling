@@ -112,6 +112,7 @@ fn
 foldhash
 footguns
 formatter
+frontend
 fundle
 Fundle
 Fundle's
@@ -138,6 +139,7 @@ interop
 Interop
 interoperability
 interoperate
+jitter
 IOCP
 IP
 Kubernetes
@@ -182,6 +184,7 @@ non-mockable
 ns
 nuget
 NUMA
+observability
 ohno
 ok
 Ok
@@ -213,6 +216,7 @@ repo
 repos
 Reqwest
 Reusability
+RPC
 runtime
 runtimes
 rustc

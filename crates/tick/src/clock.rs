@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Arc;
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -60,7 +59,7 @@ use crate::timers::TimerKey;
 ///
 /// # Cloning and shared state
 ///
-/// Cloning a clock is inexpensive (just an [`Arc`] clone) and every clone shares the same underlying state,
+/// Cloning a clock is inexpensive and every clone shares the same underlying state,
 /// including registered timers and, when the `test-util` feature is enabled, the controlled passage of time.
 /// Any timers you register or time adjustments you perform through one clone are visible to every other clone
 /// created from the same clock.
@@ -142,7 +141,7 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Clock(pub(crate) Arc<ClockState>);
+pub struct Clock(pub(crate) ClockState);
 
 impl Clock {
     /// Creates a new clock driven by the Tokio runtime.
@@ -183,7 +182,7 @@ impl Clock {
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
-        Self(crate::state::GlobalState::System.into_clock_state())
+        Self(ClockState::new_system())
     }
 
     /// Creates a new frozen clock.
@@ -419,7 +418,7 @@ impl Clock {
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {
-        self.0.as_ref()
+        &self.0
     }
 }
 
@@ -436,7 +435,7 @@ mod tests {
 
     use std::{fmt::Debug, thread::sleep};
 
-    use crate::ClockControl;
+    use crate::{ClockControl, runtime::InactiveClock};
 
     use super::*;
 
@@ -576,5 +575,23 @@ mod tests {
     fn as_ref_ok() {
         let clock = Clock::new_frozen();
         let _: &Clock = clock.as_ref();
+    }
+
+    #[test]
+    fn owners_count() {
+        let (clock, driver) = InactiveClock::default().activate();
+
+        assert!(!clock.0.is_unique());
+        drop(clock);
+        assert!(driver.0.is_unique());
+    }
+
+    #[test]
+    fn owners_count_clock_control() {
+        let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
+
+        assert!(!driver.0.is_unique());
+        drop(clock);
+        assert!(driver.0.is_unique());
     }
 }
