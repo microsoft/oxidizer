@@ -205,3 +205,4 @@ pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};
 pub use layer::RetryLayer;
 pub use service::Retry;
+pub(crate) use service::RetryShared;

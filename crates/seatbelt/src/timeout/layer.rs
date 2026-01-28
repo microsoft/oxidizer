@@ -5,9 +5,9 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use crate::timeout::{
-    OnTimeout, OnTimeoutArgs, Timeout, TimeoutOutput as TimeoutOutputCallback, TimeoutOutputArgs, TimeoutOverride, TimeoutOverrideArgs,
-};
+use std::sync::Arc;
+
+use crate::timeout::*;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
 use crate::{NotSet, ResilienceContext, Set};
@@ -31,7 +31,7 @@ use layered::Layer;
 pub struct TimeoutLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     timeout: Option<Duration>,
-    timeout_output: Option<TimeoutOutputCallback<Out>>,
+    timeout_output: Option<TimeoutOutput<Out>>,
     on_timeout: Option<OnTimeout<Out>>,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
@@ -92,7 +92,7 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// timeout output handler.
     #[must_use]
     pub fn timeout_output(mut self, output: impl Fn(TimeoutOutputArgs) -> Out + Send + Sync + 'static) -> TimeoutLayer<In, Out, S1, Set> {
-        self.timeout_output = Some(TimeoutOutputCallback::new(output));
+        self.timeout_output = Some(TimeoutOutput::new(output));
         self.into_state::<S1, Set>()
     }
 
@@ -175,8 +175,7 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
     type Service = Timeout<In, Out, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Timeout {
-            inner,
+        let shared = TimeoutShared {
             clock: self.context.get_clock().clone(),
             timeout: self.timeout.expect("timeout must be set in Ready state"),
             enable_if: self.enable_if.clone(),
@@ -185,6 +184,11 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
             timeout_override: self.timeout_override.clone(),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),
+        };
+
+        Timeout {
+            shared: Arc::new(shared),
+            inner,
         }
     }
 }
@@ -208,7 +212,6 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use layered::Execute;

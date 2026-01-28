@@ -5,12 +5,14 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
-use crate::retry::{CloneArgs, CloneInput, OnRetry, OnRetryArgs, RecoveryArgs, RestoreInput, RestoreInputArgs, Retry, ShouldRecover};
+use crate::retry::*;
 use crate::utils::EnableIf;
 use crate::utils::TelemetryHelper;
-use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, retry::Backoff};
+use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 use layered::Layer;
 
 /// Builder for configuring retry resilience middleware.
@@ -372,8 +374,7 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
     type Service = Retry<In, Out, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Retry {
-            inner,
+        let shared = RetryShared {
             clock: self.context.get_clock().clone(),
             max_attempts: self.max_attempts,
             backoff: self.backoff.clone().into(),
@@ -385,6 +386,11 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
             telemetry: self.telemetry.clone(),
             restore_input: self.restore_input.clone(),
             handle_unavailable: self.handle_unavailable,
+        };
+
+        Retry {
+            shared: Arc::new(shared),
+            inner,
         }
     }
 }
@@ -475,14 +481,12 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use layered::Execute;
     use tick::Clock;
 
     use super::*;
-    use crate::retry::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]

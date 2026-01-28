@@ -34,7 +34,7 @@ impl ProbesOptions {
         Self::new([ProbeOptions::SingleProbe { cooldown }])
     }
 
-    pub fn reliable(stage_duration: Duration, failure_threshold: f32) -> Self {
+    pub fn progressive(stage_duration: Duration, failure_threshold: f32) -> Self {
         Self::gradual(&[0.001, 0.01, 0.05, 0.1, 0.25, 0.5], stage_duration, failure_threshold)
     }
 
@@ -191,8 +191,8 @@ mod tests {
 
     #[test]
     #[expect(clippy::float_cmp, reason = "Test")]
-    fn probes_options_reliable_ok() {
-        let options = ProbesOptions::reliable(Duration::from_secs(30), 0.2);
+    fn probes_options_progressive_ok() {
+        let options = ProbesOptions::progressive(Duration::from_secs(30), 0.2);
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 7);

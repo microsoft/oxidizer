@@ -5,11 +5,10 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
-use super::{
-    Breaker, BreakerId, BreakerIdProvider, Engines, HalfOpenMode, HealthMetricsBuilder, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs,
-    OnProbing, OnProbingArgs, RejectedInput, RejectedInputArgs, ShouldRecover,
-};
+use super::*;
 use crate::breaker::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
@@ -66,7 +65,7 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
             min_throughput: DEFAULT_MIN_THROUGHPUT,
             sampling_duration: DEFAULT_SAMPLING_DURATION,
             break_duration: DEFAULT_BREAK_DURATION,
-            half_open_mode: HalfOpenMode::reliable(None),
+            half_open_mode: HalfOpenMode::progressive(None),
             _state: PhantomData,
         }
     }
@@ -294,7 +293,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// This determines how the circuit breaker behaves when transitioning from half-open
     /// to a closed state.
     ///
-    /// **Default**: [`HalfOpenMode::reliable`]
+    /// **Default**: [`HalfOpenMode::progressive`]
     #[must_use]
     pub fn half_open_mode(mut self, mode: HalfOpenMode) -> Self {
         self.half_open_mode = mode;
@@ -344,8 +343,7 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
     type Service = Breaker<In, Out, S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Breaker {
-            inner,
+        let shared = BreakerShared {
             clock: self.context.get_clock().clone(),
             recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
             rejected_input: self.rejected_input.clone().expect("rejected_input must be set in Ready state"),
@@ -355,6 +353,11 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
             on_closed: self.on_closed.clone(),
             on_probing: self.on_probing.clone(),
             id_provider: self.breaker_id.clone(),
+        };
+
+        Breaker {
+            shared: Arc::new(shared),
+            inner,
         }
     }
 }
@@ -408,7 +411,6 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::breaker::RecoveryArgs;
     use crate::breaker::engine::probing::ProbeOptions;
     use crate::testing::RecoverableType;
 
@@ -613,7 +615,7 @@ mod tests {
         assert_eq!(layer.min_throughput, DEFAULT_MIN_THROUGHPUT);
         assert_eq!(layer.sampling_duration, DEFAULT_SAMPLING_DURATION);
         assert_eq!(layer.break_duration, DEFAULT_BREAK_DURATION);
-        assert_eq!(layer.half_open_mode, HalfOpenMode::reliable(None));
+        assert_eq!(layer.half_open_mode, HalfOpenMode::progressive(None));
     }
 
     #[test]
@@ -625,7 +627,7 @@ mod tests {
         let probes = layer
             .break_duration(Duration::from_secs(234))
             .failure_threshold(0.52)
-            .half_open_mode(HalfOpenMode::reliable(None))
+            .half_open_mode(HalfOpenMode::progressive(None))
             .probes_options();
 
         // access the last probe which should be the health probe

@@ -183,3 +183,4 @@ pub use args::{OnTimeoutArgs, TimeoutOutputArgs, TimeoutOverrideArgs};
 pub(crate) use callbacks::{OnTimeout, TimeoutOutput, TimeoutOverride};
 pub use layer::TimeoutLayer;
 pub use service::Timeout;
+pub(crate) use service::TimeoutShared;

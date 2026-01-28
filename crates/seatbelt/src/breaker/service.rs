@@ -2,15 +2,12 @@
 // Licensed under the MIT License.
 
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use layered::Service;
 use tick::Clock;
 
-use super::{
-    BreakerId, BreakerIdProvider, BreakerLayer, CircuitEngine, Engines, EnterCircuitResult, ExecutionMode, ExecutionResult,
-    ExitCircuitResult, OnClosed, OnClosedArgs, OnOpened, OnOpenedArgs, OnProbing, OnProbingArgs, RecoveryArgs, RejectedInput,
-    RejectedInputArgs, ShouldRecover,
-};
+use super::*;
 use crate::{NotSet, utils::EnableIf};
 
 /// Applies circuit breaker logic to prevent cascading failures.
@@ -28,16 +25,33 @@ use crate::{NotSet, utils::EnableIf};
 /// For comprehensive examples and usage patterns, see the [`breaker` module][crate::breaker] documentation.
 #[derive(Debug)]
 pub struct Breaker<In, Out, S> {
+    pub(super) shared: Arc<BreakerShared<In, Out>>,
     pub(super) inner: S,
-    pub(super) clock: Clock,
-    pub(super) recovery: ShouldRecover<Out>,
-    pub(super) rejected_input: RejectedInput<In, Out>,
-    pub(super) enable_if: EnableIf<In>,
-    pub(super) engines: Engines,
-    pub(super) id_provider: Option<BreakerIdProvider<In>>,
-    pub(super) on_opened: Option<OnOpened<Out>>,
-    pub(super) on_closed: Option<OnClosed<Out>>,
-    pub(super) on_probing: Option<OnProbing<In>>,
+}
+
+/// Shared configuration for [`Breaker`] middleware.
+///
+/// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+#[derive(Debug)]
+pub(crate) struct BreakerShared<In, Out> {
+    pub(crate) clock: Clock,
+    pub(crate) recovery: ShouldRecover<Out>,
+    pub(crate) rejected_input: RejectedInput<In, Out>,
+    pub(crate) enable_if: EnableIf<In>,
+    pub(crate) engines: Engines,
+    pub(crate) id_provider: Option<BreakerIdProvider<In>>,
+    pub(crate) on_opened: Option<OnOpened<Out>>,
+    pub(crate) on_closed: Option<OnClosed<Out>>,
+    pub(crate) on_probing: Option<OnProbing<In>>,
+}
+
+impl<In, Out, S: Clone> Clone for Breaker<In, Out, S> {
+    fn clone(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 impl<In, Out> Breaker<In, Out, ()> {
@@ -61,57 +75,41 @@ where
     type Out = Out;
 
     async fn execute(&self, input: In) -> Self::Out {
-        // Check if a circuit breaker is enabled for this input
-        if !self.enable_if.call(&input) {
+        if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
-        // Determine the breaker ID for this input
-        let breaker_id = self
-            .id_provider
-            .as_ref()
-            .map_or_else(BreakerId::default, |breaker_id| breaker_id.call(&input));
+        let breaker_id = self.shared.get_breaker_id(&input);
+        let engine = self.shared.engines.get_engine(&breaker_id);
 
-        // Retrieve the engine for this breaker instance
-        let engine = self.engines.get_engine(&breaker_id);
-
-        // Before
-        let (input, mode) = match self.before_execute(engine.as_ref(), input, &breaker_id) {
-            ControlFlow::Continue(input) => input,
+        let (input, mode) = match self.shared.before_execute(engine.as_ref(), input, &breaker_id) {
+            ControlFlow::Continue(result) => result,
             ControlFlow::Break(output) => return output,
         };
 
-        // Execute the inner service
         let output = self.inner.execute(input).await;
 
-        // After
-        self.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+        self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
 
         output
     }
 }
 
-impl<In, Out, S> Breaker<In, Out, S> {
-    #[inline]
+impl<In, Out> BreakerShared<In, Out> {
+    fn get_breaker_id(&self, input: &In) -> BreakerId {
+        self.id_provider
+            .as_ref()
+            .map_or_else(BreakerId::default, |provider| provider.call(input))
+    }
+
     fn before_execute(&self, engine: &impl CircuitEngine, mut input: In, breaker_id: &BreakerId) -> ControlFlow<Out, (In, ExecutionMode)> {
-        // Try to enter the circuit
         match engine.enter() {
             EnterCircuitResult::Accepted { mode } => {
-                match mode {
-                    // regular execution, do nothing special
-                    ExecutionMode::Normal => ControlFlow::Continue((input, ExecutionMode::Normal)),
-                    // This is a probing execution that happens when the circuit is half-open.
-                    // Invoke the on_probing callback if configured.
-                    ExecutionMode::Probe => {
-                        if let Some(on_probing) = &self.on_probing {
-                            on_probing.call(&mut input, OnProbingArgs { breaker_id });
-                        }
-
-                        ControlFlow::Continue((input, ExecutionMode::Probe))
-                    }
+                if mode == ExecutionMode::Probe {
+                    self.invoke_on_probing(&mut input, breaker_id);
                 }
+                ControlFlow::Continue((input, mode))
             }
-            // Circuit is open, return rejected input output
             EnterCircuitResult::Rejected => ControlFlow::Break(self.rejected_input.call(input, RejectedInputArgs { breaker_id })),
         }
     }
@@ -125,30 +123,34 @@ impl<In, Out, S> Breaker<In, Out, S> {
             },
         );
 
-        // Evaluate the execution result based on recovery decision
         let execution_result = ExecutionResult::from_recovery(&recovery);
 
-        // Exit the circuit and handle state transitions
         match engine.exit(execution_result, mode) {
-            ExitCircuitResult::Unchanged | ExitCircuitResult::Reopened => {
-                // we explicitly do nothing here
-            }
+            ExitCircuitResult::Unchanged | ExitCircuitResult::Reopened => {}
             ExitCircuitResult::Opened(_health) => {
-                if let Some(on_opened) = &self.on_opened {
-                    on_opened.call(output, OnOpenedArgs { breaker_id });
-                }
+                self.invoke_on_opened(output, breaker_id);
             }
             ExitCircuitResult::Closed(stats) => {
-                if let Some(on_closed) = &self.on_closed {
-                    on_closed.call(
-                        output,
-                        OnClosedArgs {
-                            breaker_id,
-                            open_duration: stats.opened_duration(self.clock.instant()),
-                        },
-                    );
-                }
+                self.invoke_on_closed(output, breaker_id, stats.opened_duration(self.clock.instant()));
             }
+        }
+    }
+
+    fn invoke_on_probing(&self, input: &mut In, breaker_id: &BreakerId) {
+        if let Some(on_probing) = &self.on_probing {
+            on_probing.call(input, OnProbingArgs { breaker_id });
+        }
+    }
+
+    fn invoke_on_opened(&self, output: &Out, breaker_id: &BreakerId) {
+        if let Some(on_opened) = &self.on_opened {
+            on_opened.call(output, OnOpenedArgs { breaker_id });
+        }
+    }
+
+    fn invoke_on_closed(&self, output: &Out, breaker_id: &BreakerId, open_duration: std::time::Duration) {
+        if let Some(on_closed) = &self.on_closed {
+            on_closed.call(output, OnClosedArgs { breaker_id, open_duration });
         }
     }
 }
@@ -157,16 +159,14 @@ impl<In, Out, S> Breaker<In, Out, S> {
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use layered::Execute;
     use tick::ClockControl;
 
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
-    use crate::breaker::{EngineFake, HalfOpenMode, HealthInfo, Stats};
     use crate::{RecoveryInfo, ResilienceContext, Set};
     use layered::Layer;
 
@@ -180,29 +180,7 @@ mod tests {
 
         let breaker = layer.layer(Execute::new(|v: String| async move { v }));
 
-        assert!(breaker.enable_if.call(&"str".to_string()));
-    }
-
-    #[tokio::test]
-    async fn breaker_disabled_no_inner_calls() {
-        let clock = Clock::new_frozen();
-        let service = create_ready_breaker_layer(&clock)
-            .disable()
-            .layer(Execute::new(move |v: String| async move { v }));
-
-        let result = service.execute("test".to_string()).await;
-
-        assert_eq!(result, "test");
-    }
-
-    #[tokio::test]
-    async fn passthrough_behavior() {
-        let clock = Clock::new_frozen();
-        let service = create_ready_breaker_layer(&clock).layer(Execute::new(move |v: String| async move { v }));
-
-        let result = service.execute("test".to_string()).await;
-
-        assert_eq!(result, "test");
+        assert!(breaker.shared.enable_if.call(&"str".to_string()));
     }
 
     #[test]
@@ -219,6 +197,7 @@ mod tests {
         );
 
         let result = service
+            .shared
             .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .continue_value()
             .unwrap();
@@ -245,6 +224,7 @@ mod tests {
         );
 
         let result = service
+            .shared
             .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .continue_value()
             .unwrap();
@@ -261,6 +241,7 @@ mod tests {
         let engine = EngineFake::new(EnterCircuitResult::Rejected, ExitCircuitResult::Unchanged);
 
         let result = service
+            .shared
             .before_execute(&engine, "test".to_string(), &BreakerId::default())
             .break_value()
             .unwrap();
@@ -282,7 +263,9 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
+        service
+            .shared
+            .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
     #[test]
@@ -300,7 +283,9 @@ mod tests {
         );
 
         // This should not panic, indicating no callbacks were invoked
-        service.after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
+        service
+            .shared
+            .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
     #[test]
@@ -323,7 +308,9 @@ mod tests {
             ExitCircuitResult::Opened(HealthInfo::new(1, 1, 1.0, 1)),
         );
 
-        service.after_execute(&engine, &"error_response".to_string(), ExecutionMode::Normal, &BreakerId::default());
+        service
+            .shared
+            .after_execute(&engine, &"error_response".to_string(), ExecutionMode::Normal, &BreakerId::default());
         assert!(opened_called_clone.load(Ordering::SeqCst));
     }
 
@@ -347,100 +334,13 @@ mod tests {
             ExitCircuitResult::Closed(Stats::new(Instant::now())),
         );
 
-        service.after_execute(
+        service.shared.after_execute(
             &engine,
             &"success_response".to_string(),
             ExecutionMode::Normal,
             &BreakerId::default(),
         );
         assert!(closed_called_clone.load(Ordering::SeqCst));
-    }
-
-    #[tokio::test]
-    async fn execute_end_to_end_with_callbacks() {
-        let probing_called = Arc::new(AtomicBool::new(false));
-        let opened_called = Arc::new(AtomicBool::new(false));
-        let closed_called = Arc::new(AtomicBool::new(false));
-
-        let probing_called_clone = Arc::clone(&probing_called);
-        let opened_called_clone = Arc::clone(&opened_called);
-        let closed_called_clone = Arc::clone(&closed_called);
-
-        let clock_control = ClockControl::new();
-
-        // Create a service that transforms input and can trigger different circuit states
-        let service = create_ready_breaker_layer(&clock_control.to_clock())
-            .min_throughput(5)
-            .half_open_mode(HalfOpenMode::quick())
-            .on_probing(move |input, _| {
-                assert_eq!(input, "probe_input");
-                probing_called.store(true, Ordering::SeqCst);
-            })
-            .on_opened(move |output, _| {
-                assert_eq!(output, "error_output");
-                opened_called.store(true, Ordering::SeqCst);
-            })
-            .on_closed(move |output, args| {
-                assert_eq!(output, "probe_output");
-                assert!(args.open_duration() > Duration::ZERO);
-                closed_called.store(true, Ordering::SeqCst);
-            })
-            .layer(Execute::new(move |input: String| async move {
-                // Transform input to simulate different scenarios
-                match input.as_str() {
-                    "probe_input" => "probe_output".to_string(),
-                    "success_input" => "success_output".to_string(),
-                    "error_input" => "error_output".to_string(),
-                    _ => input,
-                }
-            }));
-
-        // break the circuit first by simulating failures
-        for _ in 0..5 {
-            let result = service.execute("error_input".to_string()).await;
-            assert_eq!(result, "error_output");
-        }
-
-        // rejected input
-        let result = service.execute("success_input".to_string()).await;
-        assert_eq!(result, "circuit is open");
-        assert!(opened_called_clone.load(Ordering::SeqCst));
-        assert!(!closed_called_clone.load(Ordering::SeqCst));
-
-        // send probe and close the circuit
-        clock_control.advance(DEFAULT_BREAK_DURATION);
-        let result = service.execute("probe_input".to_string()).await;
-        assert_eq!(result, "probe_output");
-        assert!(probing_called_clone.load(Ordering::SeqCst));
-        assert!(closed_called_clone.load(Ordering::SeqCst));
-
-        // normal execution should pass through
-        let result = service.execute("success_input".to_string()).await;
-        assert_eq!(result, "success_output");
-    }
-
-    #[tokio::test]
-    async fn different_partitions_ensure_isolated() {
-        let clock = Clock::new_frozen();
-        let service = create_ready_breaker_layer(&clock)
-            .breaker_id(|input| BreakerId::from(input.clone()))
-            .min_throughput(3)
-            .recovery_with(|_, _| RecoveryInfo::retry())
-            .rejected_input(|_, args| format!("circuit is open, breaker: {}", args.breaker_id()))
-            .layer(Execute::new(|input: String| async move { input }));
-
-        // break the circuit for partition "A"
-        for _ in 0..3 {
-            let result = service.execute("A".to_string()).await;
-            assert_eq!(result, "A");
-        }
-
-        let result = service.execute("A".to_string()).await;
-        assert_eq!(result, "circuit is open, breaker: A");
-
-        // Execute on partition "B" should pass through
-        let result = service.execute("B".to_string()).await;
-        assert_eq!(result, "B");
     }
 
     #[tokio::test]

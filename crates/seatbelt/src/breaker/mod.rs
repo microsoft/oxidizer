@@ -149,7 +149,7 @@
 //! | Sampling duration | `30` seconds | Time window for calculating failure rates | [`sampling_duration`][BreakerLayer::sampling_duration] |
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
 //! | Breaker isolation | Shared circuit (default) | All inputs share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
-//! | Half-open mode | `Reliable` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
+//! | Half-open mode | `Progressive` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
 //! | Enable condition | Always enabled | Circuit breaker protection is applied to all inputs | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
 //! These defaults provide a reasonable starting point for most use cases, offering a balance
@@ -246,7 +246,7 @@
 //!             "service temporarily unavailable due to exceeding failure threshold".to_string()
 //!         })
 //!         // Optional configuration
-//!         .half_open_mode(HalfOpenMode::reliable(None)) // close the circuit gradually (default)
+//!         .half_open_mode(HalfOpenMode::progressive(None)) // close the circuit gradually (default)
 //!         .failure_threshold(0.05) // Trip at 5% failure threshold (less sensitive than default 10%)
 //!         .min_throughput(50)  // Require minimum 50 executions before considering circuit open
 //!         .sampling_duration(Duration::from_secs(60)) // Evaluate failures over 60-second window
@@ -291,6 +291,7 @@ pub(super) use callbacks::*;
 pub use layer::BreakerLayer;
 #[doc(inline)]
 pub use service::Breaker;
+pub(crate) use service::BreakerShared;
 
 mod execution_result;
 pub(super) use execution_result::ExecutionResult;
