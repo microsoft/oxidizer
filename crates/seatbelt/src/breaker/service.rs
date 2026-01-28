@@ -23,6 +23,7 @@ use crate::{NotSet, utils::EnableIf};
 /// builder methods on the returned [`BreakerLayer`] instance.
 ///
 /// For comprehensive examples and usage patterns, see the [`breaker` module][crate::breaker] documentation.
+#[derive(Debug)]
 pub struct Breaker<In, Out, S> {
     pub(super) shared: Arc<BreakerShared<In, Out>>,
     pub(super) inner: S,
@@ -31,6 +32,7 @@ pub struct Breaker<In, Out, S> {
 /// Shared configuration for [`Breaker`] middleware.
 ///
 /// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+#[derive(Debug)]
 pub(crate) struct BreakerShared<In, Out> {
     pub(crate) clock: Clock,
     pub(crate) recovery: ShouldRecover<Out>,
@@ -49,12 +51,6 @@ impl<In, Out, S: Clone> Clone for Breaker<In, Out, S> {
             shared: Arc::clone(&self.shared),
             inner: self.inner.clone(),
         }
-    }
-}
-
-impl<In, Out, S: std::fmt::Debug> std::fmt::Debug for Breaker<In, Out, S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Breaker").field("inner", &self.inner).finish_non_exhaustive()
     }
 }
 

@@ -26,6 +26,7 @@ use crate::{NotSet, RecoveryInfo, RecoveryKind};
 /// builder methods on the returned [`RetryLayer`][crate::retry::RetryLayer] instance.
 ///
 /// For comprehensive examples and usage patterns, see the [retry module][crate::retry] documentation.
+#[derive(Debug)]
 pub struct Retry<In, Out, S> {
     pub(super) shared: Arc<RetryShared<In, Out>>,
     pub(super) inner: S,
@@ -34,6 +35,7 @@ pub struct Retry<In, Out, S> {
 /// Shared configuration for [`Retry`] middleware.
 ///
 /// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+#[derive(Debug)]
 pub(crate) struct RetryShared<In, Out> {
     pub(crate) clock: Clock,
     pub(crate) max_attempts: u32,
@@ -54,15 +56,6 @@ impl<In, Out, S: Clone> Clone for Retry<In, Out, S> {
             shared: Arc::clone(&self.shared),
             inner: self.inner.clone(),
         }
-    }
-}
-
-impl<In, Out, S: std::fmt::Debug> std::fmt::Debug for Retry<In, Out, S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Retry")
-            .field("max_attempts", &self.shared.max_attempts)
-            .field("inner", &self.inner)
-            .finish_non_exhaustive()
     }
 }
 

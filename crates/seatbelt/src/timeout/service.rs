@@ -25,6 +25,7 @@ use crate::{NotSet, ResilienceContext};
 /// For comprehensive examples and usage patterns, see the [timeout module] documentation.
 ///
 /// [timeout module]: crate::timeout
+#[derive(Debug)]
 pub struct Timeout<In, Out, S> {
     pub(super) shared: Arc<TimeoutShared<In, Out>>,
     pub(super) inner: S,
@@ -33,6 +34,7 @@ pub struct Timeout<In, Out, S> {
 /// Shared configuration for [`Timeout`] middleware.
 ///
 /// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
+#[derive(Debug)]
 pub(crate) struct TimeoutShared<In, Out> {
     pub(crate) clock: Clock,
     pub(crate) timeout: Duration,
@@ -50,15 +52,6 @@ impl<In, Out, S: Clone> Clone for Timeout<In, Out, S> {
             shared: Arc::clone(&self.shared),
             inner: self.inner.clone(),
         }
-    }
-}
-
-impl<In, Out, S: std::fmt::Debug> std::fmt::Debug for Timeout<In, Out, S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Timeout")
-            .field("timeout", &self.shared.timeout)
-            .field("inner", &self.inner)
-            .finish_non_exhaustive()
     }
 }
 
