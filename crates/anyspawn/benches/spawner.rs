@@ -15,7 +15,7 @@ fn entry(c: &mut Criterion) {
 
     // Tokio benchmarks
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let tokio_spawner = Spawner::tokio();
+    let tokio_spawner = Spawner::new_tokio();
 
     group.bench_function("tokio_direct", |b| {
         b.iter(|| rt.block_on(async { tokio::spawn(async { 42 }).await.unwrap() }));
@@ -26,7 +26,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // smol benchmarks
-    let smol_spawner = Spawner::custom(|fut| {
+    let smol_spawner = Spawner::new_custom(|fut| {
         smol::spawn(fut).detach();
     });
 

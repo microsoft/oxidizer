@@ -13,7 +13,7 @@
 
 </div>
 
-Async runtime abstractions
+A generic task spawner compatible with any async runtime.
 
 This crate provides a [`Spawner`][__link0] type that abstracts task spawning across
 different async runtimes without generic infection.
@@ -31,7 +31,7 @@ different async runtimes without generic infection.
 ```rust
 use anyspawn::Spawner;
 
-let spawner = Spawner::tokio();
+let spawner = Spawner::new_tokio();
 let result = spawner.spawn(async { 1 + 1 }).await;
 assert_eq!(result, 2);
 ```
@@ -41,7 +41,7 @@ assert_eq!(result, 2);
 ```rust
 use anyspawn::Spawner;
 
-let spawner = Spawner::custom(|fut| {
+let spawner = Spawner::new_custom(|fut| {
     std::thread::spawn(move || futures::executor::block_on(fut));
 });
 
@@ -51,8 +51,8 @@ let handle = spawner.spawn(async { 42 });
 
 ## Features
 
-* `tokio` (default): Enables the [`Spawner::tokio`][__link1] constructor
-* `custom`: Enables the [`Spawner::custom`][__link2] constructor
+* `tokio` (default): Enables the [`Spawner::new_tokio`][__link1] constructor
+* `custom`: Enables the [`Spawner::new_custom`][__link2] constructor
 
 
 <hr/>
@@ -60,7 +60,7 @@ let handle = spawner.spawn(async { 42 });
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-uxdJT263GuGzrWqTf_02hGG_fiPeXEDO8BG8LhU0Uc9qTPYWSBgmhhbnlzcGF3bmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9dpP_3aSShKG7QXWKrXDfsoG1WHsvhBMNw7G0Heldai66RkYWSBgmhhbnlzcGF3bmUwLjEuMA
  [__link0]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::tokio
- [__link2]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::custom
+ [__link1]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::new_tokio
+ [__link2]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::new_custom

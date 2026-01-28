@@ -5,7 +5,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
-//! Async runtime abstractions
+//! A generic task spawner compatible with any async runtime.
 //!
 //! This crate provides a [`Spawner`] type that abstracts task spawning across
 //! different async runtimes without generic infection.
@@ -25,7 +25,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! let spawner = Spawner::tokio();
+//! let spawner = Spawner::new_tokio();
 //! let result = spawner.spawn(async { 1 + 1 }).await;
 //! assert_eq!(result, 2);
 //! # }
@@ -36,7 +36,7 @@
 //! ```rust,ignore
 //! use anyspawn::Spawner;
 //!
-//! let spawner = Spawner::custom(|fut| {
+//! let spawner = Spawner::new_custom(|fut| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
 //! });
 //!
@@ -46,8 +46,8 @@
 //!
 //! # Features
 //!
-//! - `tokio` (default): Enables the [`Spawner::tokio`] constructor
-//! - `custom`: Enables the [`Spawner::custom`] constructor
+//! - `tokio` (default): Enables the [`Spawner::new_tokio`] constructor
+//! - `custom`: Enables the [`Spawner::new_custom`] constructor
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]

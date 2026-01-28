@@ -17,7 +17,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 /// Runtime-agnostic task spawner.
 ///
 /// `Spawner` abstracts task spawning across different async runtimes. Use the
-/// built-in constructors for common runtimes, or [`Spawner::custom`] for custom
+/// built-in constructors for common runtimes, or [`Spawner::new_custom`] for custom
 /// implementations.
 ///
 /// # Examples
@@ -29,7 +29,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let spawner = Spawner::tokio();
+/// let spawner = Spawner::new_tokio();
 /// let handle = spawner.spawn(async {
 ///     println!("Task running!");
 /// });
@@ -42,7 +42,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 /// ```rust,ignore
 /// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::custom(|fut| {
+/// let spawner = Spawner::new_custom(|fut| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
 /// });
 ///
@@ -61,7 +61,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let spawner = Spawner::tokio();
+/// let spawner = Spawner::new_tokio();
 /// let value = spawner.spawn(async { 1 + 1 }).await;
 /// assert_eq!(value, 2);
 /// # }
@@ -76,7 +76,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let spawner = Spawner::tokio();
+/// let spawner = Spawner::new_tokio();
 ///
 /// let result = spawner
 ///     .spawn(async {
@@ -115,7 +115,7 @@ impl Spawner {
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let spawner = Spawner::tokio();
+    /// let spawner = Spawner::new_tokio();
     /// let result = spawner.spawn(async { 42 }).await;
     /// assert_eq!(result, 42);
     /// # }
@@ -123,7 +123,7 @@ impl Spawner {
     #[must_use]
     #[cfg(feature = "tokio")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
-    pub fn tokio() -> Self {
+    pub fn new_tokio() -> Self {
         Self(SpawnerKind::Tokio)
     }
 
@@ -137,13 +137,13 @@ impl Spawner {
     /// ```rust,ignore
     /// use anyspawn::Spawner;
     ///
-    /// let spawner = Spawner::custom(|fut| {
+    /// let spawner = Spawner::new_custom(|fut| {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));
     /// });
     /// ```
     #[cfg(feature = "custom")]
     #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
-    pub fn custom<F>(f: F) -> Self
+    pub fn new_custom<F>(f: F) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
@@ -166,7 +166,7 @@ impl Spawner {
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let spawner = Spawner::tokio();
+    /// let spawner = Spawner::new_tokio();
     ///
     /// // Await to get the result
     /// let value = spawner.spawn(async { 1 + 1 }).await;

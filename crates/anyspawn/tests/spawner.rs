@@ -13,7 +13,7 @@ static_assertions::assert_impl_all!(Spawner: Send, Sync);
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn tokio_spawn_and_await() {
-    let spawner = Spawner::tokio();
+    let spawner = Spawner::new_tokio();
     let result = spawner.spawn(async { 42 }).await;
     assert_eq!(result, 42);
 }
@@ -21,7 +21,7 @@ async fn tokio_spawn_and_await() {
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn tokio_spawn_fire_and_forget() {
-    let spawner = Spawner::tokio();
+    let spawner = Spawner::new_tokio();
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     let () = spawner
@@ -36,7 +36,7 @@ async fn tokio_spawn_fire_and_forget() {
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawn_and_await() {
-    let spawner = Spawner::custom(|fut| {
+    let spawner = Spawner::new_custom(|fut| {
         std::thread::spawn(move || futures::executor::block_on(fut));
     });
 
@@ -47,7 +47,7 @@ fn custom_spawn_and_await() {
 #[cfg(feature = "custom")]
 #[tokio::test]
 async fn custom_spawn_fire_and_forget() {
-    let spawner = Spawner::custom(|fut| {
+    let spawner = Spawner::new_custom(|fut| {
         std::thread::spawn(move || futures::executor::block_on(fut));
     });
 
@@ -65,7 +65,7 @@ async fn custom_spawn_fire_and_forget() {
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawner_debug() {
-    let spawner = Spawner::custom(|_| {});
+    let spawner = Spawner::new_custom(|_| {});
     let debug_str = format!("{spawner:?}");
     assert!(debug_str.contains("CustomSpawner"));
 }

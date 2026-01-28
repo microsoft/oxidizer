@@ -3,11 +3,11 @@
 
 [package]
 name = "anyspawn"
-description = "A generic task spawner compatible with any async runtime"
+description = "A generic task spawner compatible with any async runtime."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
-categories = ["Asynchronous"]
+categories = ["asynchronous"]
 
 edition.workspace = true
 rust-version.workspace = true
@@ -20,7 +20,7 @@ repository.workspace = true
 all-features = true
 
 [features]
-default = ["tokio"]
+default = ["tokio", "custom"]
 tokio = ["dep:tokio"]
 custom = ["dep:futures-channel"]
 
