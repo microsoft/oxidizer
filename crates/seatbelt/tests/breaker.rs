@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(feature = "breaker")]
 #![allow(dead_code, reason = "This is a test module")]
 #![allow(missing_docs, reason = "This is a test module")]
+#![cfg(feature = "breaker")]
 
 //! Integration tests for circuit breaker middleware using only public API.
 

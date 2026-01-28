@@ -168,6 +168,7 @@ impl<In, Out> RetryShared<In, Out> {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // causes test timeout
     fn is_recoverable(&self, recovery: &RecoveryInfo) -> bool {
         match recovery.kind() {
             RecoveryKind::Unavailable => self.handle_unavailable,
