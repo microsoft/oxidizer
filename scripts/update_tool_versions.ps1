@@ -4,13 +4,13 @@
 
 <#
 .SYNOPSIS
-    Updates cargo tool versions in constants.env to their latest versions from crates.io.
+    Updates cargo tool versions in constants.env to their latest stable versions from crates.io.
 
 .DESCRIPTION
     This script reads constants.env, extracts all cargo tool version variables,
-    queries the crates.io API for the latest version of each crate, and updates
-    the file with the latest versions. Rate limiting is applied (1 request per second)
-    to respect crates.io's usage policies.
+    queries the crates.io API for the latest stable version of each crate (excluding
+    alpha/beta/prerelease versions), and updates the file with the latest versions.
+    Rate limiting is applied (1 request per second) to respect crates.io's usage policies.
 
 .PARAMETER ConstantsFile
     Path to the constants.env file. Defaults to ../constants.env relative to script location.
@@ -45,7 +45,14 @@ function Get-CrateLatestVersion {
         }
 
         $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -ErrorAction Stop
-        $latestVersion = $response.crate.max_version
+
+        # Use max_stable_version to exclude alpha/beta/prerelease versions
+        # Fall back to max_version if max_stable_version is not available
+        $latestVersion = if ($response.crate.max_stable_version) {
+            $response.crate.max_stable_version
+        } else {
+            $response.crate.max_version
+        }
 
         return @{
             Success = $true

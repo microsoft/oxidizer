@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 
 use crate::{runtime::ClockGone, state::ClockState};
 
@@ -11,10 +11,10 @@ use crate::{runtime::ClockGone, state::ClockState};
 /// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
 /// ensure timers fire at the correct time.
 #[derive(Debug)]
-pub struct ClockDriver(pub(super) Arc<ClockState>);
+pub struct ClockDriver(pub(crate) ClockState);
 
 impl ClockDriver {
-    pub(super) const fn new(state: Arc<ClockState>) -> Self {
+    pub(super) const fn new(state: ClockState) -> Self {
         Self(state)
     }
 
@@ -30,7 +30,7 @@ impl ClockDriver {
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "the mut forces exclusive ownership of the driver")]
     pub fn advance_timers(&mut self, now: Instant) -> Result<Option<Instant>, ClockGone> {
-        let next_timer = match self.0.as_ref() {
+        let next_timer = match &self.0 {
             ClockState::System(timers) => timers.try_advance_timers(now),
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.next_timer(),
@@ -39,7 +39,7 @@ impl ClockDriver {
         match next_timer {
             Some(next) => Ok(Some(next)),
             // Check if this is the last reference to the clock state
-            None if Arc::strong_count(&self.0) == 1 => Err(ClockGone::new()),
+            None if self.0.is_unique() => Err(ClockGone::new()),
             None => Ok(None),
         }
     }
@@ -72,8 +72,8 @@ mod tests {
             timers.register(when, Waker::noop().clone());
         });
 
-        let clock_state = Arc::new(ClockState::System(timers));
-        let mut driver = ClockDriver::new(Arc::clone(&clock_state));
+        let clock_state = ClockState::System(timers);
+        let mut driver = ClockDriver::new(clock_state.clone());
 
         _ = driver.advance_timers(Instant::now() - Duration::from_secs(1));
         assert_eq!(clock_state.timers_len(), 1);
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn advance_timers_with_clock_control_does_not_advance() {
         let control = ClockControl::new();
-        let clock_state = Arc::new(ClockState::ClockControl(control.clone()));
+        let clock_state = ClockState::ClockControl(control.clone());
         let when = control.instant() + Duration::from_secs(1);
 
         control.register_timer(when, Waker::noop().clone());

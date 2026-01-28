@@ -1,0 +1,117 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seatbelt"
+description = "Resilience and recovery mechanisms for fallible operations."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "layered::layer::stack::Stack",
+    "layered::service::Service",
+    "opentelemetry::metrics::meter::MeterProvider",
+    "recoverable::Recovery",
+    "recoverable::RecoveryInfo",
+    "recoverable::RecoveryKind",
+    "tick::clock::Clock",
+    "tower_layer::Layer",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["timeout", "retry", "breaker"]
+timeout = []
+retry = ["dep:fastrand"]
+breaker = ["dep:fastrand"]
+metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
+logs = ["dep:tracing"]
+
+[dependencies]
+fastrand = { workspace = true, optional = true }
+layered = { workspace = true }
+opentelemetry = { workspace = true, optional = true }
+recoverable = { workspace = true }
+tick = { workspace = true }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloc_tracker.workspace = true
+criterion.workspace = true
+fastrand.workspace = true
+futures = { workspace = true, features = ["executor"] }
+http.workspace = true
+layered = { workspace = true }
+mutants.workspace = true
+ohno = { workspace = true, features = ["app-err"] }
+opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
+opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
+static_assertions.workspace = true
+tick = { workspace = true, features = ["test-util", "tokio"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+
+[[example]]
+name = "timeout"
+required-features = ["timeout"]
+
+[[example]]
+name = "timeout_advanced"
+required-features = ["timeout"]
+
+[[example]]
+name = "retry"
+required-features = ["retry"]
+
+[[example]]
+name = "retry_advanced"
+required-features = ["retry"]
+
+[[example]]
+name = "retry_outage"
+required-features = ["retry"]
+
+[[example]]
+name = "resilience_pipeline"
+required-features = ["retry", "timeout"]
+
+[[example]]
+name = "breaker"
+required-features = ["breaker", "metrics"]
+
+[[bench]]
+name = "observability"
+harness = false
+required-features = ["retry", "logs", "metrics"]
+
+[[bench]]
+name = "timeout"
+harness = false
+required-features = ["timeout"]
+
+[[bench]]
+name = "retry"
+harness = false
+required-features = ["retry"]
+
+[[bench]]
+name = "breaker"
+harness = false
+required-features = ["breaker"]
+
+[lints]
+workspace = true
