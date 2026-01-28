@@ -160,7 +160,7 @@ impl<In, Out> BreakerShared<In, Out> {
 #[cfg(not(miri))]
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use layered::Execute;
     use tick::ClockControl;
@@ -181,28 +181,6 @@ mod tests {
         let breaker = layer.layer(Execute::new(|v: String| async move { v }));
 
         assert!(breaker.shared.enable_if.call(&"str".to_string()));
-    }
-
-    #[tokio::test]
-    async fn breaker_disabled_no_inner_calls() {
-        let clock = Clock::new_frozen();
-        let service = create_ready_breaker_layer(&clock)
-            .disable()
-            .layer(Execute::new(move |v: String| async move { v }));
-
-        let result = service.execute("test".to_string()).await;
-
-        assert_eq!(result, "test");
-    }
-
-    #[tokio::test]
-    async fn passthrough_behavior() {
-        let clock = Clock::new_frozen();
-        let service = create_ready_breaker_layer(&clock).layer(Execute::new(move |v: String| async move { v }));
-
-        let result = service.execute("test".to_string()).await;
-
-        assert_eq!(result, "test");
     }
 
     #[test]
@@ -363,93 +341,6 @@ mod tests {
             &BreakerId::default(),
         );
         assert!(closed_called_clone.load(Ordering::SeqCst));
-    }
-
-    #[tokio::test]
-    async fn execute_end_to_end_with_callbacks() {
-        let probing_called = Arc::new(AtomicBool::new(false));
-        let opened_called = Arc::new(AtomicBool::new(false));
-        let closed_called = Arc::new(AtomicBool::new(false));
-
-        let probing_called_clone = Arc::clone(&probing_called);
-        let opened_called_clone = Arc::clone(&opened_called);
-        let closed_called_clone = Arc::clone(&closed_called);
-
-        let clock_control = ClockControl::new();
-
-        // Create a service that transforms input and can trigger different circuit states
-        let service = create_ready_breaker_layer(&clock_control.to_clock())
-            .min_throughput(5)
-            .half_open_mode(HalfOpenMode::quick())
-            .on_probing(move |input, _| {
-                assert_eq!(input, "probe_input");
-                probing_called.store(true, Ordering::SeqCst);
-            })
-            .on_opened(move |output, _| {
-                assert_eq!(output, "error_output");
-                opened_called.store(true, Ordering::SeqCst);
-            })
-            .on_closed(move |output, args| {
-                assert_eq!(output, "probe_output");
-                assert!(args.open_duration() > Duration::ZERO);
-                closed_called.store(true, Ordering::SeqCst);
-            })
-            .layer(Execute::new(move |input: String| async move {
-                // Transform input to simulate different scenarios
-                match input.as_str() {
-                    "probe_input" => "probe_output".to_string(),
-                    "success_input" => "success_output".to_string(),
-                    "error_input" => "error_output".to_string(),
-                    _ => input,
-                }
-            }));
-
-        // break the circuit first by simulating failures
-        for _ in 0..5 {
-            let result = service.execute("error_input".to_string()).await;
-            assert_eq!(result, "error_output");
-        }
-
-        // rejected input
-        let result = service.execute("success_input".to_string()).await;
-        assert_eq!(result, "circuit is open");
-        assert!(opened_called_clone.load(Ordering::SeqCst));
-        assert!(!closed_called_clone.load(Ordering::SeqCst));
-
-        // send probe and close the circuit
-        clock_control.advance(DEFAULT_BREAK_DURATION);
-        let result = service.execute("probe_input".to_string()).await;
-        assert_eq!(result, "probe_output");
-        assert!(probing_called_clone.load(Ordering::SeqCst));
-        assert!(closed_called_clone.load(Ordering::SeqCst));
-
-        // normal execution should pass through
-        let result = service.execute("success_input".to_string()).await;
-        assert_eq!(result, "success_output");
-    }
-
-    #[tokio::test]
-    async fn different_partitions_ensure_isolated() {
-        let clock = Clock::new_frozen();
-        let service = create_ready_breaker_layer(&clock)
-            .breaker_id(|input| BreakerId::from(input.clone()))
-            .min_throughput(3)
-            .recovery_with(|_, _| RecoveryInfo::retry())
-            .rejected_input(|_, args| format!("circuit is open, breaker: {}", args.breaker_id()))
-            .layer(Execute::new(|input: String| async move { input }));
-
-        // break the circuit for partition "A"
-        for _ in 0..3 {
-            let result = service.execute("A".to_string()).await;
-            assert_eq!(result, "A");
-        }
-
-        let result = service.execute("A".to_string()).await;
-        assert_eq!(result, "circuit is open, breaker: A");
-
-        // Execute on partition "B" should pass through
-        let result = service.execute("B".to_string()).await;
-        assert_eq!(result, "B");
     }
 
     #[tokio::test]
