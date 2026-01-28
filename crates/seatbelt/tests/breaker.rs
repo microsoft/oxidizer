@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "breaker")]
+
 //! Integration tests for circuit breaker middleware using only public API.
 
 use std::sync::Arc;

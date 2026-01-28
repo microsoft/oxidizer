@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "retry")]
+
 //! Integration tests for retry middleware using only public API.
 
 use std::sync::atomic::{AtomicU32, Ordering};

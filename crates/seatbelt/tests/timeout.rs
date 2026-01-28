@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "timeout")]
+
 //! Integration tests for timeout middleware using only public API.
 
 use std::sync::Arc;
