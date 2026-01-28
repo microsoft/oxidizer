@@ -3,6 +3,7 @@
 
 #![cfg(feature = "retry")]
 #![allow(dead_code, reason = "This is a test module")]
+#![allow(missing_docs, reason = "This is a test module")]
 
 //! Integration tests for retry middleware using only public API.
 

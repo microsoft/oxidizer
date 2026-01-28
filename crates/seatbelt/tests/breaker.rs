@@ -3,6 +3,7 @@
 
 #![cfg(feature = "breaker")]
 #![allow(dead_code, reason = "This is a test module")]
+#![allow(missing_docs, reason = "This is a test module")]
 
 //! Integration tests for circuit breaker middleware using only public API.
 
