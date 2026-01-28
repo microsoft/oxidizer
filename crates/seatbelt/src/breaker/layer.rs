@@ -65,7 +65,7 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
             min_throughput: DEFAULT_MIN_THROUGHPUT,
             sampling_duration: DEFAULT_SAMPLING_DURATION,
             break_duration: DEFAULT_BREAK_DURATION,
-            half_open_mode: HalfOpenMode::reliable(None),
+            half_open_mode: HalfOpenMode::progressive(None),
             _state: PhantomData,
         }
     }
@@ -293,7 +293,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// This determines how the circuit breaker behaves when transitioning from half-open
     /// to a closed state.
     ///
-    /// **Default**: [`HalfOpenMode::reliable`]
+    /// **Default**: [`HalfOpenMode::progressive`]
     #[must_use]
     pub fn half_open_mode(mut self, mode: HalfOpenMode) -> Self {
         self.half_open_mode = mode;
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(layer.min_throughput, DEFAULT_MIN_THROUGHPUT);
         assert_eq!(layer.sampling_duration, DEFAULT_SAMPLING_DURATION);
         assert_eq!(layer.break_duration, DEFAULT_BREAK_DURATION);
-        assert_eq!(layer.half_open_mode, HalfOpenMode::reliable(None));
+        assert_eq!(layer.half_open_mode, HalfOpenMode::progressive(None));
     }
 
     #[test]
@@ -627,7 +627,7 @@ mod tests {
         let probes = layer
             .break_duration(Duration::from_secs(234))
             .failure_threshold(0.52)
-            .half_open_mode(HalfOpenMode::reliable(None))
+            .half_open_mode(HalfOpenMode::progressive(None))
             .probes_options();
 
         // access the last probe which should be the health probe

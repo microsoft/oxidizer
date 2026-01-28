@@ -15,7 +15,7 @@ use crate::breaker::engine::probing::ProbesOptions;
 /// Currently, two modes are supported:
 ///
 /// - [`HalfOpenMode::quick`]: Allows a single probe to determine if the service has recovered.
-/// - [`HalfOpenMode::reliable`]: Gradually increases the percentage of probes over multiple stages (default).
+/// - [`HalfOpenMode::progressive`]: Gradually increases the percentage of probes over multiple stages (default).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HalfOpenMode {
     inner: Mode,
@@ -24,7 +24,7 @@ pub struct HalfOpenMode {
 impl HalfOpenMode {
     /// Allow quick recovery from half-open state with a single probe.
     ///
-    /// This approach is less reliable compared to the [`HalfOpenMode::reliable`] mode, but
+    /// This approach is less reliable compared to the [`HalfOpenMode::progressive`] mode, but
     /// can close the circuit faster.
     ///
     /// The downside of this approach is that it relies on a single execution to determine
@@ -53,16 +53,16 @@ impl HalfOpenMode {
     /// provided, the value of [`break_duration`][crate::breaker::BreakerLayer::break_duration]
     /// is used. The provided stage duration is clamped to a minimum of 1 second.
     #[must_use]
-    pub fn reliable(stage_duration: impl Into<Option<Duration>>) -> Self {
+    pub fn progressive(stage_duration: impl Into<Option<Duration>>) -> Self {
         Self {
-            inner: Mode::Reliable(stage_duration.into().map(|d| d.max(MIN_SAMPLING_DURATION))),
+            inner: Mode::Progressive(stage_duration.into().map(|d| d.max(MIN_SAMPLING_DURATION))),
         }
     }
 
     pub(super) fn to_options(&self, default_stage_duration: Duration, failure_threshold: f32) -> ProbesOptions {
         match self.inner {
             Mode::Quick => ProbesOptions::quick(default_stage_duration),
-            Mode::Reliable(duration) => ProbesOptions::reliable(duration.unwrap_or(default_stage_duration), failure_threshold),
+            Mode::Progressive(duration) => ProbesOptions::progressive(duration.unwrap_or(default_stage_duration), failure_threshold),
         }
     }
 }
@@ -70,7 +70,7 @@ impl HalfOpenMode {
 #[derive(Debug, Clone, PartialEq)]
 enum Mode {
     Quick,
-    Reliable(Option<Duration>),
+    Progressive(Option<Duration>),
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -103,17 +103,17 @@ mod tests {
     }
 
     #[test]
-    fn reliable_mode_creates_seven_probes() {
-        let mode = HalfOpenMode::reliable(None);
+    fn progressive_mode_creates_seven_probes() {
+        let mode = HalfOpenMode::progressive(None);
         let options = mode.to_options(Duration::from_secs(30), 0.1);
 
         assert_eq!(options.probes().len(), 7);
     }
 
     #[test]
-    fn reliable_mode_with_custom_duration() {
+    fn progressive_mode_with_custom_duration() {
         let custom = Duration::from_secs(45);
-        let mode = HalfOpenMode::reliable(custom);
+        let mode = HalfOpenMode::progressive(custom);
         let options = mode.to_options(Duration::from_secs(30), 0.1);
         let probes: Vec<_> = options.probes().collect();
 
@@ -133,8 +133,8 @@ mod tests {
     }
 
     #[test]
-    fn reliable_mode_with_default_duration() {
-        let mode = HalfOpenMode::reliable(None);
+    fn progressive_mode_with_default_duration() {
+        let mode = HalfOpenMode::progressive(None);
         let default = Duration::from_secs(60);
         let options = mode.to_options(default, 0.1);
         let probes: Vec<_> = options.probes().collect();
@@ -152,20 +152,20 @@ mod tests {
     }
 
     #[test]
-    fn reliable_mode_accepts_various_inputs() {
-        let mode1 = HalfOpenMode::reliable(Duration::from_secs(10));
-        let mode2 = HalfOpenMode::reliable(Some(Duration::from_secs(10)));
-        let mode3 = HalfOpenMode::reliable(None);
+    fn progressive_mode_accepts_various_inputs() {
+        let mode1 = HalfOpenMode::progressive(Duration::from_secs(10));
+        let mode2 = HalfOpenMode::progressive(Some(Duration::from_secs(10)));
+        let mode3 = HalfOpenMode::progressive(None);
 
-        assert!(matches!(mode1.inner, Mode::Reliable(Some(_))));
-        assert!(matches!(mode2.inner, Mode::Reliable(Some(_))));
-        assert!(matches!(mode3.inner, Mode::Reliable(None)));
+        assert!(matches!(mode1.inner, Mode::Progressive(Some(_))));
+        assert!(matches!(mode2.inner, Mode::Progressive(Some(_))));
+        assert!(matches!(mode3.inner, Mode::Progressive(None)));
     }
 
     #[test]
-    fn reliable_mode_clamps_min_duration() {
-        let mode = HalfOpenMode::reliable(Duration::from_millis(500));
+    fn progressive_mode_clamps_min_duration() {
+        let mode = HalfOpenMode::progressive(Duration::from_millis(500));
 
-        assert!(matches!(mode.inner, Mode::Reliable(duration) if duration == Some(Duration::from_secs(1))));
+        assert!(matches!(mode.inner, Mode::Progressive(duration) if duration == Some(Duration::from_secs(1))));
     }
 }
