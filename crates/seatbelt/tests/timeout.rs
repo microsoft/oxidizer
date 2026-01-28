@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg(feature = "timeout")]
+#![allow(dead_code, reason = "This is a test module")]
 
 //! Integration tests for timeout middleware using only public API.
 
