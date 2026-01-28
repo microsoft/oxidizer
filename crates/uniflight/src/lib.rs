@@ -424,7 +424,7 @@ where
 /// silently retrying. Callers can decide whether to retry by calling
 /// `execute` again.
 ///
-/// The panic message is captured and available via [`Display`] or [`LeaderPanicked::message`].
+/// The panic message is captured and available via [`std::fmt::Display`] or [`LeaderPanicked::message`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeaderPanicked {
     message: Arc<str>,
@@ -607,9 +607,21 @@ mod tests {
             })
             .await;
 
-        let Err(err) = result else {
-            panic!("expected Err, got Ok");
-        };
+        let err = result.as_ref().unwrap_err();
         assert_eq!(err.message(), "test panic");
+    }
+
+    #[test]
+    fn extract_panic_message_from_string() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("owned string panic"));
+        let message = extract_panic_message(&*payload);
+        assert_eq!(&*message, "owned string panic");
+    }
+
+    #[test]
+    fn extract_panic_message_unknown_type() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42i32);
+        let message = extract_panic_message(&*payload);
+        assert_eq!(&*message, "unknown panic");
     }
 }
