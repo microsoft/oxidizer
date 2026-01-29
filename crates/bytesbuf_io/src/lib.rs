@@ -4,11 +4,11 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! Asynchronous I/O abstractions expressed via `bytesbuf` types.
+//! Asynchronous I/O abstractions expressed via [`bytesbuf`] types.
 //!
 //! These types model byte sources that can be read from ([`Read`] trait) and byte sinks that can be
 //! written to ([`Write`] trait). All operations use byte sequences represented by types from
-//! `bytesbuf` instead of raw byte slices, enabling the level of flexibility required for
+//! [`bytesbuf`] instead of raw byte slices, enabling the level of flexibility required for
 //! implementing and using high-performance I/O endpoints that consume or produce byte streams.
 //!
 //! All operations are asynchronous and take ownership of the data/buffers passed to them,
@@ -19,6 +19,8 @@
 //!
 //! The `test-util` feature enables additional utilities for testing implementations of
 //! types that produce or consume streams of bytes. These are in the `testing` module.
+//!
+//! [`bytesbuf`]: https://docs.io/bytesbuf
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/favicon.ico")]

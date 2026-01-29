@@ -11,37 +11,36 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [Crates](#crates)
-- [About this Repo](#about-this-repo)
+- [The Oxidizer Project](#the-oxidizer-project)
+  - [Crates](#crates)
+  - [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
     - [CI Workflows](#ci-workflows)
     - [Pull Request Gates](#pull-request-gates)
-- [Trademarks](#trademarks)
+    - [Tool Versions](#tool-versions)
+  - [Trademarks](#trademarks)
 
 ## Crates
 
-These are the crates built out of this repo:
+These are the primary crates built out of this repo:
 
+- [`anyspawn`](./crates/anyspawn/README.md) - A generic task spawner compatible with any async runtime.
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros for the `data_privacy` crate.
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/README.md) - Macros for the `data_privacy` crate.
-- [`echelon`](./crates/echelon/README.md) - A composable, customizable multi-tier caching library with rich feature support.
+- [`cachelon`](./crates/echelon/README.md) - A composable, customizable multi-tier caching library with rich feature support.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
-- [`fundle_macros`](crates/fundle_macros/README.md) - Macros for the `fundle` crate.
-- [`fundle_macros_impl`](crates/fundle_macros_impl/README.md) - Macros for the `fundle` crate.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
-- [`ohno_macros`](./crates/ohno_macros/README.md) - Macros for the `ohno` crate.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
-- [`rts`](./crates/rts/README.md) - A generic future spawner compatible with any async runtime
+- [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
-- [`thread_aware_macros`](./crates/thread_aware_macros/README.md) - Macros for the `thread_aware` crate.
-- [`thread_aware_macros_impl`](./crates/thread_aware_macros_impl/README.md) - Macros for the `thread_aware` crate.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
+- [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.
 
 ## About this Repo
 
@@ -110,7 +109,7 @@ automation processes:
 To generate documentation locally with all features enabled (including feature-gated items), run:
 
 ```shell
-.\scripts\generate-docs.ps1
+just docs
 ```
 
 This requires the Rust nightly toolchain to be installed. The script will generate documentation
@@ -159,7 +158,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 - **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
   unsafe code doesn't induce undefined behaviors.
 
-- **External Type Exposure**. We use [`cargo-external-types`](https://crates.io/crates/cargo-external-types) to track
+- **External Type Exposure**. We use [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
   the exporter
   of the type which can be problematic over time. This check is there to prevent unintentional exposure. If the exposure
@@ -200,6 +199,15 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 
 - **README Content**. We use [`cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme) to ensure each crate's `README.md`
   file matches the crate's current crate-level documentation.
+
+### Tool Versions
+
+We pin the version of the tools we use in CI to ensure hermetic builds as much as possible. We routinely update
+the versions of everything to stay up to date using three scripts:
+
+- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file and in `rust-toolchain.toml`.
+- `scripts/update_tool_versions.ps1` which updates the version of tools in the `constants.env` file.
+- `scripts/update_action_versions.ps1` which updates the version of GitHub actions in the various files in `.github/workflows`.
 
 ## Trademarks
 

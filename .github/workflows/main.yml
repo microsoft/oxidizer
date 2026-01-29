@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm]
     steps:
       # prep
       - name: Checkout
@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm]
     steps:
       # prep
       - name: Checkout
@@ -143,27 +143,36 @@ jobs:
           echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (\`1.x.x -> 2.x.x\` or \`0.1.x -> 0.2.x\`)." >> semver-comment.txt
 
       - name: Post Semver Failure Comment
-        if: steps.semver.outcome == 'failure'
+        if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v2.9.4
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
-        if: steps.semver.outcome == 'success'
+        if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v2.9.4
         with:
           header: semver-check
           delete: true
 
   extended-analysis:
+    name: extended-analysis (${{ matrix.os }})
     if: github.event_name == 'pull_request'
     needs: [testing, static-analysis]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
     steps:
       # prep
       - name: Checkout
@@ -181,7 +190,7 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
       - name: Careful
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace --color always --target ${{ runner.os == 'Linux' && 'x86_64-unknown-linux-gnu' || 'x86_64-pc-windows-msvc' }}
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace --color always --target ${{ matrix.target }}
       - name: Miri
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
@@ -216,7 +225,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Note: windows-11-arm excluded due to LLVM coverage instrumentation bugs
+        # causing "malformed instrumentation profile data: symbol name is empty" errors
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm]
     steps:
       # prep
       - name: Checkout

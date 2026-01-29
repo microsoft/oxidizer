@@ -69,6 +69,7 @@ $script:TypeGroupMapping = @{
 
 # Maps the final group key to a user-friendly header in the changelog.
 $script:HeaderNameMapping = @{
+    'breaking'      = '⚠️ Breaking';
     'build'         = '🏗️ Build System';
     'ci'            = '🔄 Continuous Integration';
     'docs'          = '📚 Documentation';
@@ -82,15 +83,15 @@ $script:HeaderNameMapping = @{
 }
 
 # Defines the preferred order for commit type sections in the changelog.
-$script:TypeOrder = @('feat', 'fix', 'perf', 'docs', 'task', 'refactor', 'build', 'ci', 'style')
+$script:TypeOrder = @('breaking', 'feat', 'fix', 'perf', 'docs', 'task', 'refactor', 'build', 'ci', 'style')
 
 # Defines commit types that should be excluded from the changelog.
 $script:IgnoredTypes = @('test')
 
 # --- COMPILED REGEX PATTERNS ---
 
-# Pattern for conventional commit format: type(scope): description
-$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?:\s*(.*)'
+# Pattern for conventional commit format: type(scope)!: description (! indicates breaking change)
+$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?(!)?:\s*(.*)'
 
 # Pattern for PR references: (#123)
 $script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
@@ -230,9 +231,11 @@ function Format-ConventionalCommits {
         $isConventional = $false
 
         $conventionalMatch = $script:ConventionalCommitRegex.Match($message)
+        $isBreaking = $false
         if ($conventionalMatch.Success) {
             $type = $conventionalMatch.Groups[1].Value
-            $description = $conventionalMatch.Groups[2].Value
+            $isBreaking = $conventionalMatch.Groups[2].Value -eq '!'
+            $description = $conventionalMatch.Groups[3].Value
             $isConventional = $true
         }
 
@@ -250,7 +253,14 @@ function Format-ConventionalCommits {
             }
         }
 
-        $groupKey = if ($script:TypeGroupMapping.ContainsKey($type)) { $script:TypeGroupMapping[$type] } else { $type }
+        # Breaking changes are grouped separately, regardless of the commit type
+        $groupKey = if ($isBreaking) {
+            'breaking'
+        } elseif ($script:TypeGroupMapping.ContainsKey($type)) {
+            $script:TypeGroupMapping[$type]
+        } else {
+            $type
+        }
 
         if (-not $groupedCommits.Contains($groupKey)) {
             $groupedCommits[$groupKey] = [System.Collections.ArrayList]::new()
@@ -264,7 +274,7 @@ function Format-ConventionalCommits {
     foreach ($type in $sortedKeys) {
         if ($groupedCommits[$type].Count -gt 0) {
             $headerName = if ($script:HeaderNameMapping.ContainsKey($type)) { $script:HeaderNameMapping[$type] } else { $type.Substring(0, 1).ToUpper() + $type.Substring(1) }
-            $formattedLines += "- $headerName", "", $groupedCommits[$type], ""
+            $formattedLines += @("- $headerName", "") + @($groupedCommits[$type]) + @("")
         }
     }
 
@@ -341,6 +351,11 @@ function Update-CrateVersion {
     $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
     (Get-Content $rootCargoToml -Raw) -replace $regex, $newVersion | Set-Content $rootCargoToml -NoNewline
 
+    cargo check -p $crateName --quiet | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Cargo check failed after version update. Please verify the changes." -ErrorAction Stop
+    }
+
     return $newVersion
 }
 
@@ -354,25 +369,22 @@ function Write-Changelog {
     )
 
     $tags = Invoke-GitCommand -Command "tag --list `"$crateName-v*`"" -ErrorMessage "Failed to retrieve git tags"
+    $latestTag = $null
     if ($null -eq $tags -or $tags.Count -eq 0) {
         Write-Warning "No tags found for crate '$crateName'. Generating changelog from all history."
-        $tags = @()
     } else {
         $filteredTags = @($tags | Where-Object { $_ -match "^${crateName}-v\d+\.\d+\.\d+$" })
         if ($filteredTags.Count -gt 0) {
-            $tags = @($filteredTags | Sort-Object { [version]($_ -replace "${crateName}-v", '') })
+            $sortedTags = @($filteredTags | Sort-Object { [version]($_ -replace "${crateName}-v", '') })
+            $latestTag = $sortedTags[-1]
         } else {
             Write-Warning "No valid semantic version tags found for crate '$crateName'. Generating changelog from all history."
-            $tags = @()
         }
     }
 
-    $changelogContent = @("# Changelog", "")
     $currentDate = (Get-Date).ToString('yyyy-MM-dd')
-    $hasContent = $false
 
-    # Process unreleased commits
-    $latestTag = if ($tags.Count -gt 0) { $tags[-1] } else { $null }
+    # Get commits since the latest tag (unreleased commits)
     $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
     $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for unreleased commits"
     if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
@@ -381,52 +393,79 @@ function Write-Changelog {
         $rawCommits = @($rawCommits)
     }
 
-    if ($rawCommits) {
-        $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
-        if ($formattedCommits) {
-            $changelogContent += "## [$newVersion] - $currentDate", ""
-            $changelogContent += $formattedCommits
-            $changelogContent += ""
-            $hasContent = $true
-        }
+    if (-not $rawCommits) {
+        Write-Warning "No unreleased commits found to add to the changelog."
+        return
     }
 
-    # Process commits from previous tags
-    for ($i = $tags.Count - 1; $i -ge 0; $i--) {
-        $currentTag = $tags[$i]
-        $previousTag = if ($i -gt 0) { $tags[$i-1] } else { $null }
-        $range = if ($previousTag) { "$previousTag..$currentTag" } else { $currentTag }
-        $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for tag $currentTag"
-        if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
-            $rawCommits = @()
-        } else {
-            $rawCommits = @($rawCommits)
-        }
-        if ($rawCommits.Count -eq 0) {
-            continue
-        }
+    $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
+    if (-not $formattedCommits) {
+        Write-Warning "No relevant commits found to add to the changelog (all commits may be filtered out)."
+        return
+    }
 
-        if ($rawCommits) {
-            $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
-            if ($formattedCommits) {
-                $currentTagVersion = $currentTag -replace "${crateName}-v", ''
-                $tagDateResult = Invoke-GitCommand -Command "log -1 --format=%ai `"$currentTag`"" -ErrorMessage "Failed to get date for tag $currentTag"
-                $tagDate = if ($tagDateResult) { $tagDateResult.Split(' ')[0] } else { "unknown" }
-                $changelogContent += "## [$currentTagVersion] - $tagDate", ""
-                $changelogContent += $formattedCommits
-                $changelogContent += ""
-                $hasContent = $true
+    # Build the new version section
+    $newVersionSection = @("## [$newVersion] - $currentDate", "")
+    $newVersionSection += $formattedCommits
+    $newVersionSection += ""
+
+    # Check if changelog file exists and has content
+    if (Test-Path $changelogFile) {
+        $existingContent = Get-Content $changelogFile -Raw
+        if ($existingContent) {
+            # Find the position after "# Changelog" header and any blank lines
+            # Insert the new version section there
+            $headerPattern = '^# Changelog\s*\r?\n(\r?\n)*'
+            if ($existingContent -match $headerPattern) {
+                $headerMatch = [regex]::Match($existingContent, $headerPattern)
+                $insertPosition = $headerMatch.Index + $headerMatch.Length
+                $newContent = $existingContent.Substring(0, $insertPosition) +
+                              ($newVersionSection -join "`n") + "`n" +
+                              $existingContent.Substring($insertPosition)
+                $newContent | Set-Content $changelogFile -NoNewline
+                Write-Host "✅ Changelog updated at '$changelogFile'."
+                return
             }
         }
     }
 
-    if (-not $hasContent) {
-        Write-Warning "No relevant commits found to generate a changelog."
+    # If no existing changelog or couldn't parse it, create a new one
+    $changelogContent = @("# Changelog", "")
+    $changelogContent += $newVersionSection
+    $changelogContent | Out-File -FilePath $changelogFile -Encoding utf8
+    Write-Host "✅ Changelog created at '$changelogFile'."
+}
+
+function Update-Readme {
+    param(
+        [string]$crateName,
+        [string]$crateFolder
+    )
+
+    $readmeTemplate = Join-Path $crateFolder "../README.j2"
+    if (-not (Test-Path $readmeTemplate)) {
+        Write-Warning "README template not found at '$readmeTemplate'. Skipping README generation."
         return
     }
 
-    $changelogContent | Out-File -FilePath $changelogFile -Encoding utf8
-    Write-Host "✅ Changelog written to '$changelogFile'."
+    if (-not (Test-CommandExists -command "cargo-doc2readme")) {
+        Write-Warning "cargo-doc2readme is not installed. Skipping README generation. Install with: cargo install cargo-doc2readme"
+        return
+    }
+
+    Write-Host "📝 Updating README.md..."
+    Push-Location $crateFolder
+    try {
+        $result = cargo doc2readme --lib --template ../README.j2 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to generate README: $result"
+        } else {
+            Write-Host "✅ README.md updated."
+        }
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 function Show-FinalMessage {
@@ -526,6 +565,7 @@ try {
     }
 
     Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
+    Update-Readme -crateName $CrateName -crateFolder $crateFolder
     Show-FinalMessage -crateName $CrateName -newVersion $newVersion
 }
 catch {

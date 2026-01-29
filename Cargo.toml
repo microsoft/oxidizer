@@ -24,8 +24,9 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
+anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.2" }
-bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.1.1" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.2.0" }
 cachelon = { path = "crates/cachelon", default-features = false, version = "0.1.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
@@ -33,31 +34,38 @@ data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-f
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-layered = { path = "crates/layered", default-features = false, version = "0.1.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.2.0" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.2.0" }
+layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.3.0" }
+ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
-wing = { path = "crates/wing", default-features = false, version = "0.1.0" }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.2.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.0" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.0" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.0" }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.1" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
 tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
+uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
 # external dependencies
+ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 arrayvec = { version = "0.7.3", default-features = false }
+async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.0", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
-criterion = { version = "0.7.0", default-features = false }
+criterion = { version = "0.8.1", default-features = false }
+dashmap = { version = "6.1", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
+fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 futures = { version = "0.3.31", default-features = false }
+futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
+http = { version = "1.2.0", default-features = false, features = ["std"] }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 jiff = { version = "0.2.16", default-features = false }
@@ -70,6 +78,7 @@ nm = { version = "0.1.21", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.31.0", default-features = false }
+opentelemetry-stdout = { version = "0.31.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
@@ -100,6 +109,7 @@ trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
+xutex = { version = "0.2.0", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]

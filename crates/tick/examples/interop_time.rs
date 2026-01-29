@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 use time_tz::timezones::db;
 use time_tz::{OffsetDateTimeExt, TimeZone};
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), ohno::AppError> {
     // Create a frozen clock for the current time.
     let clock = Clock::new_frozen();
 

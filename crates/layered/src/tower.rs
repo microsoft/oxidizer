@@ -47,7 +47,7 @@
 //!     Execute::new(|req: String| async move {
 //!         Ok::<String, std::io::Error>(format!("Processed: {}", req))
 //!     }),
-//! ).build();
+//! ).into_service();
 //!
 //! let result = service.execute("request".to_string()).await;
 //! # Ok(())
@@ -261,7 +261,7 @@ mod tests {
         use tower_layer::Identity;
 
         let stack = (tower_layer(Identity::new()), Execute::new(|x: i32| async move { Ok::<_, ()>(x) }));
-        let svc = stack.build();
+        let svc = stack.into_service();
         assert_eq!(block_on(svc.execute(42)), Ok(42));
     }
 }

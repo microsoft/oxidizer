@@ -3,6 +3,10 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
+    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
+)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
 #![cfg_attr(

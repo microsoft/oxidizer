@@ -3,6 +3,10 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    not(all(feature = "intercept", feature = "tower-service", feature = "dynamic-service")),
+    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
+)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/layered/favicon.ico")]
 
@@ -54,14 +58,18 @@
 //!
 //! ## Key Concepts
 //!
-//! - **Service**: An async function `In → Out` that processes inputs.
-//! - **Middleware**: A service that wraps another service to add behavior (logging, timeouts, retries).
-//! - **Layer**: A factory that wraps any service with middleware. Stack layers using tuples
-//!   like `(layer1, layer2, service)`.
+//! - **Service**: A type implementing the [`Service`] trait that transforms inputs into outputs
+//!   asynchronously. Think of it as `async fn(&self, In) -> Out`.
+//! - **Middleware**: A service that wraps another service to add cross-cutting behavior such as
+//!   logging, timeouts, or retries. Middleware receives inputs before the inner service and can
+//!   process outputs after.
+//! - **Layer**: A type implementing the [`Layer`] trait that constructs middleware around a
+//!   service. Layers are composable and can be stacked using tuples like `(layer1, layer2, service)`.
 //!
 //! ## Layers and Middleware
 //!
-//! A [`Layer`] wraps a service with additional behavior:
+//! A [`Layer`] wraps a service with additional behavior. In this example, we create a logging
+//! middleware that prints inputs before passing them to the inner service:
 //!
 //! ```
 //! use layered::{Execute, Layer, Service, Stack};
@@ -96,7 +104,7 @@
 //! let service = (
 //!     LogLayer,
 //!     Execute::new(|x: i32| async move { x * 2 }),
-//! ).build();
+//! ).into_service();
 //!
 //! let result = service.execute(21).await;
 //! # }
@@ -120,7 +128,6 @@ mod execute;
 pub use execute::Execute;
 
 mod layer;
-#[doc(inline)]
 pub use layer::{Layer, Stack};
 
 #[cfg(any(test, feature = "dynamic-service"))]

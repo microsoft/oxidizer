@@ -8,14 +8,14 @@
 //! - Converting `SystemTime` to `jiff::Timestamp`
 //! - Converting `SystemTime` to `jiff::Zoned`
 
-use anyhow::Context;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
+use ohno::IntoAppError;
 use tick::Clock;
 
 const JIFF_DISPLAY_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), ohno::AppError> {
     // Create a frozen clock for the current time.
     let clock = Clock::new_frozen();
 
@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     let zoned = timestamp.to_zoned(TimeZone::system());
     println!(
         "Current time ({}): {}",
-        TimeZone::system().iana_name().context("failed to get time zone name")?,
+        TimeZone::system().iana_name().into_app_err("failed to get time zone name")?,
         zoned.strftime(JIFF_DISPLAY_FORMAT)
     );
 
