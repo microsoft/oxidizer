@@ -300,6 +300,7 @@ name = "cachelon"
 version = "0.1.0"
 dependencies = [
  "alloc_tracker",
+ "anyspawn",
  "arrayvec",
  "cachelon_memory",
  "cachelon_service",
@@ -313,11 +314,11 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot",
- "singleflight-async",
  "thread_aware",
  "tick",
  "tokio",
  "tracing-subscriber",
+ "uniflight",
 ]
 
 [[package]]
@@ -1891,16 +1892,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
-name = "singleflight-async"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffae0d841b8012a86beec66a3f9c57b7b331a10366c764cd40bd6faebe3ad77c"
-dependencies = [
- "parking_lot",
- "tokio",
-]
-
-[[package]]
 name = "siphasher"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2185,7 +2176,6 @@ version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
 dependencies = [
- "parking_lot",
  "pin-project-lite",
  "tokio-macros",
 ]

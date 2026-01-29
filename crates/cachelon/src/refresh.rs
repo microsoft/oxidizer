@@ -18,12 +18,13 @@ use parking_lot::Mutex;
 
 use crate::{
     fallback::{FallbackCache, FallbackCacheInner},
-    runtime::{Runtime, TokioDeps},
     telemetry::{
         CacheEvent, CacheOperation,
         ext::{CacheTelemetryExt, ClockExt},
     },
 };
+
+use anyspawn::Spawner;
 
 use cachelon_tier::{CacheEntry, CacheTier};
 
@@ -36,7 +37,7 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// # Examples
 ///
 /// ```ignore
-/// let refresh = TimeToRefresh::new_tokio(Duration::from_secs(300), TokioDeps { clock });
+/// let refresh = TimeToRefresh::new_tokio(Duration::from_secs(300));
 /// ```
 /// Manages time-based refresh scheduling for cached entries.
 ///
@@ -59,7 +60,7 @@ use cachelon_tier::{CacheEntry, CacheTier};
 pub struct TimeToRefresh<K> {
     /// The duration after which a cached entry should be refreshed.
     pub duration: Duration,
-    pub(crate) runtime: Runtime,
+    pub(crate) spawner: Spawner,
     in_flight: Mutex<HashSet<K>>,
 }
 
@@ -80,11 +81,11 @@ where
     /// # Arguments
     ///
     /// * `duration` - The time period after which cached entries should be refreshed.
-    /// * `deps` - Dependencies for the Tokio runtime, including the clock.
-    pub fn new_tokio(duration: Duration, deps: impl Into<TokioDeps>) -> Self {
+    #[must_use]
+    pub fn new_tokio(duration: Duration) -> Self {
         Self {
             duration,
-            runtime: Runtime::new_tokio(deps.into()),
+            spawner: Spawner::new_tokio(),
             in_flight: Mutex::new(HashSet::new()),
         }
     }
@@ -127,15 +128,15 @@ where
             let inner = Arc::clone(&self.inner);
             let key = key.clone();
 
-            // Fire-and-forget: spawn the refresh task in the background
-            refresh.runtime.spawn(async move {
+            // Fire-and-forget: spawn the refresh task in the background, drop the JoinHandle
+            drop(refresh.spawner.spawn(async move {
                 inner.fetch_and_promote(key.clone()).await;
 
                 // Mark as no longer in-flight
                 if let Some(refresh) = &inner.refresh {
                     refresh.finish_refresh(&key);
                 }
-            });
+            }));
         }
     }
 }
@@ -189,16 +190,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tick::Clock;
-
-    // Note: All tests here use internal pub(crate) Runtime types or methods,
-    // so they must remain as unit tests in src/ (can't be integration tests)
 
     #[test]
     fn time_to_refresh_debug() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         let debug_str = format!("{:?}", refresh);
         assert!(debug_str.contains("TimeToRefresh"));
@@ -207,18 +202,14 @@ mod tests {
 
     #[test]
     fn time_to_refresh_new_tokio() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         assert_eq!(refresh.duration, Duration::from_secs(60));
     }
 
     #[test]
     fn time_to_refresh_should_refresh_false_when_recent() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         // An instant from now should not need refresh yet
         let cached_at = Instant::now();
@@ -227,9 +218,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_try_start_refresh() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         // First call should succeed (not already in flight)
         let key = "key1".to_string();
@@ -245,9 +234,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_finish_refresh() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         let key = "key1".to_string();
 
@@ -265,9 +252,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_finish_refresh_nonexistent_key() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         // Finishing a non-existent key should not panic
         // Test passes if this doesn't panic
@@ -279,10 +264,8 @@ mod tests {
 
     #[test]
     fn time_to_refresh_should_refresh_true_after_duration() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
         // Set a very short refresh duration for testing
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_nanos(1), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_nanos(1));
 
         // Create an instant and wait slightly
         let cached_at = Instant::now();
@@ -295,29 +278,14 @@ mod tests {
 
     #[test]
     fn time_to_refresh_duration_access() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(300), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(300));
 
         assert_eq!(refresh.duration, Duration::from_secs(300));
     }
 
     #[test]
-    fn time_to_refresh_runtime_access() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
-
-        // Verify runtime is accessible and usable
-        let runtime_clock = refresh.runtime.clock();
-        let _ = runtime_clock.instant(); // Verify clock works
-    }
-
-    #[test]
     fn time_to_refresh_concurrent_keys() {
-        let clock = Clock::new_frozen();
-        let deps = TokioDeps { clock: clock.clone() };
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60), deps);
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
         // Multiple keys can be in flight simultaneously
         let key1 = "key1".to_string();

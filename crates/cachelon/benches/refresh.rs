@@ -75,7 +75,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 let fixed_with_refresh = Cache::builder(clock.clone())
                     .storage(mock_with_value("key".to_string(), value.clone()))
                     .fallback(Cache::builder(clock.clone()).storage(mock_with_value("key".to_string(), value)))
-                    .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0), &clock))
+                    .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0)))
                     .build();
 
                 let _span = fixed_with_refresh_operation.measure_thread();
@@ -99,7 +99,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 let fixed_with_refresh = Cache::builder(clock.clone())
                     .storage(mock_with_value("key".to_string(), value.clone()))
                     .fallback(Cache::builder(clock.clone()).storage(mock_with_value("key".to_string(), value)))
-                    .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(10), &clock))
+                    .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(10)))
                     .build();
 
                 let _span = fixed_with_refresh_operation.measure_thread();
@@ -261,7 +261,7 @@ fn bench_refresh_benefit(c: &mut Criterion) {
                 let cache = Cache::builder(clock.clone())
                     .storage(mock_with_value("key", CacheEntry::with_cached_at("stale_value", stale_time)))
                     .fallback(Cache::builder(clock.clone()).storage(slow_fallback))
-                    .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0), &clock))
+                    .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0)))
                     .build();
 
                 let _span = with_refresh_operation.measure_thread();

@@ -73,7 +73,7 @@ async fn main() {
         .memory()
         .ttl(Duration::from_secs(10))
         .fallback(Cache::builder::<String, String>(clock.clone()).storage(database.clone()))
-        .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(2), clock.clone()))
+        .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(2)))
         .promotion_policy(FallbackPromotionPolicy::Always)
         .build();
 

@@ -41,9 +41,11 @@ memory = ["dep:cachelon_memory"]
 service = ["dep:cachelon_service", "dep:layered"]
 tokio = [
     "dep:fundle",
-    "dep:singleflight-async",
+    "dep:uniflight",
+    "dep:anyspawn",
     "dep:tokio",
     "tick/tokio",
+    "anyspawn/tokio",
 ]
 
 [dependencies]
@@ -67,7 +69,8 @@ opentelemetry_sdk = { workspace = true, optional = true, features = [
     "metrics",
 ] }
 parking_lot = { version = "0.12.5" }
-singleflight-async = { version = "0.2", optional = true }
+uniflight = { workspace = true, optional = true }
+anyspawn = { workspace = true, optional = true }
 tick = { workspace = true, features = [] }
 thread_aware = { workspace = true }
 tokio = { workspace = true, features = ["rt"], optional = true }

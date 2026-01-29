@@ -5,7 +5,7 @@
 use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
 #[cfg(feature = "tokio")]
-use singleflight_async::SingleFlight;
+use uniflight::Merger;
 use tick::Clock;
 
 use crate::{Error, builder::CacheBuilder};
@@ -70,7 +70,7 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) storage: S,
     pub(crate) clock: Clock,
     #[cfg(feature = "tokio")]
-    coalesce: SingleFlight<K, Option<CacheEntry<V>>>,
+    request_merger: Merger<K, Option<CacheEntry<V>>>,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -102,8 +102,8 @@ impl Cache<(), (), ()> {
 /// Constructor and accessor methods.
 impl<K, V, S> Cache<K, V, S>
 where
-    K: Clone + Eq + Hash + Send + Sync,
-    V: Clone + Send + Sync,
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
     S: CacheTier<K, V> + Send + Sync,
 {
     pub(crate) fn new(name: CacheName, storage: S, clock: Clock) -> Self {
@@ -112,7 +112,7 @@ where
             storage,
             clock,
             #[cfg(feature = "tokio")]
-            coalesce: SingleFlight::new(),
+            request_merger: Merger::new(),
             _phantom: PhantomData,
         }
     }
@@ -374,7 +374,13 @@ where
         K: 'static,
         V: 'static,
     {
-        self.coalesce.work(key.clone(), || async { self.get(key).await }).await
+        // uniflight returns Result<T, LeaderPanicked>
+        // On leader panic, return None (same as cache miss)
+        // Note: uniflight accepts &key (no clone needed)
+        self.request_merger
+            .execute(key, || async { self.get(key).await })
+            .await
+            .unwrap_or(None)
     }
 }
 

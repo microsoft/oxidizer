@@ -57,8 +57,6 @@ pub mod cache;
 mod fallback;
 #[cfg(any(feature = "tokio", test))]
 pub mod refresh;
-#[cfg(any(feature = "tokio", test))]
-mod runtime;
 mod telemetry;
 mod wrapper;
 
