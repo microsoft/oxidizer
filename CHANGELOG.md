@@ -2,7 +2,7 @@
 
 Please see each crate's change log below:
 
-- [`async_once`](./crates/async_once/CHANGELOG.md)
+- [`anyspawn`](./crates/anyspawn/CHANGELOG.md)
 - [`bytesbuf`](./crates/bytesbuf/CHANGELOG.md)
 - [`bytesbuf_io`](./crates/bytesbuf_io/CHANGELOG.md)
 - [`data_privacy`](./crates/data_privacy/CHANGELOG.md)
