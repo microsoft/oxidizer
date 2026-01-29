@@ -1,14 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::fmt::Debug;
 use std::ops::ControlFlow;
+#[cfg(any(feature = "tower-service", test))]
+use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
+use std::task::{Context, Poll};
 
 use layered::Service;
 use tick::Clock;
 
 use super::*;
-use crate::{NotSet, utils::EnableIf};
+use crate::NotSet;
+use crate::utils::EnableIf;
 
 /// Applies circuit breaker logic to prevent cascading failures.
 ///
@@ -92,6 +98,76 @@ where
         self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
 
         output
+    }
+}
+
+/// Future returned by [`Breaker`] when used as a tower [`Service`](tower_service::Service).
+#[cfg(any(feature = "tower-service", test))]
+pub struct BreakerFuture<Out> {
+    inner: Pin<Box<dyn Future<Output = Out> + Send>>,
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Debug for BreakerFuture<Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BreakerFuture").finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Future for BreakerFuture<Out> {
+    type Output = Out;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.as_mut().poll(cx)
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Req, Res, Err, S> tower_service::Service<Req> for Breaker<Req, Result<Res, Err>, S>
+where
+    Err: Send + 'static,
+    Req: Send + 'static,
+    Res: Send + 'static,
+    S: tower_service::Service<Req, Response = Res, Error = Err> + Send + Sync + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Res;
+    type Error = Err;
+    type Future = BreakerFuture<Result<Res, Err>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        if !self.shared.enable_if.call(&req) {
+            let future = self.inner.call(req);
+            return BreakerFuture { inner: Box::pin(future) };
+        }
+
+        let breaker_id = self.shared.get_breaker_id(&req);
+        let engine = self.shared.engines.get_engine(&breaker_id);
+
+        let (input, mode) = match self.shared.before_execute(engine.as_ref(), req, &breaker_id) {
+            ControlFlow::Continue(result) => result,
+            ControlFlow::Break(output) => {
+                return BreakerFuture {
+                    inner: Box::pin(async move { output }),
+                };
+            }
+        };
+
+        let shared = Arc::clone(&self.shared);
+        let future = self.inner.call(input);
+
+        BreakerFuture {
+            inner: Box::pin(async move {
+                let output = future.await;
+                shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+                output
+            }),
+        }
     }
 }
 

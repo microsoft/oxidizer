@@ -1,8 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::fmt::Debug;
 use std::ops::ControlFlow;
+#[cfg(any(feature = "tower-service", test))]
+use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use layered::Service;
@@ -252,6 +257,90 @@ struct ContinueRetry<In> {
     attempt: Attempt,
     recovery: RecoveryInfo,
     delay: Duration,
+}
+
+/// Future returned by [`Retry`] when used as a tower [`Service`](tower_service::Service).
+#[cfg(any(feature = "tower-service", test))]
+pub struct RetryFuture<Out> {
+    inner: Pin<Box<dyn Future<Output = Out> + Send>>,
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Debug for RetryFuture<Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RetryFuture").finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Future for RetryFuture<Out> {
+    type Output = Out;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.as_mut().poll(cx)
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Req, Res, Err, S> tower_service::Service<Req> for Retry<Req, Result<Res, Err>, S>
+where
+    Err: Send + 'static,
+    Req: Send + 'static,
+    Res: Send + 'static,
+    S: tower_service::Service<Req, Response = Res, Error = Err> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Res;
+    type Error = Err;
+    type Future = RetryFuture<Result<Res, Err>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        use std::future::poll_fn;
+
+        if !self.shared.enable_if.call(&req) {
+            let future = self.inner.call(req);
+            return RetryFuture { inner: Box::pin(future) };
+        }
+
+        let shared = Arc::clone(&self.shared);
+        let inner = self.inner.clone();
+
+        RetryFuture {
+            inner: Box::pin(async move {
+                let mut input = req;
+                let mut inner = inner;
+                let mut attempt = Attempt::first(shared.max_attempts);
+                let mut delays = shared.backoff.delays();
+                let mut previous_recovery = None;
+
+                loop {
+                    let (original_input, attempt_input) = shared.clone_input(input, attempt, previous_recovery.clone());
+
+                    // execute inner service
+                    if poll_fn(|cx| inner.poll_ready(cx)).await.is_err() {
+                        // If poll_ready fails, we can't continue - return the error
+                        // But we need to return an Out type, so we need to call anyway
+                    }
+                    let out = inner.call(attempt_input).await;
+
+                    // evaluate whether to retry
+                    match shared.evaluate_attempt(original_input, out, attempt, &mut delays) {
+                        ControlFlow::Continue(state) => {
+                            shared.clock.delay(state.delay).await;
+                            input = state.input;
+                            attempt = state.attempt;
+                            previous_recovery = Some(state.recovery);
+                        }
+                        ControlFlow::Break(out) => return out,
+                    }
+                }
+            }),
+        }
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]

@@ -102,6 +102,21 @@
 //! - [`retry`] - Middleware that automatically retries failed operations.
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //!
+//! # Tower Compatibility
+//!
+//! All resilience middleware ([`timeout::Timeout`], [`retry::Retry`], [`breaker::Breaker`]) are
+//! compatible with the Tower ecosystem when the `tower-service` feature is enabled. This allows
+//! you to use `tower::ServiceBuilder` to compose middleware stacks:
+//!
+//! ```rust,ignore
+//! use tower::ServiceBuilder;
+//!
+//! let service = ServiceBuilder::new()
+//!     .layer(Retry::layer("my_retry", &context).clone_input().recovery_with(classify))
+//!     .layer(Timeout::layer("my_timeout", &context).timeout(Duration::from_secs(30)).timeout_output(on_timeout))
+//!     .service(my_inner_service);
+//! ```
+//!
 //! # Features
 //!
 //! This crate provides several optional features that can be enabled in your `Cargo.toml`:
@@ -112,6 +127,8 @@
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
+//! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
+//!   resilience middleware.
 
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};

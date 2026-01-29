@@ -2,7 +2,12 @@
 // Licensed under the MIT License.
 
 use std::borrow::Cow;
+use std::fmt::Debug;
+#[cfg(any(feature = "tower-service", test))]
+use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use layered::Service;
@@ -105,6 +110,66 @@ where
         match self.inner.execute(input).timeout(&self.shared.clock, timeout).await {
             Ok(output) => output,
             Err(_error) => self.shared.handle_timeout_error(timeout),
+        }
+    }
+}
+
+/// Future returned by [`Timeout`] when used as a tower [`Service`](tower_service::Service).
+#[cfg(any(feature = "tower-service", test))]
+pub struct TimeoutFuture<Out> {
+    inner: Pin<Box<dyn Future<Output = Out> + Send>>,
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Debug for TimeoutFuture<Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimeoutFuture").finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Future for TimeoutFuture<Out> {
+    type Output = Out;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.as_mut().poll(cx)
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Req, Res, Err, S> tower_service::Service<Req> for Timeout<Req, Result<Res, Err>, S>
+where
+    Err: Send + 'static,
+    Req: Send + 'static,
+    Res: Send + 'static,
+    S: tower_service::Service<Req, Response = Res, Error = Err> + Send + Sync + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Res;
+    type Error = Err;
+    type Future = TimeoutFuture<Result<Res, Err>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        if !self.shared.enable_if.call(&req) {
+            let future = self.inner.call(req);
+            return TimeoutFuture { inner: Box::pin(future) };
+        }
+
+        let timeout = self.shared.get_timeout(&req);
+        let shared = Arc::clone(&self.shared);
+        let future = self.inner.call(req);
+
+        TimeoutFuture {
+            inner: Box::pin(async move {
+                match future.timeout(&shared.clock, timeout).await {
+                    Ok(result) => result,
+                    Err(_error) => shared.handle_timeout_error(timeout),
+                }
+            }),
         }
     }
 }
