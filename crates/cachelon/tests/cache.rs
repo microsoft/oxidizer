@@ -249,18 +249,19 @@ fn try_get_or_insert_success() {
 }
 
 #[test]
-fn get_coalesced_returns_cached() {
+#[cfg(feature = "tokio")]
+fn stampede_protection_returns_cached() {
     block_on(async {
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
 
         let key = "key".to_string();
 
-        let result = cache.get_coalesced(&key).await;
+        let result = cache.get(&key).await;
         assert!(result.is_none());
 
         cache.insert(&key, CacheEntry::new(42)).await;
-        let result = cache.get_coalesced(&key).await;
+        let result = cache.get(&key).await;
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
     });

@@ -75,6 +75,8 @@ pub struct CacheBuilder<K, V, S = ()> {
     clock: Clock,
     #[cfg(feature = "telemetry")]
     telemetry: Option<CacheTelemetry>,
+    #[cfg(feature = "tokio")]
+    stampede_protection: bool,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -87,6 +89,8 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock,
             #[cfg(feature = "telemetry")]
             telemetry: None,
+            #[cfg(feature = "tokio")]
+            stampede_protection: false,
             _phantom: PhantomData,
         }
     }
@@ -124,6 +128,8 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock: self.clock,
             #[cfg(feature = "telemetry")]
             telemetry: self.telemetry,
+            #[cfg(feature = "tokio")]
+            stampede_protection: self.stampede_protection,
             _phantom: PhantomData,
         }
     }
@@ -199,6 +205,33 @@ impl<K, V, S> CacheBuilder<K, V, S> {
         self
     }
 
+    /// Enables stampede protection for cache reads.
+    ///
+    /// When enabled, concurrent requests for the same key will be merged
+    /// so that only one request performs the lookup. Others wait and share the result.
+    ///
+    /// This prevents the "thundering herd" problem where many concurrent cache
+    /// misses for the same key overwhelm the backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cachelon::Cache;
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_frozen();
+    /// let cache = Cache::builder::<String, i32>(clock)
+    ///     .memory()
+    ///     .stampede_protection()
+    ///     .build();
+    /// ```
+    #[cfg(feature = "tokio")]
+    #[must_use]
+    pub fn stampede_protection(mut self) -> Self {
+        self.stampede_protection = true;
+        self
+    }
+
     /// Sets the time-to-live (TTL) for entries in this cache tier.
     ///
     /// Entries older than the TTL will be considered expired and won't be
@@ -249,6 +282,8 @@ where
         let clock = self.clock.clone();
         #[cfg(feature = "telemetry")]
         let telemetry = self.telemetry.clone();
+        #[cfg(feature = "tokio")]
+        let stampede_protection = self.stampede_protection;
 
         FallbackBuilder {
             name: self.name,
@@ -260,6 +295,8 @@ where
             refresh: None,
             #[cfg(feature = "telemetry")]
             telemetry,
+            #[cfg(feature = "tokio")]
+            stampede_protection,
             _phantom: PhantomData,
         }
     }
@@ -309,6 +346,8 @@ pub struct FallbackBuilder<K, V, PB, FB> {
     refresh: Option<TimeToRefresh<K>>,
     #[cfg(feature = "telemetry")]
     telemetry: Option<CacheTelemetry>,
+    #[cfg(feature = "tokio")]
+    stampede_protection: bool,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -360,6 +399,20 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
         self.refresh = Some(refresh);
         self
     }
+
+    /// Enables stampede protection for cache reads.
+    ///
+    /// When enabled, concurrent requests for the same key will be merged
+    /// so that only one request performs the lookup. Others wait and share the result.
+    ///
+    /// This prevents the "thundering herd" problem where many concurrent cache
+    /// misses for the same key overwhelm the backend.
+    #[cfg(feature = "tokio")]
+    #[must_use]
+    pub fn stampede_protection(mut self) -> Self {
+        self.stampede_protection = true;
+        self
+    }
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
@@ -382,6 +435,8 @@ where
         let clock = self.clock.clone();
         #[cfg(feature = "telemetry")]
         let telemetry = self.telemetry.clone();
+        #[cfg(feature = "tokio")]
+        let stampede_protection = self.stampede_protection;
 
         FallbackBuilder {
             name: self.name,
@@ -393,6 +448,8 @@ where
             refresh: None,
             #[cfg(feature = "telemetry")]
             telemetry,
+            #[cfg(feature = "tokio")]
+            stampede_protection,
             _phantom: PhantomData,
         }
     }
@@ -466,6 +523,8 @@ where
         let clock = self.clock.clone();
         #[cfg(feature = "telemetry")]
         let telemetry = self.telemetry.clone();
+        #[cfg(feature = "tokio")]
+        let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(
             clock.clone(),
@@ -473,7 +532,13 @@ where
             telemetry,
         );
 
-        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(None), tier, clock)
+        Cache::new(
+            short_type_name::<Cache<K, V, Self::Output>>(None),
+            tier,
+            clock,
+            #[cfg(feature = "tokio")]
+            stampede_protection,
+        )
     }
 
     fn build_tier(self, clock: Clock, #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>) -> Self::Output {
@@ -502,6 +567,8 @@ where
         let clock = self.clock.clone();
         #[cfg(feature = "telemetry")]
         let telemetry = self.telemetry.clone();
+        #[cfg(feature = "tokio")]
+        let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(
             clock.clone(),
@@ -509,7 +576,13 @@ where
             telemetry,
         );
 
-        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(name), tier, clock)
+        Cache::new(
+            short_type_name::<Cache<K, V, Self::Output>>(name),
+            tier,
+            clock,
+            #[cfg(feature = "tokio")]
+            stampede_protection,
+        )
     }
 
     fn build_tier(self, clock: Clock, #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>) -> Self::Output {

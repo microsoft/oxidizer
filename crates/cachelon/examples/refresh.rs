@@ -1,18 +1,8 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
-//! Time-to-Refresh Example
-//!
-//! Demonstrates background refresh of cache entries before they expire.
-//!
-//! When a cached value is older than the `time_to_refresh` duration but still valid,
-//! the cache returns the stale value immediately while spawning a background task
-//! to fetch a fresh value from the fallback tier. This keeps the cache warm and
-//! avoids latency spikes from cache misses.
-//!
-//! This is useful for:
-//! - High-traffic keys that should never experience a cache miss
-//! - Reducing p99 latency by pre-emptively refreshing before expiration
-//! - Keeping data fresh without blocking the caller
+//! Time-to-refresh: return stale data immediately, refresh in background.
+//! Keeps cache warm and avoids latency spikes from cache misses.
 
 use std::{
     sync::{
@@ -25,79 +15,56 @@ use std::{
 use cachelon::{Cache, CacheEntry, CacheTier, FallbackPromotionPolicy, refresh::TimeToRefresh};
 use tick::Clock;
 
-/// A simulated database that tracks call counts and returns incrementing values.
-#[derive(Debug, Clone)]
-struct MockDatabase {
-    call_count: Arc<AtomicU32>,
-}
+#[derive(Clone)]
+struct Database(Arc<AtomicU32>);
 
-impl MockDatabase {
-    fn new() -> Self {
-        Self {
-            call_count: Arc::new(AtomicU32::new(0)),
-        }
-    }
-
-    fn call_count(&self) -> u32 {
-        self.call_count.load(Ordering::Relaxed)
-    }
-}
-
-impl CacheTier<String, String> for MockDatabase {
+impl CacheTier<String, String> for Database {
     async fn get(&self, key: &String) -> Option<CacheEntry<String>> {
-        let count = self.call_count.fetch_add(1, Ordering::Relaxed);
-
-        // Simulate database latency
+        let v = self.0.fetch_add(1, Ordering::Relaxed) + 1;
         tokio::time::sleep(Duration::from_millis(50)).await;
-
-        // Return a value that includes the call count so we can see refreshes
-        Some(CacheEntry::new(format!("value_v{}_for_{}", count + 1, key)))
+        Some(CacheEntry::new(format!("{key}_v{v}")))
     }
-
-    async fn insert(&self, _key: &String, _entry: CacheEntry<String>) {
-        // Database is read-only in this example
-    }
+    async fn insert(&self, _: &String, _: CacheEntry<String>) {}
 }
 
 #[tokio::main]
 async fn main() {
     let clock = Clock::new_tokio();
+    let db = Database(Arc::new(AtomicU32::new(0)));
 
-    let database = MockDatabase::new();
-
-    // Build a cache with time-to-refresh enabled
-    // - Primary: in-memory cache with 10 second TTL
-    // - Fallback: mock database
-    // - Refresh: after 2 seconds, trigger background refresh
     let cache = Cache::builder::<String, String>(clock.clone())
         .memory()
         .ttl(Duration::from_secs(10))
-        .fallback(Cache::builder::<String, String>(clock.clone()).storage(database.clone()))
-        .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(2)))
+        .fallback(Cache::builder::<String, String>(clock).storage(db.clone()))
+        .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(1)))
         .promotion_policy(FallbackPromotionPolicy::Always)
         .build();
 
-    let key = "config:app".to_string();
+    let key = "config".to_string();
 
-    // Initial fetch - cache miss, goes to database
-    let _value = cache.get(&key).await;
-    assert_eq!(database.call_count(), 1);
+    // Initial fetch (db call #1)
+    let v = cache.get(&key).await;
+    println!(
+        "initial: {:?} (db calls: {})",
+        v.map(|e| e.value().clone()),
+        db.0.load(Ordering::Relaxed)
+    );
 
-    // Immediate second fetch - cache hit, no database call
-    let _value = cache.get(&key).await;
-    assert_eq!(database.call_count(), 1);
+    // Wait past refresh threshold
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    // Wait for time-to-refresh threshold (2 seconds)
-    tokio::time::sleep(Duration::from_millis(2500)).await;
+    // Returns stale value immediately, triggers background refresh
+    let v = cache.get(&key).await;
+    println!("stale: {:?}", v.map(|e| e.value().clone()));
 
-    // This fetch returns stale value immediately, triggers background refresh
-    let _value = cache.get(&key).await;
-    // Database call count may be 1 or 2 depending on refresh timing
+    // Wait for refresh to complete
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Give background refresh time to complete
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // Next fetch should return the refreshed value
-    let _value = cache.get(&key).await;
-    // Total database calls: 2 (initial + background refresh)
+    // Now returns refreshed value
+    let v = cache.get(&key).await;
+    println!(
+        "refreshed: {:?} (db calls: {})",
+        v.map(|e| e.value().clone()),
+        db.0.load(Ordering::Relaxed)
+    );
 }

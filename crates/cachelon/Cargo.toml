@@ -85,19 +85,19 @@ tokio = { workspace = true, features = ["rt"] }
 tracing-subscriber = { workspace = true }
 
 [[bench]]
-name = "features"
+name = "operations"
 harness = false
-required-features = []
+required-features = ["telemetry", "test-util", "tokio"]
 
 [[bench]]
-name = "overhead"
+name = "dynamic"
 harness = false
-required-features = ["telemetry", "test-util"]
+required-features = ["test-util", "tokio"]
 
 [[bench]]
 name = "refresh"
 harness = false
-required-features = ["telemetry", "test-util"]
+required-features = ["test-util", "tokio"]
 
 [[example]]
 name = "simple"
@@ -124,7 +124,7 @@ name = "get_or_insert"
 required-features = ["memory", "tokio"]
 
 [[example]]
-name = "stampede"
+name = "stampede_protection"
 required-features = ["memory", "tokio"]
 
 [[example]]

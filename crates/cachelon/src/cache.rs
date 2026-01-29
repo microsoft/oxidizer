@@ -4,9 +4,9 @@
 
 use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
+use tick::Clock;
 #[cfg(feature = "tokio")]
 use uniflight::Merger;
-use tick::Clock;
 
 use crate::{Error, builder::CacheBuilder};
 use cachelon_tier::{CacheEntry, CacheTier};
@@ -20,7 +20,7 @@ pub type CacheName = &'static str;
 /// - Consistent API for all cache operations
 /// - Telemetry propagation to inner tiers
 /// - Clock management for time-based operations
-/// - Optional stampede protection via `get_coalesced`
+/// - Optional stampede protection via `stampede_protection()` builder option
 ///
 /// This type does NOT implement `CacheTier` - it is always the outermost wrapper.
 /// Inner tiers are composed using `CacheWrapper` and `FallbackCache`.
@@ -70,7 +70,7 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) storage: S,
     pub(crate) clock: Clock,
     #[cfg(feature = "tokio")]
-    request_merger: Merger<K, Option<CacheEntry<V>>>,
+    request_merger: Option<Merger<K, Option<CacheEntry<V>>>>,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -106,13 +106,13 @@ where
     V: Clone + Send + Sync + 'static,
     S: CacheTier<K, V> + Send + Sync,
 {
-    pub(crate) fn new(name: CacheName, storage: S, clock: Clock) -> Self {
+    pub(crate) fn new(name: CacheName, storage: S, clock: Clock, #[cfg(feature = "tokio")] stampede_protection: bool) -> Self {
         Self {
             name,
             storage,
             clock,
             #[cfg(feature = "tokio")]
-            request_merger: Merger::new(),
+            request_merger: stampede_protection.then(|| Merger::new()),
             _phantom: PhantomData,
         }
     }
@@ -160,13 +160,17 @@ where
 /// Public API methods that require `CacheTier` dispatch.
 impl<K, V, S> Cache<K, V, S>
 where
-    K: Clone + Eq + Hash + Send + Sync,
-    V: Clone + Send + Sync,
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
     S: CacheTier<K, V> + Send + Sync,
 {
     /// Retrieves a value from the cache.
     ///
     /// Returns `None` if the key is not found or the entry has expired.
+    ///
+    /// When stampede protection is enabled via `stampede_protection()`, concurrent
+    /// requests for the same key will be merged so that only one request
+    /// performs the lookup. Others wait and share the result.
     ///
     /// # Examples
     ///
@@ -183,6 +187,12 @@ where
     /// # });
     /// ```
     pub async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
+        #[cfg(feature = "tokio")]
+        if let Some(ref merger) = self.request_merger {
+            // TODO if the merger func() panics, should we log something?
+            return merger.execute(key, || async { self.storage.get(key).await }).await.unwrap_or(None);
+        }
+
         self.storage.get(key).await
     }
 
@@ -358,29 +368,6 @@ where
         let entry = CacheEntry::new(value);
         self.try_insert(key, entry.clone()).await?;
         Ok(entry)
-    }
-
-    /// Gets a value from the cache with stampede protection.
-    ///
-    /// When multiple concurrent requests ask for the same key, only one will
-    /// actually perform the cache lookup. The others will wait and receive
-    /// a clone of the result.
-    ///
-    /// This prevents the "thundering herd" problem where many concurrent cache
-    /// misses for the same key overwhelm the backend.
-    #[cfg(feature = "tokio")]
-    pub async fn get_coalesced(&self, key: &K) -> Option<CacheEntry<V>>
-    where
-        K: 'static,
-        V: 'static,
-    {
-        // uniflight returns Result<T, LeaderPanicked>
-        // On leader panic, return None (same as cache miss)
-        // Note: uniflight accepts &key (no clone needed)
-        self.request_merger
-            .execute(key, || async { self.get(key).await })
-            .await
-            .unwrap_or(None)
     }
 }
 

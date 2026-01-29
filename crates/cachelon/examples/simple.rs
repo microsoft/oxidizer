@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
-//! Simple Cache Example
-//!
-//! Demonstrates basic cache operations: get, insert, invalidate, contains.
+//! Basic cache operations: get, insert, invalidate.
 
 use std::time::Duration;
 
@@ -12,27 +11,20 @@ use tick::Clock;
 #[tokio::main]
 async fn main() {
     let clock = Clock::new_tokio();
+    let cache = Cache::builder::<String, String>(clock)
+        .memory()
+        .ttl(Duration::from_secs(60))
+        .build();
 
-    // Build a simple in-memory cache with a 5-second TTL
-    let cache = Cache::builder::<String, String>(clock).memory().ttl(Duration::from_secs(5)).build();
-
-    // Insert a value
     let key = "user:1".to_string();
+
+    // Insert and retrieve
     cache.insert(&key, "Alice".to_string().into()).await;
+    let value = cache.get(&key).await;
+    println!("get({key}): {:?}", value.map(|e| e.value().clone()));
 
-    // Check if key exists (returns true)
-    let _exists = cache.contains(&key).await;
-
-    // Retrieve the value (returns Some(CacheEntry))
-    let _value = cache.get(&key).await;
-
-    // Invalidate the key
+    // Invalidate
     cache.invalidate(&key).await;
-
-    // Verify it's gone (returns false)
-    let _exists_after = cache.contains(&key).await;
-
-    // Attempt to get a non-existent key (returns None)
-    let missing_key = "user:2".to_string();
-    let _missing = cache.get(&missing_key).await;
+    let value = cache.get(&key).await;
+    println!("after invalidate: {:?}", value.map(|e| e.value().clone()));
 }
