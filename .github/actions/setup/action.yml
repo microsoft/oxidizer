@@ -83,15 +83,17 @@ runs:
           echo "cargo_tools=$expanded" >> "$GITHUB_OUTPUT"
         fi
 
+    # Note: sccache is skipped on Windows ARM64 due to missing binaries
+    # See: https://github.com/Mozilla-Actions/sccache-action/issues/189
     - name: Configure Sccache
-      if: inputs.enable-sccache == 'true'
+      if: inputs.enable-sccache == 'true' && !(runner.os == 'Windows' && runner.arch == 'ARM64')
       shell: bash
       run: |
         echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
         echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
     - name: Start Sccache
-      if: inputs.enable-sccache == 'true'
+      if: inputs.enable-sccache == 'true' && !(runner.os == 'Windows' && runner.arch == 'ARM64')
       uses: mozilla-actions/sccache-action@v0.0.9
       with:
         version: ${{ env.SCCACHE_VERSION }}
