@@ -1,0 +1,53 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "uniflight"
+description = "Coalesces duplicate async tasks into a single execution."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "coalescing", "stempede", "singleflight", "deduplication"]
+categories = ["concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "thread_aware::cell::builtin::PerProcess",
+    "thread_aware::cell::storage::Strategy",
+    "thread_aware::core::ThreadAware",
+]
+
+[dependencies]
+ahash = { workspace = true, default-features = false, features = ["std"] }
+async-once-cell.workspace = true
+dashmap.workspace = true
+futures-util = { workspace = true, default-features = false, features = ["std", "alloc"] }
+thread_aware.workspace = true
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+futures-util = { workspace = true, features = ["alloc", "std"] }
+mutants.workspace = true
+tick = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt",
+    "time",
+    "rt-multi-thread",
+] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "performance"
+harness = false
+
+[[example]]
+name = "cache_population"

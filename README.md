@@ -36,6 +36,7 @@ These are the primary crates built out of this repo:
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
+- [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.
 
 ## About this Repo
 

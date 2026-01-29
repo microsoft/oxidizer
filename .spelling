@@ -1,3 +1,4 @@
+304
 →
 0.X.Y
 100k
@@ -82,6 +83,8 @@ C-SERDE
 C-SMART-PTR
 deallocate
 Debuggability
+Deduplicate
+deduplicating
 deduplication
 deque
 Deque
@@ -279,6 +282,8 @@ unconfigured
 uncontended
 unhandleable
 unicode
+uniflight
+uniflight's
 Uninit
 unordered
 unredacted
