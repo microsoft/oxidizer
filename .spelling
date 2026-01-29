@@ -37,6 +37,7 @@ btree_map
 buildable
 bytesbuf
 callee
+cancelled
 Cargo.toml
 C-BITFLAG
 C-CONV
@@ -239,6 +240,7 @@ shareable
 skimmable
 SLAs
 smallvec
+spawner
 startup
 stderr
 stdlib

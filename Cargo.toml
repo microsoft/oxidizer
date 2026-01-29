@@ -24,6 +24,7 @@ repository = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
+anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.2.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
@@ -54,6 +55,7 @@ duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 futures = { version = "0.3.31", default-features = false }
+futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 http = { version = "1.2.0", default-features = false, features = ["std"] }
