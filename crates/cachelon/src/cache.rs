@@ -426,7 +426,7 @@ mod tests {
                 .try_get_or_insert(&key, || async { Err(Error::from_message("fetch failed")) })
                 .await;
 
-            assert!(result.is_err());
+            result.unwrap_err();
         });
     }
 }

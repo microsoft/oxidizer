@@ -436,7 +436,7 @@ mod tests {
         });
     }
 
-    /// Tests that FallbackCacheInner Debug output is correct.
+    /// Tests that `FallbackCacheInner` Debug output is correct.
     #[test]
     fn fallback_cachelon_inner_debug() {
         let clock = Clock::new_frozen();

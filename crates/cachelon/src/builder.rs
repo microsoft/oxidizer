@@ -177,10 +177,6 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// ```
     #[cfg(feature = "service")]
     #[must_use]
-    #[expect(
-        clippy::wrong_self_convention,
-        reason = "builder method that consumes self to construct storage from service"
-    )]
     pub fn service<S>(self, service: S) -> CacheBuilder<K, V, cachelon_service::ServiceAdapter<K, V, S>>
     where
         K: Hash + Eq + Clone + Send + Sync + 'static,
