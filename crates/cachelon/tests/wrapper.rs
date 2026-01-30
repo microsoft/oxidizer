@@ -1,9 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 
-#![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "test-util")]
 
-//! Integration tests for CacheWrapper public API (through Cache).
+//! Integration tests for `CacheWrapper` public API (through Cache).
 
 use cachelon::{Cache, CacheEntry};
 use std::time::Duration;
@@ -54,7 +53,7 @@ fn wrapper_try_get() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
-        assert!(cache.try_get(&key).await.is_ok());
+        cache.try_get(&key).await.unwrap();
 
         cache.insert(&key, CacheEntry::new(42)).await;
         let result = cache.try_get(&key).await;
@@ -84,7 +83,7 @@ fn wrapper_try_insert() {
 
         let key = "key".to_string();
         let result = cache.try_insert(&key, CacheEntry::new(42)).await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(cache.get(&key).await.is_some());
     });
 }
@@ -112,7 +111,7 @@ fn wrapper_try_invalidate() {
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await;
         let result = cache.try_invalidate(&key).await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(cache.get(&key).await.is_none());
     });
 }
@@ -141,7 +140,7 @@ fn wrapper_try_clear() {
 
         cache.insert(&"k1".to_string(), CacheEntry::new(1)).await;
         let result = cache.try_clear().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(cache.get(&"k1".to_string()).await.is_none());
     });
 }

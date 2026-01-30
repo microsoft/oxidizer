@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Integration tests for ServiceAdapter.
+//! Integration tests for `ServiceAdapter`.
 
 use cachelon_service::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
 use cachelon_tier::{CacheEntry, CacheTier, Error};
@@ -32,21 +32,21 @@ where
     async fn execute(&self, input: CacheOperation<K, V>) -> Self::Out {
         match input {
             CacheOperation::Get(req) => {
-                let data = self.data.lock().unwrap();
+                let data = self.data.lock().expect("lock poisoned");
                 Ok(CacheResponse::Get(data.get(&req.key).cloned()))
             }
             CacheOperation::Insert(req) => {
-                let mut data = self.data.lock().unwrap();
+                let mut data = self.data.lock().expect("lock poisoned");
                 data.insert(req.key, req.entry);
                 Ok(CacheResponse::Insert(()))
             }
             CacheOperation::Invalidate(req) => {
-                let mut data = self.data.lock().unwrap();
+                let mut data = self.data.lock().expect("lock poisoned");
                 data.remove(&req.key);
                 Ok(CacheResponse::Invalidate(()))
             }
             CacheOperation::Clear => {
-                let mut data = self.data.lock().unwrap();
+                let mut data = self.data.lock().expect("lock poisoned");
                 data.clear();
                 Ok(CacheResponse::Clear(()))
             }
@@ -83,21 +83,17 @@ async fn adapter_try_operations_return_ok() {
     assert!(result.unwrap().is_none());
 
     // try_insert
-    let result = adapter.try_insert(&"key".to_string(), CacheEntry::new(42)).await;
-    assert!(result.is_ok());
+    adapter.try_insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
     // try_get on existing key
-    let result = adapter.try_get(&"key".to_string()).await;
-    assert!(result.is_ok());
-    assert!(result.unwrap().is_some());
+    let result = adapter.try_get(&"key".to_string()).await.unwrap();
+    assert!(result.is_some());
 
     // try_invalidate
-    let result = adapter.try_invalidate(&"key".to_string()).await;
-    assert!(result.is_ok());
+    adapter.try_invalidate(&"key".to_string()).await.unwrap();
 
     // try_clear
-    let result = adapter.try_clear().await;
-    assert!(result.is_ok());
+    adapter.try_clear().await.unwrap();
 }
 
 #[tokio::test]

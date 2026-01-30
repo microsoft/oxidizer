@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Benchmarks for DynamicCache with allocation tracking.
+//! Benchmarks for `DynamicCache` with allocation tracking.
 //!
-//! DynamicCache uses boxing for type erasure, so we track both time and allocations.
+//! `DynamicCache` uses boxing for type erasure, so we track both time and allocations.
 
-#![allow(missing_docs)]
+#![allow(missing_docs, reason = "Benchmark code")]
 
 use std::{hint::black_box, time::Instant};
 
@@ -20,7 +20,7 @@ use tokio::runtime::Runtime;
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn rt() -> Runtime {
-    Runtime::new().unwrap()
+    Runtime::new().expect("failed to create runtime")
 }
 
 fn bench_dynamic_cache(c: &mut Criterion) {

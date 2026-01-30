@@ -3,7 +3,7 @@
 
 //! Benchmarks for time-to-refresh overhead.
 
-#![allow(missing_docs)]
+#![allow(missing_docs, reason = "Benchmark code")]
 
 use std::{collections::HashMap, hint::black_box, time::Duration, time::Instant};
 
@@ -14,7 +14,7 @@ use tick::Clock;
 use tokio::runtime::Runtime;
 
 fn rt() -> Runtime {
-    Runtime::new().unwrap()
+    Runtime::new().expect("failed to create runtime")
 }
 
 fn mock_with_value(key: &str, value: &str) -> MockCache<String, String> {

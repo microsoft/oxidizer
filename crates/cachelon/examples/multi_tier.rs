@@ -37,7 +37,7 @@ async fn main() {
     let db = Arc::new(Database(Mutex::new(0)));
 
     // L2: database
-    let l2 = Cache::builder::<String, UserData>(clock.clone()).storage(db.clone());
+    let l2 = Cache::builder::<String, UserData>(clock.clone()).storage(Arc::clone(&db));
 
     // L1: only promote NotFound (negative cache)
     let cache = Cache::builder::<String, UserData>(clock)

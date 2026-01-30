@@ -168,7 +168,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let (logger_provider, meter_provider) = create_test_providers();
 
-        let telemetry = CacheTelemetry::new(logger_provider, &meter_provider, clock.clone());
+        let telemetry = CacheTelemetry::new(logger_provider, &meter_provider, clock);
 
         // Verify clock access works
         let returned_clock = telemetry.clock();
@@ -329,7 +329,7 @@ mod tests {
         let (logger_provider, meter_provider) = create_test_providers();
         let telemetry = CacheTelemetry::new(logger_provider, &meter_provider, clock);
 
-        let debug_str = format!("{:?}", telemetry);
+        let debug_str = format!("{telemetry:?}");
         assert!(debug_str.contains("CacheTelemetry"));
     }
 
@@ -340,7 +340,7 @@ mod tests {
         let telemetry = CacheTelemetry::new(logger_provider, &meter_provider, clock);
 
         // Access inner through clone to verify debug
-        let debug_str = format!("{:?}", telemetry);
+        let debug_str = format!("{telemetry:?}");
         assert!(!debug_str.is_empty());
     }
 

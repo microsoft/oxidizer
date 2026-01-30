@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn insert_request_new() {
         let entry = CacheEntry::new(42);
-        let req = InsertRequest::new("key".to_string(), entry.clone());
+        let req = InsertRequest::new("key".to_string(), entry);
         assert_eq!(req.key, "key");
         assert_eq!(*req.entry, 42);
     }
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn cachelon_response_into_entry_with_value() {
         let entry = CacheEntry::new(42);
-        let response = CacheResponse::Get(Some(entry.clone()));
+        let response = CacheResponse::Get(Some(entry));
         let extracted = response.into_entry();
         assert!(extracted.is_some());
         assert_eq!(*extracted.unwrap(), 42);

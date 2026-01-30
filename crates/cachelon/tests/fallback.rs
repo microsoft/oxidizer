@@ -1,6 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "test-util")]
 
 //! Integration tests for fallback cache behavior.
@@ -111,12 +110,12 @@ fn fallback_cachelon_try_operations() {
 
         let key = "key".to_string();
 
-        assert!(cache.try_insert(&key, CacheEntry::new(42)).await.is_ok());
+        cache.try_insert(&key, CacheEntry::new(42)).await.unwrap();
         let result = cache.try_get(&key).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
-        assert!(cache.try_invalidate(&key).await.is_ok());
-        assert!(cache.try_clear().await.is_ok());
+        cache.try_invalidate(&key).await.unwrap();
+        cache.try_clear().await.unwrap();
     });
 }
 
@@ -219,7 +218,7 @@ fn fallback_cachelon_try_get_error_from_primary() {
             .build();
 
         let result = cache.try_get(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 

@@ -1,6 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "test-util")]
 
 //! Integration tests for Cache API.
@@ -15,7 +14,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 #[test]
 fn builder_creates_cache() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, String>(clock.clone()).memory().build();
+    let cache = Cache::builder::<String, String>(clock).memory().build();
 
     assert!(!cache.name().is_empty());
 }
@@ -32,7 +31,7 @@ fn name_returns_non_empty_string() {
 #[test]
 fn clock_returns_reference() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock.clone()).memory().build();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
 
     let clock_ref = cache.clock();
     // Verify we can use the clock
@@ -82,7 +81,7 @@ fn try_get_try_insert() {
         assert!(result.unwrap().is_none());
 
         let result = cache.try_insert(&key, CacheEntry::new(100)).await;
-        assert!(result.is_ok());
+        result.unwrap();
 
         let result = cache.try_get(&key).await;
         assert!(result.is_ok());
@@ -116,7 +115,7 @@ fn try_invalidate_returns_ok() {
         cache.insert(&key, CacheEntry::new(42)).await;
 
         let result = cache.try_invalidate(&key).await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(cache.get(&key).await.is_none());
     });
 }
@@ -186,7 +185,7 @@ fn try_clear_returns_ok() {
         cache.insert(&"k1".to_string(), CacheEntry::new(1)).await;
 
         let result = cache.try_clear().await;
-        assert!(result.is_ok());
+        result.unwrap();
 
         assert!(cache.get(&"k1".to_string()).await.is_none());
     });
@@ -271,21 +270,21 @@ fn stampede_protection_returns_cached() {
 // Thread Safety Tests (per O-ABSTRACTIONS-SEND-SYNC guideline)
 // =============================================================================
 
-/// Verifies that Cache with InMemoryCache storage is Send.
+/// Verifies that Cache with `InMemoryCache` storage is Send.
 #[test]
 fn cachelon_with_memory_is_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Cache<String, i32, cachelon_memory::InMemoryCache<String, i32>>>();
 }
 
-/// Verifies that Cache with InMemoryCache storage is Sync.
+/// Verifies that Cache with `InMemoryCache` storage is Sync.
 #[test]
 fn cachelon_with_memory_is_sync() {
     fn assert_sync<T: Sync>() {}
     assert_sync::<Cache<String, i32, cachelon_memory::InMemoryCache<String, i32>>>();
 }
 
-/// Verifies that CacheEntry is Send.
+/// Verifies that `CacheEntry` is Send.
 #[test]
 fn cachelon_entry_is_send() {
     fn assert_send<T: Send>() {}
@@ -293,7 +292,7 @@ fn cachelon_entry_is_send() {
     assert_send::<CacheEntry<String>>();
 }
 
-/// Verifies that CacheEntry is Sync.
+/// Verifies that `CacheEntry` is Sync.
 #[test]
 fn cachelon_entry_is_sync() {
     fn assert_sync<T: Sync>() {}

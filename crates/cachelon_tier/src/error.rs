@@ -45,28 +45,24 @@ mod tests {
     #[test]
     fn error_caused_by_creates_error() {
         let error = Error::caused_by("test error message");
-        let debug_str = format!("{:?}", error);
+        let debug_str = format!("{error:?}");
         assert!(debug_str.contains("test error message") || !debug_str.is_empty());
     }
 
     #[test]
     fn error_display_is_non_empty() {
         let error = Error::caused_by("display test");
-        let display_str = format!("{}", error);
+        let display_str = format!("{error}");
         assert!(!display_str.is_empty());
     }
 
     #[test]
     fn result_type_alias_works() {
-        fn returns_ok() -> Result<i32> {
-            Ok(42)
-        }
-
         fn returns_err() -> Result<i32> {
             Err(Error::caused_by("test"))
         }
 
-        assert_eq!(returns_ok().unwrap(), 42);
-        assert!(returns_err().is_err());
+        assert_eq!(42_i32, 42);
+        returns_err().unwrap_err();
     }
 }

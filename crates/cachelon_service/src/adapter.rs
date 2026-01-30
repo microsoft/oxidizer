@@ -193,8 +193,7 @@ mod tests {
     #[tokio::test]
     async fn adapter_try_insert() {
         let adapter = ServiceAdapter::new(MockService);
-        let result = adapter.try_insert(&"key".to_string(), CacheEntry::new(100)).await;
-        assert!(result.is_ok());
+        adapter.try_insert(&"key".to_string(), CacheEntry::new(100)).await.unwrap();
     }
 
     #[tokio::test]
@@ -207,8 +206,7 @@ mod tests {
     #[tokio::test]
     async fn adapter_try_invalidate() {
         let adapter = ServiceAdapter::new(MockService);
-        let result = adapter.try_invalidate(&"key".to_string()).await;
-        assert!(result.is_ok());
+        adapter.try_invalidate(&"key".to_string()).await.unwrap();
     }
 
     #[tokio::test]
@@ -221,8 +219,7 @@ mod tests {
     #[tokio::test]
     async fn adapter_try_clear() {
         let adapter = ServiceAdapter::new(MockService);
-        let result = adapter.try_clear().await;
-        assert!(result.is_ok());
+        adapter.try_clear().await.unwrap();
     }
 
     #[test]

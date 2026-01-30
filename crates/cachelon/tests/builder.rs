@@ -1,6 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "test-util")]
 
 //! Integration tests for Cache builder API.
@@ -54,7 +53,7 @@ fn mock_cachelon_failure_injection() {
         mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
 
         // try_get fails
-        assert!(cache.try_get(&"key".to_string()).await.is_err());
+        cache.try_get(&"key".to_string()).await.unwrap_err();
 
         // get (infallible) still works (returns None)
         let result = cache.get(&"key".to_string()).await;
@@ -81,7 +80,7 @@ fn mock_cachelon_shares_state_with_handle() {
 #[test]
 fn cachelon_builder_clock() {
     let clock = Clock::new_frozen();
-    let builder = Cache::builder::<String, i32>(clock.clone());
+    let builder = Cache::builder::<String, i32>(clock);
     let builder_clock = builder.clock();
     assert!(std::ptr::eq(builder_clock, builder_clock));
 }
@@ -176,7 +175,7 @@ fn cachelon_builder_debug() {
     let clock = Clock::new_frozen();
     let builder = Cache::builder::<String, i32>(clock).memory();
 
-    let debug_str = format!("{:?}", builder);
+    let debug_str = format!("{builder:?}");
     assert!(debug_str.contains("CacheBuilder"));
 }
 
@@ -188,7 +187,7 @@ fn fallback_builder_debug() {
 
     let builder = Cache::builder::<String, i32>(clock).memory().fallback(fallback);
 
-    let debug_str = format!("{:?}", builder);
+    let debug_str = format!("{builder:?}");
     assert!(debug_str.contains("FallbackBuilder"));
 }
 

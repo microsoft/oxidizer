@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Integration tests for InMemoryCache.
+//! Integration tests for `InMemoryCache`.
 
 use cachelon_memory::{InMemoryCache, InMemoryCacheBuilder};
 use cachelon_tier::{CacheEntry, CacheTier};
@@ -81,8 +81,7 @@ fn try_get_returns_ok() {
 fn try_insert_returns_ok() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        let result = cache.try_insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(result.is_ok());
+        cache.try_insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
         assert!(cache.get(&"key".to_string()).await.is_some());
     });
 }
@@ -114,8 +113,7 @@ fn try_invalidate_returns_ok() {
         let cache = InMemoryCache::<String, i32>::new();
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
 
-        let result = cache.try_invalidate(&"key".to_string()).await;
-        assert!(result.is_ok());
+        cache.try_invalidate(&"key".to_string()).await.unwrap();
         assert!(cache.get(&"key".to_string()).await.is_none());
     });
 }
@@ -142,8 +140,7 @@ fn try_clear_returns_ok() {
         let cache = InMemoryCache::<String, i32>::new();
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
 
-        let result = cache.try_clear().await;
-        assert!(result.is_ok());
+        cache.try_clear().await.unwrap();
     });
 }
 

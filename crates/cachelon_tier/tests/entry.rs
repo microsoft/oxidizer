@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Integration tests for CacheEntry.
+//! Integration tests for `CacheEntry`.
 
 use std::time::{Duration, Instant};
 
@@ -82,6 +82,6 @@ fn clone_creates_identical_copy() {
 #[test]
 fn debug_includes_value() {
     let entry = CacheEntry::new(42);
-    let debug_str = format!("{:?}", entry);
+    let debug_str = format!("{entry:?}");
     assert!(debug_str.contains("42"));
 }

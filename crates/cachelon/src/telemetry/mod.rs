@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn cachelon_operation_debug() {
         let get = CacheOperation::Get;
-        let debug_str = format!("{:?}", get);
+        let debug_str = format!("{get:?}");
         assert!(debug_str.contains("Get"));
     }
 
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn cachelon_event_debug() {
         let hit = CacheEvent::Hit;
-        let debug_str = format!("{:?}", hit);
+        let debug_str = format!("{hit:?}");
         assert!(debug_str.contains("Hit"));
     }
 

@@ -195,7 +195,7 @@ mod tests {
     fn time_to_refresh_debug() {
         let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
 
-        let debug_str = format!("{:?}", refresh);
+        let debug_str = format!("{refresh:?}");
         assert!(debug_str.contains("TimeToRefresh"));
         assert!(debug_str.contains("duration"));
     }

@@ -41,7 +41,7 @@ async fn main() {
         handles.push(tokio::spawn(async move { cache.get(&key).await }));
     }
     for h in handles {
-        h.await.unwrap();
+        h.await.expect("task panicked");
     }
     println!("without protection: {} backend calls", backend.0.load(Ordering::Relaxed));
 
@@ -61,7 +61,7 @@ async fn main() {
         handles.push(tokio::spawn(async move { cache.get(&key).await }));
     }
     for h in handles {
-        h.await.unwrap();
+        h.await.expect("task panicked");
     }
     println!("with protection: {} backend call(s)", backend.0.load(Ordering::Relaxed));
 }

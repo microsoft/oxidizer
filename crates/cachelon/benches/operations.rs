@@ -3,7 +3,7 @@
 
 //! Benchmarks for core cache operations and wrapper overhead.
 
-#![allow(missing_docs)]
+#![allow(missing_docs, reason = "Benchmark code")]
 
 use std::{hint::black_box, sync::Arc, time::Instant};
 
@@ -16,7 +16,7 @@ use tick::Clock;
 use tokio::runtime::Runtime;
 
 fn rt() -> Runtime {
-    Runtime::new().unwrap()
+    Runtime::new().expect("failed to create runtime")
 }
 
 fn telemetry(clock: Clock) -> CacheTelemetry {
