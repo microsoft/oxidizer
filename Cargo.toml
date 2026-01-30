@@ -27,6 +27,7 @@ repository = "https://github.com/microsoft/oxidizer"
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.2.0" }
+cachelon = { path = "crates/cachelon", default-features = false, version = "0.1.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
@@ -49,6 +50,7 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
+arrayvec = { version = "0.7.3", default-features = false }
 async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.0", default-features = false }
 chrono = { version = "0.4.40", default-features = false }

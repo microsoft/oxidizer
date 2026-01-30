@@ -1,0 +1,34 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cachelon_memory"
+description = "A composable, customizable multi-tier caching library with rich feature support."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "caching", "concurrency"]
+categories = ["caching", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = []
+
+[dependencies]
+cachelon_tier = { path = "../cachelon_tier" }
+moka = { version = "0.12", features = ["future"] }
+thread_aware = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
+
+[lints]
+workspace = true
