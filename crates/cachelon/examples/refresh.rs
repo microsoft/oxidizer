@@ -12,19 +12,30 @@ use std::{
     time::Duration,
 };
 
-use cachelon::{Cache, CacheEntry, CacheTier, FallbackPromotionPolicy, refresh::TimeToRefresh};
+use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, refresh::TimeToRefresh};
 use tick::Clock;
 
 #[derive(Clone)]
 struct Database(Arc<AtomicU32>);
 
 impl CacheTier<String, String> for Database {
-    async fn get(&self, key: &String) -> Option<CacheEntry<String>> {
+    async fn get(&self, key: &String) -> Result<Option<CacheEntry<String>>, Error> {
         let v = self.0.fetch_add(1, Ordering::Relaxed) + 1;
         tokio::time::sleep(Duration::from_millis(50)).await;
-        Some(CacheEntry::new(format!("{key}_v{v}")))
+        Ok(Some(CacheEntry::new(format!("{key}_v{v}"))))
     }
-    async fn insert(&self, _: &String, _: CacheEntry<String>) {}
+
+    async fn insert(&self, _: &String, _: CacheEntry<String>) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn invalidate(&self, _: &String) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -43,7 +54,7 @@ async fn main() {
     let key = "config".to_string();
 
     // Initial fetch (db call #1)
-    let v = cache.get(&key).await;
+    let v = cache.get(&key).await.expect("get failed");
     println!(
         "initial: {:?} (db calls: {})",
         v.map(|e| e.value().clone()),
@@ -54,14 +65,14 @@ async fn main() {
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
     // Returns stale value immediately, triggers background refresh
-    let v = cache.get(&key).await;
+    let v = cache.get(&key).await.expect("get failed");
     println!("stale: {:?}", v.map(|e| e.value().clone()));
 
     // Wait for refresh to complete
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Now returns refreshed value
-    let v = cache.get(&key).await;
+    let v = cache.get(&key).await.expect("get failed");
     println!(
         "refreshed: {:?} (db calls: {})",
         v.map(|e| e.value().clone()),

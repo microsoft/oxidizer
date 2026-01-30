@@ -7,6 +7,8 @@
 use cachelon::{Cache, CacheEntry, Error};
 use tick::Clock;
 
+type TestResult = Result<(), Error>;
+
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
@@ -51,148 +53,80 @@ fn inner_and_into_inner() {
 }
 
 #[test]
-fn get_insert_operations() {
+fn get_insert_operations() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "test_key".to_string();
 
-        assert!(cache.get(&key).await.is_none());
+        assert!(cache.get(&key).await?.is_none());
 
-        cache.insert(&key, CacheEntry::new(42)).await;
+        cache.insert(&key, CacheEntry::new(42)).await?;
 
-        let entry = cache.get(&key).await;
-        assert!(entry.is_some());
-        assert_eq!(*entry.unwrap().value(), 42);
-    });
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
 }
 
 #[test]
-fn try_get_try_insert() {
+fn invalidate_removes_entry() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
 
-        let result = cache.try_get(&key).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        assert!(cache.get(&key).await?.is_some());
 
-        let result = cache.try_insert(&key, CacheEntry::new(100)).await;
-        result.unwrap();
-
-        let result = cache.try_get(&key).await;
-        assert!(result.is_ok());
-        assert_eq!(*result.unwrap().unwrap().value(), 100);
-    });
+        cache.invalidate(&key).await?;
+        assert!(cache.get(&key).await?.is_none());
+        Ok(())
+    })
 }
 
 #[test]
-fn invalidate_removes_entry() {
+fn contains_checks_existence() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
 
-        cache.insert(&key, CacheEntry::new(42)).await;
-        assert!(cache.get(&key).await.is_some());
+        assert!(!cache.contains(&key).await?);
 
-        cache.invalidate(&key).await;
-        assert!(cache.get(&key).await.is_none());
-    });
+        cache.insert(&key, CacheEntry::new(42)).await?;
+
+        assert!(cache.contains(&key).await?);
+        Ok(())
+    })
 }
 
 #[test]
-fn try_invalidate_returns_ok() {
+fn clear_removes_all_entries() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
-        let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await;
-
-        let result = cache.try_invalidate(&key).await;
-        result.unwrap();
-        assert!(cache.get(&key).await.is_none());
-    });
-}
-
-#[test]
-fn contains_checks_existence() {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-        let key = "key".to_string();
-
-        assert!(!cache.contains(&key).await);
-
-        cache.insert(&key, CacheEntry::new(42)).await;
-
-        assert!(cache.contains(&key).await);
-    });
-}
-
-#[test]
-fn try_contains_returns_result() {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-        let key = "key".to_string();
-
-        let result = cache.try_contains(&key).await;
-        assert!(result.is_ok());
-        assert!(!result.unwrap());
-
-        cache.insert(&key, CacheEntry::new(42)).await;
-
-        let result = cache.try_contains(&key).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    });
-}
-
-#[test]
-fn clear_removes_all_entries() {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-        cache.insert(&"k1".to_string(), CacheEntry::new(1)).await;
-        cache.insert(&"k2".to_string(), CacheEntry::new(2)).await;
+        cache.insert(&"k1".to_string(), CacheEntry::new(1)).await?;
+        cache.insert(&"k2".to_string(), CacheEntry::new(2)).await?;
 
         // Verify entries exist before clearing
-        assert!(cache.get(&"k1".to_string()).await.is_some());
-        assert!(cache.get(&"k2".to_string()).await.is_some());
+        assert!(cache.get(&"k1".to_string()).await?.is_some());
+        assert!(cache.get(&"k2".to_string()).await?.is_some());
 
-        cache.clear().await;
+        cache.clear().await?;
 
-        assert!(cache.get(&"k1".to_string()).await.is_none());
-        assert!(cache.get(&"k2".to_string()).await.is_none());
-    });
+        assert!(cache.get(&"k1".to_string()).await?.is_none());
+        assert!(cache.get(&"k2".to_string()).await?.is_none());
+        Ok(())
+    })
 }
 
 #[test]
-fn try_clear_returns_ok() {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-        cache.insert(&"k1".to_string(), CacheEntry::new(1)).await;
-
-        let result = cache.try_clear().await;
-        result.unwrap();
-
-        assert!(cache.get(&"k1".to_string()).await.is_none());
-    });
-}
-
-#[test]
-fn len_and_is_empty() {
+fn len_and_is_empty() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
@@ -201,69 +135,83 @@ fn len_and_is_empty() {
         assert_eq!(cache.len(), Some(0));
         assert_eq!(cache.is_empty(), Some(true));
 
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
         // After insert, len() and is_empty() return Some values
         // Note: exact count may be eventually consistent with moka cache
         assert!(cache.len().is_some());
         assert!(cache.is_empty().is_some());
-    });
+        Ok(())
+    })
 }
 
 #[test]
-fn get_or_insert_returns_cached() {
+fn get_or_insert_returns_cached() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
 
-        let entry = cache.get_or_insert(&key, || async { 42 }).await;
+        let entry = cache.get_or_insert(&key, || async { 42 }).await?;
         assert_eq!(*entry.value(), 42);
 
-        let entry = cache.get_or_insert(&key, || async { 100 }).await;
+        let entry = cache.get_or_insert(&key, || async { 100 }).await?;
         assert_eq!(*entry.value(), 42);
-    });
+        Ok(())
+    })
 }
 
 #[test]
-fn try_get_or_insert_success() {
+fn try_get_or_insert_success() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
 
-        let result: std::result::Result<CacheEntry<i32>, Error> = cache.try_get_or_insert(&key, || async { Ok(42) }).await;
-
-        assert!(result.is_ok());
-        assert_eq!(*result.unwrap().value(), 42);
+        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(42) }).await?;
+        assert_eq!(*entry.value(), 42);
 
         // Verify caching: second call should return cached value, not 100
-        let result: std::result::Result<CacheEntry<i32>, Error> = cache.try_get_or_insert(&key, || async { Ok(100) }).await;
+        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await?;
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
 
-        assert!(result.is_ok());
-        assert_eq!(*result.unwrap().value(), 42);
+#[test]
+fn try_get_or_insert_error() {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        let key = "key".to_string();
+
+        let result: Result<CacheEntry<i32>, Error> =
+            cache.try_get_or_insert(&key, || async { Err(Error::from_message("test error")) }).await;
+
+        assert!(result.is_err());
     });
 }
 
 #[test]
 #[cfg(feature = "tokio")]
-fn stampede_protection_returns_cached() {
+fn stampede_protection_returns_cached() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
 
         let key = "key".to_string();
 
-        let result = cache.get(&key).await;
+        let result = cache.get(&key).await?;
         assert!(result.is_none());
 
-        cache.insert(&key, CacheEntry::new(42)).await;
-        let result = cache.get(&key).await;
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap().value(), 42);
-    });
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
 }
 
 // =============================================================================

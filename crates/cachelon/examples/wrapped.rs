@@ -26,12 +26,12 @@ async fn main() {
 
     let key = "user:1".to_string();
 
-    cache.insert(&key, CacheEntry::new("Alice".to_string())).await;
+    cache.insert(&key, CacheEntry::new("Alice".to_string())).await.expect("insert failed");
     println!("insert: ok");
 
-    let hit = cache.get(&key).await;
+    let hit = cache.get(&key).await.expect("get failed");
     println!("get (hit): {:?}", hit.map(|e| e.value().clone()));
 
-    let miss = cache.get(&"missing".to_string()).await;
+    let miss = cache.get(&"missing".to_string()).await.expect("get failed");
     println!("get (miss): {miss:?}");
 }

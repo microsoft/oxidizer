@@ -124,13 +124,8 @@ where
     V: Clone + Send + Sync,
     S: CacheTier<K, V> + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let timed = self.clock.timed_async(self.inner.get(key)).await;
-        self.handle_get_result(timed.result, timed.duration)
-    }
-
-    async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let timed = self.clock.timed_async(self.inner.try_get(key)).await;
         match timed.result {
             Ok(value) => Ok(self.handle_get_result(value, timed.duration)),
             Err(e) => {
@@ -141,19 +136,9 @@ where
         }
     }
 
-    async fn insert(&self, key: &K, mut entry: CacheEntry<V>) {
+    async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.set_cached_at(self.clock.instant());
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
-        self.telemetry
-            .record(self.name, CacheOperation::Insert, CacheEvent::Inserted, timed.duration);
-        if let Some(size) = self.inner.len() {
-            self.telemetry.record_size(self.name, size);
-        }
-    }
-
-    async fn try_insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
-        entry.set_cached_at(self.clock.instant());
-        let timed = self.clock.timed_async(self.inner.try_insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
                 self.telemetry
@@ -170,17 +155,8 @@ where
         timed.result
     }
 
-    async fn invalidate(&self, key: &K) {
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
         let timed = self.clock.timed_async(self.inner.invalidate(key)).await;
-        self.telemetry
-            .record(self.name, CacheOperation::Invalidate, CacheEvent::Invalidated, timed.duration);
-        if let Some(size) = self.inner.len() {
-            self.telemetry.record_size(self.name, size);
-        }
-    }
-
-    async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
-        let timed = self.clock.timed_async(self.inner.try_invalidate(key)).await;
         match &timed.result {
             Ok(()) => {
                 self.telemetry
@@ -197,17 +173,8 @@ where
         timed.result
     }
 
-    async fn clear(&self) {
+    async fn clear(&self) -> Result<(), Error> {
         let timed = self.clock.timed_async(self.inner.clear()).await;
-        self.telemetry
-            .record(self.name, CacheOperation::Clear, CacheEvent::Ok, timed.duration);
-        if let Some(size) = self.inner.len() {
-            self.telemetry.record_size(self.name, size);
-        }
-    }
-
-    async fn try_clear(&self) -> Result<(), Error> {
-        let timed = self.clock.timed_async(self.inner.try_clear()).await;
         match &timed.result {
             Ok(()) => {
                 self.telemetry

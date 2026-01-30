@@ -53,7 +53,7 @@ async fn main() {
         .promotion_policy(FallbackPromotionPolicy::always())
         .build();
 
-    cache.insert(&"key".to_string(), CacheEntry::new("value".to_string())).await;
-    let v = cache.get(&"key".to_string()).await;
+    cache.insert(&"key".to_string(), CacheEntry::new("value".to_string())).await.expect("insert failed");
+    let v = cache.get(&"key".to_string()).await.expect("get failed");
     println!("get(key): {:?}", v.map(|e| e.value().clone()));
 }

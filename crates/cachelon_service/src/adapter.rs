@@ -69,15 +69,7 @@ where
     V: Clone + Send + Sync + 'static,
     S: Service<CacheOperation<K, V>, Out = Result<CacheResponse<V>, Error>> + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        let request = CacheOperation::Get(GetRequest::new(key.clone()));
-        match self.service.execute(request).await {
-            Ok(CacheResponse::Get(entry)) => entry,
-            _ => None,
-        }
-    }
-
-    async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let request = CacheOperation::Get(GetRequest::new(key.clone()));
         match self.service.execute(request).await? {
             CacheResponse::Get(entry) => Ok(entry),
@@ -85,12 +77,7 @@ where
         }
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
-        let request = CacheOperation::Insert(InsertRequest::new(key.clone(), entry));
-        let _ = self.service.execute(request).await;
-    }
-
-    async fn try_insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         let request = CacheOperation::Insert(InsertRequest::new(key.clone(), entry));
         match self.service.execute(request).await? {
             CacheResponse::Insert(()) => Ok(()),
@@ -98,12 +85,7 @@ where
         }
     }
 
-    async fn invalidate(&self, key: &K) {
-        let request = CacheOperation::Invalidate(InvalidateRequest::new(key.clone()));
-        let _ = self.service.execute(request).await;
-    }
-
-    async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
         let request = CacheOperation::Invalidate(InvalidateRequest::new(key.clone()));
         match self.service.execute(request).await? {
             CacheResponse::Invalidate(()) => Ok(()),
@@ -111,11 +93,7 @@ where
         }
     }
 
-    async fn clear(&self) {
-        let _ = self.service.execute(CacheOperation::Clear).await;
-    }
-
-    async fn try_clear(&self) -> Result<(), Error> {
+    async fn clear(&self) -> Result<(), Error> {
         match self.service.execute(CacheOperation::Clear).await? {
             CacheResponse::Clear(()) => Ok(()),
             _ => Err(Error::from_message("unexpected response type for clear")),
@@ -164,62 +142,37 @@ mod tests {
     async fn adapter_get_existing() {
         let adapter = ServiceAdapter::new(MockService);
         let result = adapter.get(&"existing".to_string()).await;
-        assert!(result.is_some());
-        assert_eq!(*result.unwrap(), 42);
+        assert!(result.is_ok());
+        assert_eq!(*result.unwrap().unwrap().value(), 42);
     }
 
     #[tokio::test]
     async fn adapter_get_missing() {
         let adapter = ServiceAdapter::new(MockService);
         let result = adapter.get(&"missing".to_string()).await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn adapter_try_get_existing() {
-        let adapter = ServiceAdapter::new(MockService);
-        let result = adapter.try_get(&"existing".to_string()).await;
         assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
+        assert!(result.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn adapter_insert() {
         let adapter = ServiceAdapter::new(MockService);
-        adapter.insert(&"key".to_string(), CacheEntry::new(100)).await;
+        adapter.insert(&"key".to_string(), CacheEntry::new(100)).await.unwrap();
         // No assertion - just verify it doesn't panic
-    }
-
-    #[tokio::test]
-    async fn adapter_try_insert() {
-        let adapter = ServiceAdapter::new(MockService);
-        adapter.try_insert(&"key".to_string(), CacheEntry::new(100)).await.unwrap();
     }
 
     #[tokio::test]
     async fn adapter_invalidate() {
         let adapter = ServiceAdapter::new(MockService);
-        adapter.invalidate(&"key".to_string()).await;
+        adapter.invalidate(&"key".to_string()).await.unwrap();
         // No assertion - just verify it doesn't panic
-    }
-
-    #[tokio::test]
-    async fn adapter_try_invalidate() {
-        let adapter = ServiceAdapter::new(MockService);
-        adapter.try_invalidate(&"key".to_string()).await.unwrap();
     }
 
     #[tokio::test]
     async fn adapter_clear() {
         let adapter = ServiceAdapter::new(MockService);
-        adapter.clear().await;
+        adapter.clear().await.unwrap();
         // No assertion - just verify it doesn't panic
-    }
-
-    #[tokio::test]
-    async fn adapter_try_clear() {
-        let adapter = ServiceAdapter::new(MockService);
-        adapter.try_clear().await.unwrap();
     }
 
     #[test]

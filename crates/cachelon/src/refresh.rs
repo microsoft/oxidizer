@@ -152,8 +152,8 @@ where
         let timed = self.clock.timed_async(self.fallback.get(&key)).await;
 
         match timed.result {
-            Some(value) => self.handle_fallback_hit(key, value, timed.duration).await,
-            None => self.handle_fallback_miss(timed.duration),
+            Ok(Some(value)) => self.handle_fallback_hit(key, value, timed.duration).await,
+            Ok(None) | Err(_) => self.handle_fallback_miss(timed.duration),
         }
     }
 
@@ -167,7 +167,7 @@ where
     }
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
-        let timed = self.clock.timed_async(self.primary.try_insert(&key, value)).await;
+        let timed = self.clock.timed_async(self.primary.insert(&key, value)).await;
 
         match timed.result {
             Ok(()) => {

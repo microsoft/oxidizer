@@ -14,18 +14,18 @@ async fn main() {
     let cache = Cache::builder(clock).storage(mock.clone()).build();
 
     // Operations are recorded
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    cache.get(&"key".to_string()).await;
+    cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+    cache.get(&"key".to_string()).await.expect("get failed");
 
     println!("operations: {:?}", mock.operations());
 
     // Inject failures for testing error paths
     mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
-    let result = cache.try_get(&"key".to_string()).await;
+    let result = cache.get(&"key".to_string()).await;
     println!("after fail_when: {result:?}");
 
     // Clear failures
     mock.clear_failures();
-    let result = cache.try_get(&"key".to_string()).await;
-    println!("after clear_failures: {:?}", result.map(|e| e.map(|e| *e.value())));
+    let result = cache.get(&"key".to_string()).await.expect("get failed");
+    println!("after clear_failures: {:?}", result.map(|e| *e.value()));
 }

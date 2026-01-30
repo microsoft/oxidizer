@@ -19,12 +19,12 @@ async fn main() {
     let key = "user:1".to_string();
 
     // Insert and retrieve
-    cache.insert(&key, "Alice".to_string().into()).await;
-    let value = cache.get(&key).await;
+    cache.insert(&key, "Alice".to_string().into()).await.expect("insert failed");
+    let value = cache.get(&key).await.expect("get failed");
     println!("get({key}): {:?}", value.map(|e| e.value().clone()));
 
     // Invalidate
-    cache.invalidate(&key).await;
-    let value = cache.get(&key).await;
+    cache.invalidate(&key).await.expect("invalidate failed");
+    let value = cache.get(&key).await.expect("get failed");
     println!("after invalidate: {:?}", value.map(|e| e.value().clone()));
 }

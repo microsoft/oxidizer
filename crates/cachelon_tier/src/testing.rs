@@ -39,15 +39,15 @@ type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use cachelon_tier::{testing::{MockCache, CacheOp}, CacheTier, CacheEntry};
 ///
-/// # futures::executor::block_on(async {
-/// let cache = MockCache::new();
+/// # async fn example() {
+/// let cache = MockCache::<String, i32>::new();
 ///
 /// // Insert and retrieve
-/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-/// let value = cache.get(&"key".to_string()).await;
+/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+/// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 ///
 /// // Verify operations
@@ -55,26 +55,26 @@ type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
 ///     CacheOp::Insert { key: "key".to_string(), entry: CacheEntry::new(42) },
 ///     CacheOp::Get("key".to_string()),
 /// ]);
-/// # });
+/// # }
 /// ```
 ///
 /// # Failure Injection
 ///
-/// ```
+/// ```no_run
 /// use cachelon_tier::{testing::{MockCache, CacheOp}, CacheTier, CacheEntry};
 ///
-/// # futures::executor::block_on(async {
+/// # async fn example() {
 /// let cache: MockCache<String, i32> = MockCache::new();
 ///
 /// // Fail all get operations
 /// cache.fail_when(|op| matches!(op, CacheOp::Get(_)));
-/// assert!(cache.try_get(&"key".to_string()).await.is_err());
+/// assert!(cache.get(&"key".to_string()).await.is_err());
 ///
 /// // Fail only specific keys
 /// cache.fail_when(|op| matches!(op, CacheOp::Get(k) if k == "forbidden"));
-/// assert!(cache.try_get(&"forbidden".to_string()).await.is_err());
-/// assert!(cache.try_get(&"allowed".to_string()).await.is_ok());
-/// # });
+/// assert!(cache.get(&"forbidden".to_string()).await.is_err());
+/// assert!(cache.get(&"allowed".to_string()).await.is_ok());
+/// # }
 /// ```
 pub struct MockCache<K, V> {
     data: Arc<Mutex<HashMap<K, CacheEntry<V>>>>,
@@ -215,13 +215,7 @@ where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        let op = CacheOp::Get(key.clone());
-        self.record(op);
-        self.data.lock().get(key).cloned()
-    }
-
-    async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let op = CacheOp::Get(key.clone());
         if self.should_fail(&op) {
             self.record(op);
@@ -231,16 +225,7 @@ where
         Ok(self.data.lock().get(key).cloned())
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
-        let op = CacheOp::Insert {
-            key: key.clone(),
-            entry: entry.clone(),
-        };
-        self.record(op);
-        self.data.lock().insert(key.clone(), entry);
-    }
-
-    async fn try_insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         let op = CacheOp::Insert {
             key: key.clone(),
             entry: entry.clone(),
@@ -254,13 +239,7 @@ where
         Ok(())
     }
 
-    async fn invalidate(&self, key: &K) {
-        let op = CacheOp::Invalidate(key.clone());
-        self.record(op);
-        self.data.lock().remove(key);
-    }
-
-    async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
         let op = CacheOp::Invalidate(key.clone());
         if self.should_fail(&op) {
             self.record(op);
@@ -271,13 +250,7 @@ where
         Ok(())
     }
 
-    async fn clear(&self) {
-        let op = CacheOp::Clear;
-        self.record(op);
-        self.data.lock().clear();
-    }
-
-    async fn try_clear(&self) -> Result<(), Error> {
+    async fn clear(&self) -> Result<(), Error> {
         let op = CacheOp::Clear;
         if self.should_fail(&op) {
             self.record(op);

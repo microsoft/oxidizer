@@ -2,7 +2,7 @@
 
 //! Integration tests for `CacheTier` trait default implementations.
 
-use cachelon_tier::{CacheEntry, CacheTier};
+use cachelon_tier::{CacheEntry, CacheTier, Error};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -24,95 +24,72 @@ where
     K: Clone + Eq + std::hash::Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        self.data.lock().expect("lock poisoned").get(key).cloned()
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+        Ok(self.data.lock().expect("lock poisoned").get(key).cloned())
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.data.lock().expect("lock poisoned").insert(key.clone(), entry);
+        Ok(())
+    }
+
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
+        self.data.lock().expect("lock poisoned").remove(key);
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        self.data.lock().expect("lock poisoned").clear();
+        Ok(())
     }
 }
 
 #[tokio::test]
 async fn minimal_cachelon_get_miss() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-    let result = cache.get(&"key".to_string()).await;
+    let cache = MinimalCache::<String, i32>::new();
+    let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_none());
 }
 
 #[tokio::test]
 async fn minimal_cachelon_get_hit() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    let result = cache.get(&"key".to_string()).await;
+    let cache = MinimalCache::<String, i32>::new();
+    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_some());
     assert_eq!(*result.unwrap().value(), 42);
 }
 
 #[tokio::test]
-async fn default_try_get_wraps_get() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-    let result = cache.try_get(&"key".to_string()).await.unwrap();
-    assert!(result.is_none());
-
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    let result = cache.try_get(&"key".to_string()).await.unwrap();
+async fn default_insert_wraps_insert() {
+    let cache = MinimalCache::<String, i32>::new();
+    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_some());
 }
 
 #[tokio::test]
-async fn default_try_insert_wraps_insert() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-    cache.try_insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert!(cache.get(&"key".to_string()).await.is_some());
-}
-
-#[tokio::test]
-async fn default_invalidate_does_not_panic() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-
-    // Test passes if this doesn't panic (default impl is no-op)
-    cache.invalidate(&"nonexistent".to_string()).await;
-
-    // Test with existing key
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    cache.invalidate(&"key".to_string()).await;
-}
-
-#[tokio::test]
-async fn default_try_invalidate_returns_ok() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
+async fn default_invalidate_returns_ok() {
+    let cache = MinimalCache::<String, i32>::new();
 
     // Should return Ok even for nonexistent keys
-    cache.try_invalidate(&"nonexistent".to_string()).await.unwrap();
+    let _: () = cache.invalidate(&"nonexistent".to_string()).await.unwrap();
 
     // Should return Ok for existing keys
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    cache.try_invalidate(&"key".to_string()).await.unwrap();
+    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _: () = cache.invalidate(&"key".to_string()).await.unwrap();
 }
 
 #[tokio::test]
-async fn default_clear_does_not_panic() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-
-    // Test passes if this doesn't panic (default impl is no-op)
-    cache.clear().await;
-
-    // Test with entries
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    cache.clear().await;
-}
-
-#[tokio::test]
-async fn default_try_clear_returns_ok() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
+async fn default_clear_returns_ok() {
+    let cache = MinimalCache::<String, i32>::new();
 
     // Should return Ok for empty cache
-    cache.try_clear().await.unwrap();
+    let _: () = cache.clear().await.unwrap();
 
     // Should return Ok even with entries
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-    cache.try_clear().await.unwrap();
+    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _: () = cache.clear().await.unwrap();
 }
 
 #[tokio::test]
@@ -145,12 +122,23 @@ where
     K: Clone + Eq + std::hash::Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        self.data.lock().expect("lock poisoned").get(key).cloned()
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+        Ok(self.data.lock().expect("lock poisoned").get(key).cloned())
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.data.lock().expect("lock poisoned").insert(key.clone(), entry);
+        Ok(())
+    }
+
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
+        self.data.lock().expect("lock poisoned").remove(key);
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        self.data.lock().expect("lock poisoned").clear();
+        Ok(())
     }
 
     fn len(&self) -> Option<u64> {
@@ -160,14 +148,14 @@ where
 
 #[tokio::test]
 async fn is_empty_uses_len_when_available() {
-    let cache: CacheWithLen<String, i32> = CacheWithLen::new();
+    let cache = CacheWithLen::<String, i32>::new();
 
     // Empty cache
     assert_eq!(cache.is_empty(), Some(true));
     assert_eq!(cache.len(), Some(0));
 
     // Add entry
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
     assert_eq!(cache.is_empty(), Some(false));
     assert_eq!(cache.len(), Some(1));
 }

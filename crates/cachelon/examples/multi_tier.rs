@@ -6,7 +6,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use cachelon::{Cache, CacheEntry, CacheTier, FallbackPromotionPolicy};
+use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use parking_lot::Mutex;
 use tick::Clock;
 
@@ -20,15 +20,26 @@ enum UserData {
 struct Database(Mutex<u32>);
 
 impl CacheTier<String, UserData> for Arc<Database> {
-    async fn get(&self, key: &String) -> Option<CacheEntry<UserData>> {
+    async fn get(&self, key: &String) -> Result<Option<CacheEntry<UserData>>, Error> {
         *self.0.lock() += 1;
         let data = match key.as_str() {
             "user:1" => UserData::Found("Alice".to_string()),
             _ => UserData::NotFound,
         };
-        Some(CacheEntry::new(data))
+        Ok(Some(CacheEntry::new(data)))
     }
-    async fn insert(&self, _: &String, _: CacheEntry<UserData>) {}
+
+    async fn insert(&self, _: &String, _: CacheEntry<UserData>) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn invalidate(&self, _: &String) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -50,18 +61,18 @@ async fn main() {
         .build();
 
     // user:1 exists - NOT cached (policy rejects Found)
-    let v = cache.get(&"user:1".to_string()).await;
+    let v = cache.get(&"user:1".to_string()).await.expect("get failed");
     println!("user:1: {:?}", v.map(|e| e.value().clone()));
 
     // user:2 not found - cached (policy accepts NotFound)
-    let v = cache.get(&"user:2".to_string()).await;
+    let v = cache.get(&"user:2".to_string()).await.expect("get failed");
     println!("user:2: {:?}", v.map(|e| e.value().clone()));
 
     println!("db calls after first round: {}", *db.0.lock());
 
     // Second round
-    cache.get(&"user:1".to_string()).await; // db call (not cached)
-    cache.get(&"user:2".to_string()).await; // cache hit (was promoted)
+    cache.get(&"user:1".to_string()).await.expect("get failed"); // db call (not cached)
+    cache.get(&"user:2".to_string()).await.expect("get failed"); // cache hit (was promoted)
 
     println!("db calls after second round: {}", *db.0.lock());
 }

@@ -9,20 +9,30 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use cachelon::{Cache, CacheEntry, CacheTier};
+use cachelon::{Cache, CacheEntry, CacheTier, Error};
 use tick::Clock;
 
 #[derive(Debug, Clone)]
 struct SlowBackend(Arc<AtomicU32>);
 
 impl CacheTier<String, String> for SlowBackend {
-    async fn get(&self, key: &String) -> Option<CacheEntry<String>> {
+    async fn get(&self, key: &String) -> Result<Option<CacheEntry<String>>, Error> {
         self.0.fetch_add(1, Ordering::Relaxed);
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        Some(CacheEntry::new(format!("value_for_{key}")))
+        Ok(Some(CacheEntry::new(format!("value_for_{key}"))))
     }
 
-    async fn insert(&self, _: &String, _: CacheEntry<String>) {}
+    async fn insert(&self, _: &String, _: CacheEntry<String>) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn invalidate(&self, _: &String) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -41,7 +51,7 @@ async fn main() {
         handles.push(tokio::spawn(async move { cache.get(&key).await }));
     }
     for h in handles {
-        h.await.expect("task panicked");
+        let _ = h.await.expect("task panicked");
     }
     println!("without protection: {} backend calls", backend.0.load(Ordering::Relaxed));
 
@@ -61,7 +71,7 @@ async fn main() {
         handles.push(tokio::spawn(async move { cache.get(&key).await }));
     }
     for h in handles {
-        h.await.expect("task panicked");
+        let _ = h.await.expect("task panicked");
     }
     println!("with protection: {} backend call(s)", backend.0.load(Ordering::Relaxed));
 }

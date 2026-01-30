@@ -39,9 +39,10 @@ pub type CacheName = &'static str;
 ///     .memory()
 ///     .build();
 ///
-/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-/// let value = cache.get(&"key".to_string()).await;
+/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+/// let value = cache.get(&"key".to_string()).await?;
 /// assert_eq!(*value.unwrap().value(), 42);
+/// # Ok::<(), cachelon::Error>(())
 /// # });
 /// ```
 ///
@@ -172,6 +173,11 @@ where
     /// requests for the same key will be merged so that only one request
     /// performs the lookup. Others wait and share the result.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache tier operation fails.
+    /// Note: With stampede protection enabled, errors are treated as cache misses.
+    ///
     /// # Examples
     ///
     /// ```
@@ -182,30 +188,24 @@ where
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// let result = cache.get(&"missing".to_string()).await;
+    /// let result = cache.get(&"missing".to_string()).await?;
     /// assert!(result.is_none());
+    /// # Ok::<(), cachelon::Error>(())
     /// # });
     /// ```
-    pub async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
+    pub async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         #[cfg(feature = "tokio")]
         if let Some(ref merger) = self.request_merger {
-            // TODO if the merger func() panics, should we log something?
-            return merger.execute(key, || async { self.storage.get(key).await }).await.unwrap_or(None);
+            // With stampede protection, concurrent requests are merged.
+            // Storage errors are treated as cache misses (Ok(None)) since
+            // Error doesn't implement Clone for sharing across waiters.
+            return Ok(merger
+                .execute(key, || async { self.storage.get(key).await.ok().flatten() })
+                .await
+                .unwrap_or(None));
         }
 
         self.storage.get(key).await
-    }
-
-    /// Retrieves a value from the cache, with error handling.
-    ///
-    /// Returns `Ok(None)` if the key is not found, or `Err` if the
-    /// underlying storage operation fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying cache tier operation fails.
-    pub async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        self.storage.try_get(key).await
     }
 
     /// Inserts a value into the cache.
@@ -213,6 +213,10 @@ where
     /// The entry's timestamp will be set to the current time according
     /// to the cache's clock.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache tier operation fails.
+    ///
     /// # Examples
     ///
     /// ```
@@ -223,62 +227,39 @@ where
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+    /// cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+    /// # Ok::<(), cachelon::Error>(())
     /// # });
     /// ```
-    pub async fn insert(&self, key: &K, entry: CacheEntry<V>) {
-        self.storage.insert(key, entry).await;
-    }
-
-    /// Inserts a value into the cache, with error handling.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying cache tier operation fails.
-    pub async fn try_insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.storage.try_insert(key, entry).await
+    pub async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.storage.insert(key, entry).await
     }
 
     /// Invalidates (removes) a value from the cache.
-    pub async fn invalidate(&self, key: &K) {
-        self.storage.invalidate(key).await;
-    }
-
-    /// Invalidates (removes) a value from the cache, returning an error if the operation fails.
     ///
     /// # Errors
     ///
     /// Returns an error if the underlying cache tier operation fails.
-    pub async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
-        self.storage.try_invalidate(key).await
+    pub async fn invalidate(&self, key: &K) -> Result<(), Error> {
+        self.storage.invalidate(key).await
     }
 
     /// Returns true if the cache contains a value for the given key.
-    pub async fn contains(&self, key: &K) -> bool {
-        self.get(key).await.is_some()
-    }
-
-    /// Returns true if the cache contains a value for the given key, or an error.
     ///
     /// # Errors
     ///
     /// Returns an error if the underlying cache tier operation fails.
-    pub async fn try_contains(&self, key: &K) -> Result<bool, Error> {
-        Ok(self.try_get(key).await?.is_some())
+    pub async fn contains(&self, key: &K) -> Result<bool, Error> {
+        Ok(self.get(key).await?.is_some())
     }
 
     /// Clears all entries from the cache.
-    pub async fn clear(&self) {
-        self.storage.clear().await;
-    }
-
-    /// Clears all entries from the cache, returning an error if the operation fails.
     ///
     /// # Errors
     ///
     /// Returns an error if the underlying cache tier operation fails.
-    pub async fn try_clear(&self) -> Result<(), Error> {
-        self.storage.try_clear().await
+    pub async fn clear(&self) -> Result<(), Error> {
+        self.storage.clear().await
     }
 
     /// Returns the number of entries in the cache, if supported by the underlying storage.
@@ -298,6 +279,10 @@ where
     /// If the key is present, returns the cached value immediately. Otherwise,
     /// calls the provided function to compute the value, inserts it, and returns it.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache tier operation fails.
+    ///
     /// # Examples
     ///
     /// ```
@@ -308,25 +293,26 @@ where
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 42 }).await;
+    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 42 }).await?;
     /// assert_eq!(*entry.value(), 42);
     ///
     /// // Second call returns cached value without calling the function
-    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 100 }).await;
+    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 100 }).await?;
     /// assert_eq!(*entry.value(), 42);
+    /// # Ok::<(), cachelon::Error>(())
     /// # });
     /// ```
-    pub async fn get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> CacheEntry<V>
+    pub async fn get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
     where
         Fut: Future<Output = V>,
     {
-        if let Some(entry) = self.get(key).await {
-            return entry;
+        if let Some(entry) = self.get(key).await? {
+            return Ok(entry);
         }
         let value = f().await;
         let entry = CacheEntry::new(value);
-        self.insert(key, entry.clone()).await;
-        entry
+        self.insert(key, entry.clone()).await?;
+        Ok(entry)
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.
@@ -361,12 +347,12 @@ where
         E: From<Error>,
         Fut: Future<Output = Result<V, E>>,
     {
-        if let Some(entry) = self.try_get(key).await? {
+        if let Some(entry) = self.get(key).await? {
             return Ok(entry);
         }
         let value = f().await?;
         let entry = CacheEntry::new(value);
-        self.try_insert(key, entry.clone()).await?;
+        self.insert(key, entry.clone()).await?;
         Ok(entry)
     }
 }
@@ -387,19 +373,19 @@ where
     async fn execute(&self, input: cachelon_service::CacheOperation<K, V>) -> Self::Out {
         match input {
             cachelon_service::CacheOperation::Get(req) => {
-                let entry = self.try_get(&req.key).await?;
+                let entry = self.get(&req.key).await?;
                 Ok(cachelon_service::CacheResponse::Get(entry))
             }
             cachelon_service::CacheOperation::Insert(req) => {
-                self.try_insert(&req.key, req.entry).await?;
+                self.insert(&req.key, req.entry).await?;
                 Ok(cachelon_service::CacheResponse::Insert(()))
             }
             cachelon_service::CacheOperation::Invalidate(req) => {
-                self.try_invalidate(&req.key).await?;
+                self.invalidate(&req.key).await?;
                 Ok(cachelon_service::CacheResponse::Invalidate(()))
             }
             cachelon_service::CacheOperation::Clear => {
-                self.try_clear().await?;
+                self.clear().await?;
                 Ok(cachelon_service::CacheResponse::Clear(()))
             }
         }

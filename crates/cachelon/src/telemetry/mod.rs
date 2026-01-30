@@ -58,6 +58,7 @@ pub(crate) enum CacheEvent {
     Inserted,
     Invalidated,
     Ok,
+    #[cfg_attr(not(test), expect(dead_code, reason = "Reserved for future telemetry integration"))]
     Fallback,
     FallbackPromotion,
     Error,

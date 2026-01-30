@@ -22,7 +22,7 @@ async fn main() {
     // Wrap in Cache for full API
     let cache = Cache::builder::<String, String>(clock).storage(dynamic).build();
 
-    cache.insert(&"key".to_string(), CacheEntry::new("value".to_string())).await;
-    let value = cache.get(&"key".to_string()).await;
+    cache.insert(&"key".to_string(), CacheEntry::new("value".to_string())).await.expect("insert failed");
+    let value = cache.get(&"key".to_string()).await.expect("get failed");
     println!("get(key): {:?}", value.map(|e| e.value().clone()));
 }

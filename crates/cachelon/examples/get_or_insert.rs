@@ -21,10 +21,10 @@ async fn main() {
     let key = "user:1".to_string();
 
     // First call: cache miss, calls fetch_from_db
-    let entry = cache.get_or_insert(&key, || fetch_from_db("1")).await;
+    let entry = cache.get_or_insert(&key, || fetch_from_db("1")).await.expect("get_or_insert failed");
     println!("first call: {}", entry.value());
 
     // Second call: cache hit, no fetch
-    let entry = cache.get_or_insert(&key, || fetch_from_db("1")).await;
+    let entry = cache.get_or_insert(&key, || fetch_from_db("1")).await.expect("get_or_insert failed");
     println!("second call: {}", entry.value());
 }

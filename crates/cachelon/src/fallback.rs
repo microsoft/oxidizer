@@ -5,7 +5,7 @@
 //! This module provides fallback cache tiers that check a primary cache first,
 //! then query a fallback tier on miss with configurable promotion policies.
 
-use std::{hash::Hash, marker::PhantomData, sync::Arc, time::Duration};
+use std::{hash::Hash, marker::PhantomData, sync::Arc};
 
 use futures::join;
 use tick::Clock;
@@ -13,11 +13,11 @@ use tick::Clock;
 #[cfg(any(feature = "tokio", test))]
 use crate::refresh::TimeToRefresh;
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{CacheEvent, CacheOperation, CacheTelemetry};
+use crate::telemetry::CacheTelemetry;
 use crate::{
     Error,
     cache::CacheName,
-    telemetry::ext::{CacheTelemetryExt, ClockExt},
+    telemetry::ext::ClockExt,
 };
 use cachelon_tier::{CacheEntry, CacheTier};
 
@@ -237,8 +237,8 @@ where
     P: CacheTier<K, V> + Send + Sync + 'static,
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
-    async fn handle_get(&self, key: &K, value: Option<CacheEntry<V>>) -> Option<CacheEntry<V>> {
-        if let Some(value) = value {
+    async fn handle_get(&self, key: &K, value: Result<Option<CacheEntry<V>>, Error>) -> Result<Option<CacheEntry<V>>, Error> {
+        if let Ok(Some(value)) = value {
             if let Some(refresh) = &self.inner.refresh
                 && let Some(cached_at) = value.cached_at()
                 && refresh.should_refresh(cached_at)
@@ -246,51 +246,24 @@ where
                 self.do_refresh(key);
             }
 
-            Some(value)
-        } else {
-            // Box the fallback future to bound stack usage. This keeps cache hits fast
-            // (no allocation) while only allocating on the miss path. See:
-            // https://without.boats/blog/futures-and-segmented-stacks/
-            let timed = self.inner.clock.timed_async(Box::pin(self.inner.fallback.get(key))).await;
-
-            #[cfg(feature = "telemetry")]
-            self.inner
-                .telemetry
-                .record(self.inner.name, CacheOperation::Get, CacheEvent::Fallback, timed.duration);
-
-            if let Some(ref v) = timed.result
-                && self.inner.policy.should_promote(v)
-            {
-                let timed_insert = self.inner.clock.timed_async(self.inner.primary.insert(key, v.clone())).await;
-
-                #[cfg(feature = "telemetry")]
-                self.inner.telemetry.record(
-                    self.inner.name,
-                    CacheOperation::Insert,
-                    CacheEvent::FallbackPromotion,
-                    timed_insert.duration,
-                );
-            }
-            timed.result
+            return Ok(Some(value));
         }
-    }
 
-    async fn handle_try_get(
-        &self,
-        key: &K,
-        result: Result<Option<CacheEntry<V>>, Error>,
-        duration: Duration,
-    ) -> Result<Option<CacheEntry<V>>, Error> {
-        match result {
-            Ok(value) => Ok(self.handle_get(key, value).await),
-            Err(e) => {
-                #[cfg(feature = "telemetry")]
-                self.inner
-                    .telemetry
-                    .record(self.inner.name, CacheOperation::Get, CacheEvent::Error, duration);
-                Err(e)
-            }
+        // Box the fallback future to bound stack usage. This keeps cache hits fast
+        // (no allocation) while only allocating on the miss path. See:
+        // https://without.boats/blog/futures-and-segmented-stacks/
+        let timed = self.inner.clock.timed_async(Box::pin(self.inner.fallback.get(key))).await;
+
+        // Propagate any error from fallback
+        let fallback_value = timed.result?;
+
+        if let Some(ref v) = fallback_value
+            && self.inner.policy.should_promote(v)
+        {
+            let _timed_insert = self.inner.clock.timed_async(self.inner.primary.insert(key, v.clone())).await;
         }
+
+        Ok(fallback_value)
     }
 }
 
@@ -301,68 +274,32 @@ where
     P: CacheTier<K, V> + Send + Sync + 'static,
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        let primary_result = self.inner.primary.get(key).await;
-        // Box handle_get to keep future size bounded regardless of nesting depth.
-        Box::pin(self.handle_get(key, primary_result)).await
-    }
-
-    async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let timed = self.inner.clock.timed_async(self.inner.primary.try_get(key)).await;
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+        let result = self.inner.primary.get(key).await;
         // Box handle_try_get to keep future size bounded regardless of nesting depth.
-        Box::pin(self.handle_try_get(key, timed.result, timed.duration)).await
+        Box::pin(self.handle_get(key, result)).await
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         // Box fallback future to bound stack usage regardless of nesting depth.
-        join!(
+        let (primary_result, fallback_result) = join!(
             self.inner.primary.insert(key, entry.clone()),
             Box::pin(self.inner.fallback.insert(key, entry))
         );
-    }
-
-    async fn try_insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        // Box fallback future to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(
-            self.inner.primary.try_insert(key, entry.clone()),
-            Box::pin(self.inner.fallback.try_insert(key, entry))
-        );
         primary_result?;
         fallback_result
     }
 
-    async fn invalidate(&self, key: &K) {
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
         // Box fallback future to bound stack usage regardless of nesting depth.
-        join!(
-            self.inner.primary.invalidate(key),
-            Box::pin(self.inner.fallback.invalidate(key))
-        );
-    }
-
-    async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
-        // Box fallback future to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(
-            self.inner.primary.try_invalidate(key),
-            Box::pin(self.inner.fallback.try_invalidate(key))
-        );
+        let (primary_result, fallback_result) = join!(self.inner.primary.invalidate(key), Box::pin(self.inner.fallback.invalidate(key)));
         primary_result?;
         fallback_result
     }
 
-    async fn clear(&self) {
+    async fn clear(&self) -> Result<(), Error> {
         // Box fallback future to bound stack usage regardless of nesting depth.
-        join!(
-            self.inner.primary.clear(),
-            Box::pin(self.inner.fallback.clear())
-        );
-    }
-
-    async fn try_clear(&self) -> Result<(), Error> {
-        // Box fallback future to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(
-            self.inner.primary.try_clear(),
-            Box::pin(self.inner.fallback.try_clear())
-        );
+        let (primary_result, fallback_result) = join!(self.inner.primary.clear(), Box::pin(self.inner.fallback.clear()));
         primary_result?;
         fallback_result
     }
@@ -403,7 +340,7 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await;
+            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -415,15 +352,26 @@ mod tests {
 
             // Primary should be empty initially
             let primary_inner = cache.inner();
-            assert!(primary_inner.inner.primary.get(&"key".to_string()).await.is_none());
+            let primary_result: Option<CacheEntry<i32>> = primary_inner
+                .inner
+                .primary
+                .get(&"key".to_string())
+                .await
+                .expect("Error getting value from primary");
+            assert!(primary_result.is_none());
 
             // Get should find in fallback and promote to primary
-            let result = cache.get(&"key".to_string()).await;
+            let result = cache.get(&"key".to_string()).await.expect("get failed");
             assert!(result.is_some());
             assert_eq!(*result.unwrap().value(), 42);
 
             // Now primary should have the value (promoted from fallback)
-            let primary_result = primary_inner.inner.primary.get(&"key".to_string()).await;
+            let primary_result: Option<CacheEntry<i32>> = primary_inner
+                .inner
+                .primary
+                .get(&"key".to_string())
+                .await
+                .expect("Error getting from primary");
             assert!(primary_result.is_some());
         });
     }
@@ -438,7 +386,7 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await;
+            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -449,13 +397,18 @@ mod tests {
                 .build();
 
             // Get should find in fallback but NOT promote
-            let result = cache.get(&"key".to_string()).await;
+            let result = cache.get(&"key".to_string()).await.expect("get failed");
             assert!(result.is_some());
             assert_eq!(*result.unwrap().value(), 42);
 
             // Primary should still be empty (no promotion)
             let primary_inner = cache.inner();
-            let primary_result = primary_inner.inner.primary.get(&"key".to_string()).await;
+            let primary_result: Option<CacheEntry<i32>> = primary_inner
+                .inner
+                .primary
+                .get(&"key".to_string())
+                .await
+                .expect("Error getting from primary");
             assert!(primary_result.is_none());
         });
     }
@@ -488,8 +441,8 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"positive".to_string(), CacheEntry::new(42)).await;
-            fallback_storage.insert(&"negative".to_string(), CacheEntry::new(-10)).await;
+            fallback_storage.insert(&"positive".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+            fallback_storage.insert(&"negative".to_string(), CacheEntry::new(-10)).await.expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -500,32 +453,44 @@ mod tests {
                 .build();
 
             // Get positive value - should be promoted
-            let result = cache.get(&"positive".to_string()).await;
+            let result = cache.get(&"positive".to_string()).await.expect("get failed");
             assert!(result.is_some());
             assert_eq!(*result.unwrap().value(), 42);
 
             // Get negative value - should NOT be promoted
-            let result = cache.get(&"negative".to_string()).await;
+            let result = cache.get(&"negative".to_string()).await.expect("get failed");
             assert!(result.is_some());
             assert_eq!(*result.unwrap().value(), -10);
 
             // Check primary has positive but not negative
             let primary_inner = cache.inner();
-            assert!(primary_inner.inner.primary.get(&"positive".to_string()).await.is_some());
-            assert!(primary_inner.inner.primary.get(&"negative".to_string()).await.is_none());
+            let positive: Option<CacheEntry<i32>> = primary_inner
+                .inner
+                .primary
+                .get(&"positive".to_string())
+                .await
+                .expect("Error getting positive");
+            assert!(positive.is_some());
+            let negative: Option<CacheEntry<i32>> = primary_inner
+                .inner
+                .primary
+                .get(&"negative".to_string())
+                .await
+                .expect("Error getting negative");
+            assert!(negative.is_none());
         });
     }
 
-    /// Tests that `try_get` also triggers promotion from fallback.
+    /// Tests that `get` also triggers promotion from fallback.
     #[test]
-    fn fallback_cachelon_try_get_with_promotion() {
+    fn fallback_cachelon_get_with_promotion() {
         block_on(async {
             let clock = Clock::new_frozen();
 
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await;
+            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -534,10 +499,9 @@ mod tests {
                 .fallback(fallback)
                 .build();
 
-            // try_get should also trigger promotion
-            let result = cache.try_get(&"key".to_string()).await;
-            assert!(result.is_ok());
-            assert!(result.unwrap().is_some());
+            // get should also trigger promotion
+            let result = cache.get(&"key".to_string()).await.expect("get failed");
+            assert!(result.is_some());
         });
     }
 }

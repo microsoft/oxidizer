@@ -6,44 +6,48 @@
 
 use std::time::Duration;
 
-use cachelon::{Cache, CacheEntry, FallbackPromotionPolicy};
+use cachelon::{Cache, CacheEntry, Error, FallbackPromotionPolicy};
 use cachelon_tier::testing::{CacheOp, MockCache};
 use tick::Clock;
+
+type TestResult = Result<(), Error>;
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
 #[test]
-fn cachelon_builder_with_storage() {
+fn cache_builder_with_storage() -> TestResult {
     let clock = Clock::new_frozen();
     let storage = MockCache::<String, i32>::new();
     let cache = Cache::builder::<String, i32>(clock).storage(storage).build();
 
     block_on(async {
-        assert!(cache.get(&"key".to_string()).await.is_none());
-    });
+        assert!(cache.get(&"key".to_string()).await?.is_none());
+        Ok(())
+    })
 }
 
 #[test]
-fn mock_cachelon_with_storage() {
+fn mock_cache_with_storage() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();
         let cache = Cache::builder(clock).storage(mock.clone()).build();
 
         // Cache operations work
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        let value = cache.get(&"key".to_string()).await;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+        let value = cache.get(&"key".to_string()).await?;
         assert_eq!(*value.unwrap().value(), 42);
 
         // Mock handle records operations
         assert_eq!(mock.operations().len(), 2);
-    });
+        Ok(())
+    })
 }
 
 #[test]
-fn mock_cachelon_failure_injection() {
+fn mock_cache_failure_injection() {
     block_on(async {
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();
@@ -52,33 +56,36 @@ fn mock_cachelon_failure_injection() {
         // Configure failures
         mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
 
-        // try_get fails
-        cache.try_get(&"key".to_string()).await.unwrap_err();
-
-        // get (infallible) still works (returns None)
+        // get fails
         let result = cache.get(&"key".to_string()).await;
-        assert!(result.is_none());
+        assert!(result.is_err());
+
+        // Clear failures and get succeeds
+        mock.clear_failures();
+        let result = cache.get(&"key".to_string()).await;
+        assert!(result.is_ok());
     });
 }
 
 #[test]
-fn mock_cachelon_shares_state_with_handle() {
+fn mock_cache_shares_state_with_handle() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();
         let cache = Cache::builder(clock).storage(mock.clone()).build();
 
         // Insert via cache
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
         // Mock handle sees the data
         assert!(mock.contains_key(&"key".to_string()));
         assert_eq!(mock.entry_count(), 1);
-    });
+        Ok(())
+    })
 }
 
 #[test]
-fn cachelon_builder_clock() {
+fn cache_builder_clock() {
     let clock = Clock::new_frozen();
     let builder = Cache::builder::<String, i32>(clock);
     let builder_clock = builder.clock();
@@ -86,7 +93,7 @@ fn cachelon_builder_clock() {
 }
 
 #[test]
-fn fallback_builder_basic() {
+fn fallback_builder_basic() -> TestResult {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory().ttl(Duration::from_secs(3600));
@@ -99,14 +106,15 @@ fn fallback_builder_basic() {
 
     block_on(async {
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await;
-        let result = cache.get(&key).await;
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let result = cache.get(&key).await?;
         assert!(result.is_some());
-    });
+        Ok(())
+    })
 }
 
 #[test]
-fn fallback_builder_promotion_policy() {
+fn fallback_builder_promotion_policy() -> TestResult {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
@@ -120,13 +128,14 @@ fn fallback_builder_promotion_policy() {
     assert!(!cache.name().is_empty());
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(cache.get(&"key".to_string()).await.is_some());
-    });
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+        assert!(cache.get(&"key".to_string()).await?.is_some());
+        Ok(())
+    })
 }
 
 #[test]
-fn nested_fallback() {
+fn nested_fallback() -> TestResult {
     let clock = Clock::new_frozen();
 
     let l3 = Cache::builder::<String, i32>(clock.clone()).memory();
@@ -137,13 +146,14 @@ fn nested_fallback() {
     assert!(!cache.name().is_empty());
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(cache.get(&"key".to_string()).await.is_some());
-    });
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+        assert!(cache.get(&"key".to_string()).await?.is_some());
+        Ok(())
+    })
 }
 
 #[test]
-fn fallback_builder_nested_fallback() {
+fn fallback_builder_nested_fallback() -> TestResult {
     let clock = Clock::new_frozen();
 
     // L3 (deepest)
@@ -165,13 +175,14 @@ fn fallback_builder_nested_fallback() {
     assert!(!cache.name().is_empty());
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(cache.get(&"key".to_string()).await.is_some());
-    });
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+        assert!(cache.get(&"key".to_string()).await?.is_some());
+        Ok(())
+    })
 }
 
 #[test]
-fn cachelon_builder_debug() {
+fn cache_builder_debug() {
     let clock = Clock::new_frozen();
     let builder = Cache::builder::<String, i32>(clock).memory();
 
@@ -192,7 +203,7 @@ fn fallback_builder_debug() {
 }
 
 #[test]
-fn cachelon_builder_name_via_telemetry() {
+fn cache_builder_name_via_telemetry() {
     // Test that name can be set even without telemetry feature
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().build();

@@ -29,8 +29,8 @@ use crate::builder::InMemoryCacheBuilder;
 ///
 /// let cache = InMemoryCache::<String, i32>::new();
 ///
-/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-/// let value = cache.get(&"key".to_string()).await;
+/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+/// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # });
 /// ```
@@ -153,37 +153,21 @@ where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        self.inner.get(key).await
-    }
-
-    async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         Ok(self.inner.get(key).await)
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
-        self.inner.insert(key.clone(), entry.clone()).await;
-    }
-
-    async fn try_insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.inner.insert(key.clone(), entry.clone()).await;
         Ok(())
     }
 
-    async fn invalidate(&self, key: &K) {
-        self.inner.invalidate(key).await;
-    }
-
-    async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
         self.inner.invalidate(key).await;
         Ok(())
     }
 
-    async fn clear(&self) {
-        self.inner.invalidate_all();
-    }
-
-    async fn try_clear(&self) -> Result<(), Error> {
+    async fn clear(&self) -> Result<(), Error> {
         self.inner.invalidate_all();
         Ok(())
     }

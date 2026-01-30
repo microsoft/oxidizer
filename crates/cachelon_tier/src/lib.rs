@@ -17,11 +17,10 @@
 //!
 //! # Implementing a Cache Tier
 //!
-//! Only [`CacheTier::get`] and [`CacheTier::insert`] are required. Other methods have
-//! sensible defaults:
+//! Implement all required methods of [`CacheTier`]:
 //!
 //! ```
-//! use cachelon_tier::{CacheEntry, CacheTier};
+//! use cachelon_tier::{CacheEntry, CacheTier, Error};
 //! use std::collections::HashMap;
 //! use std::sync::RwLock;
 //!
@@ -32,12 +31,23 @@
 //!     K: Clone + Eq + std::hash::Hash + Send + Sync,
 //!     V: Clone + Send + Sync,
 //! {
-//!     async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-//!         self.0.read().unwrap().get(key).cloned()
+//!     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+//!         Ok(self.0.read().unwrap().get(key).cloned())
 //!     }
 //!
-//!     async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+//!     async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
 //!         self.0.write().unwrap().insert(key.clone(), entry);
+//!         Ok(())
+//!     }
+//!
+//!     async fn invalidate(&self, key: &K) -> Result<(), Error> {
+//!         self.0.write().unwrap().remove(key);
+//!         Ok(())
+//!     }
+//!
+//!     async fn clear(&self) -> Result<(), Error> {
+//!         self.0.write().unwrap().clear();
+//!         Ok(())
 //!     }
 //! }
 //! ```

@@ -26,9 +26,10 @@
 //!     .memory()
 //!     .build();
 //!
-//! cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-//! let value = cache.get(&"key".to_string()).await;
+//! cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+//! let value = cache.get(&"key".to_string()).await?;
 //! assert_eq!(*value.unwrap().value(), 42);
+//! # Ok::<(), cachelon::Error>(())
 //! # });
 //! ```
 //!

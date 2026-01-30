@@ -22,8 +22,8 @@
 //!     .time_to_live(Duration::from_secs(300))
 //!     .build();
 //!
-//! cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-//! let value = cache.get(&"key".to_string()).await;
+//! cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+//! let value = cache.get(&"key".to_string()).await.unwrap();
 //! assert_eq!(*value.unwrap().value(), 42);
 //! # });
 //! ```

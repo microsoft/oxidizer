@@ -80,36 +80,20 @@ where
     K: Sync,
     V: Send,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         self.0.get(key).await
     }
 
-    async fn try_get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        self.0.try_get(key).await
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.0.insert(key, entry).await
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
-        self.0.insert(key, entry).await;
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
+        self.0.invalidate(key).await
     }
 
-    async fn try_insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.0.try_insert(key, entry).await
-    }
-
-    async fn invalidate(&self, key: &K) {
-        self.0.invalidate(key).await;
-    }
-
-    async fn try_invalidate(&self, key: &K) -> Result<(), Error> {
-        self.0.try_invalidate(key).await
-    }
-
-    async fn clear(&self) {
-        self.0.clear().await;
-    }
-
-    async fn try_clear(&self) -> Result<(), Error> {
-        self.0.try_clear().await
+    async fn clear(&self) -> Result<(), Error> {
+        self.0.clear().await
     }
 
     fn len(&self) -> Option<u64> {
