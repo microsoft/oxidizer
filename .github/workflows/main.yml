@@ -20,7 +20,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -54,7 +54,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -90,7 +90,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 1
       - name: Setup
@@ -110,7 +110,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
       - name: Setup
@@ -176,7 +176,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -202,7 +202,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
       - name: Setup
@@ -231,7 +231,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -281,7 +281,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 1
       - name: Check License Headers
@@ -296,7 +296,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v6.0.2
       - name: Setup
         uses: ./.github/actions/setup
         with:
