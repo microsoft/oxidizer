@@ -54,7 +54,10 @@ async fn minimal_cachelon_get_miss() {
 #[tokio::test]
 async fn minimal_cachelon_get_hit() {
     let cache = MinimalCache::<String, i32>::new();
-    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _: () = cache
+        .insert(&"key".to_string(), CacheEntry::new(42))
+        .await
+        .expect("error on insert");
     let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_some());
     assert_eq!(*result.unwrap().value(), 42);
@@ -63,7 +66,10 @@ async fn minimal_cachelon_get_hit() {
 #[tokio::test]
 async fn default_insert_wraps_insert() {
     let cache = MinimalCache::<String, i32>::new();
-    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _: () = cache
+        .insert(&"key".to_string(), CacheEntry::new(42))
+        .await
+        .expect("error on insert");
     let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_some());
 }
@@ -76,7 +82,10 @@ async fn default_invalidate_returns_ok() {
     let _: () = cache.invalidate(&"nonexistent".to_string()).await.unwrap();
 
     // Should return Ok for existing keys
-    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _: () = cache
+        .insert(&"key".to_string(), CacheEntry::new(42))
+        .await
+        .expect("error on insert");
     let _: () = cache.invalidate(&"key".to_string()).await.unwrap();
 }
 
@@ -88,7 +97,10 @@ async fn default_clear_returns_ok() {
     let _: () = cache.clear().await.unwrap();
 
     // Should return Ok even with entries
-    let _: () = cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _: () = cache
+        .insert(&"key".to_string(), CacheEntry::new(42))
+        .await
+        .expect("error on insert");
     let _: () = cache.clear().await.unwrap();
 }
 

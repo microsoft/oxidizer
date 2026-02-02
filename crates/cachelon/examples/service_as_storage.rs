@@ -44,7 +44,10 @@ async fn main() {
     // .service() wraps the Service in ServiceAdapter, converting it to CacheTier
     let cache = Cache::builder::<String, String>(clock).service(service).build();
 
-    cache.insert(&"key".to_string(), CacheEntry::new("value".to_string())).await.expect("insert failed");
+    cache
+        .insert(&"key".to_string(), CacheEntry::new("value".to_string()))
+        .await
+        .expect("insert failed");
     let value = cache.get(&"key".to_string()).await.expect("get failed");
     println!("get(key): {:?}", value.map(|e| e.value().clone()));
 }

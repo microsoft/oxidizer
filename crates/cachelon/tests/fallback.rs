@@ -1,7 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![cfg(feature = "test-util")]
-
 //! Integration tests for fallback cache behavior.
 //!
 //! Note: Tests for internal behavior (promotion policy internals, refresh mechanism)

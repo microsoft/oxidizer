@@ -9,7 +9,6 @@ use std::{hash::Hash, marker::PhantomData, time::Duration};
 
 use tick::Clock;
 
-#[cfg(feature = "telemetry")]
 use crate::telemetry::{CacheEvent, CacheOperation, CacheTelemetry};
 use crate::{
     CacheEntry, Error,
@@ -49,25 +48,17 @@ pub struct CacheWrapper<K, V, S> {
     pub(crate) inner: S,
     pub(crate) clock: Clock,
     pub(crate) ttl: Option<Duration>,
-    #[cfg(feature = "telemetry")]
     pub(crate) telemetry: Option<CacheTelemetry>,
     _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V, S> CacheWrapper<K, V, S> {
-    pub(crate) fn new(
-        name: CacheName,
-        inner: S,
-        clock: Clock,
-        ttl: Option<Duration>,
-        #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>,
-    ) -> Self {
+    pub(crate) fn new(name: CacheName, inner: S, clock: Clock, ttl: Option<Duration>, telemetry: Option<CacheTelemetry>) -> Self {
         Self {
             name,
             inner,
             clock,
             ttl,
-            #[cfg(feature = "telemetry")]
             telemetry,
             _phantom: PhantomData,
         }
@@ -212,14 +203,7 @@ mod tests {
     fn wrapper_inner() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
-            "test",
-            inner,
-            clock,
-            None,
-            #[cfg(feature = "telemetry")]
-            None,
-        );
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, None);
         let _inner_ref = wrapper.inner();
     }
 
@@ -227,14 +211,7 @@ mod tests {
     fn wrapper_is_expired_with_no_ttl() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
-            "test",
-            inner,
-            clock,
-            None,
-            #[cfg(feature = "telemetry")]
-            None,
-        );
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, None);
 
         // Entry without TTL should not be expired
         let entry = CacheEntry::new(42);
@@ -245,14 +222,7 @@ mod tests {
     fn wrapper_is_expired_without_cached_at() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
-            "test",
-            inner,
-            clock,
-            Some(Duration::from_secs(60)),
-            #[cfg(feature = "telemetry")]
-            None,
-        );
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(Duration::from_secs(60)), None);
 
         // Entry without cached_at should not be expired (even with tier TTL)
         let entry = CacheEntry::new(42);
@@ -268,7 +238,6 @@ mod tests {
             inner,
             clock,
             Some(Duration::from_secs(60)), // tier TTL: 60 seconds
-            #[cfg(feature = "telemetry")]
             None,
         );
 

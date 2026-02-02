@@ -31,11 +31,7 @@ default = [
     "tokio",
 ]
 dynamic-cache = ["dep:dynosaur"]
-telemetry = [
-    "dep:arrayvec",
-    "dep:opentelemetry",
-    "dep:opentelemetry_sdk",
-]
+telemetry = ["dep:arrayvec", "dep:opentelemetry", "dep:opentelemetry_sdk"]
 test-util = ["cachelon_tier/test-util", "tick/test-util"]
 memory = ["dep:cachelon_memory"]
 service = ["dep:cachelon_service", "dep:layered"]
@@ -50,10 +46,11 @@ tokio = [
 
 [dependencies]
 alloc_tracker = { workspace = true }
+anyspawn = { workspace = true, optional = true }
 arrayvec = { workspace = true, optional = true }
 cachelon_memory = { path = "../cachelon_memory", optional = true }
-cachelon_tier = { path = "../cachelon_tier" }
 cachelon_service = { path = "../cachelon_service", optional = true }
+cachelon_tier = { path = "../cachelon_tier" }
 criterion = { workspace = true }
 dynosaur = { workspace = true, optional = true }
 fundle = { workspace = true, optional = true }
@@ -69,11 +66,10 @@ opentelemetry_sdk = { workspace = true, optional = true, features = [
     "metrics",
 ] }
 parking_lot = { version = "0.12.5" }
-uniflight = { workspace = true, optional = true }
-anyspawn = { workspace = true, optional = true }
-tick = { workspace = true, features = [] }
 thread_aware = { workspace = true }
+tick = { workspace = true, features = [] }
 tokio = { workspace = true, features = ["rt"], optional = true }
+uniflight = { workspace = true, optional = true }
 
 [dev-dependencies]
 cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }

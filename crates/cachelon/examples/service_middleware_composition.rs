@@ -78,6 +78,9 @@ async fn main() {
 
     let cache = Cache::builder::<String, String>(clock).storage(adapter).build();
 
-    cache.insert(&"key".to_string(), CacheEntry::new("value".to_string())).await.expect("insert failed");
+    cache
+        .insert(&"key".to_string(), CacheEntry::new("value".to_string()))
+        .await
+        .expect("insert failed");
     let _ = cache.get(&"key".to_string()).await.expect("get failed");
 }

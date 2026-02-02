@@ -1,7 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![cfg(feature = "test-util")]
-
 //! Integration tests for Cache builder API.
 
 use std::time::Duration;

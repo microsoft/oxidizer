@@ -29,14 +29,8 @@ The adapter provides bidirectional integration:
 ## Quick Start
 
 ```rust
-use cachelon_service::{ServiceAdapter, CacheOperation, CacheResponse};
-use layered::Service;
-
-// Any service implementing Service<CacheOperation> can become a cache tier
-let service = MyRemoteCacheService::new();
-let tier = ServiceAdapter::new(service);
-
-// Now use `tier` as a CacheTier in multi-tier cache hierarchies
+// Any Service<CacheOperation> can become a cache tier
+let tier = ServiceAdapter::new(my_service);
 ```
 
 ## Use Cases
@@ -51,7 +45,7 @@ let tier = ServiceAdapter::new(service);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_service">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5ETXyg7xZtpG4hc6j-sKxqYG2zNbvHenFe-Gzbh2_skureQYWSCgnBjYWNoZWxvbl9zZXJ2aWNlZTAuMS4wgm1jYWNoZWxvbl90aWVyZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-FclP6P9Kb4G6mWGLLGhHVSG648CyVSGFxLG0dmmo8cTVY_YWSCgnBjYWNoZWxvbl9zZXJ2aWNlZTAuMS4wgm1jYWNoZWxvbl90aWVyZTAuMS4w
  [__link0]: https://docs.rs/cachelon_service/0.1.0/cachelon_service/?search=adapter::ServiceAdapter
  [__link1]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier
  [__link2]: https://docs.rs/cachelon_service/0.1.0/cachelon_service/?search=adapter::ServiceAdapter

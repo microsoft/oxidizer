@@ -1,7 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![cfg(feature = "test-util")]
-
 //! Integration tests for Cache API.
 
 use cachelon::{Cache, CacheEntry, Error};
@@ -188,8 +186,9 @@ fn try_get_or_insert_error() {
 
         let key = "key".to_string();
 
-        let result: Result<CacheEntry<i32>, Error> =
-            cache.try_get_or_insert(&key, || async { Err(Error::from_message("test error")) }).await;
+        let result: Result<CacheEntry<i32>, Error> = cache
+            .try_get_or_insert(&key, || async { Err(Error::from_message("test error")) })
+            .await;
 
         assert!(result.is_err());
     });

@@ -43,7 +43,11 @@ fn insert_and_get_returns_value() {
         let cache = InMemoryCache::<String, i32>::new();
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
-        let entry = cache.get(&"key".to_string()).await.expect("get failed").expect("entry should exist");
+        let entry = cache
+            .get(&"key".to_string())
+            .await
+            .expect("get failed")
+            .expect("entry should exist");
         assert_eq!(*entry.value(), 42);
     });
 }
@@ -55,7 +59,11 @@ fn insert_overwrites_existing_value() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
         cache.insert(&"key".to_string(), CacheEntry::new(100)).await.expect("insert failed");
 
-        let entry = cache.get(&"key".to_string()).await.expect("get failed").expect("entry should exist");
+        let entry = cache
+            .get(&"key".to_string())
+            .await
+            .expect("get failed")
+            .expect("entry should exist");
         assert_eq!(*entry.value(), 100);
     });
 }
@@ -167,7 +175,11 @@ fn clone_shares_underlying_cache() {
 
         cache1.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
-        let entry = cache2.get(&"key".to_string()).await.expect("get failed").expect("entry should exist");
+        let entry = cache2
+            .get(&"key".to_string())
+            .await
+            .expect("get failed")
+            .expect("entry should exist");
         assert_eq!(*entry.value(), 42);
     });
 }

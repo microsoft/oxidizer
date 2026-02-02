@@ -1,7 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 
-#![cfg(feature = "test-util")]
-
 //! Integration tests for `CacheWrapper` public API (through Cache).
 
 use cachelon::{Cache, CacheEntry, Error};

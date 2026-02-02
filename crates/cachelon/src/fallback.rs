@@ -14,11 +14,7 @@ use tick::Clock;
 use crate::refresh::TimeToRefresh;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::CacheTelemetry;
-use crate::{
-    Error,
-    cache::CacheName,
-    telemetry::ext::ClockExt,
-};
+use crate::{Error, cache::CacheName, telemetry::ext::ClockExt};
 use cachelon_tier::{CacheEntry, CacheTier};
 
 /// Policy for promoting values from fallback to primary cache.
@@ -340,7 +336,10 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+            fallback_storage
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -386,7 +385,10 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+            fallback_storage
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -441,8 +443,14 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"positive".to_string(), CacheEntry::new(42)).await.expect("insert failed");
-            fallback_storage.insert(&"negative".to_string(), CacheEntry::new(-10)).await.expect("insert failed");
+            fallback_storage
+                .insert(&"positive".to_string(), CacheEntry::new(42))
+                .await
+                .expect("insert failed");
+            fallback_storage
+                .insert(&"negative".to_string(), CacheEntry::new(-10))
+                .await
+                .expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -490,7 +498,10 @@ mod tests {
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
-            fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+            fallback_storage
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("insert failed");
 
             let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 

@@ -27,11 +27,10 @@ multi-tier fallback, and other features on top.
 
 ## Implementing a Cache Tier
 
-Only [`CacheTier::get`][__link4] and [`CacheTier::insert`][__link5] are required. Other methods have
-sensible defaults:
+Implement all required methods of [`CacheTier`][__link4]:
 
 ```rust
-use cachelon_tier::{CacheEntry, CacheTier};
+use cachelon_tier::{CacheEntry, CacheTier, Error};
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -42,19 +41,30 @@ where
     K: Clone + Eq + std::hash::Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Option<CacheEntry<V>> {
-        self.0.read().unwrap().get(key).cloned()
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+        Ok(self.0.read().unwrap().get(key).cloned())
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) {
+    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.0.write().unwrap().insert(key.clone(), entry);
+        Ok(())
+    }
+
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
+        self.0.write().unwrap().remove(key);
+        Ok(())
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        self.0.write().unwrap().clear();
+        Ok(())
     }
 }
 ```
 
 ## Dynamic Dispatch
 
-Enable the `dynamic-cache` feature for [`DynamicCache`][__link6], which wraps any `CacheTier`
+Enable the `dynamic-cache` feature for [`DynamicCache`][__link5], which wraps any `CacheTier`
 in a type-erased container. This is useful for multi-tier caches with heterogeneous
 storage backends.
 
@@ -64,11 +74,10 @@ storage backends.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2sjvCA6vZ9PG5u_47buEgjWG0vWlyU6p_ipG2WZWcrKVdL3YWSBgm1jYWNoZWxvbl90aWVyZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyHwefXy5ZOhGybUlNFkw2t0G_a6clkevGV3G6yzRz6Vu80AYWSBgm1jYWNoZWxvbl90aWVyZTAuMS4w
  [__link0]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=error::Error
  [__link3]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier
- [__link4]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier::get
- [__link5]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier::insert
- [__link6]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=DynamicCache
+ [__link4]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=CacheTier
+ [__link5]: https://docs.rs/cachelon_tier/0.1.0/cachelon_tier/?search=DynamicCache

@@ -26,7 +26,10 @@ async fn main() {
 
     let key = "user:1".to_string();
 
-    cache.insert(&key, CacheEntry::new("Alice".to_string())).await.expect("insert failed");
+    cache
+        .insert(&key, CacheEntry::new("Alice".to_string()))
+        .await
+        .expect("insert failed");
     println!("insert: ok");
 
     let hit = cache.get(&key).await.expect("get failed");

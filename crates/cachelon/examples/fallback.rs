@@ -29,7 +29,10 @@ async fn main() {
     let key = "user:1".to_string();
 
     // Insert goes to both L1 and L2
-    cache.insert(&key, CacheEntry::new("Alice".to_string())).await.expect("insert failed");
+    cache
+        .insert(&key, CacheEntry::new("Alice".to_string()))
+        .await
+        .expect("insert failed");
 
     // Get from L1
     let value = cache.get(&key).await.expect("get failed");

@@ -31,8 +31,8 @@ let cache = InMemoryCacheBuilder::<String, i32>::new()
     .time_to_live(Duration::from_secs(300))
     .build();
 
-cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-let value = cache.get(&"key".to_string()).await;
+cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+let value = cache.get(&"key".to_string()).await.unwrap();
 assert_eq!(*value.unwrap().value(), 42);
 ```
 
@@ -49,6 +49,6 @@ assert_eq!(*value.unwrap().value(), 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGw41hSBSqvsEG_11UjwMNc9AGxqy3ap4bKnGG15ypevZ7Pq3YWSBgm9jYWNoZWxvbl9tZW1vcnllMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8I1UFBywvLYG-gAX8-ShS0qG7UEvAPiOcwAG4NC-FtV7Is0YWSBgm9jYWNoZWxvbl9tZW1vcnllMC4xLjA
  [__link0]: https://docs.rs/cachelon_memory/0.1.0/cachelon_memory/?search=tier::InMemoryCache
  [__link1]: https://docs.rs/cachelon_memory/0.1.0/cachelon_memory/?search=builder::InMemoryCacheBuilder
