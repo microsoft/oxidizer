@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Cache builder types for constructing single and multi-tier caches.
 //!

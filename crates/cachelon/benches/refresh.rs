@@ -43,7 +43,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             rt.block_on(async {
                 let start = Instant::now();
                 for _ in 0..iters {
-                    black_box(cache.get(black_box(&key)).await);
+                    let _ = black_box(cache.get(black_box(&key)).await);
                 }
                 start.elapsed()
             })
@@ -67,7 +67,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             rt.block_on(async {
                 let start = Instant::now();
                 for _ in 0..iters {
-                    black_box(cache.get(black_box(&key)).await);
+                    let _ = black_box(cache.get(black_box(&key)).await);
                 }
                 start.elapsed()
             })
@@ -91,7 +91,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             rt.block_on(async {
                 let start = Instant::now();
                 for _ in 0..iters {
-                    black_box(cache.get(black_box(&key)).await);
+                    let _ = black_box(cache.get(black_box(&key)).await);
                 }
                 start.elapsed()
             })

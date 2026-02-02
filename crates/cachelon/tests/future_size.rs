@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Tests to verify that cache future sizes remain bounded with nested fallback tiers.
 
@@ -17,9 +18,9 @@ fn single_level_future_size_bounded() {
     let invalidate_size = size_of_val(&cache.invalidate(&key));
 
     // Verify that the future sizes are within reasonable bounds
-    assert!(get_size < 6000, "Get future size is too large: {}", get_size);
-    assert!(insert_size < 6000, "Insert future size is too large: {}", insert_size);
-    assert!(invalidate_size < 6000, "Invalidate future size is too large: {}", invalidate_size);
+    assert!(get_size < 6000, "Get future size is too large: {get_size}");
+    assert!(insert_size < 6000, "Insert future size is too large: {insert_size}");
+    assert!(invalidate_size < 6000, "Invalidate future size is too large: {invalidate_size}");
 }
 
 #[test]
@@ -36,7 +37,7 @@ fn future_size_bounded_with_nesting() {
     let invalidate_size = size_of_val(&cache.invalidate(&key));
 
     // Verify that the future sizes are within reasonable bounds
-    assert!(get_size < 6000, "Get future size is too large: {}", get_size);
-    assert!(insert_size < 6000, "Insert future size is too large: {}", insert_size);
-    assert!(invalidate_size < 6000, "Invalidate future size is too large: {}", invalidate_size);
+    assert!(get_size < 6000, "Get future size is too large: {get_size}");
+    assert!(insert_size < 6000, "Insert future size is too large: {insert_size}");
+    assert!(invalidate_size < 6000, "Invalidate future size is too large: {invalidate_size}");
 }

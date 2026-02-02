@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Background cache refresh with time-to-refresh (TTR) support.
 //!

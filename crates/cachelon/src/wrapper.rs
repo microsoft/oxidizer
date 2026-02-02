@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Wrapper that adds telemetry and TTL to cache tiers.
 //!

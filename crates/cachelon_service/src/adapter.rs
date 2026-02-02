@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Adapter to use Service implementations as `CacheTier` storage backends.
 //!

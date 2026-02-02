@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Integration tests for Cache builder API.
 
@@ -56,12 +57,12 @@ fn mock_cache_failure_injection() {
 
         // get fails
         let result = cache.get(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
 
         // Clear failures and get succeeds
         mock.clear_failures();
         let result = cache.get(&"key".to_string()).await;
-        assert!(result.is_ok());
+        result.unwrap();
     });
 }
 

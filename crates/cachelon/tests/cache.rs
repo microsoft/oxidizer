@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Integration tests for Cache API.
 
@@ -190,7 +191,7 @@ fn try_get_or_insert_error() {
             .try_get_or_insert(&key, || async { Err(Error::from_message("test error")) })
             .await;
 
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
