@@ -7,22 +7,16 @@
 
 use std::{hint::black_box, sync::Arc, time::Instant};
 
-use cachelon::{Cache, CacheEntry, CacheTelemetry, CacheTier};
+use cachelon::{Cache, CacheEntry, CacheTier};
 use cachelon_memory::InMemoryCache;
 use cachelon_tier::testing::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
-use opentelemetry_sdk::{logs::SdkLoggerProvider, metrics::SdkMeterProvider};
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use tick::Clock;
 use tokio::runtime::Runtime;
 
 fn rt() -> Runtime {
     Runtime::new().expect("failed to create runtime")
-}
-
-fn telemetry(clock: Clock) -> CacheTelemetry {
-    let logger = SdkLoggerProvider::builder().build();
-    let meter = SdkMeterProvider::builder().build();
-    CacheTelemetry::new(logger, &meter, clock)
 }
 
 // =============================================================================
@@ -133,11 +127,13 @@ fn bench_wrapper_overhead(c: &mut Criterion) {
 
     // With telemetry
     group.bench_function("with_telemetry", |b| {
+        let meter_provider = SdkMeterProvider::builder().build();
         let cache = rt.block_on(async {
             let clock = Clock::new_tokio();
-            Cache::builder(clock.clone())
+            Cache::builder(clock)
                 .storage(MockCache::<String, String>::new())
-                .telemetry(telemetry(clock), "bench")
+                .use_logs(true)
+                .use_metrics(&meter_provider)
                 .build()
         });
         let key = "key".to_string();

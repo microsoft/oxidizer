@@ -11,7 +11,7 @@ use opentelemetry_sdk::metrics::data::{AggregatedMetrics, Metric, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use tracing_subscriber::fmt::MakeWriter;
 
-/// Test helper for collecting and asserting on OTel metrics.
+/// Test helper for collecting and asserting on `OTel` metrics.
 #[derive(Debug)]
 pub(crate) struct MetricTester {
     exporter: InMemoryMetricExporter,

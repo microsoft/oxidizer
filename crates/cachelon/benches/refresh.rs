@@ -7,6 +7,7 @@
 
 use std::{collections::HashMap, hint::black_box, time::Duration, time::Instant};
 
+use anyspawn::Spawner;
 use cachelon::{Cache, CacheEntry, FallbackPromotionPolicy, refresh::TimeToRefresh};
 use cachelon_tier::testing::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -57,7 +58,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             Cache::builder(clock.clone())
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(MockCache::<String, String>::new()))
-                .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(3600)))
+                .time_to_refresh(TimeToRefresh::new(Duration::from_secs(3600), Spawner::new_tokio()))
                 .promotion_policy(FallbackPromotionPolicy::Always)
                 .build()
         });
@@ -81,7 +82,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             Cache::builder(clock.clone())
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(mock_with_value("key", "refreshed")))
-                .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(0)))
+                .time_to_refresh(TimeToRefresh::new(Duration::from_secs(0), Spawner::new_tokio()))
                 .promotion_policy(FallbackPromotionPolicy::Always)
                 .build()
         });
