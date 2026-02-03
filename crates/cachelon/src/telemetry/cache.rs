@@ -192,6 +192,7 @@ mod tests {
         capture.assert_contains("my_test_cache");
         capture.assert_contains(CacheOperation::Invalidate.as_str());
         capture.assert_contains(CacheActivity::Error.as_str());
+        capture.assert_contains("12345");
     }
 
     #[test]

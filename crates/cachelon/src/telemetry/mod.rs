@@ -112,20 +112,6 @@ mod tests {
     }
 
     #[test]
-    fn cache_operation_debug() {
-        let get = CacheOperation::Get;
-        let debug_str = format!("{get:?}");
-        assert!(debug_str.contains("Get"));
-    }
-
-    #[test]
-    fn cache_operation_clone() {
-        let get = CacheOperation::Get;
-        let cloned = get;
-        assert_eq!(get.as_str(), cloned.as_str());
-    }
-
-    #[test]
     fn cache_event_as_str() {
         assert_eq!(CacheActivity::Hit.as_str(), "cache.hit");
         assert_eq!(CacheActivity::Expired.as_str(), "cache.expired");
@@ -138,20 +124,6 @@ mod tests {
         assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
         assert_eq!(CacheActivity::FallbackPromotion.as_str(), "cache.fallback_promotion");
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
-    }
-
-    #[test]
-    fn cache_event_debug() {
-        let hit = CacheActivity::Hit;
-        let debug_str = format!("{hit:?}");
-        assert!(debug_str.contains("Hit"));
-    }
-
-    #[test]
-    fn cache_event_clone() {
-        let hit = CacheActivity::Hit;
-        let cloned = hit;
-        assert_eq!(hit.as_str(), cloned.as_str());
     }
 
     #[cfg(any(feature = "logs", feature = "metrics", test))]

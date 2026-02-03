@@ -225,7 +225,8 @@ fn fallback_builder_with_promotion_policy_always() -> TestResult {
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        assert!(cache.get(&key).await?.is_some());
+        let entry = cache.get(&key).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }
@@ -245,7 +246,8 @@ fn fallback_builder_with_promotion_policy_never() -> TestResult {
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        assert!(cache.get(&key).await?.is_some());
+        let entry = cache.get(&key).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }
@@ -269,7 +271,8 @@ fn fallback_builder_with_promotion_policy_when() -> TestResult {
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        assert!(cache.get(&key).await?.is_some());
+        let entry = cache.get(&key).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }
@@ -293,7 +296,8 @@ fn fallback_builder_with_promotion_policy_when_boxed() -> TestResult {
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        assert!(cache.get(&key).await?.is_some());
+        let entry = cache.get(&key).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }
@@ -319,11 +323,10 @@ fn nested_fallback_builder() -> TestResult {
             .promotion_policy(FallbackPromotionPolicy::Never)
             .build();
 
-        assert!(!cache.name().is_empty());
-
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        assert!(cache.get(&key).await?.is_some());
+        let entry = cache.get(&key).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }

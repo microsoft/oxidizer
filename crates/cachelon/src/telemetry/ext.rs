@@ -39,7 +39,7 @@ impl ClockExt for Clock {
         let result = f.await;
         TimedResult {
             result,
-            duration: start.elapsed(),
+            duration: self.instant().saturating_duration_since(start),
         }
     }
 }
@@ -77,77 +77,34 @@ mod tests {
     }
 
     #[test]
-    fn clock_ext_timed_async() {
+    fn clock_ext_timed_async_measures_duration() {
         block_on(async {
-            let clock = Clock::new_frozen();
+            let control = tick::ClockControl::new();
+            let clock = control.to_clock();
 
-            let timed = clock.timed_async(async { 42 }).await;
-
-            assert_eq!(timed.result, 42);
-            // Duration depends on Clock implementation - just verify we get a result
-        });
-    }
-
-    #[test]
-    fn clock_ext_timed_async_with_time_advance() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-
-            // Start timing, then advance the clock during the async operation
             let timed = clock
                 .timed_async(async {
-                    // In a real scenario, time would pass
-                    "hello"
+                    control.advance(Duration::from_millis(100));
+                    42
                 })
                 .await;
 
-            assert_eq!(timed.result, "hello");
+            assert_eq!(timed.result, 42);
+            assert_eq!(timed.duration, Duration::from_millis(100));
         });
     }
 
     #[test]
-    fn cache_telemetry_ext_none_does_not_panic() {
-        let telemetry: Option<CacheTelemetry> = None;
-        // Should not panic when telemetry is None
-        telemetry.record("test_cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(10));
-    }
+    fn telemetry_ext_none_emits_no_logs() {
+        use crate::telemetry::testing::LogCapture;
 
-    #[test]
-    fn cache_telemetry_ext_with_various_operations() {
-        let telemetry: Option<CacheTelemetry> = None;
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        // Test all operation types don't panic
+        let telemetry: Option<CacheTelemetry> = None;
         telemetry.record("cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Insert, CacheActivity::Ok, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Invalidate, CacheActivity::Ok, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Clear, CacheActivity::Ok, Duration::from_millis(1));
-    }
+        telemetry.record_size("cache", 42);
 
-    #[test]
-    fn cache_telemetry_ext_with_various_events() {
-        let telemetry: Option<CacheTelemetry> = None;
-
-        // Test all event types don't panic
-        telemetry.record("cache", CacheOperation::Get, CacheActivity::Miss, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Get, CacheActivity::Expired, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Get, CacheActivity::Error, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Get, CacheActivity::Fallback, Duration::from_millis(1));
-    }
-
-    #[test]
-    fn cache_telemetry_ext_record_size_none_does_not_panic() {
-        let telemetry: Option<CacheTelemetry> = None;
-        // Should not panic when telemetry is None
-        telemetry.record_size("test_cache", 42);
-    }
-
-    #[test]
-    fn cache_telemetry_ext_record_size_various_values() {
-        let telemetry: Option<CacheTelemetry> = None;
-
-        // Test various size values don't panic
-        telemetry.record_size("cache", 0);
-        telemetry.record_size("cache", 100);
-        telemetry.record_size("cache", u64::MAX);
+        assert!(capture.output().is_empty());
     }
 }

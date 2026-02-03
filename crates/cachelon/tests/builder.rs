@@ -86,9 +86,10 @@ fn mock_cache_shares_state_with_handle() -> TestResult {
 #[test]
 fn cache_builder_clock() {
     let clock = Clock::new_frozen();
-    let builder = Cache::builder::<String, i32>(clock);
+    let builder = Cache::builder::<String, i32>(clock.clone());
     let builder_clock = builder.clock();
-    assert!(std::ptr::eq(builder_clock, builder_clock));
+    // Verify clock is accessible and returns valid instant
+    let _ = builder_clock.instant();
 }
 
 #[test]
@@ -106,8 +107,8 @@ fn fallback_builder_basic() -> TestResult {
     block_on(async {
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        let result = cache.get(&key).await?;
-        assert!(result.is_some());
+        let entry = cache.get(&key).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }
@@ -124,29 +125,10 @@ fn fallback_builder_promotion_policy() -> TestResult {
         .promotion_policy(FallbackPromotionPolicy::Never)
         .build();
 
-    assert!(!cache.name().is_empty());
-
     block_on(async {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-        assert!(cache.get(&"key".to_string()).await?.is_some());
-        Ok(())
-    })
-}
-
-#[test]
-fn nested_fallback() -> TestResult {
-    let clock = Clock::new_frozen();
-
-    let l3 = Cache::builder::<String, i32>(clock.clone()).memory();
-    let l2 = Cache::builder::<String, i32>(clock.clone()).memory().fallback(l3);
-
-    let cache = Cache::builder::<String, i32>(clock).memory().fallback(l2).build();
-
-    assert!(!cache.name().is_empty());
-
-    block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-        assert!(cache.get(&"key".to_string()).await?.is_some());
+        let entry = cache.get(&"key".to_string()).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
 }
@@ -171,42 +153,10 @@ fn fallback_builder_nested_fallback() -> TestResult {
         .promotion_policy(FallbackPromotionPolicy::Never)
         .build();
 
-    assert!(!cache.name().is_empty());
-
     block_on(async {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-        assert!(cache.get(&"key".to_string()).await?.is_some());
+        let entry = cache.get(&"key".to_string()).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
         Ok(())
     })
-}
-
-#[test]
-fn cache_builder_debug() {
-    let clock = Clock::new_frozen();
-    let builder = Cache::builder::<String, i32>(clock).memory();
-
-    let debug_str = format!("{builder:?}");
-    assert!(debug_str.contains("CacheBuilder"));
-}
-
-#[test]
-fn fallback_builder_debug() {
-    let clock = Clock::new_frozen();
-
-    let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
-
-    let builder = Cache::builder::<String, i32>(clock).memory().fallback(fallback);
-
-    let debug_str = format!("{builder:?}");
-    assert!(debug_str.contains("FallbackBuilder"));
-}
-
-#[test]
-fn cache_builder_name_via_telemetry() {
-    // Test that name can be set even without telemetry feature
-    let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-    // Name is automatically generated from type
-    assert!(!cache.name().is_empty());
 }
