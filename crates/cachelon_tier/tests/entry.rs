@@ -3,7 +3,7 @@
 
 //! Integration tests for `CacheEntry`.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use cachelon_tier::CacheEntry;
 
@@ -26,7 +26,7 @@ fn with_ttl_creates_entry_with_ttl() {
 
 #[test]
 fn with_cached_at_creates_entry_with_timestamp() {
-    let now = Instant::now();
+    let now = SystemTime::now();
     let entry = CacheEntry::with_cached_at("value", now);
     assert_eq!(*entry.value(), "value");
     assert_eq!(entry.cached_at(), Some(now));
@@ -38,7 +38,7 @@ fn set_cached_at_updates_timestamp() {
     let mut entry = CacheEntry::new("value");
     assert!(entry.cached_at().is_none());
 
-    let now = Instant::now();
+    let now = SystemTime::now();
     entry.set_cached_at(now);
     assert_eq!(entry.cached_at(), Some(now));
 }

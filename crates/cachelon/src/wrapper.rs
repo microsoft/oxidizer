@@ -88,7 +88,13 @@ where
         // Per-entry TTL takes precedence over tier-level TTL
         let ttl = entry.ttl().or(self.ttl);
         if let Some(ttl) = ttl {
-            entry.cached_at().is_some_and(|cached_at| cached_at.elapsed() > ttl)
+            match entry.cached_at() {
+                Some(cached_at) => match self.clock.system_time().duration_since(cached_at) {
+                    Ok(elapsed) => elapsed > ttl,
+                    Err(_) => true, // If the system time went backwards, consider it expired
+                },
+                None => true, // TODO: If have no cached_at timestamp, something went wrong; with TTL treat as expired?
+            }
         } else {
             false
         }
@@ -130,7 +136,7 @@ where
     }
 
     async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
-        entry.set_cached_at(self.clock.instant());
+        entry.set_cached_at(self.clock.system_time());
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
@@ -226,9 +232,9 @@ mod tests {
         let inner = InMemoryCache::<String, i32>::new();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(Duration::from_secs(60)), None);
 
-        // Entry without cached_at should not be expired (even with tier TTL)
+        // Entry without cached_at should be expired if TTL is configured (treat as expired to be safe)
         let entry = CacheEntry::new(42);
-        assert!(!wrapper.is_expired(&entry));
+        assert!(wrapper.is_expired(&entry));
     }
 
     #[test]
@@ -238,14 +244,14 @@ mod tests {
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
             "test",
             inner,
-            clock,
+            clock.clone(),
             Some(Duration::from_secs(60)), // tier TTL: 60 seconds
             None,
         );
 
         // Entry with per-entry TTL should use entry TTL
         let mut entry = CacheEntry::with_ttl(42, Duration::from_secs(120)); // entry TTL: 120 seconds
-        entry.set_cached_at(std::time::Instant::now());
+        entry.set_cached_at(clock.system_time());
 
         // Entry TTL is longer than tier TTL, so entry should not be expired
         assert!(!wrapper.is_expired(&entry));

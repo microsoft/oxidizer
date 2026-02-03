@@ -12,7 +12,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 
 use anyspawn::Spawner;
@@ -76,8 +76,11 @@ where
         }
     }
 
-    pub(crate) fn should_refresh(&self, cached_at: Instant) -> bool {
-        cached_at.elapsed() >= self.duration
+    pub(crate) fn should_refresh(&self, cached_at: SystemTime) -> bool {
+        match cached_at.elapsed() {
+            Ok(elapsed) => elapsed >= self.duration,
+            Err(_) => true, // If the system time went backwards, consider it stale
+        }
     }
 
     /// Returns true if this key was successfully marked as in-flight (i.e., not already refreshing).
@@ -193,7 +196,7 @@ mod tests {
         let refresh = create_refresh();
 
         // An instant from now should not need refresh yet
-        let cached_at = Instant::now();
+        let cached_at = SystemTime::now();
         assert!(!refresh.should_refresh(cached_at));
     }
 
@@ -249,7 +252,7 @@ mod tests {
         let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
 
         // Create an instant and wait slightly
-        let cached_at = Instant::now();
+        let cached_at = SystemTime::now();
         // Use a small spin to allow some time to pass
         std::thread::sleep(Duration::from_millis(1));
 

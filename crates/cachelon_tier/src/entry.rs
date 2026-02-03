@@ -3,7 +3,7 @@
 
 use std::{
     ops::Deref,
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 
 /// A cached value with associated metadata.
@@ -28,7 +28,7 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CacheEntry<V> {
     value: V,
-    cached_at: Option<Instant>,
+    cached_at: Option<SystemTime>,
     /// Per-entry TTL override. If set, takes precedence over cache-level TTL.
     ttl: Option<Duration>,
 }
@@ -84,13 +84,13 @@ impl<V> CacheEntry<V> {
     ///
     /// ```
     /// use cachelon_tier::CacheEntry;
-    /// use std::time::Instant;
+    /// use std::time::SystemTime;
     ///
-    /// let now = Instant::now();
+    /// let now = SystemTime::now();
     /// let entry = CacheEntry::with_cached_at(42, now);
     /// assert_eq!(entry.cached_at(), Some(now));
     /// ```
-    pub fn with_cached_at(value: V, cached_at: Instant) -> Self {
+    pub fn with_cached_at(value: V, cached_at: SystemTime) -> Self {
         Self {
             value,
             cached_at: Some(cached_at),
@@ -103,14 +103,14 @@ impl<V> CacheEntry<V> {
     /// Returns `None` if the entry hasn't been inserted yet or was created
     /// without a timestamp.
     #[must_use]
-    pub fn cached_at(&self) -> Option<Instant> {
+    pub fn cached_at(&self) -> Option<SystemTime> {
         self.cached_at
     }
 
     /// Sets the timestamp when this entry was cached.
     ///
     /// This is typically called by the cache implementation when inserting.
-    pub fn set_cached_at(&mut self, cached_at: Instant) {
+    pub fn set_cached_at(&mut self, cached_at: SystemTime) {
         self.cached_at = Some(cached_at);
     }
 
