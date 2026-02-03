@@ -20,7 +20,12 @@ repository.workspace = true
 all-features = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = []
+allowed_external_types = [
+    "cachelon_tier::entry::CacheEntry",
+    "cachelon_tier::error::Error",
+    "cachelon_tier::tier::CacheTier",
+    "layered::service::Service",
+]
 
 [dependencies]
 cachelon_tier = { path = "../cachelon_tier" }

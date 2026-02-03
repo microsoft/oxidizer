@@ -7,16 +7,21 @@
 //! OpenTelemetry metrics and logs. When the `telemetry` feature is enabled,
 //! all cache operations emit structured logs and metrics.
 
-#[cfg(feature = "telemetry")]
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 use cache::CacheTelemetryInner;
-#[cfg(feature = "telemetry")]
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 use opentelemetry::logs::Severity;
 
 use thread_aware::{Arc, PerCore};
 
-#[cfg(feature = "telemetry")]
+pub(crate) mod attributes;
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 pub(crate) mod cache;
 pub(crate) mod ext;
+#[cfg(any(feature = "metrics", test))]
+pub(crate) mod metrics;
+#[cfg(test)]
+pub(crate) mod testing;
 
 /// Cache telemetry provider for OpenTelemetry integration.
 ///
@@ -26,7 +31,7 @@ pub(crate) mod ext;
 /// Construct this and pass it to the cache builder via `.telemetry()`.
 #[derive(Clone, Debug)]
 pub struct CacheTelemetry {
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     inner: Arc<CacheTelemetryInner, PerCore>,
 }
 
@@ -41,16 +46,16 @@ pub(crate) enum CacheOperation {
 impl CacheOperation {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Get => "get",
-            Self::Insert => "insert",
-            Self::Invalidate => "invalidate",
-            Self::Clear => "clear",
+            Self::Get => "cache.get",
+            Self::Insert => "cache.insert",
+            Self::Invalidate => "cache.invalidate",
+            Self::Clear => "cache.clear",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum CacheEvent {
+pub(crate) enum CacheActivity {
     Hit,
     Expired,
     Miss,
@@ -59,30 +64,30 @@ pub(crate) enum CacheEvent {
     Inserted,
     Invalidated,
     Ok,
-    #[cfg_attr(not(test), expect(dead_code, reason = "Reserved for future telemetry integration"))]
+    #[cfg_attr(not(test), expect(dead_code, reason = "activity variant for future use"))]
     Fallback,
     FallbackPromotion,
     Error,
 }
 
-impl CacheEvent {
+impl CacheActivity {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Hit => "hit",
-            Self::Expired => "expired",
-            Self::Miss => "miss",
-            Self::RefreshHit => "refresh_hit",
-            Self::RefreshMiss => "refresh_miss",
-            Self::Inserted => "inserted",
-            Self::Invalidated => "invalidated",
-            Self::Ok => "ok",
-            Self::Fallback => "fallback",
-            Self::FallbackPromotion => "fallback_promotion",
-            Self::Error => "error",
+            Self::Hit => "cache.hit",
+            Self::Expired => "cache.expired",
+            Self::Miss => "cache.miss",
+            Self::RefreshHit => "cache.refresh_hit",
+            Self::RefreshMiss => "cache.refresh_miss",
+            Self::Inserted => "cache.inserted",
+            Self::Invalidated => "cache.invalidated",
+            Self::Ok => "cache.ok",
+            Self::Fallback => "cache.fallback",
+            Self::FallbackPromotion => "cache.fallback_promotion",
+            Self::Error => "cache.error",
         }
     }
 
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub fn severity(self) -> Severity {
         match self {
             Self::Hit | Self::Miss | Self::RefreshHit | Self::Ok => Severity::Debug,
@@ -99,79 +104,79 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cachelon_operation_as_str() {
-        assert_eq!(CacheOperation::Get.as_str(), "get");
-        assert_eq!(CacheOperation::Insert.as_str(), "insert");
-        assert_eq!(CacheOperation::Invalidate.as_str(), "invalidate");
-        assert_eq!(CacheOperation::Clear.as_str(), "clear");
+    fn cache_operation_as_str() {
+        assert_eq!(CacheOperation::Get.as_str(), "cache.get");
+        assert_eq!(CacheOperation::Insert.as_str(), "cache.insert");
+        assert_eq!(CacheOperation::Invalidate.as_str(), "cache.invalidate");
+        assert_eq!(CacheOperation::Clear.as_str(), "cache.clear");
     }
 
     #[test]
-    fn cachelon_operation_debug() {
+    fn cache_operation_debug() {
         let get = CacheOperation::Get;
         let debug_str = format!("{get:?}");
         assert!(debug_str.contains("Get"));
     }
 
     #[test]
-    fn cachelon_operation_clone() {
+    fn cache_operation_clone() {
         let get = CacheOperation::Get;
         let cloned = get;
         assert_eq!(get.as_str(), cloned.as_str());
     }
 
     #[test]
-    fn cachelon_event_as_str() {
-        assert_eq!(CacheEvent::Hit.as_str(), "hit");
-        assert_eq!(CacheEvent::Expired.as_str(), "expired");
-        assert_eq!(CacheEvent::Miss.as_str(), "miss");
-        assert_eq!(CacheEvent::RefreshHit.as_str(), "refresh_hit");
-        assert_eq!(CacheEvent::RefreshMiss.as_str(), "refresh_miss");
-        assert_eq!(CacheEvent::Inserted.as_str(), "inserted");
-        assert_eq!(CacheEvent::Invalidated.as_str(), "invalidated");
-        assert_eq!(CacheEvent::Ok.as_str(), "ok");
-        assert_eq!(CacheEvent::Fallback.as_str(), "fallback");
-        assert_eq!(CacheEvent::FallbackPromotion.as_str(), "fallback_promotion");
-        assert_eq!(CacheEvent::Error.as_str(), "error");
+    fn cache_event_as_str() {
+        assert_eq!(CacheActivity::Hit.as_str(), "cache.hit");
+        assert_eq!(CacheActivity::Expired.as_str(), "cache.expired");
+        assert_eq!(CacheActivity::Miss.as_str(), "cache.miss");
+        assert_eq!(CacheActivity::RefreshHit.as_str(), "cache.refresh_hit");
+        assert_eq!(CacheActivity::RefreshMiss.as_str(), "cache.refresh_miss");
+        assert_eq!(CacheActivity::Inserted.as_str(), "cache.inserted");
+        assert_eq!(CacheActivity::Invalidated.as_str(), "cache.invalidated");
+        assert_eq!(CacheActivity::Ok.as_str(), "cache.ok");
+        assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
+        assert_eq!(CacheActivity::FallbackPromotion.as_str(), "cache.fallback_promotion");
+        assert_eq!(CacheActivity::Error.as_str(), "cache.error");
     }
 
     #[test]
-    fn cachelon_event_debug() {
-        let hit = CacheEvent::Hit;
+    fn cache_event_debug() {
+        let hit = CacheActivity::Hit;
         let debug_str = format!("{hit:?}");
         assert!(debug_str.contains("Hit"));
     }
 
     #[test]
-    fn cachelon_event_clone() {
-        let hit = CacheEvent::Hit;
+    fn cache_event_clone() {
+        let hit = CacheActivity::Hit;
         let cloned = hit;
         assert_eq!(hit.as_str(), cloned.as_str());
     }
 
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     #[test]
-    fn cachelon_event_severity_debug() {
-        assert_eq!(CacheEvent::Hit.severity(), Severity::Debug);
-        assert_eq!(CacheEvent::Miss.severity(), Severity::Debug);
-        assert_eq!(CacheEvent::RefreshHit.severity(), Severity::Debug);
-        assert_eq!(CacheEvent::Ok.severity(), Severity::Debug);
+    fn cache_event_severity_debug() {
+        assert_eq!(CacheActivity::Hit.severity(), Severity::Debug);
+        assert_eq!(CacheActivity::Miss.severity(), Severity::Debug);
+        assert_eq!(CacheActivity::RefreshHit.severity(), Severity::Debug);
+        assert_eq!(CacheActivity::Ok.severity(), Severity::Debug);
     }
 
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     #[test]
-    fn cachelon_event_severity_info() {
-        assert_eq!(CacheEvent::Expired.severity(), Severity::Info);
-        assert_eq!(CacheEvent::RefreshMiss.severity(), Severity::Info);
-        assert_eq!(CacheEvent::Inserted.severity(), Severity::Info);
-        assert_eq!(CacheEvent::Invalidated.severity(), Severity::Info);
-        assert_eq!(CacheEvent::Fallback.severity(), Severity::Info);
-        assert_eq!(CacheEvent::FallbackPromotion.severity(), Severity::Info);
+    fn cache_event_severity_info() {
+        assert_eq!(CacheActivity::Expired.severity(), Severity::Info);
+        assert_eq!(CacheActivity::RefreshMiss.severity(), Severity::Info);
+        assert_eq!(CacheActivity::Inserted.severity(), Severity::Info);
+        assert_eq!(CacheActivity::Invalidated.severity(), Severity::Info);
+        assert_eq!(CacheActivity::Fallback.severity(), Severity::Info);
+        assert_eq!(CacheActivity::FallbackPromotion.severity(), Severity::Info);
     }
 
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     #[test]
-    fn cachelon_event_severity_error() {
-        assert_eq!(CacheEvent::Error.severity(), Severity::Error);
+    fn cache_event_severity_error() {
+        assert_eq!(CacheActivity::Error.severity(), Severity::Error);
     }
 }

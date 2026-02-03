@@ -10,7 +10,7 @@ use std::{hash::Hash, marker::PhantomData, time::Duration};
 
 use tick::Clock;
 
-use crate::telemetry::{CacheEvent, CacheOperation, CacheTelemetry};
+use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 use crate::{
     CacheEntry, Error,
     cache::CacheName,
@@ -97,14 +97,15 @@ where
     fn handle_get_result(&self, value: Option<CacheEntry<V>>, duration: Duration) -> Option<CacheEntry<V>> {
         if let Some(entry) = value {
             if self.is_expired(&entry) {
-                self.telemetry.record(self.name, CacheOperation::Get, CacheEvent::Expired, duration);
+                self.telemetry
+                    .record(self.name, CacheOperation::Get, CacheActivity::Expired, duration);
                 None
             } else {
-                self.telemetry.record(self.name, CacheOperation::Get, CacheEvent::Hit, duration);
+                self.telemetry.record(self.name, CacheOperation::Get, CacheActivity::Hit, duration);
                 Some(entry)
             }
         } else {
-            self.telemetry.record(self.name, CacheOperation::Get, CacheEvent::Miss, duration);
+            self.telemetry.record(self.name, CacheOperation::Get, CacheActivity::Miss, duration);
             None
         }
     }
@@ -122,7 +123,7 @@ where
             Ok(value) => Ok(self.handle_get_result(value, timed.duration)),
             Err(e) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Get, CacheEvent::Error, timed.duration);
+                    .record(self.name, CacheOperation::Get, CacheActivity::Error, timed.duration);
                 Err(e)
             }
         }
@@ -134,14 +135,14 @@ where
         match &timed.result {
             Ok(()) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheEvent::Inserted, timed.duration);
+                    .record(self.name, CacheOperation::Insert, CacheActivity::Inserted, timed.duration);
                 if let Some(size) = self.inner.len() {
                     self.telemetry.record_size(self.name, size);
                 }
             }
             Err(_) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheEvent::Error, timed.duration);
+                    .record(self.name, CacheOperation::Insert, CacheActivity::Error, timed.duration);
             }
         }
         timed.result
@@ -152,14 +153,14 @@ where
         match &timed.result {
             Ok(()) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Invalidate, CacheEvent::Invalidated, timed.duration);
+                    .record(self.name, CacheOperation::Invalidate, CacheActivity::Invalidated, timed.duration);
                 if let Some(size) = self.inner.len() {
                     self.telemetry.record_size(self.name, size);
                 }
             }
             Err(_) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Invalidate, CacheEvent::Error, timed.duration);
+                    .record(self.name, CacheOperation::Invalidate, CacheActivity::Error, timed.duration);
             }
         }
         timed.result
@@ -170,14 +171,14 @@ where
         match &timed.result {
             Ok(()) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Clear, CacheEvent::Ok, timed.duration);
+                    .record(self.name, CacheOperation::Clear, CacheActivity::Ok, timed.duration);
                 if let Some(size) = self.inner.len() {
                     self.telemetry.record_size(self.name, size);
                 }
             }
             Err(_) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Clear, CacheEvent::Error, timed.duration);
+                    .record(self.name, CacheOperation::Clear, CacheActivity::Error, timed.duration);
             }
         }
         timed.result

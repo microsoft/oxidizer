@@ -6,7 +6,6 @@
 use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 
 use tick::Clock;
-#[cfg(feature = "tokio")]
 use uniflight::Merger;
 
 use crate::{Error, builder::CacheBuilder};
@@ -71,7 +70,6 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) name: CacheName,
     pub(crate) storage: S,
     pub(crate) clock: Clock,
-    #[cfg(feature = "tokio")]
     request_merger: Option<Merger<K, Option<CacheEntry<V>>>>,
     _phantom: PhantomData<(K, V)>,
 }
@@ -108,12 +106,11 @@ where
     V: Clone + Send + Sync + 'static,
     S: CacheTier<K, V> + Send + Sync,
 {
-    pub(crate) fn new(name: CacheName, storage: S, clock: Clock, #[cfg(feature = "tokio")] stampede_protection: bool) -> Self {
+    pub(crate) fn new(name: CacheName, storage: S, clock: Clock, stampede_protection: bool) -> Self {
         Self {
             name,
             storage,
             clock,
-            #[cfg(feature = "tokio")]
             request_merger: stampede_protection.then(|| Merger::new()),
             _phantom: PhantomData,
         }
@@ -195,7 +192,6 @@ where
     /// # });
     /// ```
     pub async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        #[cfg(feature = "tokio")]
         if let Some(ref merger) = self.request_merger {
             // With stampede protection, concurrent requests are merged.
             // Storage errors are treated as cache misses (Ok(None)) since

@@ -57,7 +57,6 @@
 pub mod builder;
 pub mod cache;
 mod fallback;
-#[cfg(any(feature = "tokio", test))]
 pub mod refresh;
 mod telemetry;
 mod wrapper;
@@ -77,7 +76,7 @@ pub use cachelon_tier::{CacheEntry, CacheTier, Error, Result};
 pub use cachelon_tier::{DynamicCache, DynamicCacheExt};
 #[doc(inline)]
 pub use fallback::{FallbackCache, FallbackPromotionPolicy};
-#[cfg(feature = "telemetry")]
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 #[doc(inline)]
 pub use telemetry::CacheTelemetry;
 #[doc(inline)]

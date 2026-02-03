@@ -10,7 +10,7 @@ use tick::Clock;
 use crate::{
     cache::CacheName,
     telemetry::CacheTelemetry,
-    telemetry::{CacheEvent, CacheOperation},
+    telemetry::{CacheActivity, CacheOperation},
 };
 
 /// Result of a timed async operation.
@@ -46,22 +46,22 @@ impl ClockExt for Clock {
 
 pub trait CacheTelemetryExt {
     /// Records a cache operation if telemetry is enabled.
-    fn record(&self, name: CacheName, operation: CacheOperation, event: CacheEvent, duration: Duration);
+    fn record(&self, name: CacheName, operation: CacheOperation, event: CacheActivity, duration: Duration);
 
     /// Records the current cache size if telemetry is enabled.
     fn record_size(&self, name: CacheName, size: u64);
 }
 
 impl CacheTelemetryExt for Option<CacheTelemetry> {
-    fn record(&self, name: CacheName, operation: CacheOperation, event: CacheEvent, duration: Duration) {
-        #[cfg(feature = "telemetry")]
+    fn record(&self, name: CacheName, operation: CacheOperation, event: CacheActivity, duration: Duration) {
+        #[cfg(any(feature = "logs", feature = "metrics", test))]
         if let Some(t) = self {
             t.record(name, operation, event, Some(duration));
         }
     }
 
     fn record_size(&self, name: CacheName, size: u64) {
-        #[cfg(feature = "telemetry")]
+        #[cfg(any(feature = "logs", feature = "metrics", test))]
         if let Some(t) = self {
             t.record_size(name, size);
         }
@@ -106,43 +106,43 @@ mod tests {
     }
 
     #[test]
-    fn cachelon_telemetry_ext_none_does_not_panic() {
+    fn cache_telemetry_ext_none_does_not_panic() {
         let telemetry: Option<CacheTelemetry> = None;
         // Should not panic when telemetry is None
-        telemetry.record("test_cache", CacheOperation::Get, CacheEvent::Hit, Duration::from_millis(10));
+        telemetry.record("test_cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(10));
     }
 
     #[test]
-    fn cachelon_telemetry_ext_with_various_operations() {
+    fn cache_telemetry_ext_with_various_operations() {
         let telemetry: Option<CacheTelemetry> = None;
 
         // Test all operation types don't panic
-        telemetry.record("cache", CacheOperation::Get, CacheEvent::Hit, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Insert, CacheEvent::Ok, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Invalidate, CacheEvent::Ok, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Clear, CacheEvent::Ok, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Insert, CacheActivity::Ok, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Invalidate, CacheActivity::Ok, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Clear, CacheActivity::Ok, Duration::from_millis(1));
     }
 
     #[test]
-    fn cachelon_telemetry_ext_with_various_events() {
+    fn cache_telemetry_ext_with_various_events() {
         let telemetry: Option<CacheTelemetry> = None;
 
         // Test all event types don't panic
-        telemetry.record("cache", CacheOperation::Get, CacheEvent::Miss, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Get, CacheEvent::Expired, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Get, CacheEvent::Error, Duration::from_millis(1));
-        telemetry.record("cache", CacheOperation::Get, CacheEvent::Fallback, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Get, CacheActivity::Miss, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Get, CacheActivity::Expired, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Get, CacheActivity::Error, Duration::from_millis(1));
+        telemetry.record("cache", CacheOperation::Get, CacheActivity::Fallback, Duration::from_millis(1));
     }
 
     #[test]
-    fn cachelon_telemetry_ext_record_size_none_does_not_panic() {
+    fn cache_telemetry_ext_record_size_none_does_not_panic() {
         let telemetry: Option<CacheTelemetry> = None;
         // Should not panic when telemetry is None
         telemetry.record_size("test_cache", 42);
     }
 
     #[test]
-    fn cachelon_telemetry_ext_record_size_various_values() {
+    fn cache_telemetry_ext_record_size_various_values() {
         let telemetry: Option<CacheTelemetry> = None;
 
         // Test various size values don't panic

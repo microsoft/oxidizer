@@ -11,9 +11,8 @@ use std::{hash::Hash, marker::PhantomData, sync::Arc};
 use futures::join;
 use tick::Clock;
 
-#[cfg(any(feature = "tokio", test))]
 use crate::refresh::TimeToRefresh;
-#[cfg(feature = "telemetry")]
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 use crate::telemetry::CacheTelemetry;
 use crate::{Error, cache::CacheName, telemetry::ext::ClockExt};
 use cachelon_tier::{CacheEntry, CacheTier};
@@ -153,9 +152,8 @@ pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) fallback: F,
     pub(crate) policy: FallbackPromotionPolicy<V>,
     pub(crate) clock: Clock,
-    #[cfg(any(feature = "tokio", test))]
     pub(crate) refresh: Option<TimeToRefresh<K>>,
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub(crate) telemetry: Option<CacheTelemetry>,
     _phantom: PhantomData<K>,
 }
@@ -207,8 +205,8 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
         fallback: F,
         policy: FallbackPromotionPolicy<V>,
         clock: Clock,
-        #[cfg(any(feature = "tokio", test))] refresh: Option<TimeToRefresh<K>>,
-        #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>,
+        refresh: Option<TimeToRefresh<K>>,
+        #[cfg(any(feature = "logs", feature = "metrics", test))] telemetry: Option<CacheTelemetry>,
     ) -> Self {
         Self {
             inner: Arc::new(FallbackCacheInner {
@@ -217,9 +215,8 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
                 fallback,
                 policy,
                 clock,
-                #[cfg(any(feature = "tokio", test))]
                 refresh,
-                #[cfg(feature = "telemetry")]
+                #[cfg(any(feature = "logs", feature = "metrics", test))]
                 telemetry,
                 _phantom: PhantomData,
             }),
@@ -335,6 +332,7 @@ mod tests {
             let clock = Clock::new_frozen();
 
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+            let primary_check = primary_storage.clone(); // Clone to check state directly
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
             fallback_storage
@@ -351,13 +349,7 @@ mod tests {
                 .build();
 
             // Primary should be empty initially
-            let primary_inner = cache.inner();
-            let primary_result: Option<CacheEntry<i32>> = primary_inner
-                .inner
-                .primary
-                .get(&"key".to_string())
-                .await
-                .expect("Error getting value from primary");
+            let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
             assert!(primary_result.is_none());
 
             // Get should find in fallback and promote to primary
@@ -366,12 +358,7 @@ mod tests {
             assert_eq!(*result.unwrap().value(), 42);
 
             // Now primary should have the value (promoted from fallback)
-            let primary_result: Option<CacheEntry<i32>> = primary_inner
-                .inner
-                .primary
-                .get(&"key".to_string())
-                .await
-                .expect("Error getting from primary");
+            let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
             assert!(primary_result.is_some());
         });
     }
@@ -384,6 +371,7 @@ mod tests {
             let clock = Clock::new_frozen();
 
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+            let primary_check = primary_storage.clone();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
             fallback_storage
@@ -405,13 +393,7 @@ mod tests {
             assert_eq!(*result.unwrap().value(), 42);
 
             // Primary should still be empty (no promotion)
-            let primary_inner = cache.inner();
-            let primary_result: Option<CacheEntry<i32>> = primary_inner
-                .inner
-                .primary
-                .get(&"key".to_string())
-                .await
-                .expect("Error getting from primary");
+            let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
             assert!(primary_result.is_none());
         });
     }
@@ -442,6 +424,7 @@ mod tests {
             let clock = Clock::new_frozen();
 
             let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+            let primary_check = primary_storage.clone();
             let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
 
             fallback_storage
@@ -472,20 +455,9 @@ mod tests {
             assert_eq!(*result.unwrap().value(), -10);
 
             // Check primary has positive but not negative
-            let primary_inner = cache.inner();
-            let positive: Option<CacheEntry<i32>> = primary_inner
-                .inner
-                .primary
-                .get(&"positive".to_string())
-                .await
-                .expect("Error getting positive");
+            let positive = primary_check.get(&"positive".to_string()).await.expect("get failed");
             assert!(positive.is_some());
-            let negative: Option<CacheEntry<i32>> = primary_inner
-                .inner
-                .primary
-                .get(&"negative".to_string())
-                .await
-                .expect("Error getting negative");
+            let negative = primary_check.get(&"negative".to_string()).await.expect("get failed");
             assert!(negative.is_none());
         });
     }

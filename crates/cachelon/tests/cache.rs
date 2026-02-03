@@ -196,7 +196,6 @@ fn try_get_or_insert_error() {
 }
 
 #[test]
-#[cfg(feature = "tokio")]
 fn stampede_protection_returns_cached() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
@@ -220,21 +219,21 @@ fn stampede_protection_returns_cached() -> TestResult {
 
 /// Verifies that Cache with `InMemoryCache` storage is Send.
 #[test]
-fn cachelon_with_memory_is_send() {
+fn cache_with_memory_is_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Cache<String, i32, cachelon_memory::InMemoryCache<String, i32>>>();
 }
 
 /// Verifies that Cache with `InMemoryCache` storage is Sync.
 #[test]
-fn cachelon_with_memory_is_sync() {
+fn cache_with_memory_is_sync() {
     fn assert_sync<T: Sync>() {}
     assert_sync::<Cache<String, i32, cachelon_memory::InMemoryCache<String, i32>>>();
 }
 
 /// Verifies that `CacheEntry` is Send.
 #[test]
-fn cachelon_entry_is_send() {
+fn cache_entry_is_send() {
     fn assert_send<T: Send>() {}
     assert_send::<CacheEntry<i32>>();
     assert_send::<CacheEntry<String>>();
@@ -242,7 +241,7 @@ fn cachelon_entry_is_send() {
 
 /// Verifies that `CacheEntry` is Sync.
 #[test]
-fn cachelon_entry_is_sync() {
+fn cache_entry_is_sync() {
     fn assert_sync<T: Sync>() {}
     assert_sync::<CacheEntry<i32>>();
     assert_sync::<CacheEntry<String>>();

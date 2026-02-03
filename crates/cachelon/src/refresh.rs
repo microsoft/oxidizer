@@ -15,17 +15,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyspawn::Spawner;
 use parking_lot::Mutex;
 
 use crate::{
     fallback::{FallbackCache, FallbackCacheInner},
     telemetry::{
-        CacheEvent, CacheOperation,
+        CacheActivity, CacheOperation,
         ext::{CacheTelemetryExt, ClockExt},
     },
 };
-
-use anyspawn::Spawner;
 
 use cachelon_tier::{CacheEntry, CacheTier};
 
@@ -38,26 +37,11 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// # Examples
 ///
 /// ```ignore
-/// let refresh = TimeToRefresh::new_tokio(Duration::from_secs(300));
+/// use anyspawn::Spawner;
+/// use std::time::Duration;
+///
+/// let refresh = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio());
 /// ```
-/// Manages time-based refresh scheduling for cached entries.
-///
-/// This struct provides functionality to track when cached entries should be
-/// refreshed based on a configurable duration. It maintains an internal set of
-/// keys currently being refreshed to prevent duplicate refresh tasks from being
-/// spawned for the same key.
-///
-/// # Type Parameters
-///
-/// * `K` - The type of keys used to identify cached entries. Must implement
-///   `Eq` and `Hash` for use in the internal `HashSet`.
-///
-/// # Fields
-///
-/// * `duration` - The time period after which a cached entry is considered stale
-///   and should be refreshed.
-/// * `runtime` - The async runtime used to spawn refresh tasks.
-/// * `in_flight` - A thread-safe set tracking keys with active refresh operations.
 pub struct TimeToRefresh<K> {
     /// The duration after which a cached entry should be refreshed.
     pub duration: Duration,
@@ -77,16 +61,17 @@ impl<K> TimeToRefresh<K>
 where
     K: Clone + Eq + Hash + Send + 'static,
 {
-    /// Creates a new `TimeToRefresh` instance using the Tokio runtime.
+    /// Creates a new `TimeToRefresh` instance.
     ///
     /// # Arguments
     ///
     /// * `duration` - The time period after which cached entries should be refreshed.
+    /// * `spawner` - The spawner used to run background refresh tasks.
     #[must_use]
-    pub fn new_tokio(duration: Duration) -> Self {
+    pub fn new(duration: Duration, spawner: Spawner) -> Self {
         Self {
             duration,
-            spawner: Spawner::new_tokio(),
+            spawner,
             in_flight: Mutex::new(HashSet::new()),
         }
     }
@@ -149,7 +134,7 @@ where
     P: CacheTier<K, V> + Send + Sync + 'static,
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
-    async fn fetch_and_promote(&self, key: K) {
+    pub(crate) async fn fetch_and_promote(&self, key: K) {
         let timed = self.clock.timed_async(self.fallback.get(&key)).await;
 
         match timed.result {
@@ -160,7 +145,7 @@ where
 
     async fn handle_fallback_hit(&self, key: K, value: CacheEntry<V>, fetch_duration: Duration) {
         self.telemetry
-            .record(self.name, CacheOperation::Get, CacheEvent::RefreshHit, fetch_duration);
+            .record(self.name, CacheOperation::Get, CacheActivity::RefreshHit, fetch_duration);
 
         if self.policy.should_promote(&value) {
             self.promote_to_primary(key, value).await;
@@ -173,18 +158,18 @@ where
         match timed.result {
             Ok(()) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheEvent::FallbackPromotion, timed.duration);
+                    .record(self.name, CacheOperation::Insert, CacheActivity::FallbackPromotion, timed.duration);
             }
             Err(_) => {
                 self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheEvent::Error, timed.duration);
+                    .record(self.name, CacheOperation::Insert, CacheActivity::Error, timed.duration);
             }
         }
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {
         self.telemetry
-            .record(self.name, CacheOperation::Get, CacheEvent::RefreshMiss, duration);
+            .record(self.name, CacheOperation::Get, CacheActivity::RefreshMiss, duration);
     }
 }
 
@@ -192,9 +177,13 @@ where
 mod tests {
     use super::*;
 
+    fn create_refresh() -> TimeToRefresh<String> {
+        TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio())
+    }
+
     #[test]
     fn time_to_refresh_debug() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+        let refresh = create_refresh();
 
         let debug_str = format!("{refresh:?}");
         assert!(debug_str.contains("TimeToRefresh"));
@@ -202,15 +191,15 @@ mod tests {
     }
 
     #[test]
-    fn time_to_refresh_new_tokio() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+    fn time_to_refresh_new() {
+        let refresh = create_refresh();
 
         assert_eq!(refresh.duration, Duration::from_secs(60));
     }
 
     #[test]
     fn time_to_refresh_should_refresh_false_when_recent() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+        let refresh = create_refresh();
 
         // An instant from now should not need refresh yet
         let cached_at = Instant::now();
@@ -219,7 +208,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_try_start_refresh() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+        let refresh = create_refresh();
 
         // First call should succeed (not already in flight)
         let key = "key1".to_string();
@@ -235,7 +224,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_finish_refresh() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+        let refresh = create_refresh();
 
         let key = "key1".to_string();
 
@@ -253,7 +242,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_finish_refresh_nonexistent_key() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+        let refresh = create_refresh();
 
         // Finishing a non-existent key should not panic
         // Test passes if this doesn't panic
@@ -266,7 +255,7 @@ mod tests {
     #[test]
     fn time_to_refresh_should_refresh_true_after_duration() {
         // Set a very short refresh duration for testing
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_nanos(1));
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
 
         // Create an instant and wait slightly
         let cached_at = Instant::now();
@@ -279,14 +268,14 @@ mod tests {
 
     #[test]
     fn time_to_refresh_duration_access() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(300));
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio());
 
         assert_eq!(refresh.duration, Duration::from_secs(300));
     }
 
     #[test]
     fn time_to_refresh_concurrent_keys() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new_tokio(Duration::from_secs(60));
+        let refresh = create_refresh();
 
         // Multiple keys can be in flight simultaneously
         let key1 = "key1".to_string();

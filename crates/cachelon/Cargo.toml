@@ -21,35 +21,26 @@ all-features = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "layered::layer::stack::Stack",
-    "tower_layer::Layer",
+    # Workspace sibling crates
+    "cachelon_memory::*",
+    "cachelon_service::*",
+    "cachelon_tier::*",
+    "layered::service::Service",
+    "tick::clock::Clock",
 ]
 
 [features]
-default = [
-    "dynamic-cache",
-    "memory",
-    "service",
-    "telemetry",
-    "tokio",
-]
+default = ["dynamic-cache", "memory", "service", "logs", "metrics"]
 dynamic-cache = ["dep:dynosaur"]
-telemetry = ["dep:arrayvec", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+logs = ["dep:arrayvec", "dep:opentelemetry", "dep:tracing"]
 test-util = ["cachelon_tier/test-util", "tick/test-util"]
 memory = ["dep:cachelon_memory"]
+metrics = ["dep:opentelemetry"]
 service = ["dep:cachelon_service", "dep:layered"]
-tokio = [
-    "dep:fundle",
-    "dep:uniflight",
-    "dep:anyspawn",
-    "dep:tokio",
-    "tick/tokio",
-    "anyspawn/tokio",
-]
 
 [dependencies]
 alloc_tracker = { workspace = true }
-anyspawn = { workspace = true, optional = true }
+anyspawn = { workspace = true, features = ["tokio"] }
 arrayvec = { workspace = true, optional = true }
 cachelon_memory = { path = "../cachelon_memory", optional = true }
 cachelon_service = { path = "../cachelon_service", optional = true }
@@ -64,91 +55,88 @@ opentelemetry = { workspace = true, optional = true, features = [
     "metrics",
     "logs",
 ] }
-opentelemetry_sdk = { workspace = true, optional = true, features = [
-    "logs",
-    "metrics",
-] }
 parking_lot = { version = "0.12.5" }
 thread_aware = { workspace = true }
 tick = { workspace = true, features = [] }
-tokio = { workspace = true, features = ["rt"], optional = true }
-uniflight = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+uniflight = { workspace = true }
 
 [dev-dependencies]
 cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }
 dynosaur = { workspace = true }
 fundle = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
-tick = { workspace = true, features = ["test-util"] }
+tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt"] }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+tracing = { workspace = true, features = ["std"] }
 
 [[bench]]
 name = "operations"
 harness = false
-required-features = ["telemetry", "test-util", "tokio"]
+required-features = ["logs", "metrics", "test-util"]
 
 [[bench]]
 name = "dynamic"
 harness = false
-required-features = ["test-util", "tokio"]
+required-features = ["test-util"]
 
 [[bench]]
 name = "refresh"
 harness = false
-required-features = ["test-util", "tokio"]
+required-features = ["test-util"]
 
 [[example]]
 name = "simple"
-required-features = ["memory", "tokio"]
+required-features = ["memory"]
 
 [[example]]
 name = "wrapped"
-required-features = ["memory", "telemetry", "tokio"]
+required-features = ["memory", "logs", "metrics"]
 
 [[example]]
 name = "fallback"
-required-features = ["memory", "telemetry", "tokio"]
+required-features = ["memory", "logs", "metrics"]
 
 [[example]]
 name = "multi_tier"
-required-features = ["memory", "telemetry", "tokio"]
+required-features = ["memory", "logs", "metrics"]
 
 [[example]]
 name = "dynamic"
-required-features = ["dynamic-cache", "memory", "telemetry", "tokio"]
+required-features = ["dynamic-cache", "memory", "logs", "metrics"]
 
 [[example]]
 name = "get_or_insert"
-required-features = ["memory", "tokio"]
+required-features = ["memory"]
 
 [[example]]
 name = "stampede_protection"
-required-features = ["memory", "tokio"]
+required-features = ["memory"]
 
 [[example]]
 name = "refresh"
-required-features = ["memory", "tokio"]
+required-features = ["memory"]
 
 [[example]]
 name = "mock_testing"
-required-features = ["test-util", "tokio"]
+required-features = ["test-util"]
 
 [[example]]
 name = "cache_as_service"
-required-features = ["memory", "service", "tokio"]
+required-features = ["memory", "service"]
 
 [[example]]
 name = "service_as_storage"
-required-features = ["service", "tokio"]
+required-features = ["service"]
 
 [[example]]
 name = "multi_tier_service"
-required-features = ["memory", "service", "tokio"]
+required-features = ["memory", "service"]
 
 [[example]]
 name = "service_middleware_composition"
-required-features = ["memory", "service", "tokio"]
+required-features = ["memory", "service"]
 
 [lints]
 workspace = true

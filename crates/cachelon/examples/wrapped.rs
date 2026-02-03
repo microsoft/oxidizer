@@ -5,8 +5,8 @@
 
 use std::time::Duration;
 
-use cachelon::{Cache, CacheEntry, CacheTelemetry};
-use opentelemetry_sdk::{logs::SdkLoggerProvider, metrics::SdkMeterProvider};
+use cachelon::{Cache, CacheEntry};
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use tick::Clock;
 
 #[tokio::main]
@@ -14,13 +14,12 @@ async fn main() {
     let clock = Clock::new_tokio();
 
     // Set up telemetry
-    let logger = SdkLoggerProvider::builder().build();
-    let meter = SdkMeterProvider::builder().build();
-    let telemetry = CacheTelemetry::new(logger, &meter, clock.clone());
+    let meter_provider = SdkMeterProvider::builder().build();
 
     let cache = Cache::builder::<String, String>(clock)
         .memory()
-        .telemetry(telemetry, "my-cache")
+        .use_logs(true)
+        .use_metrics(&meter_provider)
         .ttl(Duration::from_secs(30))
         .build();
 

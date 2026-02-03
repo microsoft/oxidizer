@@ -132,32 +132,32 @@ mod tests {
     }
 
     #[test]
-    fn cachelon_operation_get() {
+    fn cache_operation_get() {
         let op: CacheOperation<String, i32> = CacheOperation::Get(GetRequest::new("key".to_string()));
         assert!(matches!(op, CacheOperation::Get(_)));
     }
 
     #[test]
-    fn cachelon_operation_insert() {
+    fn cache_operation_insert() {
         let entry = CacheEntry::new(42);
         let op = CacheOperation::Insert(InsertRequest::new("key".to_string(), entry));
         assert!(matches!(op, CacheOperation::Insert(_)));
     }
 
     #[test]
-    fn cachelon_operation_invalidate() {
+    fn cache_operation_invalidate() {
         let op: CacheOperation<String, i32> = CacheOperation::Invalidate(InvalidateRequest::new("key".to_string()));
         assert!(matches!(op, CacheOperation::Invalidate(_)));
     }
 
     #[test]
-    fn cachelon_operation_clear() {
+    fn cache_operation_clear() {
         let op: CacheOperation<String, i32> = CacheOperation::Clear;
         assert!(matches!(op, CacheOperation::Clear));
     }
 
     #[test]
-    fn cachelon_response_is_hit() {
+    fn cache_response_is_hit() {
         let entry = CacheEntry::new(42);
         let response: CacheResponse<i32> = CacheResponse::Get(Some(entry));
         assert!(response.is_hit());
@@ -165,14 +165,14 @@ mod tests {
     }
 
     #[test]
-    fn cachelon_response_is_miss() {
+    fn cache_response_is_miss() {
         let response: CacheResponse<i32> = CacheResponse::Get(None);
         assert!(response.is_miss());
         assert!(!response.is_hit());
     }
 
     #[test]
-    fn cachelon_response_into_entry_with_value() {
+    fn cache_response_into_entry_with_value() {
         let entry = CacheEntry::new(42);
         let response = CacheResponse::Get(Some(entry));
         let extracted = response.into_entry();
@@ -181,14 +181,14 @@ mod tests {
     }
 
     #[test]
-    fn cachelon_response_into_entry_without_value() {
+    fn cache_response_into_entry_without_value() {
         let response: CacheResponse<i32> = CacheResponse::Get(None);
         let extracted = response.into_entry();
         assert!(extracted.is_none());
     }
 
     #[test]
-    fn cachelon_response_into_entry_non_get() {
+    fn cache_response_into_entry_non_get() {
         let response: CacheResponse<i32> = CacheResponse::Insert(());
         let extracted = response.into_entry();
         assert!(extracted.is_none());

@@ -6,10 +6,11 @@
 //! This module provides the builder pattern infrastructure for creating
 //! caches with configurable storage, TTL, telemetry, and fallback tiers.
 
+#[cfg(any(feature = "metrics", test))]
+use opentelemetry::metrics::{Meter, MeterProvider};
 use std::{hash::Hash, marker::PhantomData, time::Duration};
 use tick::Clock;
 
-#[cfg(any(feature = "tokio", test))]
 use crate::refresh::TimeToRefresh;
 use crate::{
     Cache, CacheTier,
@@ -18,7 +19,7 @@ use crate::{
     wrapper::CacheWrapper,
 };
 
-#[cfg(feature = "telemetry")]
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 use crate::telemetry::CacheTelemetry;
 #[cfg(feature = "memory")]
 use cachelon_memory::InMemoryCache;
@@ -74,9 +75,10 @@ pub struct CacheBuilder<K, V, S = ()> {
     storage: S,
     ttl: Option<Duration>,
     clock: Clock,
-    #[cfg(feature = "telemetry")]
-    telemetry: Option<CacheTelemetry>,
-    #[cfg(feature = "tokio")]
+    #[cfg(any(feature = "logs", test))]
+    logs_enabled: bool,
+    #[cfg(any(feature = "metrics", test))]
+    meter: Option<Meter>,
     stampede_protection: bool,
     _phantom: PhantomData<(K, V)>,
 }
@@ -88,9 +90,10 @@ impl<K, V> CacheBuilder<K, V, ()> {
             storage: (),
             ttl: None,
             clock,
-            #[cfg(feature = "telemetry")]
-            telemetry: None,
-            #[cfg(feature = "tokio")]
+            #[cfg(any(feature = "logs", test))]
+            logs_enabled: false,
+            #[cfg(any(feature = "metrics", test))]
+            meter: None,
             stampede_protection: false,
             _phantom: PhantomData,
         }
@@ -127,9 +130,10 @@ impl<K, V> CacheBuilder<K, V, ()> {
             storage,
             ttl: self.ttl,
             clock: self.clock,
-            #[cfg(feature = "telemetry")]
-            telemetry: self.telemetry,
-            #[cfg(feature = "tokio")]
+            #[cfg(any(feature = "logs", test))]
+            logs_enabled: self.logs_enabled,
+            #[cfg(any(feature = "metrics", test))]
+            meter: self.meter,
             stampede_protection: self.stampede_protection,
             _phantom: PhantomData,
         }
@@ -191,14 +195,25 @@ impl<K, V> CacheBuilder<K, V, ()> {
 }
 
 impl<K, V, S> CacheBuilder<K, V, S> {
-    /// Sets the telemetry and name for this cache tier.
+    /// Enables or disables logging for this cache.
     ///
-    /// The name is used to identify this tier in telemetry output.
-    #[cfg(feature = "telemetry")]
+    /// When enabled, cache operations will emit structured logs via the `tracing` crate.
+    #[cfg(any(feature = "logs", test))]
     #[must_use]
-    pub fn telemetry(mut self, telemetry: CacheTelemetry, name: &'static str) -> Self {
-        self.telemetry = Some(telemetry);
-        self.name = Some(name);
+    pub fn use_logs(mut self, enabled: bool) -> Self {
+        self.logs_enabled = enabled;
+        self
+    }
+
+    /// Configures metrics collection for this cache.
+    ///
+    /// When configured, cache operations will emit metrics via OpenTelemetry.
+    #[cfg(any(feature = "metrics", test))]
+    #[must_use]
+    pub fn use_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
+        use crate::telemetry::metrics::create_meter;
+
+        self.meter = Some(create_meter(meter_provider));
         self
     }
 
@@ -222,7 +237,6 @@ impl<K, V, S> CacheBuilder<K, V, S> {
     ///     .stampede_protection()
     ///     .build();
     /// ```
-    #[cfg(feature = "tokio")]
     #[must_use]
     pub fn stampede_protection(mut self) -> Self {
         self.stampede_protection = true;
@@ -277,9 +291,10 @@ where
         FB: CacheTierBuilder<K, V>,
     {
         let clock = self.clock.clone();
-        #[cfg(feature = "telemetry")]
-        let telemetry = self.telemetry.clone();
-        #[cfg(feature = "tokio")]
+        #[cfg(any(feature = "logs", feature = "metrics", test))]
+        let logs_enabled = self.logs_enabled;
+        #[cfg(any(feature = "metrics", test))]
+        let meter = self.meter.clone();
         let stampede_protection = self.stampede_protection;
 
         FallbackBuilder {
@@ -288,11 +303,11 @@ where
             fallback_builder: fallback,
             policy: FallbackPromotionPolicy::Always,
             clock,
-            #[cfg(any(feature = "tokio", test))]
             refresh: None,
-            #[cfg(feature = "telemetry")]
-            telemetry,
-            #[cfg(feature = "tokio")]
+            #[cfg(any(feature = "logs", test))]
+            logs_enabled,
+            #[cfg(any(feature = "metrics", test))]
+            meter,
             stampede_protection,
             _phantom: PhantomData,
         }
@@ -339,24 +354,31 @@ pub struct FallbackBuilder<K, V, PB, FB> {
     fallback_builder: FB,
     policy: FallbackPromotionPolicy<V>,
     clock: Clock,
-    #[cfg(any(feature = "tokio", test))]
     refresh: Option<TimeToRefresh<K>>,
-    #[cfg(feature = "telemetry")]
-    telemetry: Option<CacheTelemetry>,
-    #[cfg(feature = "tokio")]
+    #[cfg(any(feature = "logs", test))]
+    logs_enabled: bool,
+    #[cfg(any(feature = "metrics", test))]
+    meter: Option<Meter>,
     stampede_protection: bool,
     _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
-    /// Sets the telemetry and name for this fallback cache.
-    ///
-    /// The name is used to identify this tier in telemetry output.
-    #[cfg(feature = "telemetry")]
+    /// Enables or disables logging for this fallback cache.
+    #[cfg(any(feature = "logs", test))]
     #[must_use]
-    pub fn telemetry(mut self, telemetry: CacheTelemetry, name: &'static str) -> Self {
-        self.telemetry = Some(telemetry);
-        self.name = Some(name);
+    pub fn use_logs(mut self, enabled: bool) -> Self {
+        self.logs_enabled = enabled;
+        self
+    }
+
+    /// Enables or disables metrics for this fallback cache.
+    #[cfg(any(feature = "metrics", test))]
+    #[must_use]
+    pub fn use_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
+        use crate::telemetry::metrics::create_meter;
+
+        self.meter = Some(create_meter(meter_provider));
         self
     }
 
@@ -390,7 +412,6 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     ///
     /// When entries in the primary tier exceed the refresh duration,
     /// they will be asynchronously refreshed from the fallback tier.
-    #[cfg(any(feature = "tokio", test))]
     #[must_use]
     pub fn time_to_refresh(mut self, refresh: TimeToRefresh<K>) -> Self {
         self.refresh = Some(refresh);
@@ -404,7 +425,6 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     ///
     /// This prevents the "thundering herd" problem where many concurrent cache
     /// misses for the same key overwhelm the backend.
-    #[cfg(feature = "tokio")]
     #[must_use]
     pub fn stampede_protection(mut self) -> Self {
         self.stampede_protection = true;
@@ -430,9 +450,10 @@ where
         FB2: CacheTierBuilder<K, V>,
     {
         let clock = self.clock.clone();
-        #[cfg(feature = "telemetry")]
-        let telemetry = self.telemetry.clone();
-        #[cfg(feature = "tokio")]
+        #[cfg(any(feature = "logs", test))]
+        let logs_enabled = self.logs_enabled;
+        #[cfg(any(feature = "metrics", test))]
+        let meter = self.meter.clone();
         let stampede_protection = self.stampede_protection;
 
         FallbackBuilder {
@@ -441,11 +462,11 @@ where
             fallback_builder: fallback,
             policy: FallbackPromotionPolicy::Always,
             clock,
-            #[cfg(any(feature = "tokio", test))]
             refresh: None,
-            #[cfg(feature = "telemetry")]
-            telemetry,
-            #[cfg(feature = "tokio")]
+            #[cfg(any(feature = "logs", test))]
+            logs_enabled,
+            #[cfg(any(feature = "metrics", test))]
+            meter,
             stampede_protection,
             _phantom: PhantomData,
         }
@@ -505,7 +526,11 @@ pub(crate) trait Buildable<K, V> {
 
     fn build(self) -> Cache<K, V, Self::Output>;
 
-    fn build_tier(self, clock: Clock, #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>) -> Self::Output;
+    fn build_tier(
+        self,
+        clock: Clock,
+        #[cfg(any(feature = "logs", feature = "metrics", test))] telemetry: Option<CacheTelemetry>,
+    ) -> Self::Output;
 }
 
 impl<K, V, S> Buildable<K, V> for CacheBuilder<K, V, S>
@@ -518,33 +543,30 @@ where
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let clock = self.clock.clone();
-        #[cfg(feature = "telemetry")]
-        let telemetry = self.telemetry.clone();
-        #[cfg(feature = "tokio")]
+        let telemetry = CacheTelemetry::new(self.logs_enabled, self.meter.as_ref(), clock.clone());
+
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(
             clock.clone(),
-            #[cfg(feature = "telemetry")]
-            telemetry,
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
+            Some(telemetry),
         );
 
-        Cache::new(
-            short_type_name::<Cache<K, V, Self::Output>>(None),
-            tier,
-            clock,
-            #[cfg(feature = "tokio")]
-            stampede_protection,
-        )
+        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(None), tier, clock, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>) -> Self::Output {
+    fn build_tier(
+        self,
+        clock: Clock,
+        #[cfg(any(feature = "logs", feature = "metrics", test))] telemetry: Option<CacheTelemetry>,
+    ) -> Self::Output {
         CacheWrapper::new(
             short_type_name::<S>(self.name),
             self.storage,
             clock,
             self.ttl,
-            #[cfg(feature = "telemetry")]
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry,
         )
     }
@@ -562,35 +584,32 @@ where
     fn build(self) -> Cache<K, V, Self::Output> {
         let name = self.name;
         let clock = self.clock.clone();
-        #[cfg(feature = "telemetry")]
-        let telemetry = self.telemetry.clone();
-        #[cfg(feature = "tokio")]
+        #[cfg(any(feature = "logs", feature = "metrics", test))]
+        let telemetry = CacheTelemetry::new(self.logs_enabled, self.meter.as_ref(), clock.clone());
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(
             clock.clone(),
-            #[cfg(feature = "telemetry")]
-            telemetry,
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
+            Some(telemetry),
         );
 
-        Cache::new(
-            short_type_name::<Cache<K, V, Self::Output>>(name),
-            tier,
-            clock,
-            #[cfg(feature = "tokio")]
-            stampede_protection,
-        )
+        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(name), tier, clock, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, #[cfg(feature = "telemetry")] telemetry: Option<CacheTelemetry>) -> Self::Output {
+    fn build_tier(
+        self,
+        clock: Clock,
+        #[cfg(any(feature = "logs", feature = "metrics", test))] telemetry: Option<CacheTelemetry>,
+    ) -> Self::Output {
         let primary = self.primary_builder.build_tier(
             clock.clone(),
-            #[cfg(feature = "telemetry")]
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry.clone(),
         );
         let fallback = self.fallback_builder.build_tier(
             clock.clone(),
-            #[cfg(feature = "telemetry")]
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry.clone(),
         );
 
@@ -600,9 +619,8 @@ where
             fallback,
             self.policy,
             clock,
-            #[cfg(any(feature = "tokio", test))]
             self.refresh,
-            #[cfg(feature = "telemetry")]
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry,
         )
     }
@@ -634,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn cachelon_builder_with_ttl() {
+    fn cache_builder_with_ttl() {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().ttl(Duration::from_secs(300)).build();
 
@@ -642,45 +660,43 @@ mod tests {
         assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
     }
 
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "logs", test))]
     #[test]
-    fn cachelon_builder_with_telemetry() {
-        use crate::telemetry::CacheTelemetry;
-        use opentelemetry_sdk::{logs::SdkLoggerProvider, metrics::SdkMeterProvider};
-
+    fn cache_builder_with_logs() {
         let clock = Clock::new_frozen();
-        let logger_provider = SdkLoggerProvider::builder().build();
-        let meter_provider = SdkMeterProvider::builder().build();
-        let telemetry = CacheTelemetry::new(logger_provider, &meter_provider, clock.clone());
 
-        let cache = Cache::builder::<String, i32>(clock)
-            .memory()
-            .telemetry(telemetry, "test_cache")
-            .build();
+        let cache = Cache::builder::<String, i32>(clock).memory().use_logs(true).build();
 
-        assert_eq!(cache.inner().name(), "test_cache");
+        assert!(!cache.inner().name().is_empty());
     }
 
-    #[cfg(feature = "telemetry")]
+    #[cfg(any(feature = "metrics", test))]
     #[test]
-    fn fallback_builder_with_telemetry() {
-        use crate::telemetry::CacheTelemetry;
-        use opentelemetry_sdk::{logs::SdkLoggerProvider, metrics::SdkMeterProvider};
+    fn cache_builder_with_metrics() {
+        use opentelemetry_sdk::metrics::SdkMeterProvider;
 
         let clock = Clock::new_frozen();
-        let logger_provider = SdkLoggerProvider::builder().build();
         let meter_provider = SdkMeterProvider::builder().build();
-        let telemetry = CacheTelemetry::new(logger_provider, &meter_provider, clock.clone());
+
+        let cache = Cache::builder::<String, i32>(clock).memory().use_metrics(&meter_provider).build();
+
+        assert!(!cache.inner().name().is_empty());
+    }
+
+    #[cfg(any(feature = "logs", test))]
+    #[test]
+    fn fallback_builder_with_logs() {
+        let clock = Clock::new_frozen();
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
             .fallback(fallback)
-            .telemetry(telemetry, "fallback_cache")
+            .use_logs(true)
             .build();
 
-        assert_eq!(cache.name(), "fallback_cache");
+        assert!(!cache.name().is_empty());
     }
 
     #[test]

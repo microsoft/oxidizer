@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use anyspawn::Spawner;
 use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, refresh::TimeToRefresh};
 use tick::Clock;
 
@@ -47,7 +48,7 @@ async fn main() {
         .memory()
         .ttl(Duration::from_secs(10))
         .fallback(Cache::builder::<String, String>(clock).storage(db.clone()))
-        .time_to_refresh(TimeToRefresh::new_tokio(Duration::from_secs(1)))
+        .time_to_refresh(TimeToRefresh::new(Duration::from_secs(1), Spawner::new_tokio()))
         .promotion_policy(FallbackPromotionPolicy::Always)
         .build();
 

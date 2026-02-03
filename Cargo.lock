@@ -317,6 +317,7 @@ dependencies = [
  "thread_aware",
  "tick",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "uniflight",
 ]
