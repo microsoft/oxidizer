@@ -204,19 +204,8 @@ mod tests {
     use super::*;
     use cachelon_memory::InMemoryCache;
 
-    // Public API tests (via Cache) moved to tests/wrapper.rs
-    // Tests below access internal CacheWrapper construction or private methods
-
     #[test]
-    fn wrapper_inner() {
-        let clock = Clock::new_frozen();
-        let inner = InMemoryCache::<String, i32>::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, None);
-        let _inner_ref = wrapper.inner();
-    }
-
-    #[test]
-    fn wrapper_is_expired_with_no_ttl() {
+    fn wrapper_is_expired_with_no_ttl_returns_false() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, None);
@@ -227,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_is_expired_without_cached_at() {
+    fn wrapper_is_expired_with_ttl_without_cached_at_returns_true() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(Duration::from_secs(60)), None);

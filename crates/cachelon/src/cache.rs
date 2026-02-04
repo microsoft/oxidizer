@@ -99,7 +99,7 @@ impl Cache<(), (), ()> {
     }
 }
 
-/// Constructor and accessor methods.
+/// Constructor and access methods.
 impl<K, V, S> Cache<K, V, S>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
@@ -386,30 +386,5 @@ where
                 Ok(cachelon_service::CacheResponse::Clear(()))
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        futures::executor::block_on(f)
-    }
-
-    #[test]
-    fn try_get_or_insert_error() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-            let key = "key".to_string();
-
-            let result: std::result::Result<CacheEntry<i32>, Error> = cache
-                .try_get_or_insert(&key, || async { Err(Error::from_message("fetch failed")) })
-                .await;
-
-            result.unwrap_err();
-        });
     }
 }

@@ -53,6 +53,7 @@ pub trait CacheTelemetryExt {
 }
 
 impl CacheTelemetryExt for Option<CacheTelemetry> {
+    #[allow(unused_variables, reason = "No-op when telemetry is disabled")]
     fn record(&self, name: CacheName, operation: CacheOperation, event: CacheActivity, duration: Duration) {
         #[cfg(any(feature = "logs", feature = "metrics", test))]
         if let Some(t) = self {
@@ -60,6 +61,7 @@ impl CacheTelemetryExt for Option<CacheTelemetry> {
         }
     }
 
+    #[allow(unused_variables, reason = "No-op when telemetry is disabled")]
     fn record_size(&self, name: CacheName, size: u64) {
         #[cfg(any(feature = "logs", feature = "metrics", test))]
         if let Some(t) = self {

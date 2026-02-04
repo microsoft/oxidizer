@@ -6,7 +6,7 @@
 //! Note: Tests for internal behavior (promotion policy internals, refresh mechanism)
 //! are in the unit tests in `src/fallback.rs`.
 
-use cachelon::{Cache, CacheEntry, Error, FallbackPromotionPolicy};
+use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use cachelon_tier::testing::MockCache;
 use tick::Clock;
 
@@ -327,6 +327,31 @@ fn nested_fallback_builder() -> TestResult {
         cache.insert(&key, CacheEntry::new(42)).await?;
         let entry = cache.get(&key).await?;
         assert_eq!(*entry.unwrap().value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn fallback_get_triggers_promotion() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+        let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+
+        fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .build();
+
+        // get should trigger promotion from fallback
+        let result = cache.get(&"key".to_string()).await?;
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
         Ok(())
     })
 }

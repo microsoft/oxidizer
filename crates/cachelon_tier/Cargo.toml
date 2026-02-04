@@ -20,10 +20,7 @@ repository.workspace = true
 all-features = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "ohno::enrichable::Enrichable",
-    "ohno::error_ext::ErrorExt",
-]
+allowed_external_types = ["ohno::enrichable::Enrichable", "ohno::error_ext::ErrorExt"]
 
 [features]
 default = ["dynamic-cache"]

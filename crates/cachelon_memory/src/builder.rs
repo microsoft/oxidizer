@@ -5,7 +5,7 @@
 //!
 //! This module provides a builder API for `InMemoryCache` that abstracts
 //! the underlying moka configuration, providing a stable API surface
-//! without exposing moka's types.
+//! without exposing moka types.
 
 use std::hash::Hash;
 use std::marker::PhantomData;

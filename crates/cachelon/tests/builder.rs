@@ -86,7 +86,7 @@ fn mock_cache_shares_state_with_handle() -> TestResult {
 #[test]
 fn cache_builder_clock() {
     let clock = Clock::new_frozen();
-    let builder = Cache::builder::<String, i32>(clock.clone());
+    let builder = Cache::builder::<String, i32>(clock);
     let builder_clock = builder.clock();
     // Verify clock is accessible and returns valid instant
     let _ = builder_clock.instant();

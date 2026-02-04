@@ -38,7 +38,7 @@ where
     }
 }
 
-/// A cloneable dynamic cache tier with type erasure.
+/// A clonable dynamic cache tier with type erasure.
 ///
 /// `DynamicCache` wraps a trait object in an `Arc` to enable cloning while maintaining
 /// dynamic dispatch. Use this when you need to erase the concrete storage type
@@ -105,5 +105,3 @@ where
         self.0.is_empty()
     }
 }
-
-// Public API tests are in `tests/dynamic.rs`.

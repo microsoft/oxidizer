@@ -12,7 +12,6 @@ use futures::join;
 use tick::Clock;
 
 use crate::refresh::TimeToRefresh;
-#[cfg(any(feature = "logs", feature = "metrics", test))]
 use crate::telemetry::CacheTelemetry;
 use crate::{Error, cache::CacheName, telemetry::ext::ClockExt};
 use cachelon_tier::{CacheEntry, CacheTier};
@@ -153,7 +152,6 @@ pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) policy: FallbackPromotionPolicy<V>,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
-    #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub(crate) telemetry: Option<CacheTelemetry>,
     _phantom: PhantomData<K>,
 }
@@ -206,7 +204,7 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
         policy: FallbackPromotionPolicy<V>,
         clock: Clock,
         refresh: Option<TimeToRefresh<K>>,
-        #[cfg(any(feature = "logs", feature = "metrics", test))] telemetry: Option<CacheTelemetry>,
+        telemetry: Option<CacheTelemetry>,
     ) -> Self {
         Self {
             inner: Arc::new(FallbackCacheInner {
@@ -216,7 +214,6 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
                 policy,
                 clock,
                 refresh,
-                #[cfg(any(feature = "logs", feature = "metrics", test))]
                 telemetry,
                 _phantom: PhantomData,
             }),
@@ -459,33 +456,6 @@ mod tests {
             assert!(positive.is_some());
             let negative = primary_check.get(&"negative".to_string()).await.expect("get failed");
             assert!(negative.is_none());
-        });
-    }
-
-    /// Tests that `get` also triggers promotion from fallback.
-    #[test]
-    fn fallback_cachelon_get_with_promotion() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-
-            let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
-            let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
-
-            fallback_storage
-                .insert(&"key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("insert failed");
-
-            let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
-
-            let cache = Cache::builder::<String, i32>(clock)
-                .storage(primary_storage)
-                .fallback(fallback)
-                .build();
-
-            // get should also trigger promotion
-            let result = cache.get(&"key".to_string()).await.expect("get failed");
-            assert!(result.is_some());
         });
     }
 }

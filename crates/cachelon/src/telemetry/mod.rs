@@ -10,10 +10,13 @@
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 use cache::CacheTelemetryInner;
 #[cfg(any(feature = "logs", feature = "metrics", test))]
-use opentelemetry::logs::Severity;
-
+use opentelemetry::{logs::Severity, metrics::Meter};
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 use thread_aware::{Arc, PerCore};
+#[cfg(any(feature = "logs", feature = "metrics", test))]
+use tick::Clock;
 
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 pub(crate) mod attributes;
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 pub(crate) mod cache;
@@ -35,6 +38,52 @@ pub struct CacheTelemetry {
     inner: Arc<CacheTelemetryInner, PerCore>,
 }
 
+impl CacheTelemetry {
+    /// Creates a new cache telemetry collector.
+    ///
+    /// # Arguments
+    ///
+    /// * `logging_enabled` - Whether logging is enabled
+    /// * `meter` - The OpenTelemetry meter to use for metrics
+    /// * `clock` - The clock to use for timing events
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
+    #[must_use]
+    pub fn new(logging_enabled: bool, meter: Option<&Meter>, clock: Clock) -> Self {
+        use crate::telemetry::metrics::{create_cache_size_gauge, create_event_counter, create_operation_duration_histogram};
+
+        Self {
+            inner: Arc::from_unaware(CacheTelemetryInner {
+                logging_enabled,
+                clock,
+                event_counter: meter.map(create_event_counter),
+                operation_duration: meter.map(create_operation_duration_histogram),
+                cache_size: meter.map(create_cache_size_gauge),
+            }),
+        }
+    }
+}
+
+#[cfg(any(feature = "logs", feature = "metrics", test))]
+macro_rules! create_telemetry {
+    ($builder:expr, $clock:expr) => {
+        Some($crate::telemetry::CacheTelemetry::new(
+            $builder.logs_enabled,
+            $builder.meter.as_ref(),
+            $clock,
+        ))
+    };
+}
+
+#[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+macro_rules! create_telemetry {
+    ($builder:expr, $clock:expr) => {{
+        let _ = (&$builder, &$clock); // silence unused warnings
+        None::<$crate::telemetry::CacheTelemetry>
+    }};
+}
+
+pub(crate) use create_telemetry;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CacheOperation {
     Get,
@@ -43,6 +92,7 @@ pub(crate) enum CacheOperation {
     Clear,
 }
 
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 impl CacheOperation {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -70,6 +120,7 @@ pub(crate) enum CacheActivity {
     Error,
 }
 
+#[cfg(any(feature = "logs", feature = "metrics", test))]
 impl CacheActivity {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -87,7 +138,6 @@ impl CacheActivity {
         }
     }
 
-    #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub fn severity(self) -> Severity {
         match self {
             Self::Hit | Self::Miss | Self::RefreshHit | Self::Ok => Severity::Debug,

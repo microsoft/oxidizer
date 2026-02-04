@@ -9,17 +9,13 @@ use arrayvec::ArrayVec;
 use opentelemetry::{
     KeyValue,
     logs::Severity,
-    metrics::{Counter, Gauge, Histogram, Meter},
+    metrics::{Counter, Gauge, Histogram},
 };
-use thread_aware::Arc;
 use tick::Clock;
 
 use crate::{
     cache::CacheName,
-    telemetry::{
-        CacheActivity, CacheOperation, CacheTelemetry, attributes,
-        metrics::{create_cache_size_gauge, create_event_counter, create_operation_duration_histogram},
-    },
+    telemetry::{CacheActivity, CacheOperation, CacheTelemetry, attributes},
 };
 
 /// Maximum attributes per event: `cache_name`, event, event, `duration_ns`, reason = 5
@@ -29,33 +25,14 @@ type Attributes = ArrayVec<KeyValue, MAX_ATTRIBUTES>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CacheTelemetryInner {
-    clock: Clock,
-    logging_enabled: bool,
-    event_counter: Option<Counter<u64>>,
-    operation_duration: Option<Histogram<f64>>,
-    cache_size: Option<Gauge<u64>>,
+    pub(crate) clock: Clock,
+    pub(crate) logging_enabled: bool,
+    pub(crate) event_counter: Option<Counter<u64>>,
+    pub(crate) operation_duration: Option<Histogram<f64>>,
+    pub(crate) cache_size: Option<Gauge<u64>>,
 }
 
 impl CacheTelemetry {
-    /// Creates a new cache telemetry collector.
-    ///
-    /// # Arguments
-    ///
-    /// * `telemetry` - The oxidizer telemetry instance to use
-    /// * `clock` - The clock to use for timing events
-    #[must_use]
-    pub fn new(logging_enabled: bool, meter: Option<&Meter>, clock: Clock) -> Self {
-        Self {
-            inner: Arc::from_unaware(CacheTelemetryInner {
-                logging_enabled,
-                clock,
-                event_counter: meter.map(create_event_counter),
-                operation_duration: meter.map(create_operation_duration_histogram),
-                cache_size: meter.map(create_cache_size_gauge),
-            }),
-        }
-    }
-
     /// Returns a reference to the clock used for timing events.
     #[inline]
     #[must_use]
