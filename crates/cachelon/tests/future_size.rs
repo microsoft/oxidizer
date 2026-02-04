@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "memory")]
+
 //! Tests to verify that cache future sizes remain bounded with nested fallback tiers.
 
 use cachelon::{Cache, CacheEntry};

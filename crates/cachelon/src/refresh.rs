@@ -20,10 +20,7 @@ use parking_lot::Mutex;
 
 use crate::{
     fallback::{FallbackCache, FallbackCacheInner},
-    telemetry::{
-        CacheActivity, CacheOperation,
-        ext::{CacheTelemetryExt, ClockExt},
-    },
+    telemetry::{CacheActivity, CacheOperation, ext::ClockExt},
 };
 
 use cachelon_tier::{CacheEntry, CacheTier};

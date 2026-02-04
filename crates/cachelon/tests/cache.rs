@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "memory")]
+
 //! Integration tests for Cache API.
 
 use cachelon::{Cache, CacheEntry, Error};
@@ -191,7 +193,7 @@ fn try_get_or_insert_error() {
             .try_get_or_insert(&key, || async { Err(Error::from_message("test error")) })
             .await;
 
-        result.unwrap_err();
+        result.expect_err("factory error should propagate");
     });
 }
 

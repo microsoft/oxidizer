@@ -152,7 +152,7 @@ pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) policy: FallbackPromotionPolicy<V>,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
-    pub(crate) telemetry: Option<CacheTelemetry>,
+    pub(crate) telemetry: CacheTelemetry,
     _phantom: PhantomData<K>,
 }
 
@@ -204,7 +204,7 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
         policy: FallbackPromotionPolicy<V>,
         clock: Clock,
         refresh: Option<TimeToRefresh<K>>,
-        telemetry: Option<CacheTelemetry>,
+        telemetry: CacheTelemetry,
     ) -> Self {
         Self {
             inner: Arc::new(FallbackCacheInner {

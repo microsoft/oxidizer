@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Cache entry type with value and metadata.
+
 use std::{
     ops::Deref,
     time::{Duration, SystemTime},
@@ -100,31 +102,32 @@ impl<V> CacheEntry<V> {
 
     /// Returns the timestamp when this entry was cached.
     ///
-    /// Returns `None` if the entry hasn't been inserted yet or was created
-    /// without a timestamp.
+    /// Returns `None` if the entry hasn't been inserted into a cache yet,
+    /// or was created without [`with_cached_at`](Self::with_cached_at).
     #[must_use]
     pub fn cached_at(&self) -> Option<SystemTime> {
         self.cached_at
     }
 
-    /// Sets the timestamp when this entry was cached.
+    /// Sets the cache timestamp.
     ///
-    /// This is typically called by the cache implementation when inserting.
+    /// Called automatically by the cache during insertion. You typically
+    /// don't need to call this directly unless reconstructing entries
+    /// from persistent storage.
     pub fn set_cached_at(&mut self, cached_at: SystemTime) {
         self.cached_at = Some(cached_at);
     }
 
-    /// Returns the per-entry TTL, if set.
+    /// Returns the per-entry TTL override.
     ///
-    /// Per-entry TTL takes precedence over tier-level TTL.
+    /// When set, this takes precedence over any tier-level TTL configured
+    /// on the cache.
     #[must_use]
     pub fn ttl(&self) -> Option<Duration> {
         self.ttl
     }
 
-    /// Sets the per-entry TTL.
-    ///
-    /// This overrides any tier-level TTL for this specific entry.
+    /// Sets a per-entry TTL that overrides the tier-level TTL.
     pub fn set_ttl(&mut self, ttl: Duration) {
         self.ttl = Some(ttl);
     }

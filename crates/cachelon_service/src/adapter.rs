@@ -156,24 +156,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adapter_insert() {
+    async fn adapter_insert_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
-        adapter.insert(&"key".to_string(), CacheEntry::new(100)).await.unwrap();
-        // No assertion - just verify it doesn't panic
+        let result = adapter.insert(&"key".to_string(), CacheEntry::new(100)).await;
+        assert!(result.is_ok(), "insert should succeed");
     }
 
     #[tokio::test]
-    async fn adapter_invalidate() {
+    async fn adapter_invalidate_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
-        adapter.invalidate(&"key".to_string()).await.unwrap();
-        // No assertion - just verify it doesn't panic
+        let result = adapter.invalidate(&"key".to_string()).await;
+        assert!(result.is_ok(), "invalidate should succeed");
     }
 
     #[tokio::test]
-    async fn adapter_clear() {
+    async fn adapter_clear_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
-        adapter.clear().await.unwrap();
-        // No assertion - just verify it doesn't panic
+        let result = adapter.clear().await;
+        assert!(result.is_ok(), "clear should succeed");
     }
 
     #[test]

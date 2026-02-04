@@ -7,12 +7,6 @@ use std::time::Duration;
 
 use tick::Clock;
 
-use crate::{
-    cache::CacheName,
-    telemetry::CacheTelemetry,
-    telemetry::{CacheActivity, CacheOperation},
-};
-
 /// Result of a timed async operation.
 #[derive(Debug, Clone, Copy)]
 pub struct TimedResult<R> {
@@ -44,32 +38,6 @@ impl ClockExt for Clock {
     }
 }
 
-pub trait CacheTelemetryExt {
-    /// Records a cache operation if telemetry is enabled.
-    fn record(&self, name: CacheName, operation: CacheOperation, event: CacheActivity, duration: Duration);
-
-    /// Records the current cache size if telemetry is enabled.
-    fn record_size(&self, name: CacheName, size: u64);
-}
-
-impl CacheTelemetryExt for Option<CacheTelemetry> {
-    #[allow(unused_variables, reason = "No-op when telemetry is disabled")]
-    fn record(&self, name: CacheName, operation: CacheOperation, event: CacheActivity, duration: Duration) {
-        #[cfg(any(feature = "logs", feature = "metrics", test))]
-        if let Some(t) = self {
-            t.record(name, operation, event, Some(duration));
-        }
-    }
-
-    #[allow(unused_variables, reason = "No-op when telemetry is disabled")]
-    fn record_size(&self, name: CacheName, size: u64) {
-        #[cfg(any(feature = "logs", feature = "metrics", test))]
-        if let Some(t) = self {
-            t.record_size(name, size);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,19 +62,5 @@ mod tests {
             assert_eq!(timed.result, 42);
             assert_eq!(timed.duration, Duration::from_millis(100));
         });
-    }
-
-    #[test]
-    fn telemetry_ext_none_emits_no_logs() {
-        use crate::telemetry::testing::LogCapture;
-
-        let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
-
-        let telemetry: Option<CacheTelemetry> = None;
-        telemetry.record("cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(1));
-        telemetry.record_size("cache", 42);
-
-        assert!(capture.output().is_empty());
     }
 }

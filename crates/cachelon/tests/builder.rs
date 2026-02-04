@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "memory")]
+
 //! Integration tests for Cache builder API.
 
 use std::time::Duration;
@@ -57,12 +59,12 @@ fn mock_cache_failure_injection() {
 
         // get fails
         let result = cache.get(&"key".to_string()).await;
-        result.unwrap_err();
+        result.expect_err("mock configured to fail on get");
 
         // Clear failures and get succeeds
         mock.clear_failures();
         let result = cache.get(&"key".to_string()).await;
-        result.unwrap();
+        result.expect("get should succeed after clearing failures");
     });
 }
 

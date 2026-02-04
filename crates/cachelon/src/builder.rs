@@ -7,7 +7,7 @@
 //! caches with configurable storage, TTL, telemetry, and fallback tiers.
 
 #[cfg(any(feature = "metrics", test))]
-use opentelemetry::metrics::{Meter, MeterProvider};
+use opentelemetry::metrics::MeterProvider;
 use std::{hash::Hash, marker::PhantomData, time::Duration};
 use tick::Clock;
 
@@ -19,7 +19,7 @@ use crate::{
     wrapper::CacheWrapper,
 };
 
-use crate::telemetry::{CacheTelemetry, create_telemetry};
+use crate::telemetry::{CacheTelemetry, TelemetryConfig};
 #[cfg(feature = "memory")]
 use cachelon_memory::InMemoryCache;
 
@@ -74,9 +74,7 @@ pub struct CacheBuilder<K, V, S = ()> {
     storage: S,
     ttl: Option<Duration>,
     clock: Clock,
-    logs_enabled: bool,
-    #[cfg(any(feature = "metrics", test))]
-    meter: Option<Meter>,
+    telemetry: TelemetryConfig,
     stampede_protection: bool,
     _phantom: PhantomData<(K, V)>,
 }
@@ -88,9 +86,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             storage: (),
             ttl: None,
             clock,
-            logs_enabled: false,
-            #[cfg(any(feature = "metrics", test))]
-            meter: None,
+            telemetry: TelemetryConfig::new(),
             stampede_protection: false,
             _phantom: PhantomData,
         }
@@ -127,9 +123,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             storage,
             ttl: self.ttl,
             clock: self.clock,
-            logs_enabled: self.logs_enabled,
-            #[cfg(any(feature = "metrics", test))]
-            meter: self.meter,
+            telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
             _phantom: PhantomData,
         }
@@ -191,13 +185,13 @@ impl<K, V> CacheBuilder<K, V, ()> {
 }
 
 impl<K, V, S> CacheBuilder<K, V, S> {
-    /// Enables or disables logging for this cache.
+    /// Enables logging for this cache.
     ///
     /// When enabled, cache operations will emit structured logs via the `tracing` crate.
     #[cfg(any(feature = "logs", test))]
     #[must_use]
-    pub fn use_logs(mut self, enabled: bool) -> Self {
-        self.logs_enabled = enabled;
+    pub fn use_logs(mut self) -> Self {
+        self.telemetry = self.telemetry.with_logs();
         self
     }
 
@@ -207,9 +201,7 @@ impl<K, V, S> CacheBuilder<K, V, S> {
     #[cfg(any(feature = "metrics", test))]
     #[must_use]
     pub fn use_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        use crate::telemetry::metrics::create_meter;
-
-        self.meter = Some(create_meter(meter_provider));
+        self.telemetry = self.telemetry.with_metrics(meter_provider);
         self
     }
 
@@ -287,9 +279,7 @@ where
         FB: CacheTierBuilder<K, V>,
     {
         let clock = self.clock.clone();
-        let logs_enabled = self.logs_enabled;
-        #[cfg(any(feature = "metrics", test))]
-        let meter = self.meter.clone();
+        let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
         FallbackBuilder {
@@ -299,9 +289,7 @@ where
             policy: FallbackPromotionPolicy::Always,
             clock,
             refresh: None,
-            logs_enabled,
-            #[cfg(any(feature = "metrics", test))]
-            meter,
+            telemetry,
             stampede_protection,
             _phantom: PhantomData,
         }
@@ -349,19 +337,17 @@ pub struct FallbackBuilder<K, V, PB, FB> {
     policy: FallbackPromotionPolicy<V>,
     clock: Clock,
     refresh: Option<TimeToRefresh<K>>,
-    logs_enabled: bool,
-    #[cfg(any(feature = "metrics", test))]
-    meter: Option<Meter>,
+    telemetry: TelemetryConfig,
     stampede_protection: bool,
     _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
-    /// Enables or disables logging for this fallback cache.
+    /// Enables logging for this fallback cache.
     #[cfg(any(feature = "logs", test))]
     #[must_use]
-    pub fn use_logs(mut self, enabled: bool) -> Self {
-        self.logs_enabled = enabled;
+    pub fn use_logs(mut self) -> Self {
+        self.telemetry = self.telemetry.with_logs();
         self
     }
 
@@ -369,9 +355,7 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     #[cfg(any(feature = "metrics", test))]
     #[must_use]
     pub fn use_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        use crate::telemetry::metrics::create_meter;
-
-        self.meter = Some(create_meter(meter_provider));
+        self.telemetry = self.telemetry.with_metrics(meter_provider);
         self
     }
 
@@ -443,9 +427,7 @@ where
         FB2: CacheTierBuilder<K, V>,
     {
         let clock = self.clock.clone();
-        let logs_enabled = self.logs_enabled;
-        #[cfg(any(feature = "metrics", test))]
-        let meter = self.meter.clone();
+        let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
         FallbackBuilder {
@@ -455,9 +437,7 @@ where
             policy: FallbackPromotionPolicy::Always,
             clock,
             refresh: None,
-            logs_enabled,
-            #[cfg(any(feature = "metrics", test))]
-            meter,
+            telemetry,
             stampede_protection,
             _phantom: PhantomData,
         }
@@ -517,7 +497,7 @@ pub(crate) trait Buildable<K, V> {
 
     fn build(self) -> Cache<K, V, Self::Output>;
 
-    fn build_tier(self, clock: Clock, telemetry: Option<CacheTelemetry>) -> Self::Output;
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output;
 }
 
 impl<K, V, S> Buildable<K, V> for CacheBuilder<K, V, S>
@@ -530,11 +510,7 @@ where
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let clock = self.clock.clone();
-        #[cfg(any(feature = "logs", feature = "metrics", test))]
-        let telemetry = Some(CacheTelemetry::new(self.logs_enabled, self.meter.as_ref(), clock.clone()));
-        #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
-        let telemetry: Option<CacheTelemetry> = None;
-
+        let telemetry = self.telemetry.clone().build(clock.clone());
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(clock.clone(), telemetry);
@@ -542,7 +518,7 @@ where
         Cache::new(short_type_name::<Cache<K, V, Self::Output>>(None), tier, clock, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: Option<CacheTelemetry>) -> Self::Output {
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
         CacheWrapper::new(short_type_name::<S>(self.name), self.storage, clock, self.ttl, telemetry)
     }
 }
@@ -559,7 +535,7 @@ where
     fn build(self) -> Cache<K, V, Self::Output> {
         let name = self.name;
         let clock = self.clock.clone();
-        let telemetry = create_telemetry!(self, clock.clone());
+        let telemetry = self.telemetry.clone().build(clock.clone());
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(clock.clone(), telemetry);
@@ -567,7 +543,7 @@ where
         Cache::new(short_type_name::<Cache<K, V, Self::Output>>(name), tier, clock, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: Option<CacheTelemetry>) -> Self::Output {
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
         let primary = self.primary_builder.build_tier(clock.clone(), telemetry.clone());
         let fallback = self.fallback_builder.build_tier(clock.clone(), telemetry.clone());
 

@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Cache tier trait.
+//! The core trait for cache storage backends.
+//!
+//! [`CacheTier`] defines the interface that all cache backends must implement.
+//! This trait is designed for composition: implement the storage operations,
+//! then use `cachelon` to layer on telemetry, TTL, and multi-tier fallback.
 
 use crate::{CacheEntry, Error};
 

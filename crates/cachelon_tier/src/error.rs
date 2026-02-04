@@ -44,26 +44,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn error_caused_by_creates_error() {
+    fn error_debug_contains_cause_message() {
         let error = Error::caused_by("test error message");
         let debug_str = format!("{error:?}");
-        assert!(debug_str.contains("test error message") || !debug_str.is_empty());
+        assert!(
+            debug_str.contains("test error message"),
+            "debug output should contain the cause message, got: {debug_str}"
+        );
     }
 
     #[test]
-    fn error_display_is_non_empty() {
+    fn error_display_contains_cause_message() {
         let error = Error::caused_by("display test");
         let display_str = format!("{error}");
-        assert!(!display_str.is_empty());
+        assert!(
+            display_str.contains("display test"),
+            "display output should contain the cause message, got: {display_str}"
+        );
     }
 
     #[test]
-    fn result_type_alias_works() {
+    fn result_type_alias_propagates_errors() {
         fn returns_err() -> Result<i32> {
-            Err(Error::caused_by("test"))
+            Err(Error::caused_by("expected failure"))
         }
 
-        assert_eq!(42_i32, 42);
-        returns_err().unwrap_err();
+        let err = returns_err().expect_err("should return an error");
+        assert!(format!("{err}").contains("expected failure"));
     }
 }

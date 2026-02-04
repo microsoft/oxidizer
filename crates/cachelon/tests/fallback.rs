@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(feature = "memory")]
+
 //! Integration tests for fallback cache behavior.
 //!
 //! Note: Tests for internal behavior (promotion policy internals, refresh mechanism)
