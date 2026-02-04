@@ -1049,9 +1049,9 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "many_cpus"
-version = "1.1.5"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ab614fc8e14ffa2aab66ed7942362b33191752f3a5bf9533e9f88e4204545f"
+checksum = "3adf40dd69ad4b51598dd0c6f16fa69fb41e7d2cb9dc5961225c259f6fc79674"
 dependencies = [
  "cpulist",
  "derive_more",
@@ -1060,7 +1060,6 @@ dependencies = [
  "heapless",
  "itertools 0.14.0",
  "libc",
- "negative-impl",
  "new_zealand",
  "nonempty",
  "rand",
@@ -1105,17 +1104,6 @@ name = "mutants"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
-
-[[package]]
-name = "negative-impl"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67670e6848468ee39b823ed93add8bd2adb66a132b0c25fce6e60af0b81d930a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "new_zealand"
