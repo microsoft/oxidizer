@@ -375,15 +375,15 @@ where
             }
             cachelon_service::CacheOperation::Insert(req) => {
                 self.insert(&req.key, req.entry).await?;
-                Ok(cachelon_service::CacheResponse::Insert(()))
+                Ok(cachelon_service::CacheResponse::Insert())
             }
             cachelon_service::CacheOperation::Invalidate(req) => {
                 self.invalidate(&req.key).await?;
-                Ok(cachelon_service::CacheResponse::Invalidate(()))
+                Ok(cachelon_service::CacheResponse::Invalidate())
             }
             cachelon_service::CacheOperation::Clear => {
                 self.clear().await?;
-                Ok(cachelon_service::CacheResponse::Clear(()))
+                Ok(cachelon_service::CacheResponse::Clear())
             }
         }
     }

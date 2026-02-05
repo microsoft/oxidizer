@@ -33,33 +33,29 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// // Never promote
 /// let policy = FallbackPromotionPolicy::<String>::never();
 /// ```
+#[derive(Debug, Default)]
+pub struct FallbackPromotionPolicy<V>(FallbackPromotionPolicyType<V>);
+
 #[derive(Default)]
-#[expect(clippy::type_complexity, reason = "boxed closure type is necessary")]
-pub enum FallbackPromotionPolicy<V> {
+pub enum FallbackPromotionPolicyType<V> {
     /// Always promote values to primary cache.
     #[default]
     Always,
     /// Never promote values to primary cache.
     Never,
-    /// Promote based on a function pointer predicate.
-    ///
-    /// Use this for simple predicates without captured state - it has zero
-    /// allocation overhead and is slightly faster than `WhenBoxed`.
-    When(fn(&CacheEntry<V>) -> bool),
     /// Promote based on a boxed predicate that can capture state.
     ///
     /// Use this when you need to capture external state in the predicate.
     /// Has slight overhead from dynamic dispatch.
-    WhenBoxed(Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>),
+    When(Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>),
 }
 
-impl<V> std::fmt::Debug for FallbackPromotionPolicy<V> {
+impl<V> std::fmt::Debug for FallbackPromotionPolicyType<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Always => write!(f, "Always"),
             Self::Never => write!(f, "Never"),
-            Self::When(_) => write!(f, "When(<fn>)"),
-            Self::WhenBoxed(_) => write!(f, "WhenBoxed(<closure>)"),
+            Self::When(_) => write!(f, "WhenBoxed(<closure>)"),
         }
     }
 }
@@ -71,7 +67,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// of additional writes to the primary tier.
     #[must_use]
     pub fn always() -> Self {
-        Self::Always
+        Self(FallbackPromotionPolicyType::Always)
     }
 
     /// Creates a policy that never promotes values to the primary cache.
@@ -80,31 +76,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// to avoid write overhead to the primary tier.
     #[must_use]
     pub fn never() -> Self {
-        Self::Never
-    }
-
-    /// Creates a policy using a function pointer predicate.
-    ///
-    /// This is the most efficient option when no captured state is needed.
-    ///
-    /// ```
-    /// use cachelon::{Cache, CacheEntry, FallbackPromotionPolicy};
-    /// use tick::Clock;
-    ///
-    /// fn should_promote(entry: &CacheEntry<String>) -> bool {
-    ///     !entry.value().is_empty()
-    /// }
-    ///
-    /// let clock = Clock::new_frozen();
-    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
-    /// let cache = Cache::builder::<String, String>(clock)
-    ///     .memory()
-    ///     .fallback(l2)
-    ///     .promotion_policy(FallbackPromotionPolicy::when(should_promote))
-    ///     .build();
-    /// ```
-    pub fn when(predicate: fn(&CacheEntry<V>) -> bool) -> Self {
-        Self::When(predicate)
+        Self(FallbackPromotionPolicyType::Never)
     }
 
     /// Creates a policy using a closure that can capture state.
@@ -126,21 +98,20 @@ impl<V> FallbackPromotionPolicy<V> {
     ///     ))
     ///     .build();
     /// ```
-    pub fn when_boxed<F>(predicate: F) -> Self
+    pub fn when<F>(predicate: F) -> Self
     where
         F: Fn(&CacheEntry<V>) -> bool + Send + Sync + 'static,
     {
-        Self::WhenBoxed(Arc::new(predicate))
+        Self(FallbackPromotionPolicyType::When(Arc::new(predicate)))
     }
 
     /// Returns true if the response should be promoted to primary.
     #[inline]
     pub(crate) fn should_promote(&self, response: &CacheEntry<V>) -> bool {
-        match self {
-            Self::Always => true,
-            Self::Never => false,
-            Self::When(pred) => pred(response),
-            Self::WhenBoxed(pred) => pred(response),
+        match &self.0 {
+            FallbackPromotionPolicyType::Always => true,
+            FallbackPromotionPolicyType::Never => false,
+            FallbackPromotionPolicyType::When(pred) => pred(response),
         }
     }
 }
@@ -342,7 +313,7 @@ mod tests {
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(primary_storage)
                 .fallback(fallback)
-                .promotion_policy(FallbackPromotionPolicy::Always)
+                .promotion_policy(FallbackPromotionPolicy::always())
                 .build();
 
             // Primary should be empty initially
@@ -381,7 +352,7 @@ mod tests {
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(primary_storage)
                 .fallback(fallback)
-                .promotion_policy(FallbackPromotionPolicy::Never)
+                .promotion_policy(FallbackPromotionPolicy::never())
                 .build();
 
             // Get should find in fallback but NOT promote

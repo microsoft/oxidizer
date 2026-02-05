@@ -55,7 +55,7 @@ async fn main() {
         .memory()
         .ttl(Duration::from_secs(60))
         .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::when_boxed(|e: &CacheEntry<UserData>| {
+        .promotion_policy(FallbackPromotionPolicy::when(|e: &CacheEntry<UserData>| {
             matches!(e.value(), UserData::NotFound)
         }))
         .build();

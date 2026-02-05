@@ -222,7 +222,7 @@ fn fallback_builder_with_promotion_policy_always() -> TestResult {
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
             .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::Always)
+            .promotion_policy(FallbackPromotionPolicy::always())
             .build();
 
         let key = "key".to_string();
@@ -243,32 +243,7 @@ fn fallback_builder_with_promotion_policy_never() -> TestResult {
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
             .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::Never)
-            .build();
-
-        let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await?;
-        let entry = cache.get(&key).await?;
-        assert_eq!(*entry.unwrap().value(), 42);
-        Ok(())
-    })
-}
-
-#[test]
-fn fallback_builder_with_promotion_policy_when() -> TestResult {
-    fn is_positive(entry: &CacheEntry<i32>) -> bool {
-        *entry.value() > 0
-    }
-
-    block_on(async {
-        let clock = Clock::new_frozen();
-
-        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
-
-        let cache = Cache::builder::<String, i32>(clock)
-            .memory()
-            .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::when(is_positive))
+            .promotion_policy(FallbackPromotionPolicy::never())
             .build();
 
         let key = "key".to_string();
@@ -291,7 +266,7 @@ fn fallback_builder_with_promotion_policy_when_boxed() -> TestResult {
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
             .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::when_boxed(move |entry: &CacheEntry<i32>| {
+            .promotion_policy(FallbackPromotionPolicy::when(move |entry: &CacheEntry<i32>| {
                 *entry.value() >= threshold
             }))
             .build();
@@ -316,13 +291,13 @@ fn nested_fallback_builder() -> TestResult {
         let l2 = Cache::builder::<String, i32>(clock.clone())
             .memory()
             .fallback(l3)
-            .promotion_policy(FallbackPromotionPolicy::Always);
+            .promotion_policy(FallbackPromotionPolicy::always());
 
         // L1 with nested fallback
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
             .fallback(l2)
-            .promotion_policy(FallbackPromotionPolicy::Never)
+            .promotion_policy(FallbackPromotionPolicy::never())
             .build();
 
         let key = "key".to_string();

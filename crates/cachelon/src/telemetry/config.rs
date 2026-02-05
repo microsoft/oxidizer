@@ -5,7 +5,6 @@
 
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::metrics::{Meter, MeterProvider};
-use tick::Clock;
 
 use crate::telemetry::CacheTelemetry;
 #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -74,10 +73,9 @@ impl TelemetryConfig {
 
     /// Builds the telemetry collector from this configuration.
     #[must_use]
-    pub(crate) fn build(self, clock: Clock) -> CacheTelemetry {
+    pub(crate) fn build(self) -> CacheTelemetry {
         #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
         {
-            let _ = clock;
             return CacheTelemetry {};
         }
 
@@ -103,7 +101,6 @@ impl TelemetryConfig {
 
             CacheTelemetry {
                 inner: Arc::from_unaware(CacheTelemetryInner {
-                    clock,
                     logging_enabled,
                     event_counter,
                     operation_duration,

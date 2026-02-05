@@ -286,7 +286,7 @@ where
             name: self.name,
             primary_builder: self,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::Always,
+            policy: FallbackPromotionPolicy::always(),
             clock,
             refresh: None,
             telemetry,
@@ -434,7 +434,7 @@ where
             name: self.name,
             primary_builder: self,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::Always,
+            policy: FallbackPromotionPolicy::always(),
             clock,
             refresh: None,
             telemetry,
@@ -510,7 +510,7 @@ where
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build(clock.clone());
+        let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(clock.clone(), telemetry);
@@ -535,7 +535,7 @@ where
     fn build(self) -> Cache<K, V, Self::Output> {
         let name = self.name;
         let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build(clock.clone());
+        let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(clock.clone(), telemetry);

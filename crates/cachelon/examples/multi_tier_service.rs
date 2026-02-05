@@ -21,15 +21,15 @@ impl Service<CacheOperation<String, String>> for RedisService {
             CacheOperation::Get(GetRequest { key }) => Ok(CacheResponse::Get(self.0.read().get(&key).cloned())),
             CacheOperation::Insert(InsertRequest { key, entry }) => {
                 self.0.write().insert(key, entry);
-                Ok(CacheResponse::Insert(()))
+                Ok(CacheResponse::Insert())
             }
             CacheOperation::Invalidate(InvalidateRequest { key }) => {
                 self.0.write().remove(&key);
-                Ok(CacheResponse::Invalidate(()))
+                Ok(CacheResponse::Invalidate())
             }
             CacheOperation::Clear => {
                 self.0.write().clear();
-                Ok(CacheResponse::Clear(()))
+                Ok(CacheResponse::Clear())
             }
         }
     }

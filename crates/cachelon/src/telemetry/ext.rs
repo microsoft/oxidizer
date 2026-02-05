@@ -29,11 +29,11 @@ impl ClockExt for Clock {
     where
         F: Future<Output = R>,
     {
-        let start = self.instant();
+        let watch = self.stopwatch();
         let result = f.await;
         TimedResult {
             result,
-            duration: self.instant().saturating_duration_since(start),
+            duration: watch.elapsed(),
         }
     }
 }

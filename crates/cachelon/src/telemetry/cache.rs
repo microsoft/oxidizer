@@ -12,7 +12,6 @@ use opentelemetry::{
     KeyValue,
     metrics::{Counter, Gauge, Histogram},
 };
-use tick::Clock;
 
 use crate::cache::CacheName;
 #[cfg(any(feature = "metrics", test))]
@@ -24,11 +23,6 @@ use thread_aware::{Arc, PerCore};
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 #[derive(Clone, Debug)]
 pub(crate) struct CacheTelemetryInner {
-    pub(crate) clock: Clock,
-    #[cfg_attr(
-        not(any(feature = "logs", test)),
-        expect(dead_code, reason = "field used when logs feature is enabled")
-    )]
     pub(crate) logging_enabled: bool,
     #[cfg(any(feature = "metrics", test))]
     pub(crate) event_counter: Option<Counter<u64>>,
@@ -115,14 +109,6 @@ impl CacheActivity {
 }
 
 impl CacheTelemetry {
-    /// Returns a reference to the clock used for timing events.
-    #[cfg(any(feature = "logs", feature = "metrics", test))]
-    #[inline]
-    #[must_use]
-    pub fn clock(&self) -> &Clock {
-        &self.inner.clock
-    }
-
     /// Records a cache operation.
     ///
     /// # Arguments
@@ -268,9 +254,7 @@ mod tests {
     #[test]
     fn metrics_record_emits_correct_attributes() {
         let tester = MetricTester::new();
-        let telemetry = TelemetryConfig::new()
-            .with_metrics(tester.meter_provider())
-            .build(Clock::new_frozen());
+        let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
 
         telemetry.record("my_cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(5));
 
@@ -284,9 +268,7 @@ mod tests {
     #[test]
     fn metrics_record_size_emits_cache_name() {
         let tester = MetricTester::new();
-        let telemetry = TelemetryConfig::new()
-            .with_metrics(tester.meter_provider())
-            .build(Clock::new_frozen());
+        let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
 
         telemetry.record_size("size_test_cache", 42);
 
@@ -343,7 +325,7 @@ mod tests {
     #[test]
     fn telemetry_disabled_emits_nothing() {
         // No meter, no logs - telemetry still gets created but does nothing
-        let telemetry = TelemetryConfig::new().build(Clock::new_frozen());
+        let telemetry = TelemetryConfig::new().build();
 
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());

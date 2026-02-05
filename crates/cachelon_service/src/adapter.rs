@@ -81,7 +81,7 @@ where
     async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
         let request = CacheOperation::Insert(InsertRequest::new(key.clone(), entry));
         match self.service.execute(request).await? {
-            CacheResponse::Insert(()) => Ok(()),
+            CacheResponse::Insert() => Ok(()),
             _ => Err(Error::from_message("unexpected response type for insert")),
         }
     }
@@ -89,14 +89,14 @@ where
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
         let request = CacheOperation::Invalidate(InvalidateRequest::new(key.clone()));
         match self.service.execute(request).await? {
-            CacheResponse::Invalidate(()) => Ok(()),
+            CacheResponse::Invalidate() => Ok(()),
             _ => Err(Error::from_message("unexpected response type for invalidate")),
         }
     }
 
     async fn clear(&self) -> Result<(), Error> {
         match self.service.execute(CacheOperation::Clear).await? {
-            CacheResponse::Clear(()) => Ok(()),
+            CacheResponse::Clear() => Ok(()),
             _ => Err(Error::from_message("unexpected response type for clear")),
         }
     }
@@ -132,9 +132,9 @@ mod tests {
                         Ok(CacheResponse::Get(None))
                     }
                 }
-                CacheOperation::Insert(_) => Ok(CacheResponse::Insert(())),
-                CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate(())),
-                CacheOperation::Clear => Ok(CacheResponse::Clear(())),
+                CacheOperation::Insert(_) => Ok(CacheResponse::Insert()),
+                CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate()),
+                CacheOperation::Clear => Ok(CacheResponse::Clear()),
             }
         }
     }

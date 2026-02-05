@@ -205,7 +205,7 @@ mod tests {
     fn wrapper_is_expired_with_no_ttl_returns_false() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build(clock.clone());
+        let telemetry = TelemetryConfig::new().build();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
 
         // Entry without TTL should not be expired
@@ -217,7 +217,7 @@ mod tests {
     fn wrapper_is_expired_with_ttl_without_cached_at_returns_true() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build(clock.clone());
+        let telemetry = TelemetryConfig::new().build();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(Duration::from_secs(60)), telemetry);
 
         // Entry without cached_at should be expired if TTL is configured (treat as expired to be safe)
@@ -229,7 +229,7 @@ mod tests {
     fn wrapper_entry_ttl_takes_precedence_over_tier_ttl() {
         let clock = Clock::new_frozen();
         let inner = InMemoryCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build(clock.clone());
+        let telemetry = TelemetryConfig::new().build();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
             "test",
             inner,

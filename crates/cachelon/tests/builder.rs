@@ -124,7 +124,7 @@ fn fallback_builder_promotion_policy() -> TestResult {
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
         .fallback(fallback)
-        .promotion_policy(FallbackPromotionPolicy::Never)
+        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
 
     block_on(async {
@@ -146,13 +146,13 @@ fn fallback_builder_nested_fallback() -> TestResult {
     let l2 = Cache::builder::<String, i32>(clock.clone())
         .memory()
         .fallback(l3)
-        .promotion_policy(FallbackPromotionPolicy::Always);
+        .promotion_policy(FallbackPromotionPolicy::always());
 
     // L1 with nested fallback
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
         .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::Never)
+        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
 
     block_on(async {

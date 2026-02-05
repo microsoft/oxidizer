@@ -49,7 +49,7 @@ async fn main() {
         .ttl(Duration::from_secs(10))
         .fallback(Cache::builder::<String, String>(clock).storage(db.clone()))
         .time_to_refresh(TimeToRefresh::new(Duration::from_secs(1), Spawner::new_tokio()))
-        .promotion_policy(FallbackPromotionPolicy::Always)
+        .promotion_policy(FallbackPromotionPolicy::always())
         .build();
 
     let key = "config".to_string();

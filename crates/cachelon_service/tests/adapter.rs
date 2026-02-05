@@ -39,17 +39,17 @@ where
             CacheOperation::Insert(req) => {
                 let mut data = self.data.lock().expect("lock poisoned");
                 data.insert(req.key, req.entry);
-                Ok(CacheResponse::Insert(()))
+                Ok(CacheResponse::Insert())
             }
             CacheOperation::Invalidate(req) => {
                 let mut data = self.data.lock().expect("lock poisoned");
                 data.remove(&req.key);
-                Ok(CacheResponse::Invalidate(()))
+                Ok(CacheResponse::Invalidate())
             }
             CacheOperation::Clear => {
                 let mut data = self.data.lock().expect("lock poisoned");
                 data.clear();
-                Ok(CacheResponse::Clear(()))
+                Ok(CacheResponse::Clear())
             }
         }
     }
@@ -183,12 +183,12 @@ fn cache_response_into_enextracts_value() {
 
 #[test]
 fn cache_response_into_enreturns_none_for_non_get() {
-    let response: CacheResponse<i32> = CacheResponse::Insert(());
+    let response: CacheResponse<i32> = CacheResponse::Insert();
     assert!(response.into_entry().is_none());
 
-    let response: CacheResponse<i32> = CacheResponse::Invalidate(());
+    let response: CacheResponse<i32> = CacheResponse::Invalidate();
     assert!(response.into_entry().is_none());
 
-    let response: CacheResponse<i32> = CacheResponse::Clear(());
+    let response: CacheResponse<i32> = CacheResponse::Clear();
     assert!(response.into_entry().is_none());
 }

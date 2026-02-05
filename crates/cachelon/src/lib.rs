@@ -75,12 +75,7 @@ pub use cachelon_tier::{CacheEntry, CacheTier, Error, Result};
 #[doc(inline)]
 pub use cachelon_tier::{DynamicCache, DynamicCacheExt};
 #[doc(inline)]
-pub use fallback::{FallbackCache, FallbackPromotionPolicy};
-#[cfg(any(feature = "logs", feature = "metrics", test))]
-#[doc(inline)]
-pub use telemetry::CacheTelemetry;
-#[doc(inline)]
-pub use wrapper::CacheWrapper;
+pub use fallback::FallbackPromotionPolicy;
 
 #[cfg(any(feature = "test-util", test))]
 #[doc(inline)]
