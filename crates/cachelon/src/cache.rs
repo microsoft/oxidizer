@@ -3,7 +3,7 @@
 
 //! The main cache type with telemetry and stampede protection.
 
-use std::{fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{fmt::Debug, hash::Hash};
 
 use tick::Clock;
 use uniflight::Merger;
@@ -14,13 +14,47 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// Type alias for cache names used in telemetry.
 pub type CacheName = &'static str;
 
-/// The main cache type providing user-facing API with telemetry.
+/// Mergers for stampede protection on basic cache operations.
+///
+/// Each operation type has its own merger to handle the appropriate return type.
+/// Concurrent calls for the same key are coalesced - only one executes while
+/// others wait and share the result.
+struct Mergers<K, V> {
+    /// For `get` - returns cached entry or None
+    get: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
+    /// For `invalidate` - returns unit on success
+    invalidate: Merger<K, Result<(), Error>>,
+}
+
+impl<K, V> Mergers<K, V>
+where
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+{
+    fn new() -> Self {
+        Self {
+            get: Merger::new(),
+            invalidate: Merger::new(),
+        }
+    }
+}
+
+impl<K, V> Debug for Mergers<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Mergers").finish_non_exhaustive()
+    }
+}
+
+/// The main cache type providing user-facing API with optional stampede protection.
 ///
 /// `Cache` wraps any `CacheTier` implementation and provides:
-/// - Consistent API for all cache operations
-/// - Telemetry propagation to inner tiers
+/// - Consistent API for basic cache operations (`get`, `insert`, `invalidate`, `clear`)
+/// - Optional stampede protection for `get` and `invalidate` operations
 /// - Clock management for time-based operations
-/// - Optional stampede protection via `stampede_protection()` builder option
+///
+/// For "get or compute" operations (`get_or_insert`, `try_get_or_insert`, etc.),
+/// use [`LoadingCache`](crate::LoadingCache) which wraps a `Cache` and provides
+/// these methods with stampede protection.
 ///
 /// This type does NOT implement `CacheTier` - it is always the outermost wrapper.
 /// Inner tiers are composed using `CacheWrapper` and `FallbackCache`.
@@ -70,8 +104,7 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) name: CacheName,
     pub(crate) storage: S,
     pub(crate) clock: Clock,
-    request_merger: Option<Merger<K, Option<CacheEntry<V>>>>,
-    _phantom: PhantomData<(K, V)>,
+    mergers: Option<Mergers<K, V>>,
 }
 
 impl Cache<(), (), ()> {
@@ -111,8 +144,7 @@ where
             name,
             storage,
             clock,
-            request_merger: stampede_protection.then(|| Merger::new()),
-            _phantom: PhantomData,
+            mergers: stampede_protection.then(Mergers::new),
         }
     }
 
@@ -167,14 +199,17 @@ where
     ///
     /// Returns `None` if the key is not found or the entry has expired.
     ///
-    /// When stampede protection is enabled via `stampede_protection()`, concurrent
-    /// requests for the same key will be merged so that only one request
-    /// performs the lookup. Others wait and share the result.
+    /// # Stampede Protection
+    ///
+    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// concurrent requests for the same key are merged so only one performs the lookup.
+    /// All waiters share the result, including errors.
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying cache tier operation fails.
-    /// Note: With stampede protection enabled, errors are treated as cache misses.
+    /// Returns an error if:
+    /// - The underlying cache tier operation fails (error is shared with all waiters)
+    /// - With stampede protection, if the leader task panics (wrapped as [`uniflight::LeaderPanicked`])
     ///
     /// # Examples
     ///
@@ -192,14 +227,12 @@ where
     /// # });
     /// ```
     pub async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        if let Some(ref merger) = self.request_merger {
-            // With stampede protection, concurrent requests are merged.
-            // Storage errors are treated as cache misses (Ok(None)) since
-            // Error doesn't implement Clone for sharing across waiters.
-            return Ok(merger
-                .execute(key, || async { self.storage.get(key).await.ok().flatten() })
+        if let Some(ref mergers) = self.mergers {
+            return mergers
+                .get
+                .execute(key, || self.storage.get(key))
                 .await
-                .unwrap_or(None));
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
         }
 
         self.storage.get(key).await
@@ -234,10 +267,22 @@ where
 
     /// Invalidates (removes) a value from the cache.
     ///
+    /// # Stampede Protection
+    ///
+    /// When enabled, concurrent invalidations for the same key are merged.
+    ///
     /// # Errors
     ///
     /// Returns an error if the underlying cache tier operation fails.
     pub async fn invalidate(&self, key: &K) -> Result<(), Error> {
+        if let Some(ref mergers) = self.mergers {
+            return mergers
+                .invalidate
+                .execute(key, || self.storage.invalidate(key))
+                .await
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+        }
+
         self.storage.invalidate(key).await
     }
 
@@ -269,88 +314,6 @@ where
     #[must_use]
     pub fn is_empty(&self) -> Option<bool> {
         self.storage.is_empty()
-    }
-
-    /// Retrieves a value from cache, or computes and caches it if missing.
-    ///
-    /// If the key is present, returns the cached value immediately. Otherwise,
-    /// calls the provided function to compute the value, inserts it, and returns it.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying cache tier operation fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cachelon::{Cache, CacheEntry};
-    /// use tick::Clock;
-    /// # futures::executor::block_on(async {
-    ///
-    /// let clock = Clock::new_frozen();
-    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
-    ///
-    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 42 }).await?;
-    /// assert_eq!(*entry.value(), 42);
-    ///
-    /// // Second call returns cached value without calling the function
-    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 100 }).await?;
-    /// assert_eq!(*entry.value(), 42);
-    /// # Ok::<(), cachelon::Error>(())
-    /// # });
-    /// ```
-    pub async fn get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
-    where
-        Fut: Future<Output = V>,
-    {
-        if let Some(entry) = self.get(key).await? {
-            return Ok(entry);
-        }
-        let value = f().await;
-        let entry = CacheEntry::new(value);
-        self.insert(key, entry.clone()).await?;
-        Ok(entry)
-    }
-
-    /// Retrieves a value from cache, or computes and caches it if missing.
-    ///
-    /// Like `get_or_insert`, but the provided function can fail. Returns an error
-    /// if either the function fails or the cache operation fails.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The provided function returns an error
-    /// - The underlying cache tier operation fails
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cachelon::{Cache, CacheEntry, Error};
-    /// use tick::Clock;
-    /// # futures::executor::block_on(async {
-    ///
-    /// let clock = Clock::new_frozen();
-    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
-    ///
-    /// let result: std::result::Result<CacheEntry<i32>, Error> = cache
-    ///     .try_get_or_insert(&"key".to_string(), || async { Ok(42) })
-    ///     .await;
-    /// assert!(result.is_ok());
-    /// # });
-    /// ```
-    pub async fn try_get_or_insert<E, Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, E>
-    where
-        E: From<Error>,
-        Fut: Future<Output = Result<V, E>>,
-    {
-        if let Some(entry) = self.get(key).await? {
-            return Ok(entry);
-        }
-        let value = f().await?;
-        let entry = CacheEntry::new(value);
-        self.insert(key, entry.clone()).await?;
-        Ok(entry)
     }
 }
 

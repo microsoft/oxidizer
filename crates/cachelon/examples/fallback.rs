@@ -23,7 +23,7 @@ async fn main() {
         .memory()
         .ttl(Duration::from_secs(60))
         .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::Always)
+        .promotion_policy(FallbackPromotionPolicy::always())
         .build();
 
     let key = "user:1".to_string();

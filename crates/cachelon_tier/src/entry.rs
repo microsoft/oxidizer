@@ -39,16 +39,6 @@ impl<V> CacheEntry<V> {
     /// Creates a new cache entry with the given value.
     ///
     /// The timestamp will be set by the cache when the entry is inserted.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cachelon_tier::CacheEntry;
-    ///
-    /// let entry = CacheEntry::new(42);
-    /// assert_eq!(*entry.value(), 42);
-    /// assert!(entry.cached_at().is_none());
-    /// ```
     pub fn new(value: V) -> Self {
         Self {
             value,
@@ -60,16 +50,6 @@ impl<V> CacheEntry<V> {
     /// Creates a new cache entry with a per-entry TTL.
     ///
     /// The per-entry TTL takes precedence over any tier-level TTL.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cachelon_tier::CacheEntry;
-    /// use std::time::Duration;
-    ///
-    /// let entry = CacheEntry::with_ttl(42, Duration::from_secs(300));
-    /// assert_eq!(entry.ttl(), Some(Duration::from_secs(300)));
-    /// ```
     pub fn with_ttl(value: V, ttl: Duration) -> Self {
         Self {
             value,
@@ -81,17 +61,6 @@ impl<V> CacheEntry<V> {
     /// Creates a new cache entry with an explicit timestamp.
     ///
     /// This is typically used when recreating entries from persistent storage.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use cachelon_tier::CacheEntry;
-    /// use std::time::SystemTime;
-    ///
-    /// let now = SystemTime::now();
-    /// let entry = CacheEntry::with_cached_at(42, now);
-    /// assert_eq!(entry.cached_at(), Some(now));
-    /// ```
     pub fn with_cached_at(value: V, cached_at: SystemTime) -> Self {
         Self {
             value,

@@ -79,9 +79,9 @@ impl<V> FallbackPromotionPolicy<V> {
         Self(FallbackPromotionPolicyType::Never)
     }
 
-    /// Creates a policy using a closure that can capture state.
+    /// Creates a policy using a predicate closure.
     ///
-    /// Use this when you need to capture external variables in the predicate.
+    /// The closure can capture external state if needed.
     ///
     /// ```
     /// use cachelon::{Cache, CacheEntry, FallbackPromotionPolicy};
@@ -93,7 +93,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
     ///     .fallback(l2)
-    ///     .promotion_policy(FallbackPromotionPolicy::when_boxed(
+    ///     .promotion_policy(FallbackPromotionPolicy::when(
     ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len
     ///     ))
     ///     .build();
@@ -199,21 +199,10 @@ where
     P: CacheTier<K, V> + Send + Sync + 'static,
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
-    async fn handle_get(&self, key: &K, value: Result<Option<CacheEntry<V>>, Error>) -> Result<Option<CacheEntry<V>>, Error> {
-        if let Ok(Some(value)) = value {
-            if let Some(refresh) = &self.inner.refresh
-                && let Some(cached_at) = value.cached_at()
-                && refresh.should_refresh(cached_at)
-            {
-                self.do_refresh(key);
-            }
-
-            return Ok(Some(value));
-        }
-
-        // Box the fallback future to bound stack usage. This keeps cache hits fast
-        // (no allocation) while only allocating on the miss path. See:
-        // https://without.boats/blog/futures-and-segmented-stacks/
+    /// Handles the fallback path when primary cache misses.
+    /// This is a separate method so we can box just this path, keeping hits fast.
+    async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+        // Box the fallback future to bound stack usage regardless of nesting depth.
         let timed = self.inner.clock.timed_async(Box::pin(self.inner.fallback.get(key))).await;
 
         // Propagate any error from fallback
@@ -237,15 +226,28 @@ where
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let result = self.inner.primary.get(key).await;
-        // Box handle_try_get to keep future size bounded regardless of nesting depth.
-        Box::pin(self.handle_get(key, result)).await
+        // Fast path: check primary cache first (unboxed for performance)
+        // On hit, return immediately. On miss or error, fall through to fallback.
+        // Primary errors are already logged by the inner CacheWrapper.
+        if let Ok(Some(value)) = self.inner.primary.get(key).await {
+            // Check if background refresh is needed
+            if let Some(refresh) = &self.inner.refresh
+                && let Some(cached_at) = value.cached_at()
+                && refresh.should_refresh(cached_at)
+            {
+                self.do_refresh(key);
+            }
+            return Ok(Some(value));
+        }
+
+        // Slow path: fallback lookup - boxed to bound future size
+        Box::pin(self.get_from_fallback(key)).await
     }
 
     async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        // Box fallback future to bound stack usage regardless of nesting depth.
+        // Box both futures to bound stack usage regardless of nesting depth.
         let (primary_result, fallback_result) = join!(
-            self.inner.primary.insert(key, entry.clone()),
+            Box::pin(self.inner.primary.insert(key, entry.clone())),
             Box::pin(self.inner.fallback.insert(key, entry))
         );
         primary_result?;
@@ -253,15 +255,21 @@ where
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        // Box fallback future to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(self.inner.primary.invalidate(key), Box::pin(self.inner.fallback.invalidate(key)));
+        // Box both futures to bound stack usage regardless of nesting depth.
+        let (primary_result, fallback_result) = join!(
+            Box::pin(self.inner.primary.invalidate(key)),
+            Box::pin(self.inner.fallback.invalidate(key))
+        );
         primary_result?;
         fallback_result
     }
 
     async fn clear(&self) -> Result<(), Error> {
-        // Box fallback future to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(self.inner.primary.clear(), Box::pin(self.inner.fallback.clear()));
+        // Box both futures to bound stack usage regardless of nesting depth.
+        let (primary_result, fallback_result) = join!(
+            Box::pin(self.inner.primary.clear()),
+            Box::pin(self.inner.fallback.clear())
+        );
         primary_result?;
         fallback_result
     }

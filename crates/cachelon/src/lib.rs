@@ -57,12 +57,15 @@
 pub mod builder;
 pub mod cache;
 mod fallback;
+mod loading;
 pub mod refresh;
 mod telemetry;
 mod wrapper;
 
 #[doc(inline)]
 pub use cache::Cache;
+#[doc(inline)]
+pub use loading::LoadingCache;
 #[cfg(feature = "memory")]
 #[doc(inline)]
 pub use cachelon_memory::InMemoryCache;

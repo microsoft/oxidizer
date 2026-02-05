@@ -5,7 +5,7 @@
 
 //! Integration tests for Cache API.
 
-use cachelon::{Cache, CacheEntry, Error};
+use cachelon::{Cache, CacheEntry, Error, LoadingCache};
 use tick::Clock;
 
 type TestResult = Result<(), Error>;
@@ -151,13 +151,14 @@ fn get_or_insert_returns_cached() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let loader = LoadingCache::new(cache);
 
         let key = "key".to_string();
 
-        let entry = cache.get_or_insert(&key, || async { 42 }).await?;
+        let entry = loader.get_or_insert(&key, || async { 42 }).await?;
         assert_eq!(*entry.value(), 42);
 
-        let entry = cache.get_or_insert(&key, || async { 100 }).await?;
+        let entry = loader.get_or_insert(&key, || async { 100 }).await?;
         assert_eq!(*entry.value(), 42);
         Ok(())
     })
@@ -168,14 +169,15 @@ fn try_get_or_insert_success() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let loader = LoadingCache::new(cache);
 
         let key = "key".to_string();
 
-        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(42) }).await?;
+        let entry = loader.try_get_or_insert(&key, || async { Ok::<_, Error>(42) }).await?;
         assert_eq!(*entry.value(), 42);
 
         // Verify caching: second call should return cached value, not 100
-        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await?;
+        let entry = loader.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await?;
         assert_eq!(*entry.value(), 42);
         Ok(())
     })
@@ -186,10 +188,11 @@ fn try_get_or_insert_error() {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let loader = LoadingCache::new(cache);
 
         let key = "key".to_string();
 
-        let result: Result<CacheEntry<i32>, Error> = cache
+        let result: Result<CacheEntry<i32>, Error> = loader
             .try_get_or_insert(&key, || async { Err(Error::from_message("test error")) })
             .await;
 
@@ -261,4 +264,84 @@ fn error_is_send() {
 fn error_is_sync() {
     fn assert_sync<T: Sync>() {}
     assert_sync::<Error>();
+}
+
+/// Verifies that with stampede protection, storage errors are propagated (not hidden).
+#[test]
+fn stampede_protection_propagates_storage_errors() {
+    use cachelon_tier::testing::{CacheOp, MockCache};
+
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let mock = MockCache::<String, i32>::new();
+        mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
+
+        let cache = Cache::builder(clock).storage(mock).stampede_protection().build();
+
+        let result: Result<Option<CacheEntry<i32>>, Error> = cache.get(&"key".to_string()).await;
+        assert!(result.is_err(), "storage error should propagate through stampede protection");
+    });
+}
+
+/// Verifies that with stampede protection, panics are converted to errors (not hidden as misses).
+#[test]
+fn stampede_protection_converts_panic_to_error() {
+    use cachelon::CacheTier;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use uniflight::LeaderPanicked;
+
+    /// A cache tier that panics on the first get.
+    #[derive(Clone)]
+    struct PanickingCache {
+        panicked: Arc<AtomicBool>,
+    }
+
+    impl CacheTier<String, i32> for PanickingCache {
+        async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
+            if !self.panicked.swap(true, Ordering::SeqCst) {
+                panic!("simulated panic in cache tier");
+            }
+            Ok(None)
+        }
+
+        async fn insert(&self, _key: &String, _entry: CacheEntry<i32>) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn invalidate(&self, _key: &String) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn clear(&self) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let storage = PanickingCache {
+            panicked: Arc::new(AtomicBool::new(false)),
+        };
+        let cache = Cache::builder(clock).storage(storage).stampede_protection().build();
+
+        let result = cache.get(&"key".to_string()).await;
+
+        // Should be an error, not Ok(None)
+        let err = result.expect_err("panic should be converted to error, not hidden as cache miss");
+
+        // The error should wrap a LeaderPanicked error
+        assert!(
+            err.is_source::<LeaderPanicked>(),
+            "error should wrap LeaderPanicked, got: {err}"
+        );
+
+        // The panic message should be extractable
+        let panicked = err.source_as::<LeaderPanicked>().expect("should extract LeaderPanicked");
+        assert!(
+            panicked.message().contains("simulated panic"),
+            "panic message should be preserved: {}",
+            panicked.message()
+        );
+    });
 }
