@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::thread::ThreadId;
 
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
-use many_cpus::{Processor, ProcessorSet};
+use many_cpus::Processor;
 
 /// The number of processors to use for the registry.
 ///
@@ -62,7 +62,7 @@ impl ThreadRegistry {
     /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn new(count: &ProcessorCount) -> Self {
-        let builder = many_cpus::ProcessorSet::builder();
+        let builder = many_cpus::SystemHardware::current().processors().to_builder();
 
         let processors: Vec<_> = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
@@ -145,12 +145,21 @@ impl ThreadRegistry {
         let core_index = affinity.processor_index();
         let processor = &self.processors[core_index];
 
-        ProcessorSet::from_processor(processor.clone()).pin_current_thread_to();
+        let processor_set = many_cpus::SystemHardware::current()
+            .processors()
+            .to_builder()
+            .filter(|p| p.id() == processor.id())
+            .take_all();
 
-        self.threads
-            .lock()
-            .expect("Failed to acquire lock")
-            .insert(std::thread::current().id(), affinity);
+        // TODO: Handle not found here.
+        if let Some(ps) = processor_set {
+            ps.pin_current_thread_to();
+
+            self.threads
+                .lock()
+                .expect("Failed to acquire lock")
+                .insert(std::thread::current().id(), affinity);
+        }
     }
 }
 
