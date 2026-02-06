@@ -359,7 +359,11 @@ where
         let cell = Self::get_or_create_cell(&inner, key);
         let owned_key = key.to_owned();
         async move {
-            let result = cell.get_or_init(func()).await.clone();
+            // Box the future immediately to keep state machine size small.
+            // Without boxing, the entire Fut type would be embedded in our state machine.
+            // With boxing, we only store a 16-byte pointer.
+            let boxed = Box::pin(func());
+            let result = cell.get_or_init(boxed).await.clone();
             drop(cell); // Release our Arc before cleanup check
             // Remove entry if no one else is using it (weak can't upgrade)
             inner.remove_if(owned_key.borrow(), |_, weak| weak.upgrade().is_none());
