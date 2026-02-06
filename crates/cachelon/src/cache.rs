@@ -478,11 +478,7 @@ where
     /// # Ok::<(), cachelon::Error>(())
     /// # });
     /// ```
-    pub async fn optionally_get_or_insert<Fut>(
-        &self,
-        key: &K,
-        f: impl FnOnce() -> Fut + Send,
-    ) -> Result<Option<CacheEntry<V>>, Error>
+    pub async fn optionally_get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut + Send) -> Result<Option<CacheEntry<V>>, Error>
     where
         Fut: Future<Output = Option<V>> + Send,
     {

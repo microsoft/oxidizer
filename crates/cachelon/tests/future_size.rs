@@ -53,13 +53,20 @@ fn loading_methods_future_size() {
     let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
 
     let get_or_insert_size = size_of_val(&cache.get_or_insert(&key, || async { 42 }));
-    let try_get_or_insert_size =
-        size_of_val(&cache.try_get_or_insert(&key, || async { Ok::<_, std::io::Error>(42) }));
-    let optionally_get_or_insert_size =
-        size_of_val(&cache.optionally_get_or_insert(&key, || async { Some(42) }));
+    let try_get_or_insert_size = size_of_val(&cache.try_get_or_insert(&key, || async { Ok::<_, std::io::Error>(42) }));
+    let optionally_get_or_insert_size = size_of_val(&cache.optionally_get_or_insert(&key, || async { Some(42) }));
 
     // Verify that the future sizes are within reasonable bounds
-    assert!(get_or_insert_size < 1500, "get_or_insert future size is too large: {get_or_insert_size}");
-    assert!(try_get_or_insert_size < 1500, "try_get_or_insert future size is too large: {try_get_or_insert_size}");
-    assert!(optionally_get_or_insert_size < 1500, "optionally_get_or_insert future size is too large: {optionally_get_or_insert_size}");
+    assert!(
+        get_or_insert_size < 1500,
+        "get_or_insert future size is too large: {get_or_insert_size}"
+    );
+    assert!(
+        try_get_or_insert_size < 1500,
+        "try_get_or_insert future size is too large: {try_get_or_insert_size}"
+    );
+    assert!(
+        optionally_get_or_insert_size < 1500,
+        "optionally_get_or_insert future size is too large: {optionally_get_or_insert_size}"
+    );
 }

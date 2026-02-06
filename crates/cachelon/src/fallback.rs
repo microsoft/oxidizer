@@ -266,10 +266,7 @@ where
 
     async fn clear(&self) -> Result<(), Error> {
         // Box both futures to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(
-            Box::pin(self.inner.primary.clear()),
-            Box::pin(self.inner.fallback.clear())
-        );
+        let (primary_result, fallback_result) = join!(Box::pin(self.inner.primary.clear()), Box::pin(self.inner.fallback.clear()));
         primary_result?;
         fallback_result
     }

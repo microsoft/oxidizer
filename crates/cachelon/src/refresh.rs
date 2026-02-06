@@ -58,12 +58,11 @@ impl<K> TimeToRefresh<K>
 where
     K: Clone + Eq + Hash + Send + 'static,
 {
-    /// Creates a new `TimeToRefresh` instance.
+    /// Creates a new `TimeToRefresh` with the given duration and spawner.
     ///
-    /// # Arguments
-    ///
-    /// * `duration` - The time period after which cached entries should be refreshed.
-    /// * `spawner` - The spawner used to run background refresh tasks.
+    /// The `duration` specifies how long after insertion an entry becomes stale
+    /// and eligible for background refresh. The `spawner` executes refresh tasks
+    /// asynchronously without blocking cache reads.
     #[must_use]
     pub fn new(duration: Duration, spawner: Spawner) -> Self {
         Self {

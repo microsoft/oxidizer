@@ -109,14 +109,7 @@ impl CacheActivity {
 }
 
 impl CacheTelemetry {
-    /// Records a cache operation.
-    ///
-    /// # Arguments
-    ///
-    /// * `cache_name` - Static string identifying the cache instance
-    /// * `operation` - The type of cache operation
-    /// * `activity` - The operation activity
-    /// * `duration` - Operation duration
+    /// Records a cache operation with the given name, type, activity, and duration.
     #[cfg_attr(
         not(any(feature = "metrics", test)),
         expect(unused_variables, reason = "No-op when metrics are disabled")
@@ -146,12 +139,7 @@ impl CacheTelemetry {
         }
     }
 
-    /// Records the current cache size.
-    ///
-    /// # Arguments
-    ///
-    /// * `cache_name` - Static string identifying the cache instance
-    /// * `size` - The current number of entries in the cache
+    /// Records the current cache size for the given cache name.
     #[cfg_attr(
         not(any(feature = "metrics", test)),
         expect(unused_variables, reason = "No-op when metrics are disabled")

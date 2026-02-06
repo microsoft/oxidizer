@@ -110,4 +110,3 @@ async fn default_len_returns_none() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
     assert!(cache.len().is_none());
 }
-

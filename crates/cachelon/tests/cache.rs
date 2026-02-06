@@ -282,8 +282,8 @@ fn stampede_protection_propagates_storage_errors() {
 #[test]
 fn stampede_protection_converts_panic_to_error() {
     use cachelon::CacheTier;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use uniflight::LeaderPanicked;
 
     /// A cache tier that panics on the first get.
@@ -326,10 +326,7 @@ fn stampede_protection_converts_panic_to_error() {
         let err = result.expect_err("panic should be converted to error, not hidden as cache miss");
 
         // The error should wrap a LeaderPanicked error
-        assert!(
-            err.is_source::<LeaderPanicked>(),
-            "error should wrap LeaderPanicked, got: {err}"
-        );
+        assert!(err.is_source::<LeaderPanicked>(), "error should wrap LeaderPanicked, got: {err}");
 
         // The panic message should be extractable
         let panicked = err.source_as::<LeaderPanicked>().expect("should extract LeaderPanicked");

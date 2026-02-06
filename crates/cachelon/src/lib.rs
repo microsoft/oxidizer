@@ -53,6 +53,33 @@
 //!     .build();
 //! # });
 //! ```
+//!
+//! # Telemetry
+//!
+//! Enable with `metrics` and/or `logs` features. Configure via `.use_metrics()` and `.use_logs()`.
+//!
+//! ## Metrics (OpenTelemetry)
+//!
+//! | Metric | Type | Unit | Description |
+//! |--------|------|------|-------------|
+//! | `cache.event.count` | Counter | event | Cache operation events |
+//! | `cache.operation.duration_ns` | Histogram | s | Operation latency |
+//! | `cache.size` | Gauge | entry | Current entry count |
+//!
+//! **Attributes:** `cache.name`, `cache.operation`, `cache.activity`
+//!
+//! **Operations:** `cache.get`, `cache.insert`, `cache.invalidate`, `cache.clear`
+//!
+//! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
+//! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
+//! `cache.fallback_promotion`, `cache.error`, `cache.ok`
+//!
+//! ## Logs (tracing)
+//!
+//! Event name: `cache.event` with fields `cache.name`, `cache.operation`,
+//! `cache.activity`, `cache.duration_ns`.
+//!
+//! **Levels:** DEBUG (hit/miss/ok), INFO (expired/inserted/invalidated/refresh), ERROR (error)
 
 pub mod builder;
 pub mod cache;

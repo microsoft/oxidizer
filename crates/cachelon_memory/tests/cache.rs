@@ -160,7 +160,6 @@ fn len_returns_some() {
     assert!(cache.len().is_some());
 }
 
-
 #[test]
 fn clone_shares_underlying_cache() {
     block_on(async {

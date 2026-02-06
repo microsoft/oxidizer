@@ -24,7 +24,6 @@ use crate::{CacheEntry, Error};
     dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))
 )]
 pub trait CacheTier<K, V>: Send + Sync {
-
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
 
