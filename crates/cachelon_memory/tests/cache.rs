@@ -160,13 +160,6 @@ fn len_returns_some() {
     assert!(cache.len().is_some());
 }
 
-#[test]
-fn is_empty_returns_some() {
-    // Note: moka uses eventual consistency for entry counts,
-    // so we only verify that is_empty() returns Some(_)
-    let cache = InMemoryCache::<String, i32>::new();
-    assert!(cache.is_empty().is_some());
-}
 
 #[test]
 fn clone_shares_underlying_cache() {

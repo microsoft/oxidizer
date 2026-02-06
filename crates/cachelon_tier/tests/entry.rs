@@ -16,31 +16,22 @@ fn new_creates_entry_without_timestamp() {
 }
 
 #[test]
-fn with_ttl_creates_entry_with_ttl() {
+fn expires_after_creates_entry_with_ttl() {
     let ttl = Duration::from_secs(300);
-    let entry = CacheEntry::with_ttl("value", ttl);
+    let entry = CacheEntry::expires_after("value", ttl);
     assert_eq!(*entry.value(), "value");
     assert_eq!(entry.ttl(), Some(ttl));
     assert!(entry.cached_at().is_none());
 }
 
 #[test]
-fn with_cached_at_creates_entry_with_timestamp() {
+fn expires_at_creates_entry_with_ttl_and_timestamp() {
     let now = SystemTime::now();
-    let entry = CacheEntry::with_cached_at("value", now);
+    let ttl = Duration::from_secs(300);
+    let entry = CacheEntry::expires_at("value", ttl, now);
     assert_eq!(*entry.value(), "value");
     assert_eq!(entry.cached_at(), Some(now));
-    assert!(entry.ttl().is_none());
-}
-
-#[test]
-fn set_cached_at_updates_timestamp() {
-    let mut entry = CacheEntry::new("value");
-    assert!(entry.cached_at().is_none());
-
-    let now = SystemTime::now();
-    entry.set_cached_at(now);
-    assert_eq!(entry.cached_at(), Some(now));
+    assert_eq!(entry.ttl(), Some(ttl));
 }
 
 #[test]

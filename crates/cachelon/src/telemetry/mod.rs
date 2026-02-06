@@ -13,8 +13,6 @@ pub(crate) mod config;
 pub(crate) mod ext;
 #[cfg(any(feature = "metrics", test))]
 pub(crate) mod metrics;
-#[cfg(test)]
-pub(crate) mod testing;
 
 pub use cache::CacheTelemetry;
 pub(crate) use cache::{CacheActivity, CacheOperation};

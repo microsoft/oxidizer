@@ -118,9 +118,6 @@ fn fallback_cache_len_returns_some() {
 
         let len = cache.len();
         assert!(len.is_some());
-
-        let is_empty = cache.is_empty();
-        assert!(is_empty.is_some());
     });
 }
 

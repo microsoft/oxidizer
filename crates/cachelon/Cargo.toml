@@ -67,6 +67,7 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }
+testing_aids = { path = "../testing_aids" }
 dynosaur = { workspace = true }
 fundle = { workspace = true }
 opentelemetry = { workspace = true, features = [

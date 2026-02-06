@@ -127,21 +127,19 @@ fn clear_removes_all_entries() -> TestResult {
 }
 
 #[test]
-fn len_and_is_empty() -> TestResult {
+fn len_returns_some() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
-        // Empty cache returns Some values
+        // Empty cache returns Some(0)
         assert_eq!(cache.len(), Some(0));
-        assert_eq!(cache.is_empty(), Some(true));
 
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-        // After insert, len() and is_empty() return Some values
+        // After insert, len() returns Some value
         // Note: exact count may be eventually consistent with moka cache
         assert!(cache.len().is_some());
-        assert!(cache.is_empty().is_some());
         Ok(())
     })
 }

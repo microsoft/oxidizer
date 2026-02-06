@@ -1,19 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Test utilities for telemetry validation.
-
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+//! Test utilities for OpenTelemetry metrics validation.
 
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, Metric, MetricData};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
-use tracing_subscriber::fmt::MakeWriter;
 
 /// Test helper for collecting and asserting on `OTel` metrics.
 #[derive(Debug)]
-pub(crate) struct MetricTester {
+pub struct MetricTester {
     exporter: InMemoryMetricExporter,
     provider: SdkMeterProvider,
 }
@@ -46,8 +42,32 @@ impl MetricTester {
         collect_attributes(&self.exporter)
     }
 
+    /// Asserts that the collected attributes contain all of the expected key-value pairs.
     pub fn assert_attributes_contain(&self, key_values: &[KeyValue]) {
         let attributes = self.collect_attributes();
+
+        for attr in key_values {
+            assert!(
+                attributes.contains(attr),
+                "attribute {attr:?} not found in collected attributes: {attributes:?}"
+            );
+        }
+    }
+
+    /// Asserts that the collected attributes contain all of the expected key-value pairs
+    /// and optionally checks the total count.
+    pub fn assert_attributes(&self, key_values: &[KeyValue], expected_length: Option<usize>) {
+        let attributes = self.collect_attributes();
+
+        if let Some(expected_length) = expected_length {
+            assert_eq!(
+                attributes.len(),
+                expected_length,
+                "expected {} attributes, got {}",
+                expected_length,
+                attributes.len()
+            );
+        }
 
         for attr in key_values {
             assert!(
@@ -91,71 +111,4 @@ fn collect_attributes_for_metric(metric: &Metric) -> impl Iterator<Item = KeyVal
         },
     }
     .into_iter()
-}
-
-/// Thread-local log capture buffer for testing.
-///
-/// Uses `tracing_subscriber::fmt::MakeWriter` to capture formatted log output
-/// into a thread-local buffer that can be inspected in tests.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct LogCapture {
-    buffer: Arc<Mutex<Vec<u8>>>,
-}
-
-impl LogCapture {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            buffer: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    /// Returns the captured log output as a string.
-    #[must_use]
-    pub fn output(&self) -> String {
-        String::from_utf8_lossy(&self.buffer.lock().unwrap()).to_string()
-    }
-
-    /// Asserts that the captured log output contains the given string.
-    pub fn assert_contains(&self, expected: &str) {
-        let output = self.output();
-        assert!(
-            output.contains(expected),
-            "log output does not contain '{expected}', got:\n{output}"
-        );
-    }
-
-    /// Creates a `tracing_subscriber` that writes to this capture buffer.
-    /// Use with `set_default()` for thread-local capture.
-    #[must_use]
-    pub fn subscriber(&self) -> impl tracing::Subscriber {
-        use tracing_subscriber::layer::SubscriberExt;
-        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))
-    }
-}
-
-impl<'a> MakeWriter<'a> for LogCapture {
-    type Writer = LogCaptureWriter;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        LogCaptureWriter {
-            buffer: Arc::clone(&self.buffer),
-        }
-    }
-}
-
-/// Writer that appends to a shared buffer.
-pub(crate) struct LogCaptureWriter {
-    buffer: Arc<Mutex<Vec<u8>>>,
-}
-
-impl Write for LogCaptureWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.buffer.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }

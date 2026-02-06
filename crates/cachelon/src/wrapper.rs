@@ -132,7 +132,7 @@ where
     }
 
     async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
-        entry.set_cached_at(self.clock.system_time());
+        entry.ensure_cached_at(self.clock.system_time());
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
@@ -189,10 +189,6 @@ where
     fn len(&self) -> Option<u64> {
         self.inner.len()
     }
-
-    fn is_empty(&self) -> Option<bool> {
-        self.inner.is_empty()
-    }
 }
 
 #[cfg(test)]
@@ -239,8 +235,7 @@ mod tests {
         );
 
         // Entry with per-entry TTL should use entry TTL
-        let mut entry = CacheEntry::with_ttl(42, Duration::from_secs(120)); // entry TTL: 120 seconds
-        entry.set_cached_at(clock.system_time());
+        let entry = CacheEntry::expires_at(42, Duration::from_secs(120), clock.system_time()); // entry TTL: 120 seconds
 
         // Entry TTL is longer than tier TTL, so entry should not be expired
         assert!(!wrapper.is_expired(&entry));

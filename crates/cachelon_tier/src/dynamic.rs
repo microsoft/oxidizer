@@ -29,7 +29,7 @@ pub trait DynamicCacheExt<K, V>: Sized {
     fn into_dynamic(self) -> DynamicCache<K, V>;
 }
 
-impl<K, V, T> DynamicCacheExt<K, V> for T
+impl<T, K, V> DynamicCacheExt<K, V> for T
 where
     T: CacheTier<K, V> + 'static,
 {
@@ -76,11 +76,7 @@ impl<K, V> Clone for DynamicCache<K, V> {
     }
 }
 
-impl<K, V> CacheTier<K, V> for DynamicCache<K, V>
-where
-    K: Sync,
-    V: Send,
-{
+impl<K: Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         self.0.get(key).await
     }
@@ -99,9 +95,5 @@ where
 
     fn len(&self) -> Option<u64> {
         self.0.len()
-    }
-
-    fn is_empty(&self) -> Option<bool> {
-        self.0.is_empty()
     }
 }

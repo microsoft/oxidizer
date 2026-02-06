@@ -18,31 +18,25 @@ use crate::{CacheEntry, Error};
 /// - `try_get`/`try_insert`: Wrap the infallible versions in `Ok`
 /// - `invalidate`/`try_invalidate`: No-op (not all tiers support invalidation)
 /// - `clear`/`try_clear`: No-op (not all tiers support clearing)
-/// - `len`/`is_empty`: Return `None` (not all tiers track size)
+/// - `len`: Return `None` (not all tiers track size)
 #[cfg_attr(
     any(test, feature = "dynamic-cache"),
     dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))
 )]
 pub trait CacheTier<K, V>: Send + Sync {
+
     /// Gets a value, returning an error if the operation fails.
-    fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send
-    where
-        K: Sync;
+    fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
 
     /// Inserts a value, returning an error if the operation fails.
     ///
     /// Default implementation wraps `insert()` in `Ok`.
-    fn insert(&self, key: &K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send
-    where
-        K: Sync,
-        V: Send;
+    fn insert(&self, key: &K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Invalidates a value, returning an error if the operation fails.
     ///
     /// Default implementation wraps `invalidate()` in `Ok`.
-    fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send
-    where
-        K: Sync;
+    fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Clears all entries, returning an error if the operation fails.
     fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send;
@@ -53,13 +47,4 @@ pub trait CacheTier<K, V>: Send + Sync {
     fn len(&self) -> Option<u64> {
         None
     }
-
-    /// Returns true if the cache is empty.
-    ///
-    /// Returns `None` for implementations that don't track size.
-    fn is_empty(&self) -> Option<bool> {
-        self.len().map(|n| n == 0)
-    }
 }
-
-// Public API tests moved to tests/tier.rs

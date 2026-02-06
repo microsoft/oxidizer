@@ -113,7 +113,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     ///
     /// Entries will expire after this duration from insertion, regardless
     /// of access patterns. This is enforced at the cache tier level and is
-    /// independent of any per-entry TTL set via `CacheEntry::with_ttl()`.
+    /// independent of any per-entry TTL set via `CacheEntry::expires_after()`.
     ///
     /// Expired entries are removed lazily during cache operations and
     /// automatically in the background using hierarchical timer wheels.

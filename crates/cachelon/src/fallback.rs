@@ -34,10 +34,10 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// let policy = FallbackPromotionPolicy::<String>::never();
 /// ```
 #[derive(Debug, Default)]
-pub struct FallbackPromotionPolicy<V>(FallbackPromotionPolicyType<V>);
+pub struct FallbackPromotionPolicy<V>(PolicyType<V>);
 
 #[derive(Default)]
-pub enum FallbackPromotionPolicyType<V> {
+enum PolicyType<V> {
     /// Always promote values to primary cache.
     #[default]
     Always,
@@ -50,7 +50,7 @@ pub enum FallbackPromotionPolicyType<V> {
     When(Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>),
 }
 
-impl<V> std::fmt::Debug for FallbackPromotionPolicyType<V> {
+impl<V> std::fmt::Debug for PolicyType<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Always => write!(f, "Always"),
@@ -67,7 +67,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// of additional writes to the primary tier.
     #[must_use]
     pub fn always() -> Self {
-        Self(FallbackPromotionPolicyType::Always)
+        Self(PolicyType::Always)
     }
 
     /// Creates a policy that never promotes values to the primary cache.
@@ -76,7 +76,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// to avoid write overhead to the primary tier.
     #[must_use]
     pub fn never() -> Self {
-        Self(FallbackPromotionPolicyType::Never)
+        Self(PolicyType::Never)
     }
 
     /// Creates a policy using a predicate closure.
@@ -102,16 +102,16 @@ impl<V> FallbackPromotionPolicy<V> {
     where
         F: Fn(&CacheEntry<V>) -> bool + Send + Sync + 'static,
     {
-        Self(FallbackPromotionPolicyType::When(Arc::new(predicate)))
+        Self(PolicyType::When(Arc::new(predicate)))
     }
 
     /// Returns true if the response should be promoted to primary.
     #[inline]
     pub(crate) fn should_promote(&self, response: &CacheEntry<V>) -> bool {
         match &self.0 {
-            FallbackPromotionPolicyType::Always => true,
-            FallbackPromotionPolicyType::Never => false,
-            FallbackPromotionPolicyType::When(pred) => pred(response),
+            PolicyType::Always => true,
+            PolicyType::Never => false,
+            PolicyType::When(pred) => pred(response),
         }
     }
 }
@@ -277,10 +277,6 @@ where
     fn len(&self) -> Option<u64> {
         // Return length of primary cache if available
         self.inner.primary.len()
-    }
-
-    fn is_empty(&self) -> Option<bool> {
-        self.inner.primary.is_empty()
     }
 }
 

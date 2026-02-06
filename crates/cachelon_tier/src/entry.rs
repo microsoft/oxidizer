@@ -19,12 +19,12 @@ use std::{
 /// use cachelon_tier::CacheEntry;
 /// use std::time::Duration;
 ///
-/// // Simple entry with just a value
+/// // Simple entry with just a value (no expiration)
 /// let entry = CacheEntry::new(42);
 /// assert_eq!(*entry.value(), 42);
 ///
-/// // Entry with per-entry TTL
-/// let entry = CacheEntry::with_ttl("data".to_string(), Duration::from_secs(60));
+/// // Entry that expires after a duration from insert time
+/// let entry = CacheEntry::expires_after("data".to_string(), Duration::from_secs(60));
 /// assert_eq!(entry.ttl(), Some(Duration::from_secs(60)));
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub struct CacheEntry<V> {
 impl<V> CacheEntry<V> {
     /// Creates a new cache entry with the given value.
     ///
-    /// The timestamp will be set by the cache when the entry is inserted.
+    /// The entry will not expire unless a tier-level TTL is configured.
     pub fn new(value: V) -> Self {
         Self {
             value,
@@ -47,10 +47,11 @@ impl<V> CacheEntry<V> {
         }
     }
 
-    /// Creates a new cache entry with a per-entry TTL.
+    /// Creates a cache entry that expires after the given duration from insert time.
     ///
+    /// The timestamp will be set by the cache when the entry is inserted.
     /// The per-entry TTL takes precedence over any tier-level TTL.
-    pub fn with_ttl(value: V, ttl: Duration) -> Self {
+    pub fn expires_after(value: V, ttl: Duration) -> Self {
         Self {
             value,
             cached_at: None,
@@ -58,33 +59,36 @@ impl<V> CacheEntry<V> {
         }
     }
 
-    /// Creates a new cache entry with an explicit timestamp.
+    /// Creates a cache entry that expires at `cached_at + ttl`.
     ///
-    /// This is typically used when recreating entries from persistent storage.
-    pub fn with_cached_at(value: V, cached_at: SystemTime) -> Self {
+    /// Use this when restoring entries from persistent storage or migrating
+    /// between caches while preserving the original expiration time.
+    pub fn expires_at(value: V, ttl: Duration, cached_at: SystemTime) -> Self {
         Self {
             value,
             cached_at: Some(cached_at),
-            ttl: None,
+            ttl: Some(ttl),
         }
     }
 
     /// Returns the timestamp when this entry was cached.
     ///
     /// Returns `None` if the entry hasn't been inserted into a cache yet,
-    /// or was created without [`with_cached_at`](Self::with_cached_at).
+    /// or was created without [`expires_at`](Self::expires_at).
     #[must_use]
     pub fn cached_at(&self) -> Option<SystemTime> {
         self.cached_at
     }
 
-    /// Sets the cache timestamp.
+    /// Sets the cache timestamp if not already set.
     ///
-    /// Called automatically by the cache during insertion. You typically
-    /// don't need to call this directly unless reconstructing entries
-    /// from persistent storage.
-    pub fn set_cached_at(&mut self, cached_at: SystemTime) {
-        self.cached_at = Some(cached_at);
+    /// Called automatically by the cache during insertion. If the entry
+    /// was created with [`expires_at`](Self::expires_at), the existing
+    /// timestamp is preserved.
+    pub fn ensure_cached_at(&mut self, cached_at: SystemTime) {
+        if self.cached_at.is_none() {
+            self.cached_at = Some(cached_at);
+        }
     }
 
     /// Returns the per-entry TTL override.

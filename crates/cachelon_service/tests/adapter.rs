@@ -120,13 +120,6 @@ fn adapter_len_returns_none() {
 }
 
 #[test]
-fn adapter_is_empty_returns_none() {
-    let service = InMemoryCacheService::<String, i32>::new();
-    let adapter = ServiceAdapter::new(service);
-    assert_eq!(adapter.is_empty(), None);
-}
-
-#[test]
 fn adapter_provides_access_to_inner_service() {
     let service = InMemoryCacheService::<String, i32>::new();
     let adapter: ServiceAdapter<String, i32, _> = ServiceAdapter::new(service);

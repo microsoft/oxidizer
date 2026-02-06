@@ -313,12 +313,6 @@ where
         self.storage.len()
     }
 
-    /// Returns true if the cache is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> Option<bool> {
-        self.storage.is_empty()
-    }
-
     /// Retrieves a value from cache, or computes and caches it if missing.
     ///
     /// If the key is present, returns the cached value immediately. Otherwise,

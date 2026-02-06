@@ -105,11 +105,6 @@ where
         // Service-based tiers typically don't expose length information
         None
     }
-
-    fn is_empty(&self) -> Option<bool> {
-        // Service-based tiers typically don't expose empty status
-        None
-    }
 }
 
 #[cfg(test)]
@@ -180,12 +175,6 @@ mod tests {
     fn adapter_len() {
         let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
         assert_eq!(adapter.len(), None);
-    }
-
-    #[test]
-    fn adapter_is_empty() {
-        let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
-        assert_eq!(adapter.is_empty(), None);
     }
 
     #[test]

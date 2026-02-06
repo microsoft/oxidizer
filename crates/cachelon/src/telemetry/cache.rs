@@ -200,10 +200,8 @@ impl CacheTelemetry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::telemetry::{
-        TelemetryConfig,
-        testing::{LogCapture, MetricTester},
-    };
+    use crate::telemetry::TelemetryConfig;
+    use testing_aids::{LogCapture, MetricTester};
 
     #[test]
     fn cache_operation_as_str() {

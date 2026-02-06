@@ -347,7 +347,7 @@ mod tests {
     async fn breaker_emits_logs() {
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
+        use testing_aids::LogCapture;
 
         let log_capture = LogCapture::new();
         let _guard = log_capture.subscriber().set_default();

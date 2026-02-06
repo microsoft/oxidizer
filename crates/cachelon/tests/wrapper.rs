@@ -98,20 +98,18 @@ fn wrapper_clear() -> TestResult {
 }
 
 #[test]
-fn wrapper_len_and_is_empty() -> TestResult {
+fn wrapper_len_returns_some() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         assert_eq!(cache.len(), Some(0));
-        assert_eq!(cache.is_empty(), Some(true));
 
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-        // After insert, len() and is_empty() return Some values
+        // After insert, len() returns Some value
         // Note: exact count may be eventually consistent with moka cache
         assert!(cache.len().is_some());
-        assert!(cache.is_empty().is_some());
         Ok(())
     })
 }
@@ -141,7 +139,7 @@ fn wrapper_entry_with_ttl() -> TestResult {
 
         let key = "key".to_string();
         // Entry with per-entry TTL
-        let entry = CacheEntry::with_ttl(42, Duration::from_secs(120));
+        let entry = CacheEntry::expires_after(42, Duration::from_secs(120));
         cache.insert(&key, entry).await?;
 
         // Entry should exist immediately after insertion
