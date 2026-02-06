@@ -46,4 +46,11 @@ pub trait CacheTier<K, V>: Send + Sync {
     fn len(&self) -> Option<u64> {
         None
     }
+
+    /// Returns `true` if the cache contains no entries.
+    ///
+    /// Returns `None` for implementations that don't track size.
+    fn is_empty(&self) -> Option<bool> {
+        self.len().map(|len| len == 0)
+    }
 }

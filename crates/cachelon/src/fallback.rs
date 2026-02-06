@@ -16,6 +16,9 @@ use crate::telemetry::CacheTelemetry;
 use crate::{Error, cache::CacheName, telemetry::ext::ClockExt};
 use cachelon_tier::{CacheEntry, CacheTier};
 
+/// Type alias for promotion predicate functions.
+type PromotionPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
+
 /// Policy for promoting values from fallback to primary cache.
 ///
 /// When a cache miss occurs in the primary tier and a value is found in the
@@ -32,6 +35,9 @@ use cachelon_tier::{CacheEntry, CacheTier};
 ///
 /// // Never promote
 /// let policy = FallbackPromotionPolicy::<String>::never();
+///
+/// // Promote based on a condition
+/// let policy = FallbackPromotionPolicy::<String>::when(|entry| entry.value().len() >= 5);
 /// ```
 #[derive(Debug, Default)]
 pub struct FallbackPromotionPolicy<V>(PolicyType<V>);
@@ -47,7 +53,7 @@ enum PolicyType<V> {
     ///
     /// Use this when you need to capture external state in the predicate.
     /// Has slight overhead from dynamic dispatch.
-    When(Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>),
+    When(PromotionPredicate<V>),
 }
 
 impl<V> std::fmt::Debug for PolicyType<V> {

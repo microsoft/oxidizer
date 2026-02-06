@@ -15,7 +15,7 @@ use cachelon_tier::{CacheEntry, CacheTier};
 pub type CacheName = &'static str;
 
 /// Mergers for stampede protection on all cache operations.
-/// Only created when stampede_protection is enabled.
+/// Only created when `stampede_protection` is enabled.
 struct Mergers<K, V> {
     get: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
     invalidate: Merger<K, Result<(), Error>>,
@@ -106,7 +106,7 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) storage: S,
     pub(crate) clock: Clock,
     /// Mergers for stampede protection on all operations.
-    /// Only present when stampede_protection is enabled.
+    /// Only present when `stampede_protection` is enabled.
     mergers: Option<Mergers<K, V>>,
 }
 
@@ -311,6 +311,14 @@ where
     #[must_use]
     pub fn len(&self) -> Option<u64> {
         self.storage.len()
+    }
+
+    /// Returns `true` if the cache contains no entries.
+    ///
+    /// Returns `None` if the underlying storage doesn't support size tracking.
+    #[must_use]
+    pub fn is_empty(&self) -> Option<bool> {
+        self.storage.is_empty()
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.

@@ -10,7 +10,7 @@ use std::error::Error as StdError;
 /// Wraps any underlying error from a cache implementation while preserving
 /// the ability to extract the original typed error.
 ///
-/// # For CacheTier Implementers
+/// # For `CacheTier` Implementers
 ///
 /// Wrap your storage-specific errors using [`from_source`](Self::from_source):
 ///
@@ -90,6 +90,7 @@ impl Error {
     /// assert!(error.is_source::<std::io::Error>());
     /// assert!(!error.is_source::<std::fmt::Error>());
     /// ```
+    #[must_use]
     pub fn is_source<T: StdError + 'static>(&self) -> bool {
         self.source_as::<T>().is_some()
     }
@@ -111,6 +112,7 @@ impl Error {
     ///     assert_eq!(io_err.kind(), std::io::ErrorKind::NotFound);
     /// }
     /// ```
+    #[must_use]
     pub fn source_as<T: StdError + 'static>(&self) -> Option<&T> {
         self.source().and_then(|s| s.downcast_ref::<T>())
     }
