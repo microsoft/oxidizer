@@ -307,6 +307,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot",
+ "pin-project-lite",
  "thread_aware",
  "tick",
  "tokio",

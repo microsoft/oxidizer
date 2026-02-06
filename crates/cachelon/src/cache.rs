@@ -14,16 +14,14 @@ use cachelon_tier::{CacheEntry, CacheTier};
 /// Type alias for cache names used in telemetry.
 pub type CacheName = &'static str;
 
-/// Mergers for stampede protection on basic cache operations.
-///
-/// Each operation type has its own merger to handle the appropriate return type.
-/// Concurrent calls for the same key are coalesced - only one executes while
-/// others wait and share the result.
+/// Mergers for stampede protection on all cache operations.
+/// Only created when stampede_protection is enabled.
 struct Mergers<K, V> {
-    /// For `get` - returns cached entry or None
     get: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
-    /// For `invalidate` - returns unit on success
     invalidate: Merger<K, Result<(), Error>>,
+    get_or_insert: Merger<K, Result<CacheEntry<V>, Error>>,
+    try_get_or_insert: Merger<K, Result<CacheEntry<V>, Error>>,
+    optionally_get_or_insert: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
 }
 
 impl<K, V> Mergers<K, V>
@@ -35,6 +33,9 @@ where
         Self {
             get: Merger::new(),
             invalidate: Merger::new(),
+            get_or_insert: Merger::new(),
+            try_get_or_insert: Merger::new(),
+            optionally_get_or_insert: Merger::new(),
         }
     }
 }
@@ -104,6 +105,8 @@ pub struct Cache<K, V, S = ()> {
     pub(crate) name: CacheName,
     pub(crate) storage: S,
     pub(crate) clock: Clock,
+    /// Mergers for stampede protection on all operations.
+    /// Only present when stampede_protection is enabled.
     mergers: Option<Mergers<K, V>>,
 }
 
@@ -227,15 +230,15 @@ where
     /// # });
     /// ```
     pub async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        if let Some(ref mergers) = self.mergers {
-            return mergers
+        if let Some(mergers) = &self.mergers {
+            mergers
                 .get
                 .execute(key, || self.storage.get(key))
                 .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.storage.get(key).await
         }
-
-        self.storage.get(key).await
     }
 
     /// Inserts a value into the cache.
@@ -275,15 +278,15 @@ where
     ///
     /// Returns an error if the underlying cache tier operation fails.
     pub async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        if let Some(ref mergers) = self.mergers {
-            return mergers
+        if let Some(mergers) = &self.mergers {
+            mergers
                 .invalidate
                 .execute(key, || self.storage.invalidate(key))
                 .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.storage.invalidate(key).await
         }
-
-        self.storage.invalidate(key).await
     }
 
     /// Returns true if the cache contains a value for the given key.
@@ -314,6 +317,207 @@ where
     #[must_use]
     pub fn is_empty(&self) -> Option<bool> {
         self.storage.is_empty()
+    }
+
+    /// Retrieves a value from cache, or computes and caches it if missing.
+    ///
+    /// If the key is present, returns the cached value immediately. Otherwise,
+    /// calls the provided function to compute the value, inserts it, and returns it.
+    ///
+    /// # Stampede Protection
+    ///
+    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// concurrent calls for the same missing key are coalesced - only one caller
+    /// computes the value while others wait and share the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache operation fails or (with stampede
+    /// protection) if the leader task panics.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cachelon::Cache;
+    /// use tick::Clock;
+    /// # futures::executor::block_on(async {
+    ///
+    /// let clock = Clock::new_frozen();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
+    ///
+    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 42 }).await?;
+    /// assert_eq!(*entry.value(), 42);
+    /// # Ok::<(), cachelon::Error>(())
+    /// # });
+    /// ```
+    pub async fn get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
+    where
+        Fut: Future<Output = V> + Send,
+    {
+        if let Some(mergers) = &self.mergers {
+            mergers
+                .get_or_insert
+                .execute(key, || self.do_get_or_insert(key, f))
+                .await
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.do_get_or_insert(key, f).await
+        }
+    }
+
+    async fn do_get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
+    where
+        Fut: Future<Output = V>,
+    {
+        if let Some(entry) = self.get(key).await? {
+            return Ok(entry);
+        }
+        let value = f().await;
+        let entry = CacheEntry::new(value);
+        self.insert(key, entry.clone()).await?;
+        Ok(entry)
+    }
+
+    /// Retrieves a value from cache, or computes and caches it if missing.
+    ///
+    /// Like [`get_or_insert`](Self::get_or_insert), but the provided function can fail.
+    /// Only successful results are cached - errors are not cached, allowing retries.
+    ///
+    /// # Stampede Protection
+    ///
+    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// concurrent calls for the same missing key are coalesced. If the computation
+    /// fails, the error is shared with all waiters but not cached.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The provided function returns an error (wrapped via [`Error::from_source`])
+    /// - The underlying cache operation fails
+    /// - With stampede protection, if the leader task panics
+    ///
+    /// Use [`Error::source_as`] to extract the original error type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cachelon::{Cache, Error};
+    /// use tick::Clock;
+    /// # futures::executor::block_on(async {
+    ///
+    /// let clock = Clock::new_frozen();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
+    ///
+    /// let result = cache
+    ///     .try_get_or_insert(&"key".to_string(), || async { Ok::<_, std::io::Error>(42) })
+    ///     .await;
+    /// assert!(result.is_ok());
+    /// # });
+    /// ```
+    pub async fn try_get_or_insert<E, Fut>(&self, key: &K, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
+    where
+        E: std::error::Error + Send + Sync + 'static,
+        Fut: Future<Output = Result<V, E>> + Send,
+    {
+        if let Some(mergers) = &self.mergers {
+            mergers
+                .try_get_or_insert
+                .execute(key, || self.do_try_get_or_insert(key, f))
+                .await
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.do_try_get_or_insert(key, f).await
+        }
+    }
+
+    async fn do_try_get_or_insert<E, Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
+    where
+        E: std::error::Error + Send + Sync + 'static,
+        Fut: Future<Output = Result<V, E>>,
+    {
+        if let Some(entry) = self.get(key).await? {
+            return Ok(entry);
+        }
+        let value = f().await.map_err(Error::from_source)?;
+        let entry = CacheEntry::new(value);
+        self.insert(key, entry.clone()).await?;
+        Ok(entry)
+    }
+
+    /// Retrieves a value from cache, or conditionally computes and caches it.
+    ///
+    /// Like [`get_or_insert`](Self::get_or_insert), but the function returns `Option<V>`.
+    /// Only `Some` values are cached - `None` results are not cached, allowing the
+    /// computation to be retried on subsequent calls.
+    ///
+    /// # Stampede Protection
+    ///
+    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// concurrent calls for the same missing key are coalesced.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache operation fails or (with stampede
+    /// protection) if the leader task panics.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cachelon::Cache;
+    /// use tick::Clock;
+    /// # futures::executor::block_on(async {
+    ///
+    /// let clock = Clock::new_frozen();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
+    ///
+    /// // Returns None without caching
+    /// let result = cache
+    ///     .optionally_get_or_insert(&"missing".to_string(), || async { None })
+    ///     .await?;
+    /// assert!(result.is_none());
+    ///
+    /// // Returns Some and caches
+    /// let result = cache
+    ///     .optionally_get_or_insert(&"key".to_string(), || async { Some(42) })
+    ///     .await?;
+    /// assert_eq!(*result.unwrap().value(), 42);
+    /// # Ok::<(), cachelon::Error>(())
+    /// # });
+    /// ```
+    pub async fn optionally_get_or_insert<Fut>(
+        &self,
+        key: &K,
+        f: impl FnOnce() -> Fut + Send,
+    ) -> Result<Option<CacheEntry<V>>, Error>
+    where
+        Fut: Future<Output = Option<V>> + Send,
+    {
+        if let Some(mergers) = &self.mergers {
+            mergers
+                .optionally_get_or_insert
+                .execute(key, || self.do_optionally_get_or_insert(key, f))
+                .await
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.do_optionally_get_or_insert(key, f).await
+        }
+    }
+
+    async fn do_optionally_get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<Option<CacheEntry<V>>, Error>
+    where
+        Fut: Future<Output = Option<V>>,
+    {
+        if let Some(entry) = self.get(key).await? {
+            return Ok(Some(entry));
+        }
+        match f().await {
+            Some(value) => {
+                let entry = CacheEntry::new(value);
+                self.insert(key, entry.clone()).await?;
+                Ok(Some(entry))
+            }
+            None => Ok(None),
+        }
     }
 }
 

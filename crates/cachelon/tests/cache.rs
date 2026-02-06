@@ -5,7 +5,7 @@
 
 //! Integration tests for Cache API.
 
-use cachelon::{Cache, CacheEntry, Error, LoadingCache};
+use cachelon::{Cache, CacheEntry, Error};
 use tick::Clock;
 
 type TestResult = Result<(), Error>;
@@ -151,14 +151,13 @@ fn get_or_insert_returns_cached() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
-        let loader = LoadingCache::new(cache);
 
         let key = "key".to_string();
 
-        let entry = loader.get_or_insert(&key, || async { 42 }).await?;
+        let entry = cache.get_or_insert(&key, || async { 42 }).await?;
         assert_eq!(*entry.value(), 42);
 
-        let entry = loader.get_or_insert(&key, || async { 100 }).await?;
+        let entry = cache.get_or_insert(&key, || async { 100 }).await?;
         assert_eq!(*entry.value(), 42);
         Ok(())
     })
@@ -169,15 +168,14 @@ fn try_get_or_insert_success() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
-        let loader = LoadingCache::new(cache);
 
         let key = "key".to_string();
 
-        let entry = loader.try_get_or_insert(&key, || async { Ok::<_, Error>(42) }).await?;
+        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(42) }).await?;
         assert_eq!(*entry.value(), 42);
 
         // Verify caching: second call should return cached value, not 100
-        let entry = loader.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await?;
+        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await?;
         assert_eq!(*entry.value(), 42);
         Ok(())
     })
@@ -188,11 +186,10 @@ fn try_get_or_insert_error() {
     block_on(async {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
-        let loader = LoadingCache::new(cache);
 
         let key = "key".to_string();
 
-        let result: Result<CacheEntry<i32>, Error> = loader
+        let result: Result<CacheEntry<i32>, Error> = cache
             .try_get_or_insert(&key, || async { Err(Error::from_message("test error")) })
             .await;
 

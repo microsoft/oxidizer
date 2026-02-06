@@ -3,9 +3,12 @@
 
 //! Extension traits for telemetry recording.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-use tick::Clock;
+use pin_project_lite::pin_project;
+use tick::{Clock, Stopwatch};
 
 /// Result of a timed async operation.
 #[derive(Debug, Clone, Copy)]
@@ -16,24 +19,47 @@ pub struct TimedResult<R> {
     pub duration: Duration,
 }
 
+pin_project! {
+    /// A future that times the inner future's execution.
+    #[must_use = "futures do nothing unless polled"]
+    pub struct Timed<F> {
+        #[pin]
+        inner: F,
+        watch: Stopwatch,
+    }
+}
+
+impl<F: Future> Future for Timed<F> {
+    type Output = TimedResult<F::Output>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.inner.poll(cx) {
+            Poll::Ready(result) => Poll::Ready(TimedResult {
+                result,
+                duration: this.watch.elapsed(),
+            }),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 /// Extension trait for timing async operations.
 pub trait ClockExt {
     /// Times an async operation and returns both the result and elapsed duration.
-    fn timed_async<F, R>(&self, f: F) -> impl Future<Output = TimedResult<R>>
+    fn timed_async<F>(&self, f: F) -> Timed<F>
     where
-        F: Future<Output = R>;
+        F: Future;
 }
 
 impl ClockExt for Clock {
-    async fn timed_async<F, R>(&self, f: F) -> TimedResult<R>
+    fn timed_async<F>(&self, f: F) -> Timed<F>
     where
-        F: Future<Output = R>,
+        F: Future,
     {
-        let watch = self.stopwatch();
-        let result = f.await;
-        TimedResult {
-            result,
-            duration: watch.elapsed(),
+        Timed {
+            inner: f,
+            watch: self.stopwatch(),
         }
     }
 }

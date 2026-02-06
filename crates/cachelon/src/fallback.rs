@@ -226,8 +226,8 @@ where
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        // Fast path: check primary cache first (unboxed for performance)
-        // On hit, return immediately. On miss or error, fall through to fallback.
+        // Primary lookup is not boxed to avoid allocation on the hot path (hits).
+        // The fallback path is boxed to bound future size for deeply nested caches.
         // Primary errors are already logged by the inner CacheWrapper.
         if let Ok(Some(value)) = self.inner.primary.get(key).await {
             // Check if background refresh is needed
@@ -240,7 +240,7 @@ where
             return Ok(Some(value));
         }
 
-        // Slow path: fallback lookup - boxed to bound future size
+        // Fallback lookup - also boxed to bound future size
         Box::pin(self.get_from_fallback(key)).await
     }
 

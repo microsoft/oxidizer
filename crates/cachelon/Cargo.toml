@@ -59,6 +59,7 @@ opentelemetry = { workspace = true, optional = true, features = [
     "logs",
 ] }
 parking_lot = { version = "0.12.5" }
+pin-project-lite = { workspace = true }
 thread_aware = { workspace = true }
 tick = { workspace = true, features = [] }
 tracing = { workspace = true, optional = true }

@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use cachelon::{Cache, LoadingCache};
+use cachelon::Cache;
 use tick::Clock;
 
 async fn fetch_from_db(id: &str) -> String {
@@ -17,19 +17,18 @@ async fn fetch_from_db(id: &str) -> String {
 async fn main() {
     let clock = Clock::new_tokio();
     let cache = Cache::builder::<String, String>(clock).memory().build();
-    let loader = LoadingCache::new(cache);
 
     let key = "user:1".to_string();
 
     // First call: cache miss, calls fetch_from_db
-    let entry = loader
+    let entry = cache
         .get_or_insert(&key, || fetch_from_db("1"))
         .await
         .expect("get_or_insert failed");
     println!("first call: {}", entry.value());
 
     // Second call: cache hit, no fetch
-    let entry = loader
+    let entry = cache
         .get_or_insert(&key, || fetch_from_db("1"))
         .await
         .expect("get_or_insert failed");
