@@ -1550,9 +1550,9 @@ dependencies = [
 
 [[package]]
 name = "rapidhash"
-version = "4.2.1"
+version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d8b5b858a440a0bc02625b62dd95131b9201aa9f69f411195dd4a7cfb1de3d7"
+checksum = "84816e4c99c467e92cf984ee6328caa976dfecd33a673544489d79ca2caaefe5"
 dependencies = [
  "rustversion",
 ]
