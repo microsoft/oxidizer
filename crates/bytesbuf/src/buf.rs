@@ -361,11 +361,8 @@ impl BytesBuf {
     fn frozen(&self) -> usize {
         // Will not underflow because `unfrozen <= len` is a type invariant
         // (we can only fill bytes that contribute to `len`).
-        self.len.wrapping_sub(
-            self.span_builders_reversed
-                .last()
-                .map_or(0, SpanBuilder::len) as usize,
-        )
+        self.len
+            .wrapping_sub(self.span_builders_reversed.last().map_or(0, SpanBuilder::len) as usize)
     }
 
     /// Whether the buffer is empty (contains no data).
