@@ -114,12 +114,6 @@ pub struct BytesBuf {
     /// We cache this to avoid recalculating it every time we need this information.
     len: usize,
 
-    /// Length of the data contained in the frozen spans. The total `len` is this plus whatever
-    /// may be partially filled in the (logically) first span builder.
-    ///
-    /// We cache this to avoid recalculating it every time we need this information.
-    frozen: usize,
-
     /// Available capacity that can accept additional data into it.
     /// The total capacity is `len + available`.
     ///
@@ -169,7 +163,6 @@ impl BytesBuf {
             // so we do not reverse them here before storing.
             span_builders_reversed: span_builders,
             len: 0,
-            frozen: 0,
             available,
         }
     }
@@ -265,10 +258,6 @@ impl BytesBuf {
         // The freezing above is safe even if we panic here - freezing is an atomic operation.
         self.len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
 
-        // Any appended BytesView is frozen by definition, as contents of a BytesView are immutable.
-        // This cannot wrap because we verified `len` is in-bounds and `frozen <= len` is a type invariant.
-        self.frozen = self.frozen.wrapping_add(bytes_len);
-
         self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
     }
 
@@ -363,6 +352,20 @@ impl BytesBuf {
 
         // Will not overflow - `capacity <= usize::MAX` is a type invariant and obviously `len < capacity`.
         frozen_len.wrapping_add(unfrozen_len)
+    }
+
+    /// Length of data that has been frozen into immutable spans.
+    ///
+    /// This is `len` minus any unfrozen data in the first (logically) span builder.
+    /// Only the first span builder may contain unfrozen data - a type invariant.
+    fn frozen(&self) -> usize {
+        // Will not underflow because `unfrozen <= len` is a type invariant
+        // (we can only fill bytes that contribute to `len`).
+        self.len.wrapping_sub(
+            self.span_builders_reversed
+                .last()
+                .map_or(0, SpanBuilder::len) as usize,
+        )
     }
 
     /// Whether the buffer is empty (contains no data).
@@ -528,15 +531,11 @@ impl BytesBuf {
         // Will not wrap because we verified bounds above.
         self.len = self.len.wrapping_sub(len);
 
-        // Will not wrap because all consumed data must first have been frozen,
-        // which we guarantee via ensure_frozen() above.
-        self.frozen = self.frozen.wrapping_sub(len);
-
         Some(BytesView::from_spans_reversed(result_spans_reversed))
     }
 
     fn prepare_consume(&self, mut len: usize) -> ConsumeManifest {
-        debug_assert!(len <= self.frozen);
+        debug_assert!(len <= self.frozen());
 
         let mut detach_complete_frozen_spans: usize = 0;
 
@@ -610,11 +609,6 @@ impl BytesBuf {
             // No more capacity left in this builder, so drop it.
             self.span_builders_reversed.pop();
         }
-
-        self.frozen = self
-            .frozen
-            .checked_add(len.get() as usize)
-            .expect("usize overflow should be impossible here because the sequence builder capacity would exceed virtual memory size");
     }
 
     /// Ensures that the frozen spans list contains at least `len` bytes of data, freezing
@@ -625,7 +619,7 @@ impl BytesBuf {
     /// Panics if there is not enough data in the span builders to fulfill the request.
     fn ensure_frozen(&mut self, len: usize) {
         let must_freeze_bytes: BlockSize = len
-            .saturating_sub(self.frozen)
+            .saturating_sub(self.frozen())
             .try_into()
             .expect("requested to freeze more bytes from the first block than can actually fit into one block");
 
@@ -932,7 +926,7 @@ impl std::fmt::Debug for BytesBuf {
 
         f.debug_struct(type_name::<Self>())
             .field("len", &self.len)
-            .field("frozen", &self.frozen)
+            .field("frozen", &self.frozen())
             .field("available", &self.available)
             .field("frozen_spans", &frozen_spans)
             .field("span_builders", &span_builders)
@@ -1986,7 +1980,7 @@ mod tests {
         // The point of this is not to say that we expect it to have a specific size but to allow
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
-        assert_eq!(size_of::<BytesBuf>(), 552);
+        assert_eq!(size_of::<BytesBuf>(), 544);
     }
 
     #[test]
