@@ -11,7 +11,6 @@ rust-version = "1.88"
 authors = ["The Oxidizer Project Authors"]
 license = "MIT"
 homepage = "https://github.com/microsoft/oxidizer"
-repository = "https://github.com/microsoft/oxidizer"
 
 # Adhere to the following rules when adding dependencies:
 # * All dependencies specified here need to have default-features turned off - individual crates can enable the
