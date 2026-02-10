@@ -17,8 +17,6 @@ use std::process::{Command, ExitCode};
 
 use ohno::{AppError, app_err, bail};
 
-const REPOSITORY: &str = "microsoft/oxidizer";
-
 /// Create a GitHub release for a crate tag.
 ///
 /// Parses a tag of the form `<crate>-v<major>.<minor>.<patch>`, extracts
@@ -28,6 +26,10 @@ struct Args {
     /// the git tag name (e.g. "bytesbuf-v1.2.3")
     #[argh(positional)]
     tag: String,
+
+    /// the GitHub repository in "owner/name" format (e.g. "microsoft/oxidizer")
+    #[argh(option)]
+    repo: String,
 }
 
 fn main() -> ExitCode {
@@ -47,7 +49,7 @@ fn run(args: &Args) -> Result<(), AppError> {
     let crate_path = validate_crate(crate_name)?;
     let body = extract_changelog(&crate_path, crate_name, version)?;
     println!("Creating release for {crate_name} v{version} with body:\n{body}");
-    create_release(&args.tag, REPOSITORY, crate_name, version, &body)
+    create_release(&args.tag, &args.repo, crate_name, version, &body)
 }
 
 /// Splits a tag like `foo-v1.2.3` into `("foo", "1.2.3")`.

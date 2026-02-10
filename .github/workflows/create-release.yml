@@ -29,4 +29,4 @@ jobs:
     - name: Create GitHub Release
       env:
         GH_TOKEN: ${{ github.token }}
-      run: cargo +nightly -Zscript scripts/publish-gh-release.rs "${{ inputs.tag || github.ref_name }}"
+      run: cargo +nightly -Zscript scripts/publish-gh-release.rs --repo "${{ github.repository }}" "${{ inputs.tag || github.ref_name }}"
