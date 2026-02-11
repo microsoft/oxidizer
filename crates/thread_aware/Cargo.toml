@@ -17,7 +17,10 @@ homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware"
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["thread_aware_macros::ThreadAware"]
+allowed_external_types = [
+    "many_cpus::system_hardware::SystemHardware",
+    "thread_aware_macros::ThreadAware",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -26,6 +29,7 @@ all-features = true
 default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
+test-util = []
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }

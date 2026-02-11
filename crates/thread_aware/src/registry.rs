@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::thread::ThreadId;
 
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
-use many_cpus::Processor;
+use many_cpus::SystemHardware;
 
 /// The number of processors to use for the registry.
 ///
@@ -50,11 +50,7 @@ pub struct ThreadRegistry {
 }
 
 impl ThreadRegistry {
-    /// Create a new `ThreadRegistry`.
-    ///
-    /// # Parameters
-    ///
-    /// * `count`: The number of processors to use.
+    /// Create a new `ThreadRegistry` using the current system hardware.
     ///
     /// # Panics
     ///
@@ -62,17 +58,19 @@ impl ThreadRegistry {
     /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn new(count: &ProcessorCount) -> Self {
-        let builder = many_cpus::SystemHardware::current().processors().to_builder();
+        Self::with_hardware(count, SystemHardware::current())
+    }
 
-        let processors: Vec<_> = match count {
+    /// Create a new `ThreadRegistry` with the specified hardware instance.
+    #[must_use]
+    pub(crate) fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
+        let builder = hardware.processors().to_builder();
+
+        let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
         }
-        .expect("Not enough processors available")
-        .processors()
-        .into_iter()
-        .cloned()
-        .collect();
+        .expect("Not enough processors available");
 
         let mut numa_nodes = Vec::new();
         let mut dense_index = 0;
@@ -94,7 +92,7 @@ impl ThreadRegistry {
         assert!(numa_nodes.len() < u16::MAX as usize, "Too many memory regions");
 
         Self {
-            processors,
+            processors: Processor::unpack(processors),
             numa_nodes,
             threads: Mutex::new(HashMap::new()),
         }
@@ -104,7 +102,7 @@ impl ThreadRegistry {
     #[expect(clippy::cast_possible_truncation, reason = "Checked in new()")]
     pub fn affinities(&self) -> impl Iterator<Item = PinnedAffinity> {
         self.processors.iter().enumerate().map(|(core_index, processor)| {
-            let dense_numa_index = self.numa_nodes[processor.memory_region_id() as usize];
+            let dense_numa_index = self.numa_nodes[processor.memory_region_id()];
 
             PinnedAffinity::new(
                 core_index as _,
@@ -130,7 +128,7 @@ impl ThreadRegistry {
     pub fn current_affinity(&self) -> MemoryAffinity {
         self.threads
             .lock()
-            .expect("Failed to acquire lock")
+            .expect("poisoned lock means type invariants may not hold - not safe to continue execution")
             .get(&std::thread::current().id())
             .copied()
             .map_or(MemoryAffinity::Unknown, MemoryAffinity::Pinned)
@@ -140,32 +138,54 @@ impl ThreadRegistry {
     ///
     /// # Panics
     ///
-    /// This will panic if the internal lock is poisoned.
+    /// This will panic if affinity contains incorrect processor index
     pub fn pin_to(&self, affinity: PinnedAffinity) {
         let core_index = affinity.processor_index();
         let processor = &self.processors[core_index];
-
-        let processor_set = many_cpus::SystemHardware::current()
-            .processors()
-            .to_builder()
-            .filter(|p| p.id() == processor.id())
-            .take_all();
-
-        // TODO: Handle not found here.
-        if let Some(ps) = processor_set {
-            ps.pin_current_thread_to();
-
-            self.threads
-                .lock()
-                .expect("Failed to acquire lock")
-                .insert(std::thread::current().id(), affinity);
-        }
+        processor.pin_current_thread_to();
+        self.threads
+            .lock()
+            .expect(
+                "poisoned lock means type invariants may not hold \
+                    - not safe to continue execution",
+            )
+            .insert(std::thread::current().id(), affinity);
     }
 }
 
 impl Default for ThreadRegistry {
     fn default() -> Self {
         Self::new(&ProcessorCount::Auto)
+    }
+}
+
+/// A wrapper around `many_cpus::ProcessorSet` that contains only a single processor
+#[derive(Debug)]
+struct Processor {
+    inner: many_cpus::ProcessorSet,
+}
+
+impl Processor {
+    /// Unpack a `ProcessorSet` containing multiples processors into a set of `Processor` each
+    /// representing a single unique processor.
+    fn unpack(_processor_set: many_cpus::ProcessorSet) -> Vec<Self> {
+        todo!()
+    }
+
+    fn memory_region_id(&self) -> usize {
+        self.as_processor().memory_region_id() as usize
+    }
+
+    fn pin_current_thread_to(&self) {
+        self.inner.pin_current_thread_to();
+    }
+
+    fn as_processor(&self) -> &many_cpus::Processor {
+        &self
+            .inner
+            .iter()
+            .next()
+            .expect("ProcessorSet should contain one and only one processor")
     }
 }
 
