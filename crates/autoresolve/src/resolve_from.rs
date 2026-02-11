@@ -39,26 +39,26 @@ impl<T> ResolutionDepsPrivate<T> for ResolutionDepsEnd {
     }
 }
 
-impl<T, H, TList> ResolutionDepsPrivate<T> for ResolutionDepsNode<H, TList>
+impl<T, H, Rest> ResolutionDepsPrivate<T> for ResolutionDepsNode<H, Rest>
 where
     H: ResolveFrom<T>,
-    TList: ResolutionDeps<T>,
+    Rest: ResolutionDeps<T>,
     T: Send + Sync + 'static,
 {
     type ResolvedPrivate<'a>
-        = ResolutionDepsNode<&'a H, TList::ResolvedPrivate<'a>>
+        = ResolutionDepsNode<&'a H, Rest::ResolvedPrivate<'a>>
     where
         Self: 'a,
         T: 'a;
     fn get_private(base: &Resolver<T>) -> Self::ResolvedPrivate<'_> {
-        let tail = TList::get_private(base);
+        let tail = Rest::get_private(base);
         let head = base.try_get::<H>().expect("Ensure must have been called before new");
         ResolutionDepsNode(head, tail)
     }
 
     fn ensure(base: &mut Resolver<T>) {
         base.ensure::<H>();
-        TList::ensure(base);
+        Rest::ensure(base);
     }
 }
 
@@ -75,15 +75,15 @@ impl<T> ResolutionDeps<T> for ResolutionDepsEnd {
     }
 }
 
-impl<T, H, TList> ResolutionDeps<T> for ResolutionDepsNode<H, TList>
+impl<T, H, Rest> ResolutionDeps<T> for ResolutionDepsNode<H, Rest>
 where
-    TList: ResolutionDeps<T>,
-    for<'a> TList: ResolutionDepsPrivate<T, ResolvedPrivate<'a> = TList::Resolved<'a>>,
+    Rest: ResolutionDeps<T>,
+    for<'a> Rest: ResolutionDepsPrivate<T, ResolvedPrivate<'a> = Rest::Resolved<'a>>,
     H: ResolveFrom<T>,
     T: Send + Sync + 'static,
 {
     type Resolved<'a>
-        = ResolutionDepsNode<&'a H, TList::Resolved<'a>>
+        = ResolutionDepsNode<&'a H, Rest::Resolved<'a>>
     where
         Self: 'a,
         T: 'a;
