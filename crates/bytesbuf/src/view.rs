@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::Any;
 use std::marker::PhantomData;
 use std::num::NonZero;
 use std::ops::{Bound, RangeBounds};
@@ -10,7 +9,7 @@ use std::{iter, mem};
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
-use crate::mem::{BlockSize, Memory};
+use crate::mem::{BlockMeta, BlockSize, Memory};
 use crate::{BytesViewReader, MAX_INLINE_SPANS, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
@@ -591,7 +590,7 @@ impl BytesView {
     ///
     /// [`first_slice()`]: Self::first_slice
     #[must_use]
-    pub fn first_slice_meta(&self) -> Option<&dyn Any> {
+    pub fn first_slice_meta(&self) -> Option<&dyn BlockMeta> {
         self.spans_reversed.last().and_then(|span| span.block_ref().meta())
     }
 
@@ -883,7 +882,7 @@ impl<'s> BytesViewSlices<'s> {
 }
 
 impl<'s> Iterator for BytesViewSlices<'s> {
-    type Item = (&'s [u8], Option<&'s dyn Any>);
+    type Item = (&'s [u8], Option<&'s dyn BlockMeta>);
 
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     fn next(&mut self) -> Option<Self::Item> {
@@ -905,7 +904,7 @@ impl<'s> Iterator for BytesViewSlices<'s> {
         // they are valid for as long as the iterator has borrowed the parent BytesView for.
         let slice_with_s = unsafe { mem::transmute::<&[u8], &'s [u8]>(slice) };
         // SAFETY: Same reasoning as above - metadata lives as long as any clone of the block.
-        let meta_with_s = unsafe { mem::transmute::<Option<&dyn Any>, Option<&'s dyn Any>>(meta) };
+        let meta_with_s = unsafe { mem::transmute::<Option<&dyn BlockMeta>, Option<&'s dyn BlockMeta>>(meta) };
 
         // Seek forward to the next chunk before we return.
         self.view.advance(self.view.first_slice().len());
@@ -1490,8 +1489,13 @@ mod tests {
 
     #[test]
     fn meta_some() {
+        #[derive(Debug)]
         struct GreenMeta;
+        #[derive(Debug)]
         struct BlueMeta;
+
+        impl BlockMeta for GreenMeta {}
+        impl BlockMeta for BlueMeta {}
 
         // SAFETY: We are not allowed to drop this until all BlockRef are gone. This is fine
         // because it is dropped at the end of the function, after all BlockRef instances.
@@ -1525,11 +1529,13 @@ mod tests {
         assert!(!data1.is_empty());
         assert!(meta1.is_some());
         assert!(meta1.unwrap().is::<BlueMeta>());
+        assert!(!meta1.unwrap().is::<GreenMeta>());
 
         let (data2, meta2) = slices_iter.next().expect("should have second block");
         assert!(!data2.is_empty());
         assert!(meta2.is_some());
         assert!(meta2.unwrap().is::<GreenMeta>());
+        assert!(!meta2.unwrap().is::<BlueMeta>());
 
         assert!(slices_iter.next().is_none(), "should have no more slices");
     }

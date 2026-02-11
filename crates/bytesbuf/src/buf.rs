@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::{Any, type_name};
+use std::any::type_name;
 use std::mem::{self, MaybeUninit};
 use std::num::NonZero;
 
 use smallvec::SmallVec;
 
-use crate::mem::{Block, BlockSize, Memory};
+use crate::mem::{Block, BlockMeta, BlockSize, Memory};
 use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
@@ -490,6 +490,7 @@ impl BytesBuf {
     ///
     /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
+    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check causes UB via unwrap_unchecked in consume_all or infinite loops in prepare_consume.
     pub fn consume_checked(&mut self, len: usize) -> Option<BytesView> {
         if len > self.len() {
             return None;
@@ -718,7 +719,7 @@ impl BytesBuf {
     ///
     /// [`first_unfilled_slice()`]: Self::first_unfilled_slice
     #[must_use]
-    pub fn first_unfilled_slice_meta(&self) -> Option<&dyn Any> {
+    pub fn first_unfilled_slice_meta(&self) -> Option<&dyn BlockMeta> {
         self.span_builders_reversed.last().and_then(|sb| sb.block().meta())
     }
 
@@ -1097,7 +1098,7 @@ pub struct BytesBufRemaining<'a> {
 }
 
 impl<'a> Iterator for BytesBufRemaining<'a> {
-    type Item = (&'a mut [MaybeUninit<u8>], Option<&'a dyn Any>);
+    type Item = (&'a mut [MaybeUninit<u8>], Option<&'a dyn BlockMeta>);
 
     #[cfg_attr(test, mutants::skip)] // This gets mutated into an infinite loop which is not very helpful.
     fn next(&mut self) -> Option<Self::Item> {
@@ -1137,7 +1138,7 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
             // The metadata is valid for 'a because the BlockRef implementation guarantees metadata
             // lives as long as any clone of the memory block, and we hold an exclusive reference
             // to the BytesBuf for the lifetime 'a.
-            unsafe { mem::transmute::<Option<&dyn Any>, Option<&'a dyn Any>>(meta) }
+            unsafe { mem::transmute::<Option<&dyn BlockMeta>, Option<&'a dyn BlockMeta>>(meta) }
         };
 
         let uninit_slice_mut = span_builder.unfilled_slice_mut();
@@ -2211,7 +2212,10 @@ mod tests {
 
     #[test]
     fn first_unfilled_slice_meta_with_meta() {
+        #[derive(Debug)]
         struct CustomMeta;
+
+        impl BlockMeta for CustomMeta {}
 
         // SAFETY: We are not allowed to drop this until all BlockRef are gone. This is fine
         // because it is dropped at the end of the function, after all BlockRef instances.
@@ -2224,6 +2228,7 @@ mod tests {
         let buf = BytesBuf::from_blocks([block]);
         let meta = buf.first_unfilled_slice_meta().expect("should have metadata");
         assert!(meta.is::<CustomMeta>());
+        assert!(!meta.is::<u8>());
     }
 
     // To be stabilized soon: https://github.com/rust-lang/rust/issues/79995
