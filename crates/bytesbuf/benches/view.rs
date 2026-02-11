@@ -124,16 +124,6 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
-    group.bench_function("chunks_as_slices_vectored", |b| {
-        b.iter(|| {
-            // Will only fill 1 of 4 slots, since the test data is just one chunk.
-            let mut slices: Vec<&[u8]> = vec![&[]; 4];
-            test_data_as_view.slices(&mut slices);
-
-            _ = black_box(slices);
-        });
-    });
-
     group.bench_function("advance_one_byte", |b| {
         b.iter_batched_ref(
             || many_as_view.clone(),

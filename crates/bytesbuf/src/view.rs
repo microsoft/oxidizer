@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::any::Any;
-use std::io::IoSlice;
 use std::marker::PhantomData;
 use std::num::NonZero;
 use std::ops::{Bound, RangeBounds};
@@ -532,102 +531,36 @@ impl BytesView {
         self.spans_reversed.last().map_or::<&[u8], _>(&[], |span| span)
     }
 
-    /// Fills an array with [`IoSlice`]s representing this view.
+    /// Iterates over all the slices that make up this view, together with their metadata.
     ///
-    /// Returns the number of elements written into `dst`. If there is not enough space in `dst`
-    /// to represent the entire view, only as many slices as fit will be written.
-    ///
-    /// See also [`slices()`] for a version that fills an array of regular slices instead of [`IoSlice`]s.
+    /// Each item is a tuple of `(data, meta)` where `data` is a byte slice and `meta` is the
+    /// optional metadata of the memory block backing that slice.
     #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
     ///
     /// # Example
     ///
     /// ```
     /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use std::io::IoSlice;
-    ///
+    /// # struct PageAlignedMemory;
     /// use bytesbuf::BytesView;
     ///
     /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
     /// # let part2 = BytesView::copied_from_slice(b"World", &memory);
     /// let view = BytesView::from_views([part1, part2]);
     ///
-    /// let mut io_slices = [IoSlice::new(&[]); 4];
-    /// let count = view.io_slices(&mut io_slices);
-    ///
-    /// for i in 0..count {
+    /// for (data, meta) in view.slices() {
+    ///     let is_page_aligned = meta.is_some_and(|m| m.is::<PageAlignedMemory>());
     ///     println!(
-    ///         "IoSlice {i}: {} bytes at {:p}",
-    ///         io_slices[i].len(),
-    ///         io_slices[i].as_ptr()
+    ///         "Slice of {} bytes (page-aligned: {is_page_aligned})",
+    ///         data.len()
     ///     );
     /// }
     /// ```
     ///
-    /// [`slices()`]: Self::slices
-    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn io_slices<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
-        if dst.is_empty() {
-            return 0;
-        }
-
-        // How many slices can we fill?
-        let slice_count = self.spans_reversed.len().min(dst.len());
-
-        // Note that IoSlice has a length limit of u32::MAX. Our spans are also limited to u32::MAX
-        // by memory manager internal limits (MAX_BLOCK_SIZE), so this is safe.
-        for (i, span) in self.spans_reversed.iter().rev().take(slice_count).enumerate() {
-            *dst.get_mut(i).expect("guarded by min()") = IoSlice::new(span);
-        }
-
-        slice_count
-    }
-
-    /// Fills an array with byte slices representing this view.
-    ///
-    /// Returns the number of elements written into `dst`. If there is not enough space in `dst`
-    /// to represent the entire view, only as many slices as fit will be written.
-    ///
-    /// See also [`io_slices()`] for a version that fills an array of [`IoSlice`]s instead of regular byte slices.
-    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::BytesView;
-    ///
-    /// # let part1 = BytesView::copied_from_slice(b"Hello", &memory);
-    /// # let part2 = BytesView::copied_from_slice(b"World", &memory);
-    /// let view = BytesView::from_views([part1, part2]);
-    ///
-    /// let mut slices: [&[u8]; 4] = [&[]; 4];
-    /// let count = view.slices(&mut slices);
-    ///
-    /// for i in 0..count {
-    ///     println!(
-    ///         "Slice {i}: {} bytes at {:p}",
-    ///         slices[i].len(),
-    ///         slices[i].as_ptr()
-    ///     );
-    /// }
-    /// ```
-    ///
-    /// [`io_slices()`]: Self::io_slices
-    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
-    pub fn slices<'a>(&'a self, dst: &mut [&'a [u8]]) -> usize {
-        if dst.is_empty() {
-            return 0;
-        }
-
-        // How many slices can we fill?
-        let slice_count = self.spans_reversed.len().min(dst.len());
-
-        for (i, span) in self.spans_reversed.iter().rev().take(slice_count).enumerate() {
-            *dst.get_mut(i).expect("guarded by min()") = span;
-        }
-
-        slice_count
+    /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
+    /// a more detailed example of how to make use of the slice metadata.
+    pub fn slices(&self) -> BytesViewSlices<'_> {
+        BytesViewSlices::new(self)
     }
 
     /// Inspects the metadata of the [`first_slice()`].
@@ -658,41 +591,6 @@ impl BytesView {
     #[must_use]
     pub fn first_slice_meta(&self) -> Option<&dyn Any> {
         self.spans_reversed.last().and_then(|span| span.block_ref().meta())
-    }
-
-    /// Iterates over the metadata of all the slices that make up the view.
-    ///
-    /// Each slice iterated over is a slice that would be returned by [`first_slice()`]
-    /// at some point during the complete consumption of the data covered by a `BytesView`.
-    ///
-    /// You may wish to iterate over the metadata to determine in advance which implementation
-    /// strategy to use for a function, depending on what the metadata indicates about the
-    /// configuration of the memory blocks backing the byte sequence.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// # struct PageAlignedMemory;
-    /// use bytesbuf::BytesView;
-    ///
-    /// let view = BytesView::copied_from_slice(b"Hello", &memory);
-    ///
-    /// let all_page_aligned = view
-    ///     .iter_slice_metas()
-    ///     .all(|meta| meta.is_some_and(|m| m.is::<PageAlignedMemory>()));
-    ///
-    /// if all_page_aligned {
-    ///     println!("All slices are page-aligned, using optimized I/O path.");
-    /// }
-    /// ```
-    ///
-    /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
-    /// a more detailed example of how to make use of the slice metadata.
-    ///
-    /// [`first_slice()`]: Self::first_slice
-    pub fn iter_slice_metas(&self) -> BytesViewSliceMetas<'_> {
-        BytesViewSliceMetas::new(self)
     }
 
     /// Removes the first `count` bytes from the front of the view.
@@ -957,13 +855,13 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
     }
 }
 
-/// Exposes all `first_slice_meta()` values of a [`BytesView`].
+/// Iterator over the slices of a [`BytesView`] and their metadata.
 ///
-/// Returned by [`BytesView::iter_slice_metas()`][BytesView::iter_slice_metas] and allows you to
-/// inspect the metadata of each slice that makes up the view without consuming any part of the view.
+/// Returned by [`BytesView::slices()`] and provides each slice together with its
+/// associated memory block metadata.
 #[must_use]
 #[derive(Debug)]
-pub struct BytesViewSliceMetas<'s> {
+pub struct BytesViewSlices<'s> {
     // This starts off as a clone of the view, just for ease of implementation.
     // We consume the parts of the view we have already iterated over.
     view: BytesView,
@@ -973,7 +871,7 @@ pub struct BytesViewSliceMetas<'s> {
     _parent: PhantomData<&'s BytesView>,
 }
 
-impl<'s> BytesViewSliceMetas<'s> {
+impl<'s> BytesViewSlices<'s> {
     pub(crate) fn new(view: &'s BytesView) -> Self {
         Self {
             view: view.clone(),
@@ -982,31 +880,34 @@ impl<'s> BytesViewSliceMetas<'s> {
     }
 }
 
-impl<'s> Iterator for BytesViewSliceMetas<'s> {
-    type Item = Option<&'s dyn Any>;
+impl<'s> Iterator for BytesViewSlices<'s> {
+    type Item = (&'s [u8], Option<&'s dyn Any>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.view.is_empty() {
             return None;
         }
 
+        let slice = self.view.first_slice();
         let meta = self.view.first_slice_meta();
 
         // SAFETY: It is normally not possible to return a self-reference from an iterator because
         // next() only has an implicit lifetime for `&self`, which cannot be named in `Item`.
         // However, we can take advantage of the fact that a `BlockRef` implementation is required
-        // to guarantee that the metadata lives as long as any clone of the memory block. Because
-        // the iterator has borrowed the parent `BytesView` we know that the memory block must live
-        // for as long as the iterator lives.
+        // to guarantee that both the data and the metadata live as long as any clone of the memory
+        // block. Because the iterator has borrowed the parent `BytesView` we know that the memory
+        // block must live for as long as the iterator lives.
         //
-        // Therefor we can just re-stamp the return value with the 's lifetime to indicate that it
-        // is valid for as long as the iterator has borrowed the parent BytesView for.
+        // Therefore we can just re-stamp the return values with the 's lifetime to indicate that
+        // they are valid for as long as the iterator has borrowed the parent BytesView for.
+        let slice_with_s = unsafe { mem::transmute::<&[u8], &'s [u8]>(slice) };
+        // SAFETY: Same reasoning as above - metadata lives as long as any clone of the block.
         let meta_with_s = unsafe { mem::transmute::<Option<&dyn Any>, Option<&'s dyn Any>>(meta) };
 
         // Seek forward to the next chunk before we return.
         self.view.advance(self.view.first_slice().len());
 
-        Some(meta_with_s)
+        Some((slice_with_s, meta_with_s))
     }
 }
 
@@ -1453,43 +1354,24 @@ mod tests {
     }
 
     #[test]
-    fn vectored_read_as_io_slice() {
+    fn slices_iterator() {
         let memory = TransparentMemory::new();
         let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
         let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
 
         let view = BytesView::from_views(vec![segment1.clone(), segment2.clone()]);
 
-        let mut io_slices = vec![];
-        let ioslice_count = view.io_slices(&mut io_slices);
-        assert_eq!(ioslice_count, 0);
+        let slices: Vec<_> = view.slices().collect();
 
-        let mut io_slices = vec![IoSlice::new(&[]); 4];
-        let ioslice_count = view.io_slices(&mut io_slices);
-
-        assert_eq!(ioslice_count, 2);
-        assert_eq!(io_slices[0].len(), segment1.len());
-        assert_eq!(io_slices[1].len(), segment2.len());
+        assert_eq!(slices.len(), 2);
+        assert_eq!(slices[0].0.len(), segment1.len());
+        assert_eq!(slices[1].0.len(), segment2.len());
     }
 
     #[test]
-    fn vectored_read_as_slice() {
-        let memory = TransparentMemory::new();
-        let segment1 = BytesView::copied_from_slice(b"Hello, world!", &memory);
-        let segment2 = BytesView::copied_from_slice(b"Hello, another world!", &memory);
-
-        let view = BytesView::from_views(vec![segment1.clone(), segment2.clone()]);
-
-        let mut slices: Vec<&[u8]> = vec![];
-        let slice_count = view.slices(&mut slices);
-        assert_eq!(slice_count, 0);
-
-        let mut slices: Vec<&[u8]> = vec![&[]; 4];
-        let slice_count = view.slices(&mut slices);
-
-        assert_eq!(slice_count, 2);
-        assert_eq!(slices[0].len(), segment1.len());
-        assert_eq!(slices[1].len(), segment2.len());
+    fn slices_iterator_empty() {
+        let view = BytesView::new();
+        assert_eq!(view.slices().count(), 0);
     }
 
     #[test]
@@ -1589,12 +1471,18 @@ mod tests {
 
         let view = BytesView::from_views([view1, view2]);
 
-        let mut metas_iter = view.iter_slice_metas();
+        let mut slices_iter = view.slices();
 
         // We have two chunks, both without metadata.
-        assert!(matches!(metas_iter.next(), Some(None)));
-        assert!(matches!(metas_iter.next(), Some(None)));
-        assert!(metas_iter.next().is_none());
+        let (data1, meta1) = slices_iter.next().expect("should have first slice");
+        assert!(!data1.is_empty());
+        assert!(meta1.is_none());
+
+        let (data2, meta2) = slices_iter.next().expect("should have second slice");
+        assert!(!data2.is_empty());
+        assert!(meta2.is_none());
+
+        assert!(slices_iter.next().is_none());
     }
 
     #[test]
@@ -1624,21 +1512,23 @@ mod tests {
 
         let view = buf.consume_all();
 
-        let mut metas_iter = view.iter_slice_metas();
+        let mut slices_iter = view.slices();
 
         // NB! There is no requirement that the BytesBuf use the blocks in the order we gave
         // them in. We use white-box knowledge here to know that it actually reverses the order.
         // This behavior may change in a future version - be ready to change the test if so.
 
-        let meta1 = metas_iter.next().expect("should have first block meta");
+        let (data1, meta1) = slices_iter.next().expect("should have first block");
+        assert!(!data1.is_empty());
         assert!(meta1.is_some());
         assert!(meta1.unwrap().is::<BlueMeta>());
 
-        let meta2 = metas_iter.next().expect("should have second block meta");
+        let (data2, meta2) = slices_iter.next().expect("should have second block");
+        assert!(!data2.is_empty());
         assert!(meta2.is_some());
         assert!(meta2.unwrap().is::<GreenMeta>());
 
-        assert!(metas_iter.next().is_none(), "should have no more metas");
+        assert!(slices_iter.next().is_none(), "should have no more slices");
     }
 
     #[test]
