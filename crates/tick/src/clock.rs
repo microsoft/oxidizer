@@ -4,6 +4,8 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
+use thread_aware::ThreadAware;
+
 use crate::state::ClockState;
 use crate::timers::TimerKey;
 
@@ -142,6 +144,12 @@ use crate::timers::TimerKey;
 /// ```
 #[derive(Debug, Clone)]
 pub struct Clock(pub(crate) ClockState);
+
+impl ThreadAware for Clock {
+    fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
+        Self(self.0.relocated(source, destination))
+    }
+}
 
 impl Clock {
     /// Creates a new clock driven by the Tokio runtime.
@@ -435,6 +443,8 @@ mod tests {
 
     use std::{fmt::Debug, thread::sleep};
 
+    use thread_aware::affinity::{MemoryAffinity, pinned_affinities};
+
     use crate::{ClockControl, runtime::InactiveClock};
 
     use super::*;
@@ -594,4 +604,20 @@ mod tests {
         drop(clock);
         assert!(driver.0.is_unique());
     }
+
+    #[test]
+    fn thread_aware() {
+        let (clock, _) = InactiveClock::from(ClockControl::default()).activate();
+        let affinites = pinned_affinities(&[2, 2, 2]);
+        let source = MemoryAffinity::Pinned(affinites[0]);
+        let target_1 = affinites[1];
+        let target_2 = affinites[2];
+
+        let clock_1 = clock.relocated(source, target_1);
+        let clock_2 = clock.relocated(source, target_1);
+
+        let delay_1 = clock_1.delay(Duration::from_secs(1));
+
+    }
+
 }

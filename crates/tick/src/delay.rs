@@ -44,6 +44,8 @@ pub struct Delay {
     duration: Duration,
 }
 
+crate::impl_thread_unaware!(Delay);
+
 impl Delay {
     /// Creates a new delay that will complete after the specified duration.
     ///

@@ -87,6 +87,8 @@ pub struct PeriodicTimer {
     current_timer: Option<TimerKey>,
 }
 
+crate::impl_thread_unaware!(PeriodicTimer);
+
 impl PeriodicTimer {
     /// Creates a timer that fires periodically.
     ///

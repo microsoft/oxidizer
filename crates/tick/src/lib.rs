@@ -246,3 +246,18 @@ pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
+
+/// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.
+macro_rules! impl_thread_unaware {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl thread_aware::ThreadAware for $t {
+                fn relocated(self, _source: thread_aware::affinity::MemoryAffinity, _destination: thread_aware::affinity::PinnedAffinity) -> Self {
+                    self
+                }
+            }
+        )+
+    };
+}
+
+pub(crate) use impl_thread_unaware;

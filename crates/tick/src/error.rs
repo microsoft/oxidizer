@@ -30,6 +30,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Error(ErrorKind);
 
+crate::impl_thread_unaware!(Error);
+
 #[derive(Debug)]
 enum ErrorKind {
     #[cfg(any(feature = "fmt", test))]

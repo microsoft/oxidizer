@@ -26,6 +26,8 @@ use super::Clock;
 #[derive(Debug)]
 pub struct Stopwatch(StopwatchRepr);
 
+crate::impl_thread_unaware!(StopwatchRepr);
+
 #[derive(Debug)]
 enum StopwatchRepr {
     #[cfg(not(any(feature = "test-util", test)))]

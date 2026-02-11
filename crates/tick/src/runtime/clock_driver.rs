@@ -3,6 +3,11 @@
 
 use std::time::Instant;
 
+use thread_aware::{
+    ThreadAware,
+    affinity::{MemoryAffinity, PinnedAffinity},
+};
+
 use crate::{runtime::ClockGone, state::ClockState};
 
 /// Drives timer advancement for the clock.
@@ -12,6 +17,12 @@ use crate::{runtime::ClockGone, state::ClockState};
 /// ensure timers fire at the correct time.
 #[derive(Debug)]
 pub struct ClockDriver(pub(crate) ClockState);
+
+impl ThreadAware for ClockDriver {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        Self(self.0.relocated(source, destination))
+    }
+}
 
 impl ClockDriver {
     pub(super) const fn new(state: ClockState) -> Self {
@@ -66,9 +77,9 @@ mod tests {
 
     #[test]
     fn advance_timers_ok() {
-        let timers = SynchronizedTimers::default();
+        let timers = SynchronizedTimers::new();
         let when = Instant::now();
-        timers.with_timers(|timers| {
+        timers.with_timers::<_, ()>(|timers| {
             timers.register(when, Waker::noop().clone());
         });
 

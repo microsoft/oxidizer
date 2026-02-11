@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use thread_aware::ThreadAware;
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+
 use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::ClockState;
@@ -44,6 +47,12 @@ impl Default for InactiveClock {
     }
 }
 
+impl ThreadAware for InactiveClock {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        Self(self.0.relocated(source, destination))
+    }
+}
+
 impl InactiveClock {
     /// Activates the clock for time operations.
     ///
@@ -57,13 +66,7 @@ impl InactiveClock {
     /// - [`ClockDriver`] - Driver that advances timers (must be polled by caller)
     #[must_use]
     pub fn activate(self) -> (Clock, ClockDriver) {
-        let mut state = self.0;
-
-        if matches!(state, ClockState::System(_)) {
-            // if this is system clock, create a new instance to avoid sharing timers
-            state = ClockState::new_system();
-        }
-
+        let state = self.0;
         let clock = Clock(state.clone());
         let driver = ClockDriver::new(state);
 

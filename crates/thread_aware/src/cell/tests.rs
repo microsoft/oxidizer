@@ -358,3 +358,35 @@ fn test_relocated_unknown_source() {
     let relocated_trc = trc.relocated(source, destination);
     assert_eq!(*relocated_trc, 42);
 }
+
+#[test]
+fn test_strong_count() {
+    let affinities = pinned_affinities(&[2]);
+    let affinity1 = affinities[0].into();
+    let affinity2 = affinities[1];
+
+    let trc1 = PerCore::with_value(42);
+    assert_eq!(trc1.strong_count(), 1);
+
+    // Cloning the Arc increases the strong count for the same affinity
+    let trc2 = trc1.clone();
+    assert_eq!(trc1.strong_count(), 2);
+    assert_eq!(trc2.strong_count(), 2);
+
+    // Relocating to a different affinity creates a new inner Arc
+    let trc1_relocated = trc1.relocated(affinity1, affinity2);
+    // The relocated Arc has count 2: one in storage, one in this handle
+    assert_eq!(trc1_relocated.strong_count(), 2);
+    // The original clone now has count 3: trc2 + storage[source] + storage[dest] actually no,
+    // the storage at source holds the original value, and trc2 also points to it
+    // After relocation: original value is stored at source affinity
+    assert_eq!(trc2.strong_count(), 2);
+
+    // Clone the relocated Arc - should increase count for the destination affinity's value
+    let trc3 = trc1_relocated.clone();
+    assert_eq!(trc1_relocated.strong_count(), 3);
+    assert_eq!(trc3.strong_count(), 3);
+
+    drop(trc3);
+    assert_eq!(trc1_relocated.strong_count(), 2);
+}

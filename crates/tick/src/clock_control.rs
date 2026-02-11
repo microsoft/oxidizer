@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::Clock;
+use thread_aware::ThreadAware;
+
+use crate::{Clock, impl_thread_unaware};
 use crate::state::ClockState;
 use crate::timers::{TimerKey, Timers};
 
@@ -74,6 +76,8 @@ pub struct ClockControl {
     /// across all threads.
     state: Arc<Mutex<State>>,
 }
+
+impl_thread_unaware!(ClockControl);
 
 impl ClockControl {
     /// Creates a new `ClockControl` instance.

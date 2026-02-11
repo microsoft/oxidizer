@@ -51,6 +51,8 @@ use crate::fmt::{Iso8601, Rfc2822};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UnixSeconds(pub(super) Duration);
 
+crate::impl_thread_unaware!(UnixSeconds);
+
 impl UnixSeconds {
     /// The largest value that be can represented by `UnixSeconds`.
     ///
