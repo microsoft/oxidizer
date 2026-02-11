@@ -1,6 +1,11 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# Creates a GitHub release for a crate when a version tag (e.g. "bytesbuf-v1.2.3")
+# is pushed. Extracts the relevant changelog section and publishes the release via
+# `scripts/publish-gh-release.rs`. This workflow is triggered automatically by tag
+# pushes and is not intended to be run manually.
+
 name: create-release
 
 permissions:
