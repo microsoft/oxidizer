@@ -6,7 +6,7 @@
 # `scripts/publish-gh-release.rs`. This workflow is triggered automatically by tag
 # pushes and is not intended to be run manually.
 
-name: create-release
+name: Publish GitHub Release
 
 permissions:
   contents: write
