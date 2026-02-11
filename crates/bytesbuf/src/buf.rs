@@ -2166,4 +2166,10 @@ mod tests {
             src.as_ptr().copy_to_nonoverlapping(dst.as_mut_ptr().cast(), src.len());
         }
     }
+
+    // Compile time test
+    fn _can_use_in_dyn_traits(mem: &dyn Memory) {
+        let mut buf = mem.reserve(123);
+        let _ = buf.as_write(mem);
+    }
 }
