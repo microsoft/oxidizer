@@ -88,4 +88,15 @@ mod tests {
         assert_eq!(&*io_slices[1], &[0x44; 25]);
         assert_eq!(&*io_slices[2], &[0x44; 25]);
     }
+
+    #[test]
+    fn chunks_vectored_empty_dst() {
+        let memory = FixedBlockMemory::new(nz!(25));
+        let mut buf = memory.reserve(25);
+        buf.put_byte_repeated(0x44, 25);
+
+        let bytes = buf.consume_all();
+        let n = Buf::chunks_vectored(&bytes, &mut []);
+        assert_eq!(n, 0);
+    }
 }

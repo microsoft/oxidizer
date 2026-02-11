@@ -2196,6 +2196,36 @@ mod tests {
         assert_eq!(buf.len(), 8);
     }
 
+    #[test]
+    fn first_unfilled_slice_meta_no_capacity() {
+        let buf = BytesBuf::new();
+        assert!(buf.first_unfilled_slice_meta().is_none());
+    }
+
+    #[test]
+    fn first_unfilled_slice_meta_no_meta() {
+        let memory = FixedBlockMemory::new(nz!(64));
+        let buf = memory.reserve(64);
+        assert!(buf.first_unfilled_slice_meta().is_none());
+    }
+
+    #[test]
+    fn first_unfilled_slice_meta_with_meta() {
+        struct CustomMeta;
+
+        // SAFETY: We are not allowed to drop this until all BlockRef are gone. This is fine
+        // because it is dropped at the end of the function, after all BlockRef instances.
+        let block = unsafe { TestMemoryBlock::new(nz!(100), Some(Box::new(CustomMeta))) };
+        let block = pin!(block);
+
+        // SAFETY: We guarantee exclusive access to the memory capacity.
+        let block = unsafe { block.as_ref().to_block() };
+
+        let buf = BytesBuf::from_blocks([block]);
+        let meta = buf.first_unfilled_slice_meta().expect("should have metadata");
+        assert!(meta.is::<CustomMeta>());
+    }
+
     // To be stabilized soon: https://github.com/rust-lang/rust/issues/79995
     fn write_copy_of_slice(dst: &mut [MaybeUninit<u8>], src: &[u8]) {
         assert!(dst.len() >= src.len());
