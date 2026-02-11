@@ -586,8 +586,45 @@ impl BytesBuf {
     /// assert!(buf.is_empty());
     /// ```
     pub fn consume_all(&mut self) -> BytesView {
-        // SAFETY: Consuming len() bytes from self cannot possibly be out of bounds.
-        unsafe { self.consume_checked(self.len()).unwrap_unchecked() }
+        // Freeze any unfrozen data in the first span builder directly,
+        // avoiding the overhead of computing frozen() in ensure_frozen().
+        if let Some(unfrozen_bytes) =
+            NonZero::new(self.span_builders_reversed.last().map_or(0, SpanBuilder::len))
+        {
+            self.freeze_from_first(unfrozen_bytes);
+        }
+
+        let len = self.len;
+        let manifest = self.prepare_consume(len);
+
+        // Build result spans in storage order (content-last goes first).
+        let mut result_spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]> =
+            SmallVec::with_capacity(manifest.required_spans_capacity());
+
+        if manifest.consume_partial_span_bytes != 0 {
+            let partially_consumed_frozen_span = self
+                .frozen_spans
+                .get_mut(manifest.detach_complete_frozen_spans)
+                .expect("guarded by ensure_frozen()");
+
+            let take = partially_consumed_frozen_span.slice(0..manifest.consume_partial_span_bytes);
+            result_spans_reversed.push(take);
+
+            // SAFETY: Manifest calculation guarantees in-bounds advance.
+            unsafe {
+                partially_consumed_frozen_span.advance(manifest.consume_partial_span_bytes as usize)
+            };
+        }
+
+        result_spans_reversed.extend(
+            self.frozen_spans
+                .drain(..manifest.detach_complete_frozen_spans)
+                .rev(),
+        );
+
+        self.len = 0;
+
+        BytesView::from_spans_reversed(result_spans_reversed)
     }
 
     /// Consumes `len` bytes from the first span builder and moves it to the frozen spans list.

@@ -45,6 +45,7 @@ fn entrypoint(c: &mut Criterion) {
     let many_as_view = BytesView::from_views(many.iter().cloned());
 
     let mut group = c.benchmark_group("BytesBuf");
+    group.sample_size(50000); // default is 100
 
     let new_allocs = allocs.operation("new");
     group.bench_function("new", |b| {
