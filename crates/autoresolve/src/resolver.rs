@@ -2,7 +2,8 @@ use std::marker::PhantomData;
 
 use type_map::concurrent::TypeMap;
 
-use crate::resolve_from::{ResolutionDeps, ResolveFrom};
+use crate::resolve_deps::ResolutionDeps;
+use crate::resolve_from::ResolveFrom;
 
 pub struct Resolver<T> {
     types: TypeMap,
