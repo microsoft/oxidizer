@@ -214,6 +214,7 @@ impl BytesView {
     /// _ = view.get_num_le::<u16>();
     /// assert_eq!(view.len(), 2);
     /// ```
+    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn len(&self) -> usize {
         // Sanity check.
@@ -223,6 +224,7 @@ impl BytesView {
     }
 
     /// Whether the view is of a zero-sized byte sequence.
+    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -883,6 +885,7 @@ impl<'s> BytesViewSlices<'s> {
 impl<'s> Iterator for BytesViewSlices<'s> {
     type Item = (&'s [u8], Option<&'s dyn Any>);
 
+    #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     fn next(&mut self) -> Option<Self::Item> {
         if self.view.is_empty() {
             return None;
