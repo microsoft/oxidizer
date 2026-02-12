@@ -453,7 +453,8 @@ impl<T, S: Strategy> Arc<T, S> {
     /// Gets the number of strong references to the value in the current thread/affinity.
     ///
     /// This method returns the strong reference count for the underlying [`sync::Arc`]
-    /// that holds the value for the current affinity. Each affinity maintains its own
+    /// that holds the value for the current affinity, excluding any internal references
+    /// held by the storage for deduplication purposes. Each affinity maintains its own
     /// separate value with its own reference count.
     ///
     /// # Examples
@@ -470,7 +471,10 @@ impl<T, S: Strategy> Arc<T, S> {
     /// ```
     #[must_use]
     pub fn strong_count(this: &Self) -> usize {
-        sync::Arc::strong_count(&this.value)
+        let raw = sync::Arc::strong_count(&this.value);
+        let guard = this.storage.read().expect("Failed to acquire read lock");
+        let internal = guard.count_where(|stored| sync::Arc::ptr_eq(stored, &this.value));
+        raw - internal
     }
 
     /// Converts the `Arc<T, S>` into an `sync::Arc<T>`.
