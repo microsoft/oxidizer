@@ -473,33 +473,10 @@ impl<T, S: Strategy> Arc<T, S> {
         sync::Arc::strong_count(&this.value)
     }
 
-    /// Gets the number of weak references to the value in the current thread/affinity.
-    ///
-    /// This method returns the weak reference count for the underlying [`sync::Arc`]
-    /// that holds the value for the current affinity. Each affinity maintains its own
-    /// separate value with its own reference count.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use thread_aware::{Arc, PerCore};
-    ///
-    /// let arc = Arc::<_, PerCore>::new(|| 42);
-    /// assert_eq!(Arc::weak_count(&arc), 0);
-    ///
-    /// let weak = std::sync::Arc::downgrade(&arc.clone().into_arc());
-    /// // Note: weak references are to the underlying Arc, not the thread_aware::Arc
-    /// ```
-    #[must_use]
-    pub fn weak_count(this: &Self) -> usize {
-        sync::Arc::weak_count(&this.value)
-    }
-
-    /// Returns `true` if there is exactly one strong reference and no weak references
+    /// Returns `true` if there is exactly one strong reference
     /// to the value in the current thread/affinity.
     ///
-    /// This is equivalent to checking `Arc::strong_count(this) == 1 && Arc::weak_count(this) == 0`.
-    /// This matches the behavior of [`std::sync::Arc::is_unique`].
+    /// This is equivalent to checking `Arc::strong_count(this) == 1`.
     ///
     /// Each affinity maintains its own separate value with its own reference count,
     /// so this only checks uniqueness for the current affinity.
@@ -521,7 +498,7 @@ impl<T, S: Strategy> Arc<T, S> {
     /// ```
     #[must_use]
     pub fn is_unique(this: &Self) -> bool {
-        sync::Arc::strong_count(&this.value) == 1 && sync::Arc::weak_count(&this.value) == 0
+        sync::Arc::strong_count(&this.value) == 1
     }
 
     /// Converts the `Arc<T, S>` into an `sync::Arc<T>`.

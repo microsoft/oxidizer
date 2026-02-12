@@ -385,21 +385,6 @@ fn test_strong_count() {
 }
 
 #[test]
-fn test_weak_count() {
-    // Test weak_count with no weak references
-    let arc = PerCore::new(Counter::new);
-    assert_eq!(PerCore::weak_count(&arc), 0);
-
-    // Create a weak reference through the underlying sync::Arc
-    let arc_for_weak = arc.clone().into_arc();
-    let _weak = sync::Arc::downgrade(&arc_for_weak);
-
-    // The weak count should be reflected in the original Arc
-    // Note: arc and arc_for_weak point to the same data
-    assert_eq!(PerCore::weak_count(&arc), 1);
-}
-
-#[test]
 fn test_is_unique() {
     // Test is_unique with a single reference
     let arc = PerCore::new(Counter::new);
@@ -412,13 +397,6 @@ fn test_is_unique() {
 
     drop(arc2);
     assert!(PerCore::is_unique(&arc));
-
-    // Test is_unique with weak references
-    let arc_for_weak = arc.clone().into_arc();
-    let _weak = sync::Arc::downgrade(&arc_for_weak);
-
-    // Should not be unique because there's a weak reference
-    assert!(!PerCore::is_unique(&arc));
 }
 
 #[test]
@@ -470,4 +448,30 @@ fn test_strong_count_with_deduplication() {
     // - storage reference in affinity2 (1)
     assert_eq!(PerCore::strong_count(&arc1_relocated), 3);
     assert_eq!(PerCore::strong_count(&arc2_relocated), 3);
+}
+
+#[test]
+fn test_strong_count_independent_across_affinities() {
+    let affinities = pinned_affinities(&[2]);
+    let affinity1 = affinities[0].into();
+    let affinity2 = affinities[1];
+
+    // Create an Arc on affinity1 with strong_count = 1
+    let arc_a = PerCore::new(Counter::new);
+    assert_eq!(PerCore::strong_count(&arc_a), 1);
+
+    // Relocate to affinity2, creating a separate instance there
+    let arc_b = arc_a.clone().relocated(affinity1, affinity2);
+    assert_eq!(PerCore::strong_count(&arc_b), 2); // arc_b + storage at affinity2
+
+    // Clone arc_a on affinity1 - this should NOT affect arc_b on affinity2
+    let arc_a2 = arc_a.clone();
+    // arc_a is now referenced by:
+    // - arc_a itself
+    // - arc_a2
+    // - storage at affinity1 (from the relocation above)
+    assert_eq!(PerCore::strong_count(&arc_a), 3);
+    assert_eq!(PerCore::strong_count(&arc_a2), 3);
+    // arc_b on affinity2 is unaffected by the clone on affinity1
+    assert_eq!(PerCore::strong_count(&arc_b), 2); // Still 2, unaffected by clone on affinity1
 }
