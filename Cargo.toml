@@ -24,7 +24,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 
 # local dependencies
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.3.0" }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.2.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.2.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
