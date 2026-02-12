@@ -8,6 +8,7 @@
 use std::future::poll_fn;
 use std::time::Duration;
 
+use ohno::{app_err, bail};
 use seatbelt::retry::Retry;
 use seatbelt::timeout::Timeout;
 use seatbelt::{RecoveryInfo, ResilienceContext};
@@ -16,9 +17,9 @@ use tower::ServiceBuilder;
 use tower_service::Service;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), ohno::AppError> {
     // Shared context for resilience middleware
-    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(Clock::new_tokio()).name("tower_pipeline");
+    let context = ResilienceContext::new(Clock::new_tokio()).name("tower_pipeline");
 
     // Build a Tower service with retry and timeout middlewares using ServiceBuilder.
     // Layers are applied bottom-to-top: timeout wraps the inner service first,
@@ -35,19 +36,21 @@ async fn main() {
         .layer(
             Timeout::layer("my_timeout", &context)
                 .timeout(Duration::from_secs(1))
-                .timeout_error(|_args| "timeout".to_string()),
+                .timeout_error(|_args| app_err!("timeout")),
         )
         .service_fn(|request| async move {
             if fastrand::i16(0..10) > 4 {
-                Err("error".to_string())
+                bail!("random failure")
             } else {
                 Ok(request)
             }
         });
 
     // Execute the service using Tower's Service trait
-    poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
-    let output = service.call("value".to_string()).await;
+    poll_fn(|cx| service.poll_ready(cx)).await?;
+    let output = service.call("value".to_string()).await?;
 
-    println!("execution finished, output: {}", output.unwrap());
+    println!("execution finished, output: {}", output);
+
+    Ok(())
 }
