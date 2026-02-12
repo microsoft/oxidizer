@@ -2,14 +2,13 @@
 // Licensed under the MIT License.
 
 use std::alloc::{Layout, alloc, dealloc};
-use std::any::Any;
 use std::mem::MaybeUninit;
 use std::num::NonZero;
 use std::pin::Pin;
 use std::ptr::{self, NonNull};
 use std::sync::atomic::{self, AtomicUsize};
 
-use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
+use crate::mem::{Block, BlockMeta, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
 
 /// A memory block for testing purposes, exposing unusual functionality that does not make
 /// sense for a real memory block (e.g. attaching arbitrary object as metadata).
@@ -21,7 +20,7 @@ pub(crate) struct TestMemoryBlock {
     capacity_ptr: NonNull<MaybeUninit<u8>>,
     len: NonZero<BlockSize>,
 
-    meta: Option<Box<dyn Any>>,
+    meta: Option<Box<dyn BlockMeta>>,
 
     ref_count: AtomicUsize,
 }
@@ -30,7 +29,7 @@ impl TestMemoryBlock {
     /// # Safety
     ///
     /// The caller is not allowed to drop the block until all `BlockRef` to it are dropped.
-    pub(crate) unsafe fn new(len: NonZero<BlockSize>, meta: Option<Box<dyn Any>>) -> Self {
+    pub(crate) unsafe fn new(len: NonZero<BlockSize>, meta: Option<Box<dyn BlockMeta>>) -> Self {
         // SAFETY: Layout must be non-zero and otherwise sane.
         // It is - we use NonZero for len to ensure non-zero size.
         let capacity_ptr = NonNull::new(unsafe { alloc(byte_array_layout(len)) })
@@ -117,7 +116,7 @@ unsafe impl BlockRefDynamic for TestMemoryBlock {
 
 // SAFETY: We must ensure thread-safety of the implementation. We do.
 unsafe impl BlockRefDynamicWithMeta for TestMemoryBlock {
-    fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn Any> {
+    fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn BlockMeta> {
         // SAFETY: The state pointer is always valid for reads.
         // We only ever use shared references to the state_ptr - no exclusive references are
         // ever created. In theory, the owner could create one but Miri would yell at them.
@@ -127,7 +126,7 @@ unsafe impl BlockRefDynamicWithMeta for TestMemoryBlock {
 
         // Safe to pointerize because the parent API contract requires that
         // this has a lifetime that is a subset of the lifetime of `data`.
-        let as_any: &dyn Any = as_ref_box.as_ref();
+        let as_any: &dyn BlockMeta = as_ref_box.as_ref();
 
         NonNull::new(ptr::from_ref(as_any).cast_mut()).expect("field of non-null is non-null")
     }

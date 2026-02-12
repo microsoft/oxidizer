@@ -65,7 +65,7 @@ impl Connection {
         // use the optimal I/O path. There is no requirement that the data passed to us contains
         // only memory with our preferred configuration.
 
-        let use_optimal_path = message.iter_slice_metas().all(|meta| {
+        let use_optimal_path = message.slices().all(|(_, meta)| {
             // If there is no metadata, the memory is not I/O memory.
             meta.is_some_and(|meta| {
                 // If the type of metadata does not match the metadata
@@ -155,6 +155,7 @@ impl IoContext {
     }
 }
 
+#[derive(Debug)]
 #[expect(dead_code, reason = "unused fields just for example realism")]
 struct MemoryConfiguration {
     requires_page_alignment: bool,
@@ -167,15 +168,16 @@ struct MemoryConfiguration {
 /// thereby pretending the memory has that configuration.
 mod io_memory {
     use std::alloc::{Layout, alloc, dealloc};
-    use std::any::Any;
     use std::mem::MaybeUninit;
     use std::num::NonZero;
     use std::ptr::{self, NonNull};
     use std::sync::atomic::{self, AtomicUsize};
 
-    use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
+    use bytesbuf::mem::{Block, BlockMeta, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable, BlockSize};
 
     use super::MemoryConfiguration;
+
+    impl BlockMeta for MemoryConfiguration {}
 
     /// Allocates a new memory block of the given length and returns a `BlockRef` to it.
     #[must_use]
@@ -242,13 +244,13 @@ mod io_memory {
 
     // SAFETY: We must guarantee thread-safety. We do.
     unsafe impl BlockRefDynamicWithMeta for IoMemoryBlock {
-        fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn Any> {
+        fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn BlockMeta> {
             // SAFETY: The state pointer is always valid for reads.
             let state = unsafe { state_ptr.as_ref() };
 
             // Safe to pointerize because the parent API contract requires that
             // this has a lifetime that is a subset of the lifetime of `data`.
-            let as_any: &dyn Any = &state.memory_configuration;
+            let as_any: &dyn BlockMeta = &state.memory_configuration;
 
             NonNull::new(ptr::from_ref(as_any).cast_mut()).expect("field of non-null is non-null")
         }
