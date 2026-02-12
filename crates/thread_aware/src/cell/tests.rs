@@ -385,21 +385,6 @@ fn test_strong_count() {
 }
 
 #[test]
-fn test_is_unique() {
-    // Test is_unique with a single reference
-    let arc = PerCore::new(Counter::new);
-    assert!(PerCore::is_unique(&arc));
-
-    // Test is_unique with multiple strong references
-    let arc2 = arc.clone();
-    assert!(!PerCore::is_unique(&arc));
-    assert!(!PerCore::is_unique(&arc2));
-
-    drop(arc2);
-    assert!(PerCore::is_unique(&arc));
-}
-
-#[test]
 fn test_strong_count_after_relocation() {
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0].into();

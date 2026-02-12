@@ -473,34 +473,6 @@ impl<T, S: Strategy> Arc<T, S> {
         sync::Arc::strong_count(&this.value)
     }
 
-    /// Returns `true` if there is exactly one strong reference
-    /// to the value in the current thread/affinity.
-    ///
-    /// This is equivalent to checking `Arc::strong_count(this) == 1`.
-    ///
-    /// Each affinity maintains its own separate value with its own reference count,
-    /// so this only checks uniqueness for the current affinity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use thread_aware::{Arc, PerCore};
-    ///
-    /// let arc = Arc::<_, PerCore>::new(|| 42);
-    /// assert!(Arc::is_unique(&arc));
-    ///
-    /// let arc2 = arc.clone();
-    /// assert!(!Arc::is_unique(&arc));
-    /// assert!(!Arc::is_unique(&arc2));
-    ///
-    /// drop(arc2);
-    /// assert!(Arc::is_unique(&arc));
-    /// ```
-    #[must_use]
-    pub fn is_unique(this: &Self) -> bool {
-        sync::Arc::strong_count(&this.value) == 1
-    }
-
     /// Converts the `Arc<T, S>` into an `sync::Arc<T>`.
     #[must_use]
     pub fn into_arc(self) -> sync::Arc<T> {
