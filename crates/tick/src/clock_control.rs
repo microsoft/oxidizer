@@ -5,11 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use thread_aware::ThreadAware;
-
-use crate::{Clock, impl_thread_unaware};
 use crate::state::ClockState;
 use crate::timers::{TimerKey, Timers};
+use crate::{Clock, impl_thread_unaware};
 
 /// Controls the passage of time in tests.
 ///

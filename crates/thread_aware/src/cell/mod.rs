@@ -483,16 +483,6 @@ impl<T, S: Strategy> Arc<T, S> {
     pub fn into_arc(self) -> sync::Arc<T> {
         self.value
     }
-
-    /// Returns the number of strong references to the inner value for the current affinity.
-    ///
-    /// Note that this only counts references to the inner `sync::Arc<T>` for the current
-    /// affinity. Other affinities may have their own independent inner values with their
-    /// own reference counts.
-    #[must_use]
-    pub fn strong_count(&self) -> usize {
-        sync::Arc::strong_count(&self.value)
-    }
 }
 
 impl<T, S: Strategy> ThreadAware for Arc<T, S> {

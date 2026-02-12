@@ -18,9 +18,9 @@ pub(crate) enum ClockState {
 impl ThreadAware for ClockState {
     fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
         match self {
-            ClockState::System(synchronized_timers) => ClockState::System(synchronized_timers.relocated(source, destination)),
+            Self::System(synchronized_timers) => Self::System(synchronized_timers.relocated(source, destination)),
             #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(clock_control) => ClockState::ClockControl(clock_control.relocated(source, destination)),
+            Self::ClockControl(clock_control) => Self::ClockControl(clock_control.relocated(source, destination)),
         }
     }
 }
@@ -98,7 +98,7 @@ impl SynchronizedTimers {
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
-        false
+        thread_aware::Arc::strong_count(&self.timers) == 1
     }
 }
 

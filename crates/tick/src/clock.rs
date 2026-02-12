@@ -441,8 +441,9 @@ impl AsRef<Self> for Clock {
 mod tests {
     #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
 
-    use std::{fmt::Debug, thread::sleep};
+    use std::{fmt::Debug, task::Context, thread::sleep};
 
+    use futures::FutureExt;
     use thread_aware::affinity::{MemoryAffinity, pinned_affinities};
 
     use crate::{ClockControl, runtime::InactiveClock};
@@ -607,17 +608,51 @@ mod tests {
 
     #[test]
     fn thread_aware() {
-        let (clock, _) = InactiveClock::from(ClockControl::default()).activate();
-        let affinites = pinned_affinities(&[2, 2, 2]);
-        let source = MemoryAffinity::Pinned(affinites[0]);
-        let target_1 = affinites[1];
-        let target_2 = affinites[2];
+        let affinites = pinned_affinities(&[1, 1]);
+        let source: MemoryAffinity = affinites[0].into();
+        let pinned_1 = affinites[0];
+        let pinned_2 = affinites[1];
 
-        let clock_1 = clock.relocated(source, target_1);
-        let clock_2 = clock.relocated(source, target_1);
+        // root clock
+        let root = InactiveClock::default();
 
-        let delay_1 = clock_1.delay(Duration::from_secs(1));
+        let inactive_1 = root.clone().relocated(source, pinned_1);
+        let inactive_2 = root.relocated(source, pinned_2);
 
+        let (clock_1, mut driver_1) = inactive_1.activate();
+        let (clock_2, mut driver_2) = inactive_2.activate();
+
+        // register the timer on clock 1
+        let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
+        _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
+        assert_eq!(clock_1.0.timers_len(), 1);
+        assert_eq!(clock_2.0.timers_len(), 0);
+        assert_eq!(driver_1.0.timers_len(), 1);
+        assert_eq!(driver_2.0.timers_len(), 0);
+
+        // register the timer on clock 2
+        let mut fut_2 = Box::pin(clock_2.delay(Duration::from_secs(100)));
+        _ = fut_2.poll_unpin(&mut Context::from_waker(Waker::noop()));
+        assert_eq!(clock_1.0.timers_len(), 1);
+        assert_eq!(clock_2.0.timers_len(), 1);
+        assert_eq!(driver_1.0.timers_len(), 1);
+        assert_eq!(driver_2.0.timers_len(), 1);
+
+        // advance timers
+        driver_1.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
+        assert_eq!(driver_1.0.timers_len(), 0);
+        assert_eq!(driver_2.0.timers_len(), 1);
+        driver_2.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
+        assert_eq!(driver_2.0.timers_len(), 0);
+
+        drop(fut_1);
+        drop(fut_2);
+
+        // drop clock
+        drop(clock_1);
+        driver_1.advance_timers(Instant::now()).unwrap_err();
+        driver_2.advance_timers(Instant::now()).unwrap();
+        drop(clock_2);
+        driver_2.advance_timers(Instant::now()).unwrap_err();
     }
-
 }
