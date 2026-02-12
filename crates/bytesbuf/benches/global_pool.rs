@@ -18,6 +18,7 @@ criterion_main!(benches);
 static ALLOCATOR: Allocator<System> = Allocator::system();
 
 const ONE_MB: usize = 1024 * 1024;
+const TINY: usize = 128;
 
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
@@ -26,8 +27,34 @@ fn entrypoint(c: &mut Criterion) {
 
     // Allocate some memory to pre-warm the pool.
     drop(warm_memory.reserve(10 * ONE_MB));
+    drop(warm_memory.reserve(TINY));
 
     let mut group = c.benchmark_group("GlobalPool");
+
+    let allocs_op = allocs.operation("alloc_tiny");
+    group.bench_function("alloc_tiny", |b| {
+        b.iter(|| {
+            let _span = allocs_op.measure_thread();
+            _ = warm_memory.reserve(TINY);
+        });
+    });
+
+    let allocs_op = allocs.operation("alloc_1mb");
+    group.bench_function("alloc_1mb", |b| {
+        b.iter(|| {
+            let _span = allocs_op.measure_thread();
+            _ = warm_memory.reserve(ONE_MB);
+        });
+    });
+
+    let allocs_op = allocs.operation("fill_tiny");
+    group.bench_function("fill_tiny", |b| {
+        b.iter(|| {
+            let _span = allocs_op.measure_thread();
+            let mut buf = warm_memory.reserve(TINY);
+            buf.put_byte_repeated(66, TINY);
+        });
+    });
 
     let allocs_op = allocs.operation("fill_1mb");
     group.bench_function("fill_1mb", |b| {
@@ -36,6 +63,19 @@ fn entrypoint(c: &mut Criterion) {
             let mut buf = warm_memory.reserve(ONE_MB);
             buf.put_byte_repeated(66, ONE_MB);
         });
+    });
+
+    let allocs_op = allocs.operation("fill_tiny_cold");
+    group.bench_function("fill_tiny_cold", |b| {
+        b.iter_batched(
+            GlobalPool::new,
+            |memory| {
+                let _span = allocs_op.measure_thread();
+                let mut buf = memory.reserve(TINY);
+                buf.put_byte_repeated(66, TINY);
+            },
+            BatchSize::LargeInput,
+        );
     });
 
     let allocs_op = allocs.operation("fill_1mb_cold");
