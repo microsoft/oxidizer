@@ -432,4 +432,14 @@ mod tests {
             .clone_input()
             .max_delay(Duration::from_secs(9999)) // protect against infinite backoff
     }
+
+    #[test]
+    fn retry_future_debug_contains_struct_name() {
+        let future = RetryFuture::<String> {
+            inner: Box::pin(async { "test".to_string() }),
+        };
+        let debug_output = format!("{:?}", future);
+
+        assert!(debug_output.contains("RetryFuture"));
+    }
 }

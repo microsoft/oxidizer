@@ -309,4 +309,14 @@ mod tests {
             Some(3),
         );
     }
+
+    #[test]
+    fn timeout_future_debug_contains_struct_name() {
+        let future = TimeoutFuture::<String> {
+            inner: Box::pin(async { "test".to_string() }),
+        };
+        let debug_output = format!("{:?}", future);
+
+        assert!(debug_output.contains("TimeoutFuture"));
+    }
 }

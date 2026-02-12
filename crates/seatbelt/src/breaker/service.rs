@@ -483,4 +483,15 @@ mod tests {
             })
             .rejected_input(|_, _| "circuit is open".to_string())
     }
+
+    #[test]
+    fn breaker_future_debug_contains_type_name() {
+        let future = BreakerFuture::<String> {
+            inner: Box::pin(async { "test".to_string() }),
+        };
+
+        let debug_output = format!("{:?}", future);
+
+        assert!(debug_output.contains("BreakerFuture"));
+    }
 }
