@@ -205,7 +205,7 @@ impl BytesBuf {
     /// Panics if the resulting total buffer capacity would be greater than `usize::MAX`.
     ///
     /// [`remaining_capacity()`]: Self::remaining_capacity
-    pub fn reserve(&mut self, additional_bytes: usize, memory_provider: &impl Memory) {
+    pub fn reserve<M: Memory + ?Sized>(&mut self, additional_bytes: usize, memory_provider: &M) {
         let bytes_needed = additional_bytes.saturating_sub(self.remaining_capacity());
 
         let Some(bytes_needed) = NonZero::new(bytes_needed) else {
@@ -215,7 +215,7 @@ impl BytesBuf {
         self.extend_capacity_by_at_least(bytes_needed, memory_provider);
     }
 
-    fn extend_capacity_by_at_least(&mut self, bytes: NonZero<usize>, memory_provider: &impl Memory) {
+    fn extend_capacity_by_at_least<M: Memory + ?Sized>(&mut self, bytes: NonZero<usize>, memory_provider: &M) {
         let additional_memory = memory_provider.reserve(bytes.get());
 
         // For extra paranoia. We expect a memory provider to return an empty buffer.
@@ -933,7 +933,7 @@ impl BytesBuf {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn as_write<M: Memory>(&mut self, memory: &M) -> impl std::io::Write {
+    pub fn as_write<M: Memory + ?Sized>(&mut self, memory: &M) -> impl std::io::Write {
         BytesBufWrite::new(self, memory)
     }
 }
@@ -2239,5 +2239,11 @@ mod tests {
         unsafe {
             src.as_ptr().copy_to_nonoverlapping(dst.as_mut_ptr().cast(), src.len());
         }
+    }
+
+    // Compile time test
+    fn _can_use_in_dyn_traits(mem: &dyn Memory) {
+        let mut buf = mem.reserve(123);
+        let _ = buf.as_write(mem);
     }
 }

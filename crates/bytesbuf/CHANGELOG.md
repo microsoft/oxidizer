@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-01-15
+
+- 📚 Documentation
+
+  - A few doc-related fixes ([#198](https://github.com/microsoft/oxidizer/pull/198))
+
 ## [0.2.1] - 2026-01-07
 
 - ✨ Features
