@@ -11,6 +11,8 @@ use std::thread::ThreadId;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use many_cpus::SystemHardware;
 
+const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hold - not safe to continue execution";
+
 /// The number of processors to use for the registry.
 ///
 /// This can be set to `Auto` to use the default number of processors,
