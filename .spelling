@@ -1,3 +1,4 @@
+304
 →
 0.X.Y
 100k
@@ -37,6 +38,7 @@ btree_map
 buildable
 bytesbuf
 callee
+cancelled
 Cargo.toml
 C-BITFLAG
 C-CONV
@@ -81,6 +83,8 @@ C-SERDE
 C-SMART-PTR
 deallocate
 Debuggability
+Deduplicate
+deduplicating
 deduplication
 deque
 Deque
@@ -239,6 +243,7 @@ shareable
 skimmable
 SLAs
 smallvec
+spawner
 startup
 stderr
 stdlib
@@ -277,6 +282,8 @@ unconfigured
 uncontended
 unhandleable
 unicode
+uniflight
+uniflight's
 Uninit
 unordered
 unredacted

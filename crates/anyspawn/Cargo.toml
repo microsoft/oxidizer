@@ -1,0 +1,53 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "anyspawn"
+description = "A generic task spawner compatible with any async runtime."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "async", "runtime", "futures"]
+categories = ["asynchronous"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["tokio", "custom"]
+tokio = ["dep:tokio"]
+custom = ["dep:futures-channel"]
+
+[dependencies]
+futures-channel = { workspace = true, features = ["alloc"], optional = true }
+tokio = { workspace = true, features = ["rt"], optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+smol = "2"
+static_assertions.workspace = true
+tick = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[[bench]]
+name = "spawner"
+harness = false
+required-features = ["tokio", "custom"]
+
+[[example]]
+name = "custom"
+required-features = ["tokio", "custom"]
+
+[[example]]
+name = "tokio"
+required-features = ["tokio"]
+
+[lints]
+workspace = true

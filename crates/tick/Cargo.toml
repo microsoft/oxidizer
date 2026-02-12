@@ -13,7 +13,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -58,7 +58,6 @@ serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 static_assertions.workspace = true
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
-time-tz = { workspace = true, features = ["system"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 
 [lints]

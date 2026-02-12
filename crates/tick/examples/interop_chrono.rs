@@ -9,13 +9,11 @@
 //! - Converting `SystemTime` to `chrono::DateTime<Local>`
 
 use chrono::{DateTime, Local, Utc};
-use ohno::IntoAppError;
 use tick::Clock;
-use time_tz::TimeZone;
 
 const CHRONO_DISPLAY_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-fn main() -> Result<(), ohno::AppError> {
+fn main() {
     // Create a frozen clock for the current time.
     let clock = Clock::new_frozen();
 
@@ -30,10 +28,5 @@ fn main() -> Result<(), ohno::AppError> {
 
     // Convert the timestamp to date time in the current time zone.
     let zoned = timestamp.with_timezone(&Local);
-
-    // Retrieving the time zone name is not supported in chrono.
-    let tz = time_tz::system::get_timezone().into_app_err("failed to get time zone")?;
-    println!("Current time ({}): {}", tz.name(), zoned.format(CHRONO_DISPLAY_FORMAT));
-
-    Ok(())
+    println!("Current time (local): {}", zoned.format(CHRONO_DISPLAY_FORMAT));
 }

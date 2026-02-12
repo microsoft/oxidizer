@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf_io"
 description = "Asynchronous I/O abstractions expressed via `bytesbuf` types."
-version = "0.1.1"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "io", "zero-copy", "performance", "async"]
 categories = [
@@ -19,7 +19,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf_io"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["bytesbuf::*", "ohno::*", "futures_core::stream::Stream"]

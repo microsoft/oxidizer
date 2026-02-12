@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.0] - 2026-01-28
+
+- 📚 Documentation
+
+  - Add cross-crate link to `bytesbuf` in `bytesbuf_io` ([#186](https://github.com/microsoft/oxidizer/pull/186))
+
+- ✔️ Tasks
+
+  - Update ohno dependency ([#239](https://github.com/microsoft/oxidizer/pull/239))
+
 ## [0.1.1] - 2026-01-07
 
 - ✨ Features
