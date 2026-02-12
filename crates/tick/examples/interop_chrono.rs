@@ -13,7 +13,7 @@ use tick::Clock;
 
 const CHRONO_DISPLAY_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
-fn main() -> Result<(), ohno::AppError> {
+fn main() {
     // Create a frozen clock for the current time.
     let clock = Clock::new_frozen();
 
@@ -29,6 +29,4 @@ fn main() -> Result<(), ohno::AppError> {
     // Convert the timestamp to date time in the current time zone.
     let zoned = timestamp.with_timezone(&Local);
     println!("Current time (local): {}", zoned.format(CHRONO_DISPLAY_FORMAT));
-
-    Ok(())
 }
