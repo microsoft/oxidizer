@@ -255,11 +255,12 @@ async fn restore_input_integration_test(#[case] use_tower: bool) {
             .restore_input(move |output: &mut Result<String, String>, _args| {
                 restore_count_clone.fetch_add(1, Ordering::SeqCst);
                 if let Ok(s) = output
-                    && s.contains("error:") {
-                        let input = s.replace("error:", "");
-                        *output = Ok("restored".to_string());
-                        return Some(input);
-                    }
+                    && s.contains("error:")
+                {
+                    let input = s.replace("error:", "");
+                    *output = Ok("restored".to_string());
+                    return Some(input);
+                }
                 None
             })
             .recovery_with(|output: &Result<String, String>, _args| {
