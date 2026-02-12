@@ -40,6 +40,7 @@ thread_aware_macros = { workspace = true, optional = true }
 mutants.workspace = true
 static_assertions.workspace = true
 thread_aware_macros = { workspace = true }
+many_cpus = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

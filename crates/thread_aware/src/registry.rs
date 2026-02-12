@@ -286,3 +286,139 @@ mod tests {
         assert_eq!(affinities.len(), 5);
     }
 }
+
+/// Tests using fake hardware from `many_cpus::fake` for deterministic coverage
+/// of multi-NUMA topologies and specific processor counts.
+#[cfg(test)]
+mod test_fake_hardware {
+    use std::collections::HashSet;
+
+    use super::*;
+    use many_cpus::fake::HardwareBuilder;
+
+    /// Helper to create a `ThreadRegistry` from fake hardware with the given counts.
+    fn registry_from_fake(policy: &ProcessorCount, processors: usize, numa_nodes: usize) -> ThreadRegistry {
+        let hw = SystemHardware::fake(HardwareBuilder::from_counts(
+            NonZero::new(processors).unwrap(),
+            NonZero::new(numa_nodes).unwrap(),
+        ));
+        ThreadRegistry::with_hardware(policy, &hw)
+    }
+
+    #[test]
+    fn single_processor_single_numa() {
+        let registry = registry_from_fake(&ProcessorCount::Auto, 1, 1);
+
+        assert_eq!(registry.num_affinities(), 1);
+        let [aff] = registry.affinities().collect::<Vec<_>>()[..] else {
+            panic!("Expected exactly one affinity")
+        };
+        assert_eq!(aff.processor_index(), 0);
+        assert_eq!(aff.memory_region_index(), 0);
+        assert_eq!(aff.processor_count(), 1);
+        assert_eq!(aff.memory_region_count(), 1);
+    }
+
+    #[test]
+    fn auto_with_single_numa_node() {
+        let registry = registry_from_fake(&ProcessorCount::Auto, 4, 1);
+
+        assert_eq!(registry.num_affinities(), 4);
+        for aff in registry.affinities() {
+            assert_eq!(aff.memory_region_index(), 0);
+            assert_eq!(aff.memory_region_count(), 1);
+            assert_eq!(aff.processor_count(), 4);
+        }
+    }
+
+    #[test]
+    fn all_with_single_numa_node() {
+        let registry = registry_from_fake(&ProcessorCount::All, 4, 1);
+        assert_eq!(registry.num_affinities(), 4);
+    }
+
+    #[test]
+    fn manual_subset_of_processors() {
+        let registry = registry_from_fake(&ProcessorCount::Manual(NonZero::new(3).unwrap()), 8, 2);
+
+        assert_eq!(registry.num_affinities(), 3);
+        assert_eq!(registry.affinities().count(), 3);
+
+        let registry = registry_from_fake(&ProcessorCount::Manual(NonZero::new(1).unwrap()), 8, 2);
+        assert_eq!(registry.num_affinities(), 1);
+
+        let registry = registry_from_fake(&ProcessorCount::Manual(NonZero::new(8).unwrap()), 8, 2);
+        assert_eq!(registry.num_affinities(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "Not enough processors available")]
+    fn manual_exceeds_available_panics() {
+        let _registry = registry_from_fake(&ProcessorCount::Manual(NonZero::new(5).unwrap()), 2, 1);
+    }
+
+    #[test]
+    fn multi_numa_dense_indexing() {
+        // 4 processors across 2 NUMA nodes (round-robin: 0,1,0,1)
+        let registry = registry_from_fake(&ProcessorCount::Auto, 4, 2);
+
+        assert_eq!(registry.num_affinities(), 4);
+
+        let affinities: Vec<_> = registry.affinities().collect();
+        assert_eq!(affinities.len(), 4);
+
+        // Verify there are exactly 2 distinct memory regions in the affinities.
+        let regions: HashSet<_> = affinities.iter().map(|a| a.memory_region_index()).collect();
+        assert_eq!(regions.len(), 2);
+
+        for aff in &affinities {
+            assert_eq!(aff.processor_count(), 4);
+            assert_eq!(aff.memory_region_count(), 2);
+        }
+    }
+
+    #[test]
+    fn many_numa_nodes() {
+        // 6 processors across 3 NUMA nodes (round-robin: 0,1,2,0,1,2)
+        let registry = registry_from_fake(&ProcessorCount::Auto, 6, 3);
+
+        assert_eq!(registry.num_affinities(), 6);
+
+        let affinities: Vec<_> = registry.affinities().collect();
+        let regions: HashSet<_> = affinities.iter().map(|a| a.memory_region_index()).collect();
+        assert_eq!(regions.len(), 3);
+
+        for aff in &affinities {
+            assert_eq!(aff.processor_count(), 6);
+            assert_eq!(aff.memory_region_count(), 3);
+        }
+    }
+
+    #[test]
+    fn pin_to_with_fake_hardware() {
+        let registry = registry_from_fake(&ProcessorCount::Auto, 4, 2);
+
+        assert!(registry.current_affinity().is_unknown());
+
+        let second = registry.affinities().nth(1).unwrap();
+        registry.pin_to(second);
+
+        let current = registry.current_affinity();
+        assert!(!current.is_unknown());
+        assert_eq!(current, crate::affinity::MemoryAffinity::Pinned(second));
+    }
+
+    #[test]
+    fn pin_to_updates_on_repin() {
+        let registry = registry_from_fake(&ProcessorCount::Auto, 4, 2);
+
+        let first = registry.affinities().next().unwrap();
+        registry.pin_to(first);
+        assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(first));
+
+        // Re-pin to a different affinity.
+        let third = registry.affinities().nth(2).unwrap();
+        registry.pin_to(third);
+        assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(third));
+    }
+}
