@@ -308,6 +308,8 @@ dependencies = [
  "opentelemetry_sdk",
  "parking_lot",
  "pin-project-lite",
+ "recoverable",
+ "seatbelt",
  "testing_aids",
  "thread_aware",
  "tick",
@@ -343,6 +345,7 @@ dependencies = [
  "dynosaur",
  "ohno",
  "parking_lot",
+ "recoverable",
  "tokio",
 ]
 
