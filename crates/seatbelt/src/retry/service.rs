@@ -299,8 +299,6 @@ where
     }
 
     fn call(&mut self, req: Req) -> Self::Future {
-        use std::future::poll_fn;
-
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);
             return RetryFuture { inner: Box::pin(future) };
@@ -320,11 +318,6 @@ where
                 loop {
                     let (original_input, attempt_input) = shared.clone_input(input, attempt, previous_recovery.clone());
 
-                    // execute inner service
-                    if poll_fn(|cx| inner.poll_ready(cx)).await.is_err() {
-                        // If poll_ready fails, we can't continue - return the error
-                        // But we need to return an Out type, so we need to call anyway
-                    }
                     let out = inner.call(attempt_input).await;
 
                     // evaluate whether to retry
