@@ -211,3 +211,5 @@ pub use ::thread_aware_macros::ThreadAware;
 pub use cell::storage;
 pub use cell::{Arc, PerCore, PerNuma, PerProcess};
 pub use wrappers::{Unaware, unaware};
+
+const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hold - not safe to continue execution";

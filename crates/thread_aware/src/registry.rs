@@ -128,7 +128,7 @@ impl ThreadRegistry {
     pub fn current_affinity(&self) -> MemoryAffinity {
         self.threads
             .lock()
-            .expect("poisoned lock means type invariants may not hold - not safe to continue execution")
+            .expect(crate::POISONED_LOCK_MSG)
             .get(&std::thread::current().id())
             .copied()
             .map_or(MemoryAffinity::Unknown, MemoryAffinity::Pinned)
@@ -145,10 +145,7 @@ impl ThreadRegistry {
         processor.pin_current_thread_to();
         self.threads
             .lock()
-            .expect(
-                "poisoned lock means type invariants may not hold \
-                    - not safe to continue execution",
-            )
+            .expect(crate::POISONED_LOCK_MSG)
             .insert(std::thread::current().id(), affinity);
     }
 }
