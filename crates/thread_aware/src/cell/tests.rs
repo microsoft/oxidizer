@@ -391,11 +391,11 @@ fn test_weak_count() {
     assert_eq!(PerCore::weak_count(&arc), 0);
 
     // Create a weak reference through the underlying sync::Arc
-    let underlying = arc.clone().into_arc();
-    let _weak = sync::Arc::downgrade(&underlying);
+    let arc_for_weak = arc.clone().into_arc();
+    let _weak = sync::Arc::downgrade(&arc_for_weak);
 
     // The weak count should be reflected in the original Arc
-    // Note: arc and underlying point to the same data
+    // Note: arc and arc_for_weak point to the same data
     assert_eq!(PerCore::weak_count(&arc), 1);
 }
 
@@ -414,8 +414,8 @@ fn test_is_unique() {
     assert!(PerCore::is_unique(&arc));
 
     // Test is_unique with weak references
-    let underlying = arc.clone().into_arc();
-    let _weak = sync::Arc::downgrade(&underlying);
+    let arc_for_weak = arc.clone().into_arc();
+    let _weak = sync::Arc::downgrade(&arc_for_weak);
 
     // Should not be unique because there's a weak reference
     assert!(!PerCore::is_unique(&arc));
@@ -435,13 +435,16 @@ fn test_strong_count_after_relocation() {
     // Relocate one of them
     let arc1_relocated = arc1.relocated(affinity1, affinity2);
 
-    // The relocated Arc has count = 2 because:
-    // - arc1_relocated holds one reference
-    // - the storage at affinity2 holds another reference
+    // After relocation:
+    // - arc1_relocated holds a reference to a new Arc created for affinity2
+    // - The storage at affinity2 also holds a reference to this new Arc
+    // - Therefore, strong_count for arc1_relocated is 2
     assert_eq!(PerCore::strong_count(&arc1_relocated), 2);
 
-    // arc2 and the storage at affinity1 share the original Arc
-    // arc1 was consumed and its value was moved to storage, so count remains 2
+    // arc2 refers to the original Arc at affinity1
+    // - arc2 itself holds a reference
+    // - The storage at affinity1 also holds a reference (from the relocation)
+    // - Therefore, strong_count for arc2 is 2
     assert_eq!(PerCore::strong_count(&arc2), 2);
 }
 
