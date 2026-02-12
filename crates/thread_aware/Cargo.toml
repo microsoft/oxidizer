@@ -26,7 +26,6 @@ all-features = true
 default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
-test-util = []
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }

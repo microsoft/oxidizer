@@ -99,7 +99,6 @@ from types that implement [`ThreadAware`][__link23].
 * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
   environments: `default-features = false`.
-* **`test-util`**: Enables features used for testing.
 * **`threads`**: Enables features mainly used by async runtimes for OS interactions.
 
 ## Examples

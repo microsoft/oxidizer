@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #![expect(missing_docs, reason = "This is a test module")]
-#![cfg(feature = "test-util")]
 
 use thread_aware::affinity::pinned_affinities;
 use thread_aware_macros::ThreadAware;
