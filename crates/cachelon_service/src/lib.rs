@@ -29,10 +29,13 @@
 //! - **Middleware composition**: Add retry, timeout, or circuit breaker before caching
 //! - **Unified abstractions**: Use the same service patterns for caching and other I/O
 
-pub mod adapter;
-pub mod request;
+mod adapter;
+mod ext;
+mod request;
 
 #[doc(inline)]
 pub use adapter::ServiceAdapter;
+#[doc(inline)]
+pub use ext::CacheServiceExt;
 #[doc(inline)]
 pub use request::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};

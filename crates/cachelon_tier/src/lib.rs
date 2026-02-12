@@ -60,10 +60,10 @@
 //! storage backends.
 
 mod entry;
-pub mod error;
+mod error;
 #[cfg(any(feature = "test-util", test))]
 pub mod testing;
-pub(crate) mod tier;
+mod tier;
 
 #[cfg(any(test, feature = "dynamic-cache"))]
 mod dynamic;

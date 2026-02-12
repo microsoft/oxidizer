@@ -17,15 +17,21 @@ async fn main() {
     cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
     cache.get(&"key".to_string()).await.expect("get failed");
 
-    println!("operations: {:?}", mock.operations());
+    println!("operations: {} recorded", mock.operations().len());
 
     // Inject failures for testing error paths
     mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
     let result = cache.get(&"key".to_string()).await;
-    println!("after fail_when: {result:?}");
+    match result {
+        Ok(_) => println!("after fail_when: unexpected success"),
+        Err(e) => println!("after fail_when: {e}"),
+    }
 
     // Clear failures
     mock.clear_failures();
     let result = cache.get(&"key".to_string()).await.expect("get failed");
-    println!("after clear_failures: {:?}", result.map(|e| *e.value()));
+    match result {
+        Some(e) => println!("after clear_failures: {}", e.value()),
+        None => println!("after clear_failures: not found"),
+    }
 }

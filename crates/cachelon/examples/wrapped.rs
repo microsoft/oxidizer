@@ -32,8 +32,14 @@ async fn main() {
     println!("insert: ok");
 
     let hit = cache.get(&key).await.expect("get failed");
-    println!("get (hit): {:?}", hit.map(|e| e.value().clone()));
+    match hit {
+        Some(e) => println!("get (hit): {}", e.value()),
+        None => println!("get (hit): not found"),
+    }
 
     let miss = cache.get(&"missing".to_string()).await.expect("get failed");
-    println!("get (miss): {miss:?}");
+    match miss {
+        Some(e) => println!("get (miss): {}", e.value()),
+        None => println!("get (miss): not found"),
+    }
 }

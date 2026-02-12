@@ -62,27 +62,28 @@ async fn main() {
 
     // Initial fetch (db call #1)
     let v = cache.get(&key).await.expect("get failed");
-    println!(
-        "initial: {:?} (db calls: {})",
-        v.map(|e| e.value().clone()),
-        db.calls.load(Ordering::Relaxed)
-    );
+    match v {
+        Some(e) => println!("initial: {} (db calls: {})", e.value(), db.calls.load(Ordering::Relaxed)),
+        None => println!("initial: not found (db calls: {})", db.calls.load(Ordering::Relaxed)),
+    }
 
     // Wait past refresh threshold
     clock.delay(Duration::from_millis(1500)).await;
 
     // Returns stale value immediately, triggers background refresh
     let v = cache.get(&key).await.expect("get failed");
-    println!("stale: {:?}", v.map(|e| e.value().clone()));
+    match v {
+        Some(e) => println!("stale: {}", e.value()),
+        None => println!("stale: not found"),
+    }
 
     // Wait for refresh to complete
     clock.delay(Duration::from_millis(100)).await;
 
     // Now returns refreshed value
     let v = cache.get(&key).await.expect("get failed");
-    println!(
-        "refreshed: {:?} (db calls: {})",
-        v.map(|e| e.value().clone()),
-        db.calls.load(Ordering::Relaxed)
-    );
+    match v {
+        Some(e) => println!("refreshed: {} (db calls: {})", e.value(), db.calls.load(Ordering::Relaxed)),
+        None => println!("refreshed: not found (db calls: {})", db.calls.load(Ordering::Relaxed)),
+    }
 }

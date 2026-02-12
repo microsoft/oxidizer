@@ -75,6 +75,8 @@ opentelemetry = { workspace = true, features = [
     "logs",
 ] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
+recoverable = { workspace = true }
+seatbelt = { workspace = true, features = ["retry"] }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true, features = ["std"] }

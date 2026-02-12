@@ -95,7 +95,7 @@ pub use cache::Cache;
 pub use cachelon_memory::InMemoryCache;
 #[cfg(feature = "service")]
 #[doc(inline)]
-pub use cachelon_service::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
+pub use cachelon_service::{CacheOperation, CacheResponse, CacheServiceExt, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
 #[doc(inline)]
 pub use cachelon_tier::{CacheEntry, CacheTier, Error, Result};
 #[cfg(feature = "dynamic-cache")]

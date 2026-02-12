@@ -2,17 +2,15 @@
 // Licensed under the MIT License.
 
 //! Compose middleware with cache operations.
-//! Pattern 1: Wrap Cache (since it implements Service)
-//! Pattern 2: Wrap remote service before adapting to `CacheTier`
+//!
+//! Since Cache implements `Service<CacheOperation>`, you can wrap it
+//! with any layered middleware (logging, metrics, retry, timeout).
 
-use std::{collections::HashMap, sync::Arc};
-
-use cachelon::{Cache, CacheEntry, CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
+use cachelon::{Cache, CacheEntry, CacheOperation, CacheResponse, CacheServiceExt};
 use layered::{Layer, Service};
-use parking_lot::RwLock;
 use tick::Clock;
 
-// Simple logging middleware
+/// Simple logging middleware that prints each operation.
 struct LoggingLayer;
 
 impl<S> Layer<S> for LoggingLayer {
@@ -42,45 +40,23 @@ where
     }
 }
 
-#[derive(Clone)]
-struct RemoteCache(Arc<RwLock<HashMap<String, CacheEntry<String>>>>);
-
-impl Service<CacheOperation<String, String>> for RemoteCache {
-    type Out = Result<CacheResponse<String>, cachelon::Error>;
-
-    async fn execute(&self, input: CacheOperation<String, String>) -> Self::Out {
-        match input {
-            CacheOperation::Get(GetRequest { key }) => Ok(CacheResponse::Get(self.0.read().get(&key).cloned())),
-            CacheOperation::Insert(InsertRequest { key, entry }) => {
-                self.0.write().insert(key, entry);
-                Ok(CacheResponse::Insert())
-            }
-            CacheOperation::Invalidate(InvalidateRequest { key }) => {
-                self.0.write().remove(&key);
-                Ok(CacheResponse::Invalidate())
-            }
-            CacheOperation::Clear => {
-                self.0.write().clear();
-                Ok(CacheResponse::Clear())
-            }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, String>(clock).memory().build();
 
-    // Pattern: Wrap remote service with logging, then adapt to CacheTier
-    let remote = RemoteCache(Arc::new(RwLock::new(HashMap::new())));
-    let logged = LoggingLayer.layer(remote);
-    let adapter = ServiceAdapter::new(logged);
+    // Wrap cache with logging middleware
+    let logged_cache = LoggingLayer.layer(cache);
 
-    let cache = Cache::builder::<String, String>(clock).storage(adapter).build();
-
-    cache
+    // Use CacheServiceExt for ergonomic methods on the wrapped service
+    logged_cache
         .insert(&"key".to_string(), CacheEntry::new("value".to_string()))
         .await
         .expect("insert failed");
-    let _ = cache.get(&"key".to_string()).await.expect("get failed");
+
+    let value = logged_cache.get(&"key".to_string()).await.expect("get failed");
+    match value {
+        Some(e) => println!("get(key): {}", e.value()),
+        None => println!("get(key): not found"),
+    }
 }

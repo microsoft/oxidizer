@@ -9,7 +9,7 @@ use tick::Clock;
 use uniflight::Merger;
 
 use crate::{Error, builder::CacheBuilder};
-use cachelon_tier::{CacheEntry, CacheTier};
+use cachelon_tier::{CacheEntry, CacheTier, DynamicCache, DynamicCacheExt};
 
 /// Type alias for cache names used in telemetry.
 pub type CacheName = &'static str;
@@ -160,13 +160,21 @@ where
         &self.storage
     }
 
-    /// Consumes the cache and returns the inner storage tier.
+    /// Converts this cache into a dynamically-dispatched cache.
     ///
-    /// This is useful when you need to extract the underlying storage
-    /// for reuse or inspection.
+    /// This erases the concrete storage type, allowing caches with different
+    /// storage implementations to be used interchangeably at runtime.
     #[must_use]
-    pub fn into_inner(self) -> S {
-        self.storage
+    pub fn into_dynamic(self) -> Cache<K, V, DynamicCache<K, V>>
+    where
+        S: DynamicCacheExt<K, V>,
+    {
+        Cache {
+            name: self.name,
+            storage: self.storage.into_dynamic(),
+            clock: self.clock,
+            mergers: self.mergers,
+        }
     }
 }
 

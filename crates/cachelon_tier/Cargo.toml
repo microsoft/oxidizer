@@ -31,6 +31,7 @@ test-util = ["dep:parking_lot"]
 dynosaur = { workspace = true, optional = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true, optional = true }
+recoverable = { workspace = true }
 
 [dev-dependencies]
 parking_lot = { workspace = true }

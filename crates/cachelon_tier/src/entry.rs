@@ -61,8 +61,9 @@ impl<V> CacheEntry<V> {
 
     /// Creates a cache entry that expires at `cached_at + ttl`.
     ///
-    /// Use this when restoring entries from persistent storage or migrating
-    /// between caches while preserving the original expiration time.
+    /// This is primarily useful for testing expiration logic with controlled
+    /// timestamps, or if you need to construct entries with pre-determined
+    /// expiration times.
     pub fn expires_at(value: V, ttl: Duration, cached_at: SystemTime) -> Self {
         Self {
             value,

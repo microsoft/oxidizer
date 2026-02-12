@@ -5,6 +5,9 @@
 
 use std::error::Error as StdError;
 
+use ohno::OhnoCore;
+use recoverable::{Recovery, RecoveryInfo};
+
 /// An error from a cache operation.
 ///
 /// Wraps any underlying error from a cache implementation while preserving
@@ -38,10 +41,20 @@ use std::error::Error as StdError;
 /// }
 /// ```
 #[ohno::error]
+#[no_constructors]
 #[derive(Clone)]
-pub struct Error {}
+pub struct Error {
+    recovery_info: RecoveryInfo,
+}
 
 impl Error {
+    /// Creates a new error wrapping a cause.
+    pub fn caused_by(cause: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        Self {
+            ohno_core: OhnoCore::from(cause),
+            recovery_info: RecoveryInfo::never(),
+        }
+    }
     /// Creates a new error wrapping a source error.
     ///
     /// This preserves the original error type for later extraction via
@@ -75,6 +88,27 @@ impl Error {
     /// ```
     pub fn from_message(message: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
         Self::caused_by(message)
+    }
+
+    /// Attaches recovery information to this error.
+    ///
+    /// This is for informational purposes and does not affect error handling
+    /// logic. It can be used by monitoring or debugging tools to provide
+    /// hints on how to recover from the error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cachelon_tier::Error;
+    ///
+    /// let error = Error::from_message("temporary failure")
+    ///     .with_recovery(RecoveryInfo::RetryAfter(std::time::Duration::from_secs(5)));
+    /// ```
+    pub fn with_recovery(self, recovery_info: RecoveryInfo) -> Self {
+        Self {
+            recovery_info,
+            ..self
+        }
     }
 
     /// Returns `true` if the source error is of type `T`.
@@ -115,6 +149,12 @@ impl Error {
     #[must_use]
     pub fn source_as<T: StdError + 'static>(&self) -> Option<&T> {
         self.source().and_then(|s| s.downcast_ref::<T>())
+    }
+}
+
+impl Recovery for Error {
+    fn recovery(&self) -> RecoveryInfo {
+        self.recovery_info.clone()
     }
 }
 

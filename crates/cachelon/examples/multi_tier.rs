@@ -4,7 +4,7 @@
 //! Multi-tier cache with conditional promotion policies.
 //! Example: only promote "not found" results to avoid repeated backend queries.
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use parking_lot::Mutex;
@@ -14,6 +14,15 @@ use tick::Clock;
 enum UserData {
     Found(String),
     NotFound,
+}
+
+impl fmt::Display for UserData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UserData::Found(name) => write!(f, "Found({name})"),
+            UserData::NotFound => write!(f, "NotFound"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -62,11 +71,17 @@ async fn main() {
 
     // user:1 exists - NOT cached (policy rejects Found)
     let v = cache.get(&"user:1".to_string()).await.expect("get failed");
-    println!("user:1: {:?}", v.map(|e| e.value().clone()));
+    match v {
+        Some(e) => println!("user:1: {}", e.value()),
+        None => println!("user:1: not found"),
+    }
 
     // user:2 not found - cached (policy accepts NotFound)
     let v = cache.get(&"user:2".to_string()).await.expect("get failed");
-    println!("user:2: {:?}", v.map(|e| e.value().clone()));
+    match v {
+        Some(e) => println!("user:2: {}", e.value()),
+        None => println!("user:2: not found"),
+    }
 
     println!("db calls after first round: {}", *db.0.lock());
 

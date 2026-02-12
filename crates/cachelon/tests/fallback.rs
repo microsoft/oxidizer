@@ -108,7 +108,7 @@ fn fallback_cache_clear() -> TestResult {
 }
 
 #[test]
-fn fallback_cache_len_returns_some() {
+fn fallback_cache_len_returns_some() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
 
@@ -116,9 +116,19 @@ fn fallback_cache_len_returns_some() {
 
         let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
-        let len = cache.len();
-        assert!(len.is_some());
-    });
+        // Empty cache should have len 0
+        assert_eq!(cache.len(), Some(0));
+
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+        // After insert, len returns Some (exact value may be eventually consistent with moka)
+        assert!(cache.len().is_some());
+
+        // Verify the entry is actually accessible
+        let entry = cache.get(&"key".to_string()).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
 }
 
 fn failing_cache() -> MockCache<String, i32> {

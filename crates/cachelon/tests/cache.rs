@@ -42,15 +42,30 @@ fn clock_returns_reference() {
 }
 
 #[test]
-fn inner_and_into_inner() {
-    let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().build();
+fn into_dynamic_preserves_functionality() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
 
-    let inner = cache.inner();
-    assert!(!inner.name().is_empty());
+        // Insert before converting
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-    let owned_inner = cache.into_inner();
-    assert!(!owned_inner.name().is_empty());
+        let dynamic = cache.into_dynamic();
+
+        // Verify existing data is accessible
+        let entry = dynamic.get(&"key".to_string()).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+
+        // Verify we can still insert and retrieve
+        dynamic.insert(&"new".to_string(), CacheEntry::new(100)).await?;
+        assert_eq!(*dynamic.get(&"new".to_string()).await?.unwrap().value(), 100);
+
+        // Verify get_or_insert works (requires Cache wrapper functionality)
+        let entry = dynamic.get_or_insert(&"computed".to_string(), || async { 200 }).await?;
+        assert_eq!(*entry.value(), 200);
+
+        Ok(())
+    })
 }
 
 #[test]

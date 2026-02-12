@@ -51,12 +51,6 @@ impl<K, V, S> ServiceAdapter<K, V, S> {
         }
     }
 
-    /// Consumes the adapter and returns the inner service.
-    #[must_use]
-    pub fn into_inner(self) -> S {
-        self.service
-    }
-
     /// Returns a reference to the inner service.
     #[must_use]
     pub fn inner(&self) -> &S {
@@ -175,19 +169,5 @@ mod tests {
     fn adapter_len() {
         let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
         assert_eq!(adapter.len(), None);
-    }
-
-    #[test]
-    fn adapter_into_inner() {
-        let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
-        let _service = adapter.into_inner();
-        // Just verify it compiles and runs
-    }
-
-    #[test]
-    fn adapter_inner() {
-        let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
-        let _service = adapter.inner();
-        // Just verify it compiles and runs
     }
 }

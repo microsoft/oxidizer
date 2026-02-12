@@ -36,7 +36,10 @@ async fn main() {
 
     // Get from L1
     let value = cache.get(&key).await.expect("get failed");
-    println!("get({key}): {:?}", value.map(|e| e.value().clone()));
+    match value {
+        Some(e) => println!("get({key}): {}", e.value()),
+        None => println!("get({key}): not found"),
+    }
 
     // Invalidate only clears L1; L2 still has it
     // (Next get would promote from L2 back to L1)

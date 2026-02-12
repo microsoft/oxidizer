@@ -120,17 +120,6 @@ fn adapter_len_returns_none() {
 }
 
 #[test]
-fn adapter_provides_access_to_inner_service() {
-    let service = InMemoryCacheService::<String, i32>::new();
-    let adapter: ServiceAdapter<String, i32, _> = ServiceAdapter::new(service);
-
-    let _inner = adapter.inner();
-    let _owned = adapter.into_inner();
-}
-
-// Request type tests
-
-#[test]
 fn get_request_holds_key() {
     let req = GetRequest::new("test-key".to_string());
     assert_eq!(req.key, "test-key");

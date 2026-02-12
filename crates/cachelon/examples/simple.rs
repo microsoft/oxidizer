@@ -21,10 +21,16 @@ async fn main() {
     // Insert and retrieve
     cache.insert(&key, "Alice".to_string().into()).await.expect("insert failed");
     let value = cache.get(&key).await.expect("get failed");
-    println!("get({key}): {:?}", value.map(|e| e.value().clone()));
+    match value {
+        Some(e) => println!("get({key}): {}", e.value()),
+        None => println!("get({key}): not found"),
+    }
 
     // Invalidate
     cache.invalidate(&key).await.expect("invalidate failed");
     let value = cache.get(&key).await.expect("get failed");
-    println!("after invalidate: {:?}", value.map(|e| e.value().clone()));
+    match value {
+        Some(e) => println!("after invalidate: {}", e.value()),
+        None => println!("after invalidate: not found"),
+    }
 }

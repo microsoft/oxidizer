@@ -88,10 +88,12 @@ fn mock_cache_shares_state_with_handle() -> TestResult {
 #[test]
 fn cache_builder_clock() {
     let clock = Clock::new_frozen();
+    let expected_instant = clock.instant();
     let builder = Cache::builder::<String, i32>(clock);
+
+    // Verify builder exposes the same clock
     let builder_clock = builder.clock();
-    // Verify clock is accessible and returns valid instant
-    let _ = builder_clock.instant();
+    assert_eq!(builder_clock.instant(), expected_instant);
 }
 
 #[test]
