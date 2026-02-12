@@ -379,15 +379,23 @@ mod test_fake_hardware {
 
     #[test]
     fn pin_to_updates_on_repin() {
-        let registry = registry_from_fake(&ProcessorCount::Auto, 4, 2);
+        let hw = SystemHardware::fake(HardwareBuilder::from_counts(nz!(4), nz!(2)));
+        let registry = ThreadRegistry::with_hardware(&ProcessorCount::Auto, &hw);
+
+        assert!(!hw.is_thread_processor_pinned());
+        assert!(!hw.is_thread_memory_region_pinned());
 
         let first = registry.affinities().next().unwrap();
         registry.pin_to(first);
         assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(first));
+        assert!(hw.is_thread_processor_pinned());
+        assert!(hw.is_thread_memory_region_pinned());
 
         // Re-pin to a different affinity.
         let third = registry.affinities().nth(2).unwrap();
         registry.pin_to(third);
         assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(third));
+        assert!(hw.is_thread_processor_pinned());
+        assert!(hw.is_thread_memory_region_pinned());
     }
 }
