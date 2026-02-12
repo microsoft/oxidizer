@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0] - 2026-02-12
+
+- ✨ Features
+
+  - remove implicit `Sized` requirement from `BytesBuf::as_write` method ([#249](https://github.com/microsoft/oxidizer/pull/249))
+
+- ✔️ Tasks
+
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+
+- 🔄 Continuous Integration
+
+  - automatically publish release notes ([#247](https://github.com/microsoft/oxidizer/pull/247))
+
+- 🧩 Miscellaneous
+
+  - Merge remote-tracking branch 'origin/main' into u/sasaares/bytesbuf-expose-meta
+  - Update readme
+  - trait BlockMeta: Any + Send + Sync + Debug
+  - Skip mutations that cause infinite loops
+  - Improve test coverage
+  - Improve bytesbuf memory block metadata API UX
+
 ## [0.2.2] - 2026-01-15
 
 - 📚 Documentation
