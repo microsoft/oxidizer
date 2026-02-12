@@ -358,3 +358,105 @@ fn test_relocated_unknown_source() {
     let relocated_trc = trc.relocated(source, destination);
     assert_eq!(*relocated_trc, 42);
 }
+
+#[test]
+fn test_strong_count() {
+    // Test strong_count with a single reference
+    let arc = PerCore::new(Counter::new);
+    assert_eq!(PerCore::strong_count(&arc), 1);
+
+    // Test strong_count with multiple references
+    let arc2 = arc.clone();
+    assert_eq!(PerCore::strong_count(&arc), 2);
+    assert_eq!(PerCore::strong_count(&arc2), 2);
+
+    let arc3 = arc.clone();
+    assert_eq!(PerCore::strong_count(&arc), 3);
+    assert_eq!(PerCore::strong_count(&arc2), 3);
+    assert_eq!(PerCore::strong_count(&arc3), 3);
+
+    // Test strong_count after dropping a reference
+    drop(arc2);
+    assert_eq!(PerCore::strong_count(&arc), 2);
+    assert_eq!(PerCore::strong_count(&arc3), 2);
+
+    drop(arc3);
+    assert_eq!(PerCore::strong_count(&arc), 1);
+}
+
+#[test]
+fn test_strong_count_after_relocation() {
+    let affinities = pinned_affinities(&[2]);
+    let affinity1 = affinities[0].into();
+    let affinity2 = affinities[1];
+
+    // Create an Arc with multiple strong references
+    let arc1 = PerCore::new(Counter::new);
+    let arc2 = arc1.clone();
+    assert_eq!(PerCore::strong_count(&arc1), 2);
+
+    // Relocate one of them
+    let arc1_relocated = arc1.relocated(affinity1, affinity2);
+
+    // After relocation:
+    // - arc1_relocated holds a reference to a new Arc created for affinity2
+    // - The storage at affinity2 also holds a reference, but strong_count excludes internal refs
+    // - Therefore, strong_count for arc1_relocated is 1
+    assert_eq!(PerCore::strong_count(&arc1_relocated), 1);
+
+    // arc2 refers to the original Arc at affinity1
+    // - arc2 itself holds a reference
+    // - The storage at affinity1 also holds a reference, but strong_count excludes internal refs
+    // - Therefore, strong_count for arc2 is 1
+    assert_eq!(PerCore::strong_count(&arc2), 1);
+}
+
+#[test]
+fn test_strong_count_with_deduplication() {
+    let affinities = pinned_affinities(&[2]);
+    let affinity1 = affinities[0].into();
+    let affinity2 = affinities[1];
+
+    // Create an Arc and clone it
+    let arc1 = PerCore::new(Counter::new);
+    let arc2 = arc1.clone();
+
+    // Relocate both to the same destination
+    // They should share the same underlying Arc in the destination
+    let arc1_relocated = arc1.relocated(affinity1, affinity2);
+    let arc2_relocated = arc2.relocated(affinity1, affinity2);
+
+    // Both should point to the same underlying Arc (deduplication)
+    // The strong count includes:
+    // - arc1_relocated (1)
+    // - arc2_relocated (1)
+    // Storage reference at affinity2 is excluded by strong_count
+    assert_eq!(PerCore::strong_count(&arc1_relocated), 2);
+    assert_eq!(PerCore::strong_count(&arc2_relocated), 2);
+}
+
+#[test]
+fn test_strong_count_independent_across_affinities() {
+    let affinities = pinned_affinities(&[2]);
+    let affinity1 = affinities[0].into();
+    let affinity2 = affinities[1];
+
+    // Create an Arc on affinity1 with strong_count = 1
+    let arc_a = PerCore::new(Counter::new);
+    assert_eq!(PerCore::strong_count(&arc_a), 1);
+
+    // Relocate to affinity2, creating a separate instance there
+    let arc_b = arc_a.clone().relocated(affinity1, affinity2);
+    assert_eq!(PerCore::strong_count(&arc_b), 1); // arc_b only; storage ref excluded
+
+    // Clone arc_a on affinity1 - this should NOT affect arc_b on affinity2
+    let arc_a2 = arc_a.clone();
+    // arc_a is now referenced by:
+    // - arc_a itself
+    // - arc_a2
+    // Storage at affinity1 also holds a reference, but strong_count excludes internal refs
+    assert_eq!(PerCore::strong_count(&arc_a), 2);
+    assert_eq!(PerCore::strong_count(&arc_a2), 2);
+    // arc_b on affinity2 is unaffected by the clone on affinity1
+    assert_eq!(PerCore::strong_count(&arc_b), 1); // Still 1; unaffected by clone on affinity1
+}
