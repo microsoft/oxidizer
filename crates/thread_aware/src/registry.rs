@@ -168,8 +168,10 @@ struct Processor {
 impl Processor {
     /// Unpack a `ProcessorSet` containing multiples processors into a set of `Processor` each
     /// representing a single unique processor.
-    fn unpack(_processor_set: many_cpus::ProcessorSet) -> Vec<Self> {
-        todo!()
+    fn unpack(processor_set: many_cpus::ProcessorSet) -> Vec<Self> {
+        let mut this = processor_set.decompose().into_iter().map(|set| Self { inner: set }).collect::<Vec<_>>();
+        this.sort_by_key(|p| p.as_processor().id());
+        this
     }
 
     fn memory_region_id(&self) -> usize {
