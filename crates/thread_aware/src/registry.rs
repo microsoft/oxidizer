@@ -288,6 +288,7 @@ mod tests {
 
 /// Tests using fake hardware from `many_cpus::fake` for deterministic coverage
 /// of multi-NUMA topologies and specific processor counts.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod test_fake_hardware {
     use std::collections::HashSet;
