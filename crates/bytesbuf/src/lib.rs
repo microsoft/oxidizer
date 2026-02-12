@@ -408,7 +408,7 @@
 //!     // use the optimal I/O path. There is no requirement that the data passed to us contains
 //!     // only memory with our preferred configuration.
 //!
-//!     let use_optimal_path = message.iter_slice_metas().all(|meta| {
+//!     let use_optimal_path = message.slices().all(|(_, meta)| {
 //!         // If there is no metadata, the memory is not I/O memory.
 //!         meta.is_some_and(|meta| {
 //!             // If the type of metadata does not match the metadata
@@ -575,7 +575,7 @@ pub use memory_guard::MemoryGuard;
 pub(crate) use read_adapter::BytesViewReader;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
-pub use view::{BytesView, BytesViewSliceMetas};
+pub use view::{BytesView, BytesViewSlices};
 pub(crate) use write_adapter::BytesBufWrite;
 
 #[cfg(test)]

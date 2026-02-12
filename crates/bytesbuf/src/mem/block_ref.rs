@@ -2,8 +2,43 @@
 // Licensed under the MIT License.
 
 use std::any::Any;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
+
+/// Metadata describing a memory block, as provided by the memory provider.
+///
+/// This is a marker trait that combines [`Any`], [`Send`], [`Sync`], and [`Debug`] to ensure
+/// that block metadata is thread-safe and can be downcast to a concrete type.
+///
+/// Implement this trait on your metadata type to make it usable as block metadata:
+///
+/// ```
+/// use bytesbuf::mem::BlockMeta;
+///
+/// #[derive(Debug)]
+/// struct MyMetadata {
+///     page_aligned: bool,
+/// }
+///
+/// impl BlockMeta for MyMetadata {}
+/// ```
+pub trait BlockMeta: Any + Send + Sync + Debug {}
+
+// This block exists for ergonomics, so you can just `foo.is()` instead of `<T as Any>::is(foo)`.
+impl dyn BlockMeta {
+    /// Returns `true` if the metadata is of type `T`.
+    #[must_use]
+    pub fn is<T: Any>(&self) -> bool {
+        <dyn Any>::is::<T>(self)
+    }
+
+    /// Attempts to downcast the metadata to a concrete type.
+    #[must_use]
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        <dyn Any>::downcast_ref::<T>(self)
+    }
+}
 
 /// References a block of memory capacity rented from a memory provider.
 ///
@@ -57,7 +92,7 @@ impl BlockRef {
 
     /// Memory provider specific metadata describing the block.
     #[must_use]
-    pub fn meta(&self) -> Option<&dyn Any> {
+    pub fn meta(&self) -> Option<&dyn BlockMeta> {
         self.vtable.meta.map(|f| {
             // SAFETY: We are required to pass the original `state` here. We do.
             let meta_ptr = unsafe { f(self.state) };
@@ -97,7 +132,7 @@ type OpaqueStatePtr = NonNull<()>;
 // provider when creating the BlockRef (with clones using the clone's `OpaqueStatePtr`, respectively).
 type CloneFn = unsafe fn(state: OpaqueStatePtr) -> OpaqueStatePtr;
 type DropFn = unsafe fn(state: OpaqueStatePtr);
-type MetaFn = unsafe fn(state: OpaqueStatePtr) -> NonNull<dyn Any>;
+type MetaFn = unsafe fn(state: OpaqueStatePtr) -> NonNull<dyn BlockMeta>;
 
 // SAFETY: The safety requirements of the dynamic implementation traits require thread-safety.
 // The type itself consists entirely of data fields treated as read-only, so the
@@ -127,14 +162,13 @@ struct BlockRefVTableInner {
 ///
 /// ```
 /// # use std::ptr::NonNull;
-/// # use std::any::Any;
 /// # use std::sync::atomic::{AtomicUsize, Ordering};
-/// # use bytesbuf::mem::{BlockRefDynamic, BlockRefDynamicWithMeta};
+/// # use bytesbuf::mem::{BlockMeta, BlockRefDynamic, BlockRefDynamicWithMeta};
 /// use bytesbuf::mem::{BlockRef, BlockRefVTable};
 /// #
 /// # struct MyBlock {
 /// #     ref_count: AtomicUsize,
-/// #     meta: NonNull<dyn Any>,
+/// #     meta: NonNull<dyn BlockMeta>,
 /// # }
 /// #
 /// # // SAFETY: Implementation is thread-safe via atomic operations.
@@ -153,7 +187,7 @@ struct BlockRefVTableInner {
 /// #
 /// # // SAFETY: Implementation is thread-safe via atomic operations.
 /// # unsafe impl BlockRefDynamicWithMeta for MyBlock {
-/// #     fn meta(state: NonNull<Self::State>) -> NonNull<dyn Any> {
+/// #     fn meta(state: NonNull<Self::State>) -> NonNull<dyn BlockMeta> {
 /// #         unsafe { state.as_ref() }.meta
 /// #     }
 /// # }
@@ -212,7 +246,7 @@ fn wrap_drop<T: BlockRefDynamic>(state_ptr: OpaqueStatePtr) {
     T::drop(state_ptr.cast());
 }
 
-fn wrap_meta<T: BlockRefDynamicWithMeta>(state_ptr: OpaqueStatePtr) -> NonNull<dyn Any> {
+fn wrap_meta<T: BlockRefDynamicWithMeta>(state_ptr: OpaqueStatePtr) -> NonNull<dyn BlockMeta> {
     T::meta(state_ptr.cast())
 }
 
@@ -277,7 +311,7 @@ pub unsafe trait BlockRefDynamicWithMeta: BlockRefDynamic {
     ///
     /// Must return a pointer to an object whose lifetime it least as long as all clones of
     /// the [`BlockRef`] and which is valid for reads.
-    fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn Any>;
+    fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn BlockMeta>;
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -289,12 +323,15 @@ mod tests {
 
     struct TestBlock {
         ref_count: AtomicUsize,
-        meta: Option<NonNull<dyn Any>>,
+        meta: Option<NonNull<dyn BlockMeta>>,
     }
 
+    #[derive(Debug)]
     struct TestBlockMeta {
         label: String,
     }
+
+    impl BlockMeta for TestBlockMeta {}
 
     // SAFETY: We must ensure thread-safety of the implementation. We do.
     unsafe impl BlockRefDynamic for TestBlock {
@@ -322,7 +359,7 @@ mod tests {
 
     // SAFETY: We must ensure thread-safety of the implementation. We do.
     unsafe impl BlockRefDynamicWithMeta for TestBlock {
-        fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn Any> {
+        fn meta(state_ptr: NonNull<Self::State>) -> NonNull<dyn BlockMeta> {
             // SAFETY: The state pointer is always valid for reads.
             let state = unsafe { state_ptr.as_ref() };
 
