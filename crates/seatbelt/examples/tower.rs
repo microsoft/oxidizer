@@ -41,16 +41,15 @@ async fn main() -> Result<(), ohno::AppError> {
         .service_fn(|request| async move {
             if fastrand::i16(0..10) > 4 {
                 bail!("random failure")
-            } else {
-                Ok(request)
             }
+            Ok(request)
         });
 
     // Execute the service using Tower's Service trait
     poll_fn(|cx| service.poll_ready(cx)).await?;
     let output = service.call("value".to_string()).await?;
 
-    println!("execution finished, output: {}", output);
+    println!("execution finished, output: {output}");
 
     Ok(())
 }

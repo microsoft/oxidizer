@@ -19,7 +19,7 @@ use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::{Clock, ClockControl};
 use tower_service::Service as TowerService;
 
-/// Helper to execute a service either via layered::Service or tower_service::Service.
+/// Helper to execute a service either via `layered::Service` or `tower_service::Service`.
 async fn execute_service<S, In, Out, Err>(service: &mut S, input: In, use_tower: bool) -> Result<Out, Err>
 where
     S: Service<In, Out = Result<Out, Err>> + TowerService<In, Response = Out, Error = Err>,
@@ -254,13 +254,12 @@ async fn restore_input_integration_test(#[case] use_tower: bool) {
             .clone_input_with(|_input: &mut String, _args| None) // Don't clone - force restore path
             .restore_input(move |output: &mut Result<String, String>, _args| {
                 restore_count_clone.fetch_add(1, Ordering::SeqCst);
-                if let Ok(s) = output {
-                    if s.contains("error:") {
+                if let Ok(s) = output
+                    && s.contains("error:") {
                         let input = s.replace("error:", "");
                         *output = Ok("restored".to_string());
                         return Some(input);
                     }
-                }
                 None
             })
             .recovery_with(|output: &Result<String, String>, _args| {

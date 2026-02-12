@@ -235,6 +235,7 @@ impl<In, Out> BreakerShared<In, Out> {
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
+    use std::future::poll_fn;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
@@ -243,6 +244,7 @@ mod tests {
 
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
+    use crate::testing::FailReadyService;
     use crate::{RecoveryInfo, ResilienceContext, Set};
     use layered::Layer;
 
@@ -490,8 +492,22 @@ mod tests {
             inner: Box::pin(async { "test".to_string() }),
         };
 
-        let debug_output = format!("{:?}", future);
+        let debug_output = format!("{future:?}");
 
         assert!(debug_output.contains("BreakerFuture"));
+    }
+
+    #[tokio::test]
+    async fn poll_ready_propagates_inner_error() {
+        let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
+        let layer = Breaker::layer("test_breaker", &context)
+            .recovery_with(|_, _| RecoveryInfo::never())
+            .rejected_input(|_, _| Ok("rejected".to_string()));
+
+        let mut service = layer.layer(FailReadyService);
+
+        poll_fn(|cx| tower_service::Service::poll_ready(&mut service, cx))
+            .await
+            .unwrap_err();
     }
 }

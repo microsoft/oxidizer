@@ -226,10 +226,14 @@ impl<In, Out> TimeoutShared<In, Out> {
 #[cfg(not(miri))] // tokio runtime does not support Miri.
 #[cfg(test)]
 mod tests {
+    use std::future::poll_fn;
+
     use layered::{Execute, Stack};
     use tick::ClockControl;
 
     use super::*;
+    use crate::testing::FailReadyService;
+    use layered::Layer;
 
     #[tokio::test]
     async fn timeout_emits_log() {
@@ -315,8 +319,22 @@ mod tests {
         let future = TimeoutFuture::<String> {
             inner: Box::pin(async { "test".to_string() }),
         };
-        let debug_output = format!("{:?}", future);
+        let debug_output = format!("{future:?}");
 
         assert!(debug_output.contains("TimeoutFuture"));
+    }
+
+    #[tokio::test]
+    async fn poll_ready_propagates_inner_error() {
+        let context = crate::ResilienceContext::<String, Result<String, String>>::new(tick::Clock::new_frozen()).name("test");
+        let layer = Timeout::layer("test_timeout", &context)
+            .timeout_error(|_| "timed out".to_string())
+            .timeout(Duration::from_millis(100));
+
+        let mut service = layer.layer(FailReadyService);
+
+        poll_fn(|cx| tower_service::Service::poll_ready(&mut service, cx))
+            .await
+            .unwrap_err();
     }
 }

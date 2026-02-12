@@ -21,7 +21,7 @@ use tower_service::Service as TowerService;
 
 const DEFAULT_BREAK_DURATION: Duration = Duration::from_secs(5);
 
-/// Helper to execute a service either via layered::Service or tower_service::Service.
+/// Helper to execute a service either via `layered::Service` or `tower_service::Service`.
 async fn execute_service<S, In, Out, Err>(service: &mut S, input: In, use_tower: bool) -> Result<Out, Err>
 where
     S: Service<In, Out = Result<Out, Err>> + TowerService<In, Response = Out, Error = Err>,

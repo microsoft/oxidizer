@@ -340,12 +340,14 @@ where
 #[cfg(not(miri))] // Oxidizer runtime does not support Miri.
 #[cfg(test)]
 mod tests {
+    use std::future::poll_fn;
+
     use layered::Execute;
     use opentelemetry::KeyValue;
     use tick::ClockControl;
 
     use super::*;
-    use crate::testing::MetricTester;
+    use crate::testing::{FailReadyService, MetricTester};
     use crate::{ResilienceContext, Set};
     use layered::Layer;
 
@@ -438,8 +440,22 @@ mod tests {
         let future = RetryFuture::<String> {
             inner: Box::pin(async { "test".to_string() }),
         };
-        let debug_output = format!("{:?}", future);
+        let debug_output = format!("{future:?}");
 
         assert!(debug_output.contains("RetryFuture"));
+    }
+
+    #[tokio::test]
+    async fn poll_ready_propagates_inner_error() {
+        let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
+        let layer = Retry::layer("test_retry", &context)
+            .recovery_with(|_, _| RecoveryInfo::never())
+            .clone_input();
+
+        let mut service = layer.layer(FailReadyService);
+
+        poll_fn(|cx| tower_service::Service::poll_ready(&mut service, cx))
+            .await
+            .unwrap_err();
     }
 }
