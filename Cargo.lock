@@ -410,9 +410,9 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpulist"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10921f832bb6e2075c6910ab0be7b33e413029ae6d74b01f049fc6cb237362e6"
+checksum = "008abe0a6734be222147bad0a6233cbe22e558bba7f3a35c90d85fd90dd25cd0"
 dependencies = [
  "itertools 0.14.0",
  "new_zealand",
@@ -648,9 +648,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "folo_ffi"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2c4a9efbd06c6c8500f5d97a20159996679088bdb5f598a863960bedf3f2574"
+checksum = "bb929208a4b0187184f37cc84c90c42de5abd4d95a881dc46cf79a418ac0dc36"
 
 [[package]]
 name = "fragile"
@@ -1049,9 +1049,9 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "many_cpus"
-version = "1.1.5"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ab614fc8e14ffa2aab66ed7942362b33191752f3a5bf9533e9f88e4204545f"
+checksum = "38c310ea469cec8e38e96906a6d95e6e9779bb92641da9a41e5b81df66070da1"
 dependencies = [
  "cpulist",
  "derive_more",
@@ -1060,7 +1060,6 @@ dependencies = [
  "heapless",
  "itertools 0.14.0",
  "libc",
- "negative-impl",
  "new_zealand",
  "nonempty",
  "rand",
@@ -1107,21 +1106,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
 
 [[package]]
-name = "negative-impl"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67670e6848468ee39b823ed93add8bd2adb66a132b0c25fce6e60af0b81d930a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "new_zealand"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e098f45dda35490b475350685c55a9fb4c4f6cb885f6f0b09fea301cfef52161"
+checksum = "3cf02e79143cf0338ae784080017707ed8ec073a05bc1218680cf26594e4ed2f"
 
 [[package]]
 name = "nm"
