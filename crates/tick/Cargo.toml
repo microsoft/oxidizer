@@ -58,7 +58,6 @@ serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 static_assertions.workspace = true
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
-time-tz = { workspace = true, features = ["system"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 
 [lints]
