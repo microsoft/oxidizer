@@ -4,6 +4,9 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
+use thread_aware::ThreadAware;
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+
 use crate::state::ClockState;
 use crate::timers::TimerKey;
 
@@ -74,6 +77,28 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 ///
+/// # Thread-aware relocation
+///
+/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-core timer isolation
+/// in thread-per-core runtime architectures.
+///
+/// How relocation affects the clock depends on the underlying clock variant:
+///
+/// - **System clocks**: Relocation creates per-core timer storage. After relocation, each core
+///   maintains its own independent set of timers, eliminating cross-thread lock contention. Clones
+///   of a clock on the same core share timers, while clocks relocated to different cores are fully
+///   isolated. Each core's timers must be advanced by its own
+///   [`ClockDriver`][crate::runtime::ClockDriver].
+///
+/// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
+///   controlled time state regardless of which thread they are on. This is intentional, a single
+///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
+///   across threads.
+///
+/// For thread-per-core setups, the typical pattern is to clone an
+/// [`InactiveClock`][crate::runtime::InactiveClock], relocate each clone to its target thread,
+/// and then activate it. See the [`runtime`][crate::runtime] module for details.
+///
 /// # Examples
 ///
 /// ## Retrieve absolute time
@@ -141,7 +166,17 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Clock(pub(crate) ClockState);
+pub struct Clock {
+    pub(crate) state: ClockState,
+}
+
+impl ThreadAware for Clock {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        Self {
+            state: self.state.relocated(source, destination),
+        }
+    }
+}
 
 impl Clock {
     /// Creates a new clock driven by the Tokio runtime.
@@ -182,7 +217,9 @@ impl Clock {
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
-        Self(ClockState::new_system())
+        Self {
+            state: ClockState::new_system(),
+        }
     }
 
     /// Creates a new frozen clock.
@@ -418,7 +455,7 @@ impl Clock {
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {
-        &self.0
+        &self.state
     }
 }
 
@@ -433,7 +470,10 @@ impl AsRef<Self> for Clock {
 mod tests {
     #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
 
-    use std::{fmt::Debug, thread::sleep};
+    use std::{fmt::Debug, task::Context, thread::sleep};
+
+    use futures::FutureExt;
+    use thread_aware::affinity::pinned_affinities;
 
     use crate::{ClockControl, runtime::InactiveClock};
 
@@ -581,17 +621,93 @@ mod tests {
     fn owners_count() {
         let (clock, driver) = InactiveClock::default().activate();
 
-        assert!(!clock.0.is_unique());
+        assert!(!clock.state.is_unique());
         drop(clock);
-        assert!(driver.0.is_unique());
+        assert!(driver.state.is_unique());
     }
 
     #[test]
     fn owners_count_clock_control() {
         let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
 
-        assert!(!driver.0.is_unique());
+        assert!(!driver.state.is_unique());
         drop(clock);
-        assert!(driver.0.is_unique());
+        assert!(driver.state.is_unique());
+    }
+
+    #[test]
+    fn thread_aware() {
+        let affinites = pinned_affinities(&[1, 1]);
+        let source: MemoryAffinity = affinites[0].into();
+        let pinned_1 = affinites[0];
+        let pinned_2 = affinites[1];
+
+        // root clock
+        let root = InactiveClock::default();
+
+        let inactive_1 = root.clone().relocated(source, pinned_1);
+        let inactive_2 = root.relocated(source, pinned_2);
+
+        let (clock_1, mut driver_1) = inactive_1.activate();
+        let (clock_2, mut driver_2) = inactive_2.activate();
+
+        // register the timer on clock 1
+        let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
+        _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
+        assert_eq!(clock_1.state.timers_len(), 1);
+        assert_eq!(clock_2.state.timers_len(), 0);
+        assert_eq!(driver_1.state.timers_len(), 1);
+        assert_eq!(driver_2.state.timers_len(), 0);
+        assert_eq!(clock_1.clone().relocated(source, pinned_2).state.timers_len(), 0);
+
+        // register the timer on clock 2
+        let mut fut_2 = Box::pin(clock_2.delay(Duration::from_secs(100)));
+        _ = fut_2.poll_unpin(&mut Context::from_waker(Waker::noop()));
+        assert_eq!(clock_1.state.timers_len(), 1);
+        assert_eq!(clock_2.state.timers_len(), 1);
+        assert_eq!(driver_1.state.timers_len(), 1);
+        assert_eq!(driver_2.state.timers_len(), 1);
+
+        // advance timers
+        driver_1.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
+        assert_eq!(driver_1.state.timers_len(), 0);
+        assert_eq!(driver_2.state.timers_len(), 1);
+        driver_2.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
+        assert_eq!(driver_2.state.timers_len(), 0);
+
+        drop(fut_1);
+        drop(fut_2);
+
+        // drop clock
+        drop(clock_1);
+        driver_1.advance_timers(Instant::now()).unwrap_err();
+        driver_2.advance_timers(Instant::now()).unwrap();
+        drop(clock_2);
+        driver_2.advance_timers(Instant::now()).unwrap_err();
+    }
+
+    #[test]
+    fn thread_aware_clock_control() {
+        let affinites = pinned_affinities(&[1, 1]);
+        let source: MemoryAffinity = affinites[0].into();
+        let pinned_1 = affinites[0];
+        let pinned_2 = affinites[1];
+
+        // root clock
+        let root: InactiveClock = ClockControl::default().into();
+
+        let inactive_1 = root.clone().relocated(source, pinned_1);
+        let inactive_2 = root.relocated(source, pinned_2);
+
+        let (clock_1, driver_1) = inactive_1.activate();
+        let (clock_2, driver_2) = inactive_2.activate();
+
+        // register the timer on clock 1 also affects clock 2 because clock control is shared
+        let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
+        _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
+        assert_eq!(clock_1.state.timers_len(), 1);
+        assert_eq!(clock_2.state.timers_len(), 1);
+        assert_eq!(driver_1.state.timers_len(), 1);
+        assert_eq!(driver_2.state.timers_len(), 1);
     }
 }
