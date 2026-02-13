@@ -50,12 +50,11 @@ impl<K, V> Debug for Mergers<K, V> {
 ///
 /// `Cache` wraps any `CacheTier` implementation and provides:
 /// - Consistent API for basic cache operations (`get`, `insert`, `invalidate`, `clear`)
-/// - Optional stampede protection for `get` and `invalidate` operations
+/// - "Get or compute" operations (`get_or_insert`, `try_get_or_insert`,
+///   `optionally_get_or_insert`)
+/// - Optional stampede protection for all of the above (enabled via the builder's
+///   `.stampede_protection()`)
 /// - Clock management for time-based operations
-///
-/// For "get or compute" operations (`get_or_insert`, `try_get_or_insert`, etc.),
-/// use [`LoadingCache`](crate::LoadingCache) which wraps a `Cache` and provides
-/// these methods with stampede protection.
 ///
 /// This type does NOT implement `CacheTier` - it is always the outermost wrapper.
 /// Inner tiers are composed using `CacheWrapper` and `FallbackCache`.

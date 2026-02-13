@@ -21,11 +21,7 @@ struct FailingCache;
 impl CacheTier<String, i32> for FailingCache {
     async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
         // Wrap the IO error and attach recovery information
-        Err(Error::from_source(io::Error::new(
-            ErrorKind::TimedOut,
-            "connection timed out",
-        ))
-        .with_recovery(RecoveryInfo::retry()))
+        Err(Error::from_source(io::Error::new(ErrorKind::TimedOut, "connection timed out")).with_recovery(RecoveryInfo::retry()))
     }
 
     async fn insert(&self, _key: &String, _entry: CacheEntry<i32>) -> Result<(), Error> {

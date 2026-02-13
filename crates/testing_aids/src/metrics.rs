@@ -37,12 +37,21 @@ impl MetricTester {
     }
 
     #[must_use]
+    /// Collects all attributes from the exported metrics.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the exporter fails to flush or if the metric data is in an unexpected format.
     pub fn collect_attributes(&self) -> Vec<KeyValue> {
         self.provider.force_flush().unwrap();
         collect_attributes(&self.exporter)
     }
 
     /// Asserts that the collected attributes contain all of the expected key-value pairs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any of the expected key-value pairs are not found in the collected attributes.
     pub fn assert_attributes_contain(&self, key_values: &[KeyValue]) {
         let attributes = self.collect_attributes();
 
@@ -56,6 +65,11 @@ impl MetricTester {
 
     /// Asserts that the collected attributes contain all of the expected key-value pairs
     /// and optionally checks the total count.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any of the expected key-value pairs are not found in the collected attributes
+    /// or if the total count does not match the expected length.
     pub fn assert_attributes(&self, key_values: &[KeyValue], expected_length: Option<usize>) {
         let attributes = self.collect_attributes();
 

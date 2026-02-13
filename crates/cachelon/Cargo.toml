@@ -67,7 +67,6 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }
-testing_aids = { path = "../testing_aids" }
 dynosaur = { workspace = true }
 fundle = { workspace = true }
 opentelemetry = { workspace = true, features = [
@@ -77,6 +76,7 @@ opentelemetry = { workspace = true, features = [
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
 recoverable = { workspace = true }
 seatbelt = { workspace = true, features = ["retry"] }
+testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true, features = ["std"] }

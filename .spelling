@@ -132,6 +132,7 @@ HRESULT
 https
 i.e.
 impl
+implementers
 impls
 infeasible
 inlined
@@ -142,6 +143,7 @@ interop
 Interop
 interoperability
 interoperate
+invalidations
 jitter
 IOCP
 IP

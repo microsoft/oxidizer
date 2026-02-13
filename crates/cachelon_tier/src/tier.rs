@@ -14,11 +14,10 @@ use crate::{CacheEntry, Error};
 /// Implement this trait to create custom cache backends. The cache system
 /// wraps these in `CacheWrapper` to add telemetry and TTL support.
 ///
-/// Only `get` and `insert` are required. All other methods have sensible defaults:
-/// - `try_get`/`try_insert`: Wrap the infallible versions in `Ok`
-/// - `invalidate`/`try_invalidate`: No-op (not all tiers support invalidation)
-/// - `clear`/`try_clear`: No-op (not all tiers support clearing)
-/// - `len`: Return `None` (not all tiers track size)
+/// All four core methods are required: `get`, `insert`, `invalidate`, and `clear`.
+/// Only `len` and `is_empty` have default implementations:
+/// - `len`: Returns `None` (not all tiers track size)
+/// - `is_empty`: Delegates to `len`
 #[cfg_attr(
     any(test, feature = "dynamic-cache"),
     dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))
@@ -28,13 +27,9 @@ pub trait CacheTier<K, V>: Send + Sync {
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
 
     /// Inserts a value, returning an error if the operation fails.
-    ///
-    /// Default implementation wraps `insert()` in `Ok`.
     fn insert(&self, key: &K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Invalidates a value, returning an error if the operation fails.
-    ///
-    /// Default implementation wraps `invalidate()` in `Ok`.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Clears all entries, returning an error if the operation fails.

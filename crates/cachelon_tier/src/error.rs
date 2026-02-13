@@ -13,7 +13,7 @@ use recoverable::{Recovery, RecoveryInfo};
 /// Wraps any underlying error from a cache implementation while preserving
 /// the ability to extract the original typed error.
 ///
-/// # For `CacheTier` Implementers
+/// # For `CacheTier` implementers
 ///
 /// Wrap your storage-specific errors using [`from_source`](Self::from_source):
 ///
@@ -100,15 +100,13 @@ impl Error {
     ///
     /// ```
     /// use cachelon_tier::Error;
+    /// use recoverable::RecoveryInfo;
     ///
     /// let error = Error::from_message("temporary failure")
     ///     .with_recovery(RecoveryInfo::RetryAfter(std::time::Duration::from_secs(5)));
     /// ```
     pub fn with_recovery(self, recovery_info: RecoveryInfo) -> Self {
-        Self {
-            recovery_info,
-            ..self
-        }
+        Self { recovery_info, ..self }
     }
 
     /// Returns `true` if the source error is of type `T`.

@@ -43,9 +43,7 @@ async fn main() {
     let clock = Clock::new_frozen();
 
     // .service() wraps the Service in ServiceAdapter, converting it to CacheTier
-    let cache = Cache::builder::<String, String>(clock)
-        .service(RemoteCache::default())
-        .build();
+    let cache = Cache::builder::<String, String>(clock).service(RemoteCache::default()).build();
 
     // Use cache normally - operations go through the Service
     cache
