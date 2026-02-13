@@ -4,7 +4,10 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
-use thread_aware::{PerCore, ThreadAware};
+use thread_aware::{
+    PerCore, ThreadAware,
+    affinity::{MemoryAffinity, PinnedAffinity},
+};
 
 use crate::timers::Timers;
 
@@ -16,7 +19,7 @@ pub(crate) enum ClockState {
 }
 
 impl ThreadAware for ClockState {
-    fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         match self {
             Self::System(synchronized_timers) => Self::System(synchronized_timers.relocated(source, destination)),
             #[cfg(any(feature = "test-util", test))]
@@ -69,7 +72,7 @@ pub(crate) struct SynchronizedTimers {
 }
 
 impl ThreadAware for SynchronizedTimers {
-    fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         Self {
             timers: self.timers.relocated(source, destination),
         }

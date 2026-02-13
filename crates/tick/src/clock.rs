@@ -5,6 +5,7 @@ use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
 use thread_aware::ThreadAware;
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
 use crate::state::ClockState;
 use crate::timers::TimerKey;
@@ -170,7 +171,7 @@ pub struct Clock {
 }
 
 impl ThreadAware for Clock {
-    fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         Self {
             state: self.state.relocated(source, destination),
         }
