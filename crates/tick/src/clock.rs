@@ -143,11 +143,15 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct Clock(pub(crate) ClockState);
+pub struct Clock {
+    pub(crate) state: ClockState,
+}
 
 impl ThreadAware for Clock {
     fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
-        Self(self.0.relocated(source, destination))
+        Self {
+            state: self.state.relocated(source, destination),
+        }
     }
 }
 
@@ -190,7 +194,9 @@ impl Clock {
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
-        Self(ClockState::new_system())
+        Self {
+            state: ClockState::new_system(),
+        }
     }
 
     /// Creates a new frozen clock.
@@ -426,7 +432,7 @@ impl Clock {
     }
 
     pub(crate) fn clock_state(&self) -> &ClockState {
-        &self.0
+        &self.state
     }
 }
 
@@ -592,18 +598,18 @@ mod tests {
     fn owners_count() {
         let (clock, driver) = InactiveClock::default().activate();
 
-        assert!(!clock.0.is_unique());
+        assert!(!clock.state.is_unique());
         drop(clock);
-        assert!(driver.0.is_unique());
+        assert!(driver.state.is_unique());
     }
 
     #[test]
     fn owners_count_clock_control() {
         let (clock, driver) = InactiveClock::from(ClockControl::default()).activate();
 
-        assert!(!driver.0.is_unique());
+        assert!(!driver.state.is_unique());
         drop(clock);
-        assert!(driver.0.is_unique());
+        assert!(driver.state.is_unique());
     }
 
     #[test]
@@ -625,25 +631,25 @@ mod tests {
         // register the timer on clock 1
         let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
         _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
-        assert_eq!(clock_1.0.timers_len(), 1);
-        assert_eq!(clock_2.0.timers_len(), 0);
-        assert_eq!(driver_1.0.timers_len(), 1);
-        assert_eq!(driver_2.0.timers_len(), 0);
+        assert_eq!(clock_1.state.timers_len(), 1);
+        assert_eq!(clock_2.state.timers_len(), 0);
+        assert_eq!(driver_1.state.timers_len(), 1);
+        assert_eq!(driver_2.state.timers_len(), 0);
 
         // register the timer on clock 2
         let mut fut_2 = Box::pin(clock_2.delay(Duration::from_secs(100)));
         _ = fut_2.poll_unpin(&mut Context::from_waker(Waker::noop()));
-        assert_eq!(clock_1.0.timers_len(), 1);
-        assert_eq!(clock_2.0.timers_len(), 1);
-        assert_eq!(driver_1.0.timers_len(), 1);
-        assert_eq!(driver_2.0.timers_len(), 1);
+        assert_eq!(clock_1.state.timers_len(), 1);
+        assert_eq!(clock_2.state.timers_len(), 1);
+        assert_eq!(driver_1.state.timers_len(), 1);
+        assert_eq!(driver_2.state.timers_len(), 1);
 
         // advance timers
         driver_1.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
-        assert_eq!(driver_1.0.timers_len(), 0);
-        assert_eq!(driver_2.0.timers_len(), 1);
+        assert_eq!(driver_1.state.timers_len(), 0);
+        assert_eq!(driver_2.state.timers_len(), 1);
         driver_2.advance_timers(Instant::now() + Duration::from_secs(200)).unwrap();
-        assert_eq!(driver_2.0.timers_len(), 0);
+        assert_eq!(driver_2.state.timers_len(), 0);
 
         drop(fut_1);
         drop(fut_2);
