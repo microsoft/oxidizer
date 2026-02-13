@@ -84,7 +84,7 @@ static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rfc2822(pub(super) Timestamp);
 
-crate::impl_thread_unaware!(Rfc2822);
+crate::thread_aware_move!(Rfc2822);
 
 impl Rfc2822 {
     /// The largest value that can be represented by `Rfc2822`.

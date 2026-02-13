@@ -248,7 +248,7 @@ pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
 
 /// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.
-macro_rules! impl_thread_unaware {
+macro_rules! thread_aware_move {
     ($($t:ty),+ $(,)?) => {
         $(
             impl thread_aware::ThreadAware for $t {
@@ -260,4 +260,4 @@ macro_rules! impl_thread_unaware {
     };
 }
 
-pub(crate) use impl_thread_unaware;
+pub(crate) use thread_aware_move;

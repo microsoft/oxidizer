@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crate::state::ClockState;
 use crate::timers::{TimerKey, Timers};
-use crate::{Clock, impl_thread_unaware};
+use crate::{Clock, thread_aware_move};
 
 /// Controls the passage of time in tests.
 ///
@@ -75,7 +75,7 @@ pub struct ClockControl {
     state: Arc<Mutex<State>>,
 }
 
-impl_thread_unaware!(ClockControl);
+thread_aware_move!(ClockControl);
 
 impl ClockControl {
     /// Creates a new `ClockControl` instance.

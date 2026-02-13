@@ -86,7 +86,7 @@ use crate::fmt::{Rfc2822, UnixSeconds};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Iso8601(pub(super) Timestamp);
 
-crate::impl_thread_unaware!(Iso8601);
+crate::thread_aware_move!(Iso8601);
 
 impl Iso8601 {
     /// The largest value that can be represented by `Iso8601`.
