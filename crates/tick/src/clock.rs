@@ -658,6 +658,7 @@ mod tests {
         assert_eq!(clock_2.state.timers_len(), 0);
         assert_eq!(driver_1.state.timers_len(), 1);
         assert_eq!(driver_2.state.timers_len(), 0);
+        assert_eq!(clock_1.clone().relocated(source, pinned_2).state.timers_len(), 0);
 
         // register the timer on clock 2
         let mut fut_2 = Box::pin(clock_2.delay(Duration::from_secs(100)));
