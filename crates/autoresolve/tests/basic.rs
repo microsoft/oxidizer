@@ -10,6 +10,15 @@ impl Builtins {
 }
 
 #[derive(Clone)]
+struct TokioRuntime;
+
+impl AsRef<TokioRuntime> for TokioRuntime {
+    fn as_ref(&self) -> &TokioRuntime {
+        self
+    }
+}
+
+#[derive(Clone)]
 struct Validator {
     builtins: Builtins,
 }
@@ -18,6 +27,12 @@ impl Validator {
     fn new(builtins: &Builtins) -> Self {
         Self {
             builtins: builtins.clone(),
+        }
+    }
+
+    fn new_tokio(tokio: &TokioRuntime) -> Self {
+        Self {
+            builtins: Builtins,
         }
     }
 
@@ -32,6 +47,14 @@ impl ResolveFrom<Builtins> for Validator {
     fn new(input: <Self::Inputs as ResolutionDeps<Builtins>>::Resolved<'_>) -> Self {
         let ResolutionDepsNode(builtins, _) = input;
         Self::new(builtins)
+    }
+}
+
+impl ResolveFrom<TokioRuntime> for Validator {
+    type Inputs = ResolutionDepsNode<TokioRuntime, ResolutionDepsEnd>;
+
+    fn new(input: <Self::Inputs as ResolutionDeps<TokioRuntime>>::Resolved<'_>) -> Self {
+        Self::new_tokio(input.0)
     }
 }
 
