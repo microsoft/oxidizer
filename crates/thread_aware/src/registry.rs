@@ -309,6 +309,7 @@ mod test_fake_hardware {
     }
 
     #[test]
+    #[allow(clippy::allow_attributes, reason = "clippy behaves differently on stable vs nightly for pattern matching on arrays")]
     #[allow(clippy::needless_collect, reason = "collect needed for pattern matching on array")]
     fn single_processor_single_numa() {
         let registry = registry_from_fake(&ProcessorCount::Auto, 1, 1);
