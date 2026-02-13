@@ -105,7 +105,7 @@ impl<T> IntoAppError<T> for Result<T, AppError> {
         F: FnOnce() -> D,
         D: Display,
     {
-        if let Err(e) = &mut self {            
+        if let Err(e) = &mut self {
             let caller_location = Location::caller();
             e.add_enrichment(EnrichmentEntry::new(
                 msg_fn().to_string(),
