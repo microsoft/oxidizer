@@ -153,6 +153,7 @@ where
         self.inner.poll_ready(cx)
     }
 
+    #[cfg_attr(test, mutants::skip)] // causes test timeout
     fn call(&mut self, req: Req) -> Self::Future {
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);
