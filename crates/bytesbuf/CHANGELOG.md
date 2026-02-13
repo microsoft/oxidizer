@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0] - 2026-02-13
+
+- ✨ Features
+
+  - GlobalPool uses smaller memory blocks for smaller reservation requests ([#254](https://github.com/microsoft/oxidizer/pull/254))
+  - Improve how memory block metadata is exposed in API ([#248](https://github.com/microsoft/oxidizer/pull/248))
+  - remove implicit `Sized` requirement from `BytesBuf::as_write` method ([#249](https://github.com/microsoft/oxidizer/pull/249))
+
+- ✔️ Tasks
+
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+
+- 🔄 Continuous Integration
+
+  - automatically publish release notes ([#247](https://github.com/microsoft/oxidizer/pull/247))
+
 ## [0.2.2] - 2026-01-15
 
 - 📚 Documentation
