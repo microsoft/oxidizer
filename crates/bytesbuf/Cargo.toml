@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.2.2"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -14,7 +14,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc.workspace = true

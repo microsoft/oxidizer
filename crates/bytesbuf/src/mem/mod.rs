@@ -46,7 +46,7 @@ mod memory_shared;
 mod opaque_memory;
 
 pub use block::{Block, BlockSize};
-pub use block_ref::{BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable};
+pub use block_ref::{BlockMeta, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable};
 pub use callback_memory::CallbackMemory;
 pub use global::GlobalPool;
 pub use has_memory::HasMemory;

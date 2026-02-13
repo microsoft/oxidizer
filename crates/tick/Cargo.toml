@@ -13,13 +13,16 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "futures_core::stream::Stream",
+    "thread_aware::core::ThreadAware",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
 ]
 
 [package.metadata.docs.rs]
@@ -41,6 +44,7 @@ futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
+thread_aware.workspace = true
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
@@ -58,7 +62,6 @@ serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 static_assertions.workspace = true
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
-time-tz = { workspace = true, features = ["system"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 
 [lints]

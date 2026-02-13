@@ -9,7 +9,9 @@ use std::sync::Mutex;
 use std::thread::ThreadId;
 
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
-use many_cpus::{Processor, ProcessorSet};
+use many_cpus::SystemHardware;
+
+const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hold - not safe to continue execution";
 
 /// The number of processors to use for the registry.
 ///
@@ -50,11 +52,7 @@ pub struct ThreadRegistry {
 }
 
 impl ThreadRegistry {
-    /// Create a new `ThreadRegistry`.
-    ///
-    /// # Parameters
-    ///
-    /// * `count`: The number of processors to use.
+    /// Create a new `ThreadRegistry` using the current system hardware.
     ///
     /// # Panics
     ///
@@ -62,17 +60,19 @@ impl ThreadRegistry {
     /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn new(count: &ProcessorCount) -> Self {
-        let builder = many_cpus::ProcessorSet::builder();
+        Self::with_hardware(count, SystemHardware::current())
+    }
 
-        let processors: Vec<_> = match count {
+    /// Create a new `ThreadRegistry` with the specified hardware instance.
+    #[must_use]
+    pub(crate) fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
+        let builder = hardware.processors().to_builder();
+
+        let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
         }
-        .expect("Not enough processors available")
-        .processors()
-        .into_iter()
-        .cloned()
-        .collect();
+        .expect("Not enough processors available");
 
         let mut numa_nodes = Vec::new();
         let mut dense_index = 0;
@@ -94,7 +94,7 @@ impl ThreadRegistry {
         assert!(numa_nodes.len() < u16::MAX as usize, "Too many memory regions");
 
         Self {
-            processors,
+            processors: Processor::unpack(&processors),
             numa_nodes,
             threads: Mutex::new(HashMap::new()),
         }
@@ -104,7 +104,7 @@ impl ThreadRegistry {
     #[expect(clippy::cast_possible_truncation, reason = "Checked in new()")]
     pub fn affinities(&self) -> impl Iterator<Item = PinnedAffinity> {
         self.processors.iter().enumerate().map(|(core_index, processor)| {
-            let dense_numa_index = self.numa_nodes[processor.memory_region_id() as usize];
+            let dense_numa_index = self.numa_nodes[processor.memory_region_id()];
 
             PinnedAffinity::new(
                 core_index as _,
@@ -130,7 +130,7 @@ impl ThreadRegistry {
     pub fn current_affinity(&self) -> MemoryAffinity {
         self.threads
             .lock()
-            .expect("Failed to acquire lock")
+            .expect(POISONED_LOCK_MSG)
             .get(&std::thread::current().id())
             .copied()
             .map_or(MemoryAffinity::Unknown, MemoryAffinity::Pinned)
@@ -140,16 +140,14 @@ impl ThreadRegistry {
     ///
     /// # Panics
     ///
-    /// This will panic if the internal lock is poisoned.
+    /// This will panic if affinity contains incorrect processor index
     pub fn pin_to(&self, affinity: PinnedAffinity) {
         let core_index = affinity.processor_index();
         let processor = &self.processors[core_index];
-
-        ProcessorSet::from_processor(processor.clone()).pin_current_thread_to();
-
+        processor.pin_current_thread_to();
         self.threads
             .lock()
-            .expect("Failed to acquire lock")
+            .expect(POISONED_LOCK_MSG)
             .insert(std::thread::current().id(), affinity);
     }
 }
@@ -157,6 +155,41 @@ impl ThreadRegistry {
 impl Default for ThreadRegistry {
     fn default() -> Self {
         Self::new(&ProcessorCount::Auto)
+    }
+}
+
+/// A wrapper around `many_cpus::ProcessorSet` that contains only a single processor
+#[derive(Debug)]
+struct Processor {
+    inner: many_cpus::ProcessorSet,
+}
+
+impl Processor {
+    /// Unpack a `ProcessorSet` containing multiples processors into a set of `Processor` each
+    /// representing a single unique processor.
+    fn unpack(processor_set: &many_cpus::ProcessorSet) -> Vec<Self> {
+        let mut this = processor_set
+            .decompose()
+            .into_iter()
+            .map(|set| Self { inner: set })
+            .collect::<Vec<_>>();
+        this.sort_by_key(|p| p.as_processor().id());
+        this
+    }
+
+    fn memory_region_id(&self) -> usize {
+        self.as_processor().memory_region_id() as usize
+    }
+
+    fn pin_current_thread_to(&self) {
+        self.inner.pin_current_thread_to();
+    }
+
+    fn as_processor(&self) -> &many_cpus::Processor {
+        self.inner
+            .iter()
+            .next()
+            .expect("ProcessorSet should contain one and only one processor")
     }
 }
 
@@ -250,5 +283,120 @@ mod tests {
     fn test_crate_fake_memory_affinities() {
         let affinities = memory_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
+    }
+}
+
+/// Tests using fake hardware from `many_cpus::fake` for deterministic coverage
+/// of multi-NUMA topologies and specific processor counts.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod test_fake_hardware {
+    use std::collections::HashSet;
+
+    use super::*;
+    use many_cpus::fake::HardwareBuilder;
+
+    macro_rules! nz {
+        ($e:expr) => {
+            NonZero::new($e).unwrap()
+        };
+    }
+
+    /// Helper to create a `ThreadRegistry` from fake hardware with the given counts.
+    fn registry_from_fake(policy: &ProcessorCount, processors: usize, numa_nodes: usize) -> ThreadRegistry {
+        let hw = SystemHardware::fake(HardwareBuilder::from_counts(nz!(processors), nz!(numa_nodes)));
+        ThreadRegistry::with_hardware(policy, &hw)
+    }
+
+    #[test]
+    #[allow(clippy::allow_attributes, reason = "clippy behavior has changed in recent versions")]
+    #[allow(clippy::needless_collect, reason = "collect needed for pattern matching on array")]
+    fn single_processor_single_numa() {
+        let registry = registry_from_fake(&ProcessorCount::Auto, 1, 1);
+
+        assert_eq!(registry.num_affinities(), 1);
+        let [aff] = registry.affinities().collect::<Vec<_>>()[..] else {
+            panic!("Expected exactly one affinity")
+        };
+        assert_eq!(aff.processor_index(), 0);
+        assert_eq!(aff.memory_region_index(), 0);
+        assert_eq!(aff.processor_count(), 1);
+        assert_eq!(aff.memory_region_count(), 1);
+    }
+
+    #[test]
+    fn auto_and_all_with_single_numa_node() {
+        for policy in [ProcessorCount::Auto, ProcessorCount::All] {
+            let registry = registry_from_fake(&policy, 4, 1);
+
+            assert_eq!(registry.num_affinities(), 4);
+            for aff in registry.affinities() {
+                assert_eq!(aff.memory_region_index(), 0);
+                assert_eq!(aff.memory_region_count(), 1);
+                assert_eq!(aff.processor_count(), 4);
+            }
+        }
+    }
+
+    #[test]
+    fn manual_subset_of_processors() {
+        let registry = registry_from_fake(&ProcessorCount::Manual(nz!(3)), 8, 2);
+
+        assert_eq!(registry.num_affinities(), 3);
+        assert_eq!(registry.affinities().count(), 3);
+
+        let registry = registry_from_fake(&ProcessorCount::Manual(nz!(1)), 8, 2);
+        assert_eq!(registry.num_affinities(), 1);
+
+        let registry = registry_from_fake(&ProcessorCount::Manual(nz!(8)), 8, 2);
+        assert_eq!(registry.num_affinities(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "Not enough processors available")]
+    fn manual_exceeds_available_panics() {
+        let _registry = registry_from_fake(&ProcessorCount::Manual(nz!(5)), 2, 1);
+    }
+
+    #[test]
+    fn multi_numa_dense_indexing() {
+        for (num_procs, num_numa) in [(4, 2), (6, 3)] {
+            let registry = registry_from_fake(&ProcessorCount::Auto, num_procs, num_numa);
+
+            assert_eq!(registry.num_affinities(), num_procs);
+
+            let affinities: Vec<_> = registry.affinities().collect();
+            assert_eq!(affinities.len(), num_procs);
+
+            let regions: HashSet<_> = affinities.iter().map(|a| a.memory_region_index()).collect();
+            assert_eq!(regions.len(), num_numa);
+
+            for aff in &affinities {
+                assert_eq!(aff.processor_count(), num_procs);
+                assert_eq!(aff.memory_region_count(), num_numa);
+            }
+        }
+    }
+
+    #[test]
+    fn pin_to_updates_on_repin() {
+        let hw = SystemHardware::fake(HardwareBuilder::from_counts(nz!(4), nz!(2)));
+        let registry = ThreadRegistry::with_hardware(&ProcessorCount::Auto, &hw);
+
+        assert!(!hw.is_thread_processor_pinned());
+        assert!(!hw.is_thread_memory_region_pinned());
+
+        let first = registry.affinities().next().unwrap();
+        registry.pin_to(first);
+        assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(first));
+        assert!(hw.is_thread_processor_pinned());
+        assert!(hw.is_thread_memory_region_pinned());
+
+        // Re-pin to a different affinity.
+        let third = registry.affinities().nth(2).unwrap();
+        registry.pin_to(third);
+        assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(third));
+        assert!(hw.is_thread_processor_pinned());
+        assert!(hw.is_thread_memory_region_pinned());
     }
 }

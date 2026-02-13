@@ -14,7 +14,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_macros"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["data_privacy_macros::*"]

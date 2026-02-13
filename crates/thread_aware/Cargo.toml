@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware"
 description = "Facilities to support thread-isolated state."
-version = "0.6.1"
+version = "0.6.2"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware"]
 categories = ["data-structures"]
@@ -14,7 +14,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["thread_aware_macros::ThreadAware"]
@@ -33,6 +33,7 @@ many_cpus = { workspace = true, optional = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 [dev-dependencies]
+many_cpus = { workspace = true, features = ["test-util"] }
 mutants.workspace = true
 static_assertions.workspace = true
 thread_aware_macros = { workspace = true }

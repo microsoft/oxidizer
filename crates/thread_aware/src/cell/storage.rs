@@ -69,6 +69,13 @@ where
     }
 }
 
+impl<T, S: Strategy> Storage<T, S> {
+    /// Counts how many stored entries satisfy the given predicate.
+    pub(crate) fn count_where(&self, predicate: impl Fn(&T) -> bool) -> usize {
+        self.data.iter().filter(|opt| opt.as_ref().is_some_and(&predicate)).count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::affinity::pinned_affinities;

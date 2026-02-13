@@ -15,19 +15,19 @@ use crate::mem::Memory;
 ///
 /// [1]: crate::BytesBuf::as_write
 #[derive(Debug)]
-pub(crate) struct BytesBufWrite<'b, 'm, M: Memory> {
+pub(crate) struct BytesBufWrite<'b, 'm, M: Memory + ?Sized> {
     inner: &'b mut BytesBuf,
     memory: &'m M,
 }
 
-impl<'b, 'm, M: Memory> BytesBufWrite<'b, 'm, M> {
+impl<'b, 'm, M: Memory + ?Sized> BytesBufWrite<'b, 'm, M> {
     #[must_use]
     pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
         Self { inner, memory }
     }
 }
 
-impl<M: Memory> Write for BytesBufWrite<'_, '_, M> {
+impl<M: Memory + ?Sized> Write for BytesBufWrite<'_, '_, M> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.inner.reserve(buf.len(), self.memory);

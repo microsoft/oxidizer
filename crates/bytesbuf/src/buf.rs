@@ -7,7 +7,7 @@ use std::num::NonZero;
 
 use smallvec::SmallVec;
 
-use crate::mem::{Block, BlockSize, Memory};
+use crate::mem::{Block, BlockMeta, BlockSize, Memory};
 use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
@@ -205,7 +205,7 @@ impl BytesBuf {
     /// Panics if the resulting total buffer capacity would be greater than `usize::MAX`.
     ///
     /// [`remaining_capacity()`]: Self::remaining_capacity
-    pub fn reserve(&mut self, additional_bytes: usize, memory_provider: &impl Memory) {
+    pub fn reserve<M: Memory + ?Sized>(&mut self, additional_bytes: usize, memory_provider: &M) {
         let bytes_needed = additional_bytes.saturating_sub(self.remaining_capacity());
 
         let Some(bytes_needed) = NonZero::new(bytes_needed) else {
@@ -215,7 +215,7 @@ impl BytesBuf {
         self.extend_capacity_by_at_least(bytes_needed, memory_provider);
     }
 
-    fn extend_capacity_by_at_least(&mut self, bytes: NonZero<usize>, memory_provider: &impl Memory) {
+    fn extend_capacity_by_at_least<M: Memory + ?Sized>(&mut self, bytes: NonZero<usize>, memory_provider: &M) {
         let additional_memory = memory_provider.reserve(bytes.get());
 
         // For extra paranoia. We expect a memory provider to return an empty buffer.
@@ -490,6 +490,7 @@ impl BytesBuf {
     ///
     /// The consumed bytes and the memory capacity that backs them are removed from the buffer.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
+    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check causes UB via unwrap_unchecked in consume_all or infinite loops in prepare_consume.
     pub fn consume_checked(&mut self, len: usize) -> Option<BytesView> {
         if len > self.len() {
             return None;
@@ -695,6 +696,33 @@ impl BytesBuf {
         }
     }
 
+    /// Inspects the metadata of the memory block backing [`first_unfilled_slice()`].
+    ///
+    /// `None` if there is no metadata associated with the memory block or
+    /// if the buffer has no remaining capacity.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// # struct PageAlignedMemory;
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(64);
+    ///
+    /// let is_page_aligned = buf
+    ///     .first_unfilled_slice_meta()
+    ///     .is_some_and(|meta| meta.is::<PageAlignedMemory>());
+    ///
+    /// println!("First unfilled slice is page-aligned: {is_page_aligned}");
+    /// ```
+    ///
+    /// [`first_unfilled_slice()`]: Self::first_unfilled_slice
+    #[must_use]
+    pub fn first_unfilled_slice_meta(&self) -> Option<&dyn BlockMeta> {
+        self.span_builders_reversed.last().and_then(|sb| sb.block().meta())
+    }
+
     /// Signals that `count` bytes have been written to the start of [`first_unfilled_slice()`].
     ///
     /// The next call to [`first_unfilled_slice()`] will return the next slice of memory that
@@ -804,7 +832,7 @@ impl BytesBuf {
     /// let capacity = buf.remaining_capacity();
     ///
     /// let mut vectored = buf.begin_vectored_write(None);
-    /// let mut slices: Vec<_> = vectored.iter_slices_mut().collect();
+    /// let mut slices: Vec<_> = vectored.slices_mut().map(|(s, _)| s).collect();
     ///
     /// // Fill all slices with 0xAE bytes.
     /// // In practice, these could be filled concurrently by vectored I/O APIs.
@@ -905,7 +933,7 @@ impl BytesBuf {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn as_write<M: Memory>(&mut self, memory: &M) -> impl std::io::Write {
+    pub fn as_write<M: Memory + ?Sized>(&mut self, memory: &M) -> impl std::io::Write {
         BytesBufWrite::new(self, memory)
     }
 }
@@ -988,11 +1016,11 @@ pub struct BytesBufVectoredWrite<'a> {
 
 impl BytesBufVectoredWrite<'_> {
     /// Iterates over the slices of available capacity of the buffer,
-    /// allowing them to be filled with data.
+    /// together with the metadata of the memory block backing each slice.
     ///
     /// The slices returned from this iterator have the lifetime of the vectored
     /// write operation itself, allowing them to be mutated concurrently.
-    pub fn iter_slices_mut(&mut self) -> BytesBufRemaining<'_> {
+    pub fn slices_mut(&mut self) -> BytesBufRemaining<'_> {
         self.buf.iter_available_capacity(self.max_len)
     }
 
@@ -1011,7 +1039,7 @@ impl BytesBufVectoredWrite<'_> {
     /// # Safety
     ///
     /// The caller must ensure that `bytes_written` bytes of data have actually been written
-    /// into the slices of memory returned from `iter_slices_mut()`, sequentially from the start.
+    /// into the slices of memory returned from `slices_mut()`, sequentially from the start.
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub unsafe fn commit(self, bytes_written: usize) {
         debug_assert!(bytes_written <= self.buf.remaining_capacity());
@@ -1070,7 +1098,7 @@ pub struct BytesBufRemaining<'a> {
 }
 
 impl<'a> Iterator for BytesBufRemaining<'a> {
-    type Item = &'a mut [MaybeUninit<u8>];
+    type Item = (&'a mut [MaybeUninit<u8>], Option<&'a dyn BlockMeta>);
 
     #[cfg_attr(test, mutants::skip)] // This gets mutated into an infinite loop which is not very helpful.
     fn next(&mut self) -> Option<Self::Item> {
@@ -1100,6 +1128,18 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
             .span_builders_reversed
             .get_mut(next_span_builder_index_storage_order)
             .expect("iterator cursor referenced a span builder that does not exist");
+
+        let meta_with_a = {
+            let meta = span_builder.block().meta();
+
+            // SAFETY: The metadata reference points into the block's heap allocation, not into
+            // the span builder's stack memory. We transmute it to 'a immediately so the immutable
+            // borrow of `span_builder` is released before the mutable borrow below.
+            // The metadata is valid for 'a because the BlockRef implementation guarantees metadata
+            // lives as long as any clone of the memory block, and we hold an exclusive reference
+            // to the BytesBuf for the lifetime 'a.
+            unsafe { mem::transmute::<Option<&dyn BlockMeta>, Option<&'a dyn BlockMeta>>(meta) }
+        };
 
         let uninit_slice_mut = span_builder.unfilled_slice_mut();
 
@@ -1133,7 +1173,7 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
             uninit_slice_mut
         };
 
-        Some(uninit_slice_mut)
+        Some((uninit_slice_mut, meta_with_a))
     }
 }
 
@@ -1490,7 +1530,7 @@ mod tests {
         let iter = buf.iter_available_capacity(None);
 
         // Demonstrating that we can access slices concurrently, not only one by one.
-        let slices = iter.collect::<Vec<_>>();
+        let slices: Vec<_> = iter.map(|(s, _)| s).collect();
 
         assert_eq!(slices.len(), 10);
 
@@ -1525,7 +1565,7 @@ mod tests {
         assert_eq!(buf.len(), 8);
         assert_eq!(buf.remaining_capacity(), 8);
 
-        let available_slices = buf.iter_available_capacity(None).collect::<Vec<_>>();
+        let available_slices: Vec<_> = buf.iter_available_capacity(None).map(|(s, _)| s).collect();
         assert_eq!(available_slices.len(), 1);
         assert_eq!(available_slices[0].len(), 8);
 
@@ -1536,7 +1576,7 @@ mod tests {
         assert_eq!(buf.len(), 12);
         assert_eq!(buf.remaining_capacity(), 4);
 
-        let available_slices = buf.iter_available_capacity(None).collect::<Vec<_>>();
+        let available_slices: Vec<_> = buf.iter_available_capacity(None).map(|(s, _)| s).collect();
         assert_eq!(available_slices.len(), 1);
         assert_eq!(available_slices[0].len(), 4);
 
@@ -1601,7 +1641,7 @@ mod tests {
 
         let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        let mut slices: Vec<_> = vectored_write.slices_mut().map(|(s, _)| s).collect();
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].len(), 8);
 
@@ -1637,7 +1677,7 @@ mod tests {
 
         let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        let mut slices: Vec<_> = vectored_write.slices_mut().map(|(s, _)| s).collect();
         assert_eq!(slices.len(), 3);
         assert_eq!(slices[0].len(), 8);
         assert_eq!(slices[1].len(), 8);
@@ -1659,7 +1699,7 @@ mod tests {
 
         let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        let mut slices: Vec<_> = vectored_write.slices_mut().map(|(s, _)| s).collect();
         assert_eq!(slices.len(), 2);
         assert_eq!(slices[0].len(), 4);
         assert_eq!(slices[1].len(), 8);
@@ -1703,7 +1743,7 @@ mod tests {
         // We limit to 13 bytes of visible capacity, of which we will fill 12.
         let mut vectored_write = buf.begin_vectored_write(Some(13));
 
-        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        let mut slices: Vec<_> = vectored_write.slices_mut().map(|(s, _)| s).collect();
         assert_eq!(slices.len(), 2);
         assert_eq!(slices[0].len(), 8);
         assert_eq!(slices[1].len(), 5);
@@ -1725,7 +1765,7 @@ mod tests {
         // There are 12 remaining and we set max_limit to exactly cover those 12
         let mut vectored_write = buf.begin_vectored_write(Some(12));
 
-        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        let mut slices: Vec<_> = vectored_write.slices_mut().map(|(s, _)| s).collect();
         assert_eq!(slices.len(), 2);
         assert_eq!(slices[0].len(), 4);
         assert_eq!(slices[1].len(), 8);
@@ -1807,7 +1847,7 @@ mod tests {
 
         let mut vectored_write = buf.begin_vectored_write(None);
 
-        let mut slices = vectored_write.iter_slices_mut().collect::<Vec<_>>();
+        let mut slices: Vec<_> = vectored_write.slices_mut().map(|(s, _)| s).collect();
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].len(), 8);
 
@@ -2157,6 +2197,40 @@ mod tests {
         assert_eq!(buf.len(), 8);
     }
 
+    #[test]
+    fn first_unfilled_slice_meta_no_capacity() {
+        let buf = BytesBuf::new();
+        assert!(buf.first_unfilled_slice_meta().is_none());
+    }
+
+    #[test]
+    fn first_unfilled_slice_meta_no_meta() {
+        let memory = FixedBlockMemory::new(nz!(64));
+        let buf = memory.reserve(64);
+        assert!(buf.first_unfilled_slice_meta().is_none());
+    }
+
+    #[test]
+    fn first_unfilled_slice_meta_with_meta() {
+        #[derive(Debug)]
+        struct CustomMeta;
+
+        impl BlockMeta for CustomMeta {}
+
+        // SAFETY: We are not allowed to drop this until all BlockRef are gone. This is fine
+        // because it is dropped at the end of the function, after all BlockRef instances.
+        let block = unsafe { TestMemoryBlock::new(nz!(100), Some(Box::new(CustomMeta))) };
+        let block = pin!(block);
+
+        // SAFETY: We guarantee exclusive access to the memory capacity.
+        let block = unsafe { block.as_ref().to_block() };
+
+        let buf = BytesBuf::from_blocks([block]);
+        let meta = buf.first_unfilled_slice_meta().expect("should have metadata");
+        assert!(meta.is::<CustomMeta>());
+        assert!(!meta.is::<u8>());
+    }
+
     // To be stabilized soon: https://github.com/rust-lang/rust/issues/79995
     fn write_copy_of_slice(dst: &mut [MaybeUninit<u8>], src: &[u8]) {
         assert!(dst.len() >= src.len());
@@ -2165,5 +2239,11 @@ mod tests {
         unsafe {
             src.as_ptr().copy_to_nonoverlapping(dst.as_mut_ptr().cast(), src.len());
         }
+    }
+
+    // Compile time test
+    fn _can_use_in_dyn_traits(mem: &dyn Memory) {
+        let mut buf = mem.reserve(123);
+        let _ = buf.as_write(mem);
     }
 }
