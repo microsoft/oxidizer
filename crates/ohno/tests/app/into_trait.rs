@@ -98,3 +98,43 @@ fn string_ref() {
     let msg = err.to_string();
     assert!(msg.contains("failed operation"), "{msg}");
 }
+
+#[test]
+fn result_into_app_err_ok() {
+    let result: Result<i32, std::num::ParseIntError> = "42".parse();
+    let ok = result.into_app_err("should not appear").unwrap();
+    assert_eq!(ok, 42);
+}
+
+#[test]
+fn result_into_app_err_with_ok() {
+    let result: Result<i32, std::num::ParseIntError> = "42".parse();
+    let ok = result.into_app_err_with(|| "should not appear").unwrap();
+    assert_eq!(ok, 42);
+}
+
+#[test]
+fn option_into_app_err_ok() {
+    let ok = Some(42).into_app_err("should not appear").unwrap();
+    assert_eq!(ok, 42);
+}
+
+#[test]
+fn option_into_app_err_with_ok() {
+    let ok = Some(42).into_app_err_with(|| "should not appear").unwrap();
+    assert_eq!(ok, 42);
+}
+
+#[test]
+fn app_error_result_into_app_err_ok() {
+    let result: Result<i32, AppError> = Ok(42);
+    let ok = result.into_app_err("should not appear").unwrap();
+    assert_eq!(ok, 42);
+}
+
+#[test]
+fn app_error_result_into_app_err_with_ok() {
+    let result: Result<i32, AppError> = Ok(42);
+    let ok = result.into_app_err_with(|| "should not appear").unwrap();
+    assert_eq!(ok, 42);
+}
