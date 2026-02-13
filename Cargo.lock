@@ -1891,6 +1891,7 @@ dependencies = [
  "serde_core",
  "serde_json",
  "static_assertions",
+ "thread_aware",
  "time",
  "tokio",
 ]
