@@ -62,10 +62,14 @@ fn test_detailed_enrich() {
         .enrich("third message");
 
     let display = error.to_string();
-    assert!(display.contains("base error"));
-    assert!(display.contains("first message"));
-    assert!(display.contains("second message"));
-    assert!(display.contains("third message"));
+    let lines: Vec<_> = display.lines().collect();
+    assert_eq!(lines[0], "base error");
+    assert!(lines[1].starts_with("> first message"), "{display}");
+    assert!(lines[1].contains(file!()), "{display}");
+    assert!(lines[2].starts_with("> second message"), "{display}");
+    assert!(lines[2].contains(file!()), "{display}");
+    assert!(lines[3].starts_with("> third message"), "{display}");
+    assert!(lines[3].contains(file!()), "{display}");
 
     // Test enrichment iteration
     let enrichments: Vec<_> = error.enrichments().collect();
@@ -82,7 +86,10 @@ fn test_with_enrich() {
     let error = OhnoCore::from("base").enrich_with(|| format!("computed: {}", 42));
 
     let error_string = error.to_string();
-    assert!(error_string.contains("computed: 42"));
+    let lines: Vec<_> = error_string.lines().collect();
+    assert_eq!(lines[0], "base");
+    assert!(lines[1].starts_with("> computed: 42"), "{error_string}");
+    assert!(lines[1].contains(file!()), "{error_string}");
     assert_eq!(error.enrichments().count(), 1);
 }
 
@@ -119,6 +126,14 @@ fn test_trace_messages_iterator() {
 
     let messages: Vec<_> = error.enrichment_messages().collect();
     assert_eq!(messages, vec!["second", "first"]);
+
+    let display = error.to_string();
+    let lines: Vec<_> = display.lines().collect();
+    assert_eq!(lines[0], "base");
+    assert!(lines[1].starts_with("> first"), "{display}");
+    assert!(lines[1].contains(file!()), "{display}");
+    assert!(lines[2].starts_with("> second"), "{display}");
+    assert!(lines[2].contains(file!()), "{display}");
 }
 
 #[test]

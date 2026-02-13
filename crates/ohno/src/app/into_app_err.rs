@@ -31,26 +31,42 @@ impl<T, E> IntoAppError<T> for Result<T, E>
 where
     E: std::error::Error + Send + Sync + 'static,
 {
+    #[track_caller]
     fn into_app_err(self, msg: impl Display) -> Result<T, AppError> {
-        self.map_err(|e| {
-            let caller = Location::caller();
-            let mut e = AppError::new(e);
-            e.add_enrichment(EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
-            e
-        })
+        match self {
+            Ok(value) => Ok(value),
+            Err(e) => {
+                let caller_location = Location::caller();
+                let mut app_err = AppError::new(e);
+                app_err.add_enrichment(EnrichmentEntry::new(
+                    msg.to_string(),
+                    caller_location.file(),
+                    caller_location.line(),
+                ));
+                Err(app_err)
+            }
+        }
     }
 
+    #[track_caller]
     fn into_app_err_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
         F: FnOnce() -> D,
         D: Display,
     {
-        self.map_err(|e| {
-            let caller = Location::caller();
-            let mut e = AppError::new(e);
-            e.add_enrichment(EnrichmentEntry::new(msg_fn().to_string(), caller.file(), caller.line()));
-            e
-        })
+        match self {
+            Ok(value) => Ok(value),
+            Err(e) => {
+                let caller_location = Location::caller();
+                let mut app_err = AppError::new(e);
+                app_err.add_enrichment(EnrichmentEntry::new(
+                    msg_fn().to_string(),
+                    caller_location.file(),
+                    caller_location.line(),
+                ));
+                Err(app_err)
+            }
+        }
     }
 }
 
@@ -70,23 +86,33 @@ impl<T> IntoAppError<T> for Option<T> {
 
 /// Specialized implementation for `Result<T, AppError>` to avoid double wrapping.
 impl<T> IntoAppError<T> for Result<T, AppError> {
-    fn into_app_err(self, msg: impl Display) -> Self {
-        self.map_err(|mut e| {
-            let caller = Location::caller();
-            e.add_enrichment(EnrichmentEntry::new(msg.to_string(), caller.file(), caller.line()));
-            e
-        })
+    #[track_caller]
+    fn into_app_err(mut self, msg: impl Display) -> Self {
+        if let Err(e) = &mut self {
+            let caller_location = Location::caller();
+            e.add_enrichment(EnrichmentEntry::new(
+                msg.to_string(),
+                caller_location.file(),
+                caller_location.line(),
+            ));
+        }
+        self
     }
 
-    fn into_app_err_with<F, D>(self, msg_fn: F) -> Self
+    #[track_caller]
+    fn into_app_err_with<F, D>(mut self, msg_fn: F) -> Self
     where
         F: FnOnce() -> D,
         D: Display,
     {
-        self.map_err(|mut e| {
-            let caller = Location::caller();
-            e.add_enrichment(EnrichmentEntry::new(msg_fn().to_string(), caller.file(), caller.line()));
-            e
-        })
+        if let Err(e) = &mut self {
+            let caller_location = Location::caller();
+            e.add_enrichment(EnrichmentEntry::new(
+                msg_fn().to_string(),
+                caller_location.file(),
+                caller_location.line(),
+            ));
+        }
+        self
     }
 }
