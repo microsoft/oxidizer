@@ -10,6 +10,10 @@ use crate::{runtime::ClockGone, state::ClockState};
 /// The `ClockDriver` is responsible for advancing and firing timers associated with
 /// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
 /// ensure timers fire at the correct time.
+///
+/// In thread-per-core architectures, each thread owns its own `ClockDriver` that advances
+/// only the timers registered on that thread's [`Clock`][crate::Clock]. See the
+/// [`runtime`][crate::runtime] module for the setup pattern.
 #[derive(Debug)]
 pub struct ClockDriver {
     pub(crate) state: ClockState,

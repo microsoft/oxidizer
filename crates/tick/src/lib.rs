@@ -111,6 +111,23 @@
 //! [chrono]: https://crates.io/crates/chrono
 //! [time]: https://crates.io/crates/time
 //!
+//! # Thread-aware relocation
+//!
+//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-core
+//! timer isolation in thread-per-core runtime architectures.
+//!
+//! When an [`InactiveClock`][runtime::InactiveClock] is
+//! [relocated](thread_aware::ThreadAware::relocated) to a target thread, the underlying timer
+//! storage is duplicated per core. After activation, each thread's [`Clock`] and
+//! [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with no
+//! cross-thread lock contention.
+//!
+//! [`ClockControl`] clocks are unaffected by relocation — all clones always share the same
+//! controlled time state regardless of thread, so a single `ClockControl` can drive time for
+//! the entire test.
+//!
+//! See the [`runtime`] module documentation for setup examples.
+//!
 //! # Testing
 //!
 //! This crate provides a way to control the passage of time in tests via the `ClockControl`

@@ -76,6 +76,28 @@ use crate::timers::TimerKey;
 /// # }
 /// ```
 ///
+/// # Thread-aware relocation
+///
+/// `Clock` implements [`ThreadAware`](thread_aware::ThreadAware), enabling per-core timer isolation
+/// in thread-per-core runtime architectures.
+///
+/// How relocation affects the clock depends on the underlying clock variant:
+///
+/// - **System clocks**: Relocation creates per-core timer storage. After relocation, each core
+///   maintains its own independent set of timers, eliminating cross-thread lock contention. Clones
+///   of a clock on the same core share timers, while clocks relocated to different cores are fully
+///   isolated. Each core's timers must be advanced by its own
+///   [`ClockDriver`][crate::runtime::ClockDriver].
+///
+/// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
+///   controlled time state regardless of which thread they are on. This is intentional — a single
+///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
+///   across threads.
+///
+/// For thread-per-core setups, the typical pattern is to clone an
+/// [`InactiveClock`][crate::runtime::InactiveClock], relocate each clone to its target thread,
+/// and then activate it. See the [`runtime`][crate::runtime] module for details.
+///
 /// # Examples
 ///
 /// ## Retrieve absolute time

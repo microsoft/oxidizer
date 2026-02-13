@@ -30,14 +30,15 @@ use crate::state::ClockState;
 /// let now = clock.instant();
 ///
 /// // Driver must be advanced periodically (typically by the runtime)
-/// // driver.advance_timers();
+/// // driver.advance_timers(std::time::Instant::now());
 /// ```
 ///
 /// # Thread-per-core runtimes
 ///
-/// Thread-per-core runtimes can activate separate clock instances per thread by cloning
-/// the [`InactiveClock`] before activation. This eliminates lock contention and improves
-/// performance.
+/// In thread-per-core architectures, clone the `InactiveClock` and
+/// [`relocate`](thread_aware::ThreadAware::relocated) each clone to its target thread before
+/// activation. Relocation creates per-core timer storage, so each thread gets an independent set
+/// of timers with no cross-thread lock contention.
 #[derive(Debug, Clone)]
 pub struct InactiveClock {
     state: ClockState,

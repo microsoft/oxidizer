@@ -15,30 +15,53 @@
 //!
 //! Different runtime architectures can integrate this module as follows:
 //!
-//! ## Single-threaded Runtimes
+//! ## Thread-per-core Runtimes
 //!
-//! Clone the [`InactiveClock`] before moving it to each thread, then activate
-//! separately to avoid lock contention:
+//! In thread-per-core architectures, each thread should own an isolated clock with its own
+//! timer storage. This eliminates cross-thread lock contention and provides linear scalability.
+//!
+//! The pattern is to clone the [`InactiveClock`], relocate each clone to its target thread
+//! using [`ThreadAware::relocated`], and then activate:
 //!
 //! ```rust
+//! # use thread_aware::ThreadAware;
+//! # use thread_aware::affinity::pinned_affinities;
 //! # use tick::runtime::InactiveClock;
-//! let inactive = InactiveClock::default();
-//! let inactive_clone = inactive.clone();
+//! # let affinities = pinned_affinities(&[1, 1]);
+//! let root = InactiveClock::default();
 //!
-//! // On thread 1
-//! let (clock1, driver1) = inactive.activate();
+//! // Clone and relocate to each thread's affinity
+//! let inactive_1 = root.clone().relocated(affinities[0].into(), affinities[0]);
+//! let inactive_2 = root.relocated(affinities[1].into(), affinities[1]);
 //!
-//! // On thread 2
-//! let (clock2, driver2) = inactive_clone.activate();
+//! // On thread 1: activate and drive timers independently
+//! let (clock_1, driver_1) = inactive_1.activate();
+//!
+//! // On thread 2: activate and drive timers independently
+//! let (clock_2, driver_2) = inactive_2.activate();
 //! ```
+//!
+//! After relocation, each thread's clock and driver operate on an independent set of timers.
+//! Timers registered on `clock_1` are only visible to `driver_1`, and vice versa. Each driver
+//! must be advanced independently by its owning thread.
 //!
 //! ## Multi-threaded Runtimes
 //!
-//! Activate once and share the clock across threads, keeping the driver on the
-//! main runtime thread for timer advancement.
+//! In multi-threaded runtimes where tasks may run on any thread, activate once and share the
+//! clock across threads. The driver should be kept on a dedicated thread or task for timer
+//! advancement:
+//!
+//! ```rust
+//! # use tick::runtime::InactiveClock;
+//! let (clock, driver) = InactiveClock::default().activate();
+//!
+//! // Share `clock` across threads (it is Clone + Send + Sync)
+//! // Keep `driver` on a single thread to advance timers
+//! ```
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate
+//! [`ThreadAware::relocated`]: thread_aware::ThreadAware::relocated
 
 mod clock_driver;
 mod clock_gone;
