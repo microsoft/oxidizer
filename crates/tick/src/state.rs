@@ -1,8 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
+
+use thread_aware::{
+    PerCore, ThreadAware,
+    affinity::{MemoryAffinity, PinnedAffinity},
+};
 
 use crate::timers::Timers;
 
@@ -13,9 +18,19 @@ pub(crate) enum ClockState {
     ClockControl(crate::ClockControl),
 }
 
+impl ThreadAware for ClockState {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        match self {
+            Self::System(synchronized_timers) => Self::System(synchronized_timers.relocated(source, destination)),
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(clock_control) => Self::ClockControl(clock_control.relocated(source, destination)),
+        }
+    }
+}
+
 impl ClockState {
     pub fn new_system() -> Self {
-        Self::System(SynchronizedTimers::default())
+        Self::System(SynchronizedTimers::new())
     }
 }
 
@@ -38,7 +53,7 @@ impl ClockState {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct SynchronizedTimers {
     // The mutex here is not accessed on a hot path. Timers are accessed only when:
     //
@@ -53,10 +68,24 @@ pub(crate) struct SynchronizedTimers {
     // with `RefCell`. The `RefCell` variant is around 7% faster. In practice, in real applications,
     // the difference is negligible. The real performance improvement comes from isolating the `Clock` to each thread.
     // This reduces lock contention and provides linear scalability.
-    timers: Arc<Mutex<Timers>>,
+    timers: thread_aware::Arc<Mutex<Timers>, PerCore>,
+}
+
+impl ThreadAware for SynchronizedTimers {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        Self {
+            timers: self.timers.relocated(source, destination),
+        }
+    }
 }
 
 impl SynchronizedTimers {
+    pub fn new() -> Self {
+        Self {
+            timers: thread_aware::Arc::new(|| Mutex::new(Timers::default())),
+        }
+    }
+
     pub(super) fn with_timers<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Timers) -> R,
@@ -72,7 +101,7 @@ impl SynchronizedTimers {
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
-        Arc::strong_count(&self.timers) == 1
+        thread_aware::Arc::strong_count(&self.timers) == 1
     }
 }
 

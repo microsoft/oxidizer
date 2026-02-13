@@ -30,6 +30,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Error(ErrorKind);
 
+crate::thread_aware_move!(Error);
+
 #[derive(Debug)]
 enum ErrorKind {
     #[cfg(any(feature = "fmt", test))]
@@ -104,6 +106,8 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     use jiff::SignedDuration;
+    use thread_aware::ThreadAware;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
 
@@ -154,5 +158,15 @@ mod tests {
         assert!(matches!(error.kind(), ErrorKind::SystemTimeError(_)));
         assert_eq!(error.to_string(), expected_message);
         assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn thread_aware_ok() {
+        let error = Error::other(std::io::Error::other("dummy"));
+        let affinities = pinned_affinities(&[2]);
+
+        let error = error.relocated(affinities[0].into(), affinities[0]);
+
+        assert!(matches!(error.kind(), ErrorKind::Other(_)));
     }
 }

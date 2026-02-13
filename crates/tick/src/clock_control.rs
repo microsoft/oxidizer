@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::Clock;
 use crate::state::ClockState;
 use crate::timers::{TimerKey, Timers};
+use crate::{Clock, thread_aware_move};
 
 /// Controls the passage of time in tests.
 ///
@@ -74,6 +74,8 @@ pub struct ClockControl {
     /// across all threads.
     state: Arc<Mutex<State>>,
 }
+
+thread_aware_move!(ClockControl);
 
 impl ClockControl {
     /// Creates a new `ClockControl` instance.
@@ -151,7 +153,9 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn to_clock(&self) -> Clock {
-        Clock(ClockState::ClockControl(self.clone()))
+        Clock {
+            state: ClockState::ClockControl(self.clone()),
+        }
     }
 
     /// Sets the duration by which the clock will auto-advance when accessing the current time.
