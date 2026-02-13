@@ -14,7 +14,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_memory"
 
 [package.metadata.docs.rs]
 all-features = true
