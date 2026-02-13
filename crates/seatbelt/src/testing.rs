@@ -4,7 +4,9 @@
 #![cfg_attr(miri, expect(dead_code, reason = "too much noise to satisfy Miri's expectations"))]
 
 use std::io::Write;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, Metric, MetricData};
@@ -12,6 +14,27 @@ use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use tracing_subscriber::fmt::MakeWriter;
 
 use crate::{Recovery, RecoveryInfo};
+
+/// A tower service whose `poll_ready` always returns an error.
+///
+/// Useful for testing that resilience middleware correctly propagates
+/// inner service readiness failures.
+#[derive(Clone, Debug)]
+pub(crate) struct FailReadyService;
+
+impl tower_service::Service<String> for FailReadyService {
+    type Response = String;
+    type Error = String;
+    type Future = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Err("inner service unavailable".to_string()))
+    }
+
+    fn call(&mut self, _req: String) -> Self::Future {
+        unreachable!("call should not be invoked when poll_ready fails")
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct MetricTester {

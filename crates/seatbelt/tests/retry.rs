@@ -7,135 +7,170 @@
 
 //! Integration tests for retry middleware using only public API.
 
+use std::future::poll_fn;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
+use rstest::rstest;
 use seatbelt::retry::{Backoff, OnRetryArgs, RecoveryArgs, Retry};
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::{Clock, ClockControl};
+use tower_service::Service as TowerService;
 
+/// Helper to execute a service either via `layered::Service` or `tower_service::Service`.
+async fn execute_service<S, In, Out, Err>(service: &mut S, input: In, use_tower: bool) -> Result<Out, Err>
+where
+    S: Service<In, Out = Result<Out, Err>> + TowerService<In, Response = Out, Error = Err>,
+    S::Future: Send,
+    In: Send + 'static,
+    Out: Send + 'static,
+    Err: Send + 'static,
+{
+    if use_tower {
+        poll_fn(|cx| service.poll_ready(cx)).await?;
+        service.call(input).await
+    } else {
+        service.execute(input).await
+    }
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn retry_disabled_no_inner_calls() {
+async fn retry_disabled_no_inner_calls(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
             })
-            .recovery_with(|_: &String, _| RecoveryInfo::retry())
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .disable(),
-        Execute::new(move |v: String| async move { v }),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    assert_eq!(result, "test");
+    assert_eq!(result, Ok("test".to_string()));
     assert_eq!(counter.load(Ordering::SeqCst), 0);
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn uncloneable_recovery_called() {
+async fn uncloneable_recovery_called(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |_input: &mut String, _args| None)
-            .recovery_with(move |_input: &String, _args| {
+            .recovery_with(move |_input: &Result<String, String>, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 RecoveryInfo::retry()
             }),
-        Execute::new(move |v: String| async move { v }),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    assert_eq!(result, "test");
+    assert_eq!(result, Ok("test".to_string()));
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn no_recovery_ensure_no_additional_retries() {
+async fn no_recovery_ensure_no_additional_retries(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
             })
-            .recovery_with(move |_input: &String, _args| RecoveryInfo::never()),
-        Execute::new(move |v: String| async move { v }),
+            .recovery_with(move |_input: &Result<String, String>, _args| RecoveryInfo::never()),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    assert_eq!(result, "test");
+    assert_eq!(result, Ok("test".to_string()));
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn retry_recovery_ensure_retries_exhausted() {
+async fn retry_recovery_ensure_retries_exhausted(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
             })
-            .recovery_with(move |_input: &String, _args| RecoveryInfo::retry())
+            .recovery_with(move |_input: &Result<String, String>, _args| RecoveryInfo::retry())
             .max_retry_attempts(4),
-        Execute::new(move |v: String| async move { v }),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    assert_eq!(result, "test");
+    assert_eq!(result, Ok("test".to_string()));
     assert_eq!(counter.load(Ordering::SeqCst), 5);
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn retry_recovery_ensure_correct_delays() {
+async fn retry_recovery_ensure_correct_delays(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let delays = Arc::new(Mutex::new(vec![]));
     let delays_clone = Arc::clone(&delays);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| Some(input.clone()))
             .use_jitter(false)
             .backoff(Backoff::Linear)
-            .recovery_with(move |_input: &String, _args| RecoveryInfo::retry())
+            .recovery_with(move |_input: &Result<String, String>, _args| RecoveryInfo::retry())
             .max_retry_attempts(4)
-            .on_retry(move |_output: &String, args: OnRetryArgs| {
+            .on_retry(move |_output: &Result<String, String>, args: OnRetryArgs| {
                 delays_clone.lock().unwrap().push(args.retry_delay());
             }),
-        Execute::new(move |v: String| async move { v }),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let _result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
     assert_eq!(
         delays.lock().unwrap().to_vec(),
@@ -148,8 +183,11 @@ async fn retry_recovery_ensure_correct_delays() {
     );
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn retry_recovery_ensure_correct_attempts() {
+async fn retry_recovery_ensure_correct_attempts(#[case] use_tower: bool) {
     use seatbelt::retry::Attempt;
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
@@ -159,23 +197,23 @@ async fn retry_recovery_ensure_correct_attempts() {
     let attempts_for_clone = Arc::new(Mutex::new(vec![]));
     let attempts_for_clone_clone = Arc::clone(&attempts_for_clone);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, args| {
                 attempts_for_clone_clone.lock().unwrap().push(args.attempt());
                 Some(input.clone())
             })
-            .recovery_with(move |_input: &String, _args| RecoveryInfo::retry())
+            .recovery_with(move |_input: &Result<String, String>, _args| RecoveryInfo::retry())
             .max_retry_attempts(4)
-            .on_retry(move |_output: &String, args: OnRetryArgs| {
+            .on_retry(move |_output: &Result<String, String>, args: OnRetryArgs| {
                 attempts_clone.lock().unwrap().push(args.attempt());
             }),
-        Execute::new(move |v: String| async move { v }),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let _result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
     assert_eq!(
         attempts_for_clone.lock().unwrap().to_vec(),
@@ -199,28 +237,34 @@ async fn retry_recovery_ensure_correct_attempts() {
     );
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn restore_input_integration_test() {
+async fn restore_input_integration_test(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
     let restore_count = Arc::new(AtomicU32::new(0));
     let restore_count_clone = Arc::clone(&restore_count);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(|_input: &mut String, _args| None) // Don't clone - force restore path
-            .restore_input(move |output: &mut String, _args| {
+            .restore_input(move |output: &mut Result<String, String>, _args| {
                 restore_count_clone.fetch_add(1, Ordering::SeqCst);
-                output.contains("error:").then(|| {
-                    let input = output.replace("error:", "");
-                    *output = "restored".to_string();
-                    input
-                })
+                if let Ok(s) = output
+                    && s.contains("error:")
+                {
+                    let input = s.replace("error:", "");
+                    *output = Ok("restored".to_string());
+                    return Some(input);
+                }
+                None
             })
-            .recovery_with(|output: &String, _args| {
-                if output.contains("error:") {
+            .recovery_with(|output: &Result<String, String>, _args| {
+                if output.as_ref().is_ok_and(|s| s.contains("error:")) {
                     RecoveryInfo::retry()
                 } else {
                     RecoveryInfo::never()
@@ -232,63 +276,69 @@ async fn restore_input_integration_test() {
             async move {
                 if count == 0 {
                     // First call fails with input stored in error
-                    format!("error:{input}")
+                    Ok::<_, String>(format!("error:{input}"))
                 } else {
                     // Subsequent calls succeed
-                    format!("success:{input}")
+                    Ok::<_, String>(format!("success:{input}"))
                 }
             }
         }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test_input".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test_input".to_string(), use_tower).await;
 
     // Verify the restore path was used and retry succeeded
-    assert_eq!(result, "success:test_input");
+    assert_eq!(result, Ok("success:test_input".to_string()));
     assert_eq!(call_count.load(Ordering::SeqCst), 2); // Original + 1 retry
     assert_eq!(restore_count.load(Ordering::SeqCst), 1); // Restore called once
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn outage_handling_disabled_no_retries() {
+async fn outage_handling_disabled_no_retries(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| {
                 call_count_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
             })
-            .recovery_with(|_output: &String, _args| RecoveryInfo::unavailable()),
-        Execute::new(move |v: String| async move { v }),
+            .recovery_with(|_output: &Result<String, String>, _args| RecoveryInfo::unavailable()),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
     // Should not retry when outage handling is disabled
-    assert_eq!(result, "test");
+    assert_eq!(result, Ok("test".to_string()));
     assert_eq!(call_count.load(Ordering::SeqCst), 1); // Only original call, no retries
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn outage_handling_enabled_with_retries() {
+async fn outage_handling_enabled_with_retries(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| {
                 call_count_clone.fetch_add(1, Ordering::SeqCst);
                 Some(input.clone())
             })
-            .recovery_with(|_output: &String, args: RecoveryArgs| {
+            .recovery_with(|_output: &Result<String, String>, args: RecoveryArgs| {
                 // First attempt returns outage, subsequent attempts succeed
                 if args.attempt().index() == 0 {
                     RecoveryInfo::unavailable()
@@ -298,28 +348,31 @@ async fn outage_handling_enabled_with_retries() {
             })
             .handle_unavailable(true) // Enable outage handling
             .max_retry_attempts(2),
-        Execute::new(move |input: String| async move { format!("processed_{input}") }),
+        Execute::new(move |input: String| async move { Ok::<_, String>(format!("processed_{input}")) }),
     );
 
-    let service = stack.into_service();
-    let result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
     // Should retry when outage handling is enabled
-    assert_eq!(result, "processed_test");
+    assert_eq!(result, Ok("processed_test".to_string()));
     assert_eq!(call_count.load(Ordering::SeqCst), 2); // Original + 1 retry
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn outage_handling_with_recovery_hint() {
+async fn outage_handling_with_recovery_hint(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let delays = Arc::new(Mutex::new(vec![]));
     let delays_clone = Arc::clone(&delays);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(move |input: &mut String, _args| Some(input.clone()))
-            .recovery_with(|_output: &String, args: RecoveryArgs| {
+            .recovery_with(|_output: &Result<String, String>, args: RecoveryArgs| {
                 if args.attempt().index() == 0 {
                     RecoveryInfo::unavailable().delay(Duration::from_secs(10)) // 10 second recovery hint
                 } else {
@@ -328,52 +381,55 @@ async fn outage_handling_with_recovery_hint() {
             })
             .handle_unavailable(true)
             .max_retry_attempts(1)
-            .on_retry(move |_output: &String, args: OnRetryArgs| {
+            .on_retry(move |_output: &Result<String, String>, args: OnRetryArgs| {
                 delays_clone.lock().unwrap().push(args.retry_delay());
             }),
-        Execute::new(move |v: String| async move { v }),
+        Execute::new(move |v: String| async move { Ok::<_, String>(v) }),
     );
 
-    let service = stack.into_service();
-    let _result = service.execute("test".to_string()).await;
+    let mut service = stack.into_service();
+    let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
     // Should use the recovery hint as the delay
     assert_eq!(delays.lock().unwrap().to_vec(), vec![Duration::from_secs(10)]);
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn clone_service_works_independently() {
+async fn clone_service_works_independently(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
     let stack = (
         Retry::layer("test_retry", &context)
             .clone_input_with(|input: &mut String, _args| Some(input.clone()))
-            .recovery_with(|_output: &String, _args| RecoveryInfo::retry())
+            .recovery_with(|_output: &Result<String, String>, _args| RecoveryInfo::retry())
             .max_retry_attempts(2),
         Execute::new(move |input: String| {
             let count = call_count_clone.fetch_add(1, Ordering::SeqCst);
             async move {
                 if count < 2 {
-                    format!("attempt_{count}:{input}")
+                    Ok::<_, String>(format!("attempt_{count}:{input}"))
                 } else {
-                    format!("success:{input}")
+                    Ok::<_, String>(format!("success:{input}"))
                 }
             }
         }),
     );
 
-    let service = stack.into_service();
-    let cloned_service = service.clone();
+    let mut service = stack.into_service();
+    let mut cloned_service = service.clone();
 
     // Both services should work independently
-    let result1 = service.execute("original".to_string()).await;
-    let result2 = cloned_service.execute("cloned".to_string()).await;
+    let result1 = execute_service(&mut service, "original".to_string(), use_tower).await;
+    let result2 = execute_service(&mut cloned_service, "cloned".to_string(), use_tower).await;
 
-    assert_eq!(result1, "success:original");
-    assert_eq!(result2, "success:cloned");
+    assert_eq!(result1, Ok("success:original".to_string()));
+    assert_eq!(result2, Ok("success:cloned".to_string()));
     // Each service ran through retry cycle: 3 attempts each = 6 total
     assert_eq!(call_count.load(Ordering::SeqCst), 6);
 }

@@ -183,4 +183,6 @@ pub use args::{OnTimeoutArgs, TimeoutOutputArgs, TimeoutOverrideArgs};
 pub(crate) use callbacks::{OnTimeout, TimeoutOutput, TimeoutOverride};
 pub use layer::TimeoutLayer;
 pub use service::Timeout;
+#[cfg(feature = "tower-service")]
+pub use service::TimeoutFuture;
 pub(crate) use service::TimeoutShared;
