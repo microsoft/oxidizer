@@ -15,7 +15,10 @@ fn result_into_app_err() {
     let err = parse_number("xyz").unwrap_err();
     assert_error_message!(err, "invalid digit found in string");
     let msg = err.to_string();
-    assert!(msg.contains("failed to parse number"));
+    let lines = msg.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], "invalid digit found in string");
+    assert!(lines[1].starts_with("> failed to parse number (at "), "{msg}");
+    assert!(lines[1].contains(file!()), "{msg}");
 }
 
 #[test]
