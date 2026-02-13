@@ -1837,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "many_cpus",
  "mutants",

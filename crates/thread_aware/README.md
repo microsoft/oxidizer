@@ -148,15 +148,15 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7L1NV9wSafgG0Js_9dN9szEG9je4RDQjSI-G3g32DCW0DbWYWSCgmx0aHJlYWRfYXdhcmVlMC42LjGCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjE
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7L1NV9wSafgG0Js_9dN9szEG9je4RDQjSI-G3g32DCW0DbWYWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjE
  [__link0]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link11]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link12]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link13]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
- [__link14]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=Unaware
- [__link15]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=Unaware
+ [__link14]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=Unaware
+ [__link15]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=Unaware
  [__link16]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link17]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link18]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
@@ -170,12 +170,12 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link25]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link26]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link27]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
- [__link28]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=Arc
- [__link29]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=Arc
+ [__link28]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=Arc
+ [__link29]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=Arc
  [__link3]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link4]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
- [__link5]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=Arc
+ [__link5]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=Arc
  [__link6]: https://doc.rust-lang.org/stable/std/?search=sync::Arc
- [__link7]: https://docs.rs/thread_aware/0.6.1/thread_aware/?search=storage::Strategy
+ [__link7]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=storage::Strategy
  [__link8]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link9]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
