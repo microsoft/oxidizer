@@ -8,29 +8,34 @@ use ohno::{AppError, IntoAppError};
 
 #[test]
 fn result_into_app_err() {
-    fn parse_number(s: &str) -> Result<i32, AppError> {
-        s.parse::<i32>().into_app_err("failed to parse number")
+    fn parse_number(s: &str) -> (Result<i32, AppError>, u32) {
+        (s.parse::<i32>().into_app_err("failed to parse number"), line!())
     }
 
-    let err = parse_number("xyz").unwrap_err();
+    let (result, call_line) = parse_number("xyz");
+    let err = result.unwrap_err();
     assert_error_message!(err, "invalid digit found in string");
     let msg = err.to_string();
+    let expected_location = format!("{}:{}", file!(), call_line);
     let lines = msg.lines().collect::<Vec<_>>();
     assert_eq!(lines[0], "invalid digit found in string");
     assert!(lines[1].starts_with("> failed to parse number (at "), "{msg}");
-    assert!(lines[1].contains(file!()), "{msg}");
+    assert!(lines[1].contains(&expected_location), "{msg}");
 }
 
 #[test]
 fn result_into_app_err_with() {
-    fn parse_with_context(s: &str) -> Result<i32, AppError> {
-        s.parse::<i32>().into_app_err_with(|| format!("failed to parse: {s}"))
+    fn parse_with_context(s: &str) -> (Result<i32, AppError>, u32) {
+        (s.parse::<i32>().into_app_err_with(|| format!("failed to parse: {s}")), line!())
     }
 
-    let err = parse_with_context("abc").unwrap_err();
+    let (result, call_line) = parse_with_context("abc");
+    let err = result.unwrap_err();
     assert_error_message!(err, "invalid digit found in string");
     let msg = err.to_string();
-    assert!(msg.contains("failed to parse: abc"));
+    let expected_location = format!("{}:{}", file!(), call_line);
+    assert!(msg.contains("failed to parse: abc"), "{msg}");
+    assert!(msg.contains(&expected_location), "{msg}");
 }
 
 #[test]
@@ -61,19 +66,25 @@ fn ohno_on_into_app_err_error() {
         Err(AppError::new("root error"))
     }
 
-    fn level2() -> Result<i32, AppError> {
-        level1().into_app_err("context added")
+    fn level2() -> (Result<i32, AppError>, u32) {
+        (level1().into_app_err("context added"), line!())
     }
 
-    fn level3() -> Result<i32, AppError> {
-        level2().into_app_err_with(|| "more context added")
+    fn level3(inner: Result<i32, AppError>) -> (Result<i32, AppError>, u32) {
+        (inner.into_app_err_with(|| "more context added"), line!())
     }
 
-    let err = level3().unwrap_err();
+    let (result2, line2) = level2();
+    let (result3, line3) = level3(result2);
+    let err = result3.unwrap_err();
     let msg = err.to_string();
+    let expected_location2 = format!("{}:{}", file!(), line2);
+    let expected_location3 = format!("{}:{}", file!(), line3);
     assert!(msg.contains("root error"), "{msg}");
     assert!(msg.contains("> context added"), "{msg}");
     assert!(msg.contains("> more context added"), "{msg}");
+    assert!(msg.contains(&expected_location2), "{msg}");
+    assert!(msg.contains(&expected_location3), "{msg}");
 }
 
 #[test]
@@ -85,5 +96,5 @@ fn string_ref() {
 
     let err = fail().unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("failed operation"));
+    assert!(msg.contains("failed operation"), "{msg}");
 }
