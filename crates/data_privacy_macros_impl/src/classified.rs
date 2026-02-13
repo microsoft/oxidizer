@@ -35,6 +35,30 @@ impl Parse for MacroArgs {
     }
 }
 
+fn resolve_field(input: &ItemStruct) -> SynResult<(TokenStream, TokenStream)> {
+    match &input.fields {
+        Fields::Unnamed(unnamed_fields) => {
+            if unnamed_fields.unnamed.len() != 1 {
+                return Err(syn::Error::new_spanned(unnamed_fields, "Tuple struct must have exactly one field"));
+            }
+            let field_type = &unnamed_fields.unnamed.first().unwrap().ty;
+            Ok((quote!(self.0), quote!(#field_type)))
+        }
+
+        Fields::Named(named_fields) => {
+            if named_fields.named.len() != 1 {
+                return Err(syn::Error::new_spanned(named_fields, "Struct must have exactly one field"));
+            }
+            let field = named_fields.named.first().unwrap();
+            let field_name = field.ident.as_ref().unwrap();
+            let field_type = &field.ty;
+            Ok((quote!(self.#field_name), quote!(#field_type)))
+        }
+
+        Fields::Unit => Err(syn::Error::new_spanned(input, "Unit structs aren't supported")),
+    }
+}
+
 #[expect(
     missing_docs,
     clippy::missing_errors_doc,
@@ -48,22 +72,11 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
     let data_class = macro_args.data_class;
     let generics = &input.generics;
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let (field_access, field_type) = resolve_field(&input)?;
 
-    let unnamed_fields = match &input.fields {
-        Fields::Unnamed(unnamed_fields) => unnamed_fields,
-
-        Fields::Named(fields) => {
-            return Err(syn::Error::new_spanned(fields, "Named fields aren't supported"));
-        }
-
-        Fields::Unit => return Err(syn::Error::new_spanned(input, "Unit structs aren't supported")),
-    };
-
-    let field_count = unnamed_fields.unnamed.len();
-
-    if field_count != 1 {
-        return Err(syn::Error::new_spanned(unnamed_fields, "Tuple struct must have exactly one field"));
-    }
+    let existing_predicates = generics.where_clause.as_ref().map(|w| &w.predicates);
+    let debug_where_clause = quote!(where #existing_predicates #field_type: ::core::fmt::Debug);
+    let display_where_clause = quote!(where #existing_predicates #field_type: ::core::fmt::Display);
 
     Ok(quote! {
         #input
@@ -88,14 +101,14 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
             }
         }
 
-        impl #impl_generics ::data_privacy::RedactedDebug for #struct_name #ty_generics #where_clause {
+        impl #impl_generics ::data_privacy::RedactedDebug for #struct_name #ty_generics #debug_where_clause {
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
             )]
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 const STACK_BUFFER_SIZE: usize = 128;
-                let v = &self.0;
+                let v = &#field_access;
                 let dc = <Self as ::data_privacy::Classified>::data_class(self);
                 let mut local_buf = [0u8; STACK_BUFFER_SIZE];
                 let amount = {
@@ -115,14 +128,14 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
             }
         }
 
-        impl #impl_generics ::data_privacy::RedactedDisplay for #struct_name #ty_generics #where_clause {
+        impl #impl_generics ::data_privacy::RedactedDisplay for #struct_name #ty_generics #display_where_clause {
             #[expect(
                 clippy::cast_possible_truncation,
                 reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
             )]
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
                 const STACK_BUFFER_SIZE: usize = 128;
-                let v = &self.0;
+                let v = &#field_access;
                 let dc = <Self as ::data_privacy::Classified>::data_class(self);
                 let mut local_buf = [0u8; STACK_BUFFER_SIZE];
                 let amount = {

@@ -53,8 +53,7 @@ to tell over time that an operation is attributed to the same piece of state wit
 
 This crate is built around two primary traits:
 
-* The [`Classified`][__link0] trait is used to mark types that hold sensitive data. The trait exposes
-  explicit mechanisms to access the data in a safe and auditable way.
+* The [`Classified`][__link0] trait is used to mark types that hold sensitive data.
 
 * The [`Redactor`][__link1] trait defines the logic needed by an individual redactor. This crate provides a
   few implementations of this trait, such as [`SimpleRedactor`][__link2], but others can
@@ -192,7 +191,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_vJVWuNQIdLG1RbfSZVNVZ3G8Jil4LnevsRG20YH3-q9jKfYWSBgmxkYXRhX3ByaXZhY3lmMC4xMC4x
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3M_vhUtB5gFG-D1ZeP7gWyXGzaYsyQD3GO7GwPXvYMSh3Z2YWSBgmxkYXRhX3ByaXZhY3lmMC4xMC4x
  [__link0]: https://docs.rs/data_privacy/0.10.1/data_privacy/?search=Classified
  [__link1]: https://docs.rs/data_privacy/0.10.1/data_privacy/?search=Redactor
  [__link10]: https://docs.rs/data_privacy/0.10.1/data_privacy/?search=classified

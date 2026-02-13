@@ -2,25 +2,27 @@
 source: crates/data_privacy_macros_impl/tests/classified.rs
 expression: pretty
 ---
-struct EmailAddress(String);
-impl ::data_privacy::Classified for EmailAddress {
+struct Token {
+    value: String,
+}
+impl ::data_privacy::Classified for Token {
     fn data_class(&self) -> &::data_privacy::DataClass {
         ExampleTaxonomy::PersonallyIdentifiableInformation.as_ref()
     }
 }
-impl ::core::fmt::Debug for EmailAddress {
+impl ::core::fmt::Debug for Token {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let dc = <Self as ::data_privacy::Classified>::data_class(self);
         write!(f, "<CLASSIFIED:{}/{}>", dc.taxonomy(), dc.name())
     }
 }
-impl ::core::fmt::Display for EmailAddress {
+impl ::core::fmt::Display for Token {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let dc = <Self as ::data_privacy::Classified>::data_class(self);
         write!(f, "<CLASSIFIED:{}/{}>", dc.taxonomy(), dc.name())
     }
 }
-impl ::data_privacy::RedactedDebug for EmailAddress
+impl ::data_privacy::RedactedDebug for Token
 where
     String: ::core::fmt::Debug,
 {
@@ -34,7 +36,7 @@ where
         output: &mut ::std::fmt::Formatter<'_>,
     ) -> ::core::fmt::Result {
         const STACK_BUFFER_SIZE: usize = 128;
-        let v = &self.0;
+        let v = &self.value;
         let dc = <Self as ::data_privacy::Classified>::data_class(self);
         let mut local_buf = [0u8; STACK_BUFFER_SIZE];
         let amount = {
@@ -53,7 +55,7 @@ where
         }
     }
 }
-impl ::data_privacy::RedactedDisplay for EmailAddress
+impl ::data_privacy::RedactedDisplay for Token
 where
     String: ::core::fmt::Display,
 {
@@ -67,7 +69,7 @@ where
         output: &mut ::std::fmt::Formatter,
     ) -> ::core::fmt::Result {
         const STACK_BUFFER_SIZE: usize = 128;
-        let v = &self.0;
+        let v = &self.value;
         let dc = <Self as ::data_privacy::Classified>::data_class(self);
         let mut local_buf = [0u8; STACK_BUFFER_SIZE];
         let amount = {
@@ -86,13 +88,13 @@ where
         }
     }
 }
-impl core::ops::Deref for EmailAddress {
+impl core::ops::Deref for Token {
     type Target = ::core::convert::Infallible;
     fn deref(&self) -> &Self::Target {
         panic!("Deref to Infallible should never happen")
     }
 }
-impl ::core::ops::DerefMut for EmailAddress {
+impl ::core::ops::DerefMut for Token {
     fn deref_mut(&mut self) -> &mut Self::Target {
         panic!("Deref to Infallible should never happen")
     }
