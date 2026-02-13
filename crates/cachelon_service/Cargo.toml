@@ -1,0 +1,38 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cachelon_service"
+description = "A composable, customizable multi-tier caching library with rich feature support."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "caching", "concurrency"]
+categories = ["caching", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_service"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "cachelon_tier::entry::CacheEntry",
+    "cachelon_tier::error::Error",
+    "cachelon_tier::tier::CacheTier",
+    "layered::service::Service",
+]
+
+[dependencies]
+cachelon_tier = { path = "../cachelon_tier" }
+layered = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

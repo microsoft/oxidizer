@@ -263,7 +263,7 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::testing::MetricTester;
+    use testing_aids::MetricTester;
     use crate::{ResilienceContext, Set};
     use layered::Layer;
 
@@ -318,7 +318,7 @@ mod tests {
     async fn retry_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
+        use testing_aids::LogCapture;
 
         let log_capture = LogCapture::new();
         let _guard = log_capture.subscriber().set_default();

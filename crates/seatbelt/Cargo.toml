@@ -60,6 +60,7 @@ opentelemetry = { workspace = true, default-features = false, features = ["metri
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
 static_assertions.workspace = true
+testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 tracing.workspace = true
