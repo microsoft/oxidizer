@@ -20,33 +20,43 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         }
     }
 
-    pub fn ensure<O>(&mut self) -> &O
+    pub fn ensure<O, S>(&mut self) -> &O
     where
-        O: ResolveFrom<T>,
+        O: ResolveFrom<S>,
+        T: AsRef<S>,
     {
-        self.get::<O>()
+        self.get_through_source::<O, S>()
     }
 
-    pub fn try_get<O>(&self) -> Option<&O>
+    pub fn try_get<O, S>(&self) -> Option<&O>
     where
         O: ResolveFrom<T>,
     {
         self.types.get::<O>()
     }
 
-    pub fn get<O>(&mut self) -> &O
+    pub fn get_through_source<O, S>(&mut self) -> &O
     where
-        O: ResolveFrom<T>,
+        O: ResolveFrom<S>,
+        T: AsRef<S>,
     {
         // Weird way of doing this as I couldn't quickly figure out a good way to make lifetimes happy
-        if !self.types.contains::<O>() {
-            let inputs = <<O as ResolveFrom<T>>::Inputs as ResolutionDeps<T>>::get(self);
+        /*if !self.types.contains::<O>() {
+            let inputs = <<O as ResolveFrom<S>>::Inputs as ResolutionDeps<T>>::get(self);
             let result = O::new(inputs);
             return self.types.entry().or_insert(result);
-        }
+        }*/
 
         self.types
             .get::<O>()
             .expect("We checked that the map cointains this type, we still hold a mutable reference")
+    }
+
+    pub fn get<O>(&mut self) -> &O
+    where
+        O: ResolveFrom<T>,
+        T: AsRef<T>,
+    {
+        self.get_through_source::<O, T>()
     }
 }

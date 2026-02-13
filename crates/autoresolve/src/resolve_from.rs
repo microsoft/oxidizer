@@ -8,12 +8,11 @@ pub trait ResolveFrom<T>: Send + Sync + 'static {
 
 impl<T> ResolveFrom<T> for T
 where
-    T: Clone + Send + Sync + 'static,
+    T: AsRef<T> + Clone + Send + Sync + 'static,
 {
-    type Inputs = ResolutionDepsNode<T, ResolutionDepsEnd>;
+    type Inputs = ResolutionDepsNode<T, T, ResolutionDepsEnd>;
 
     fn new(input: <Self::Inputs as ResolutionDeps<T>>::Resolved<'_>) -> T {
-        let ResolutionDepsNode(value, ResolutionDepsEnd) = input;
-        value.clone()
+        input.0.clone()
     }
 }
