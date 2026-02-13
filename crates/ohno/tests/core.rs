@@ -66,6 +66,7 @@ fn test_detailed_enrich() {
     assert!(display.contains("first message"));
     assert!(display.contains("second message"));
     assert!(display.contains("third message"));
+    assert!(display.contains(file!()), "{display}");
 
     // Test enrichment iteration
     let enrichments: Vec<_> = error.enrichments().collect();
@@ -84,6 +85,7 @@ fn test_with_enrich() {
     let error_string = error.to_string();
     assert!(error_string.contains("computed: 42"));
     assert_eq!(error.enrichments().count(), 1);
+    assert!(error_string.contains(file!()), "{error_string}");
 }
 
 #[test]

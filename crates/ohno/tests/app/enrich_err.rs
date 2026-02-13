@@ -13,6 +13,7 @@ fn enrich_err_ext_simple() {
     let msg = err.to_string();
     assert!(msg.starts_with("connection failed"));
     assert!(msg.contains("database operation"));
+    assert!(msg.contains(file!()), "{msg}");
 }
 
 #[test]
@@ -22,6 +23,7 @@ fn enrich_err_ext_with() {
     let msg = err.to_string();
     assert!(msg.starts_with("not found"));
     assert!(msg.contains("failed to load user 123"));
+    assert!(msg.contains(file!()), "{msg}");
 }
 
 #[test]
@@ -33,6 +35,7 @@ fn enrich_err_ext_multiple_layers() {
     assert!(msg.starts_with("timeout"));
     assert!(msg.contains("http request"));
     assert!(msg.contains("api call"));
+    assert!(msg.contains(file!()), "{msg}");
 }
 
 #[test]
@@ -58,6 +61,7 @@ fn enrich_err_macro_with_simple_message() {
     let msg = err.to_string();
     assert!(msg.contains("invalid input"));
     assert!(msg.contains("failed to process request"));
+    assert!(msg.contains(file!()), "{msg}");
 }
 
 #[test]
