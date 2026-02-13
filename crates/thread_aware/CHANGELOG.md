@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.2] - 2026-02-13
+
+- ✨ Features
+
+  - introduce thread_aware::Arc::strong_count ([#253](https://github.com/microsoft/oxidizer/pull/253))
+
 ## [0.6.1] - 2026-01-20
 
 - ✨ Features
@@ -60,4 +66,3 @@
 - ✨ Features
 
   - Introduce the thread_aware crate ([#72](https://github.com/microsoft/oxidizer/pull/72))
-
