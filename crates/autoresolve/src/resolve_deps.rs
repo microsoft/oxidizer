@@ -5,61 +5,19 @@ pub struct ResolutionDepsEnd;
 
 pub struct ResolutionDepsNode<H, T>(pub H, pub T);
 
-trait ResolutionDepsPrivate<T>: Send + Sync + 'static {
-    type ResolvedPrivate<'a>
+pub trait ResolutionDeps<T>: Send + Sync + 'static {
+    type Resolved<'a>
     where
         Self: 'a,
         T: 'a;
 
     fn ensure(base: &mut Resolver<T>);
 
-    fn get_private(base: &Resolver<T>) -> Self::ResolvedPrivate<'_>;
-}
+    fn get_private(base: &Resolver<T>) -> Self::Resolved<'_>;
 
-#[expect(private_bounds)]
-pub trait ResolutionDeps<T>: ResolutionDepsPrivate<T> {
-    type Resolved<'a>
-    where
-        Self: 'a,
-        T: 'a;
-
-    fn get(base: &mut Resolver<T>) -> Self::Resolved<'_>;
-}
-
-impl<T> ResolutionDepsPrivate<T> for ResolutionDepsEnd {
-    type ResolvedPrivate<'a>
-        = ResolutionDepsEnd
-    where
-        Self: 'a,
-        T: 'a;
-
-    fn ensure(_base: &mut Resolver<T>) {}
-
-    fn get_private(_base: &Resolver<T>) -> Self::ResolvedPrivate<'_> {
-        ResolutionDepsEnd
-    }
-}
-
-impl<T, H, Rest> ResolutionDepsPrivate<T> for ResolutionDepsNode<H, Rest>
-where
-    H: ResolveFrom<T>,
-    Rest: ResolutionDeps<T>,
-    T: Send + Sync + 'static,
-{
-    type ResolvedPrivate<'a>
-        = ResolutionDepsNode<&'a H, Rest::ResolvedPrivate<'a>>
-    where
-        Self: 'a,
-        T: 'a;
-    fn get_private(base: &Resolver<T>) -> Self::ResolvedPrivate<'_> {
-        let tail = Rest::get_private(base);
-        let head = base.try_get::<H>().expect("Ensure must have been called before new");
-        ResolutionDepsNode(head, tail)
-    }
-
-    fn ensure(base: &mut Resolver<T>) {
-        base.ensure::<H>();
-        Rest::ensure(base);
+    fn get(base: &mut Resolver<T>) -> Self::Resolved<'_> {
+        Self::ensure(base);
+        Self::get_private(base)
     }
 }
 
@@ -70,17 +28,17 @@ impl<T> ResolutionDeps<T> for ResolutionDepsEnd {
         Self: 'a,
         T: 'a;
 
-    fn get(base: &mut Resolver<T>) -> Self::Resolved<'_> {
-        Self::ensure(base);
-        Self::get_private(base)
+    fn ensure(_base: &mut Resolver<T>) {}
+
+    fn get_private(_base: &Resolver<T>) -> Self::Resolved<'_> {
+        ResolutionDepsEnd
     }
 }
 
 impl<T, H, Rest> ResolutionDeps<T> for ResolutionDepsNode<H, Rest>
 where
-    Rest: ResolutionDeps<T>,
-    for<'a> Rest: ResolutionDepsPrivate<T, ResolvedPrivate<'a> = Rest::Resolved<'a>>,
     H: ResolveFrom<T>,
+    Rest: ResolutionDeps<T>,
     T: Send + Sync + 'static,
 {
     type Resolved<'a>
@@ -88,9 +46,14 @@ where
     where
         Self: 'a,
         T: 'a;
+    fn get_private(base: &Resolver<T>) -> Self::Resolved<'_> {
+        let tail = Rest::get_private(base);
+        let head = base.try_get::<H>().expect("Ensure must have been called before new");
+        ResolutionDepsNode(head, tail)
+    }
 
-    fn get(base: &mut Resolver<T>) -> Self::Resolved<'_> {
-        Self::ensure(base);
-        Self::get_private(base)
+    fn ensure(base: &mut Resolver<T>) {
+        base.ensure::<H>();
+        Rest::ensure(base);
     }
 }
