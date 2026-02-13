@@ -20,6 +20,9 @@ allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "futures_core::stream::Stream",
+    "thread_aware::core::ThreadAware",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
 ]
 
 [package.metadata.docs.rs]
@@ -41,6 +44,7 @@ futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
+thread_aware.workspace = true
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]

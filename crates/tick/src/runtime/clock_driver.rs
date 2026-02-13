@@ -10,12 +10,18 @@ use crate::{runtime::ClockGone, state::ClockState};
 /// The `ClockDriver` is responsible for advancing and firing timers associated with
 /// the clock. The runtime must call [`ClockDriver::advance_timers`] periodically to
 /// ensure timers fire at the correct time.
+///
+/// In thread-per-core architectures, each thread owns its own `ClockDriver` that advances
+/// only the timers registered on that thread's [`Clock`][crate::Clock]. See the
+/// [`runtime`][crate::runtime] module for the setup pattern.
 #[derive(Debug)]
-pub struct ClockDriver(pub(crate) ClockState);
+pub struct ClockDriver {
+    pub(crate) state: ClockState,
+}
 
 impl ClockDriver {
     pub(super) const fn new(state: ClockState) -> Self {
-        Self(state)
+        Self { state }
     }
 
     /// Advances and fires all timers scheduled to execute by the given time.
@@ -30,7 +36,7 @@ impl ClockDriver {
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     #[expect(clippy::needless_pass_by_ref_mut, reason = "the mut forces exclusive ownership of the driver")]
     pub fn advance_timers(&mut self, now: Instant) -> Result<Option<Instant>, ClockGone> {
-        let next_timer = match &self.0 {
+        let next_timer = match &self.state {
             ClockState::System(timers) => timers.try_advance_timers(now),
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.next_timer(),
@@ -39,7 +45,7 @@ impl ClockDriver {
         match next_timer {
             Some(next) => Ok(Some(next)),
             // Check if this is the last reference to the clock state
-            None if self.0.is_unique() => Err(ClockGone::new()),
+            None if self.state.is_unique() => Err(ClockGone::new()),
             None => Ok(None),
         }
     }
@@ -66,9 +72,9 @@ mod tests {
 
     #[test]
     fn advance_timers_ok() {
-        let timers = SynchronizedTimers::default();
+        let timers = SynchronizedTimers::new();
         let when = Instant::now();
-        timers.with_timers(|timers| {
+        timers.with_timers::<_, ()>(|timers| {
             timers.register(when, Waker::noop().clone());
         });
 
