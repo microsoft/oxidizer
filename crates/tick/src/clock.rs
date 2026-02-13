@@ -473,7 +473,7 @@ mod tests {
     use std::{fmt::Debug, task::Context, thread::sleep};
 
     use futures::FutureExt;
-    use thread_aware::affinity::{MemoryAffinity, pinned_affinities};
+    use thread_aware::affinity::pinned_affinities;
 
     use crate::{ClockControl, runtime::InactiveClock};
 
@@ -683,5 +683,30 @@ mod tests {
         driver_2.advance_timers(Instant::now()).unwrap();
         drop(clock_2);
         driver_2.advance_timers(Instant::now()).unwrap_err();
+    }
+
+    #[test]
+    fn thread_aware_clock_control() {
+        let affinites = pinned_affinities(&[1, 1]);
+        let source: MemoryAffinity = affinites[0].into();
+        let pinned_1 = affinites[0];
+        let pinned_2 = affinites[1];
+
+        // root clock
+        let root: InactiveClock = ClockControl::default().into();
+
+        let inactive_1 = root.clone().relocated(source, pinned_1);
+        let inactive_2 = root.relocated(source, pinned_2);
+
+        let (clock_1, driver_1) = inactive_1.activate();
+        let (clock_2, driver_2) = inactive_2.activate();
+
+        // register the timer on clock 1 also affects clock 2 because clock control is shared
+        let mut fut_1 = Box::pin(clock_1.delay(Duration::from_secs(100)));
+        _ = fut_1.poll_unpin(&mut Context::from_waker(Waker::noop()));
+        assert_eq!(clock_1.state.timers_len(), 1);
+        assert_eq!(clock_2.state.timers_len(), 1);
+        assert_eq!(driver_1.state.timers_len(), 1);
+        assert_eq!(driver_2.state.timers_len(), 1);
     }
 }
