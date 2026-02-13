@@ -91,7 +91,7 @@ use crate::timers::TimerKey;
 ///   [`ClockDriver`][crate::runtime::ClockDriver].
 ///
 /// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
-///   controlled time state regardless of which thread they are on. This is intentional — a single
+///   controlled time state regardless of which thread they are on. This is intentional, a single
 ///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
 ///   across threads.
 ///

@@ -122,7 +122,7 @@
 //! [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with no
 //! cross-thread lock contention.
 //!
-//! [`ClockControl`] clocks are unaffected by relocation — all clones always share the same
+//! [`ClockControl`] clocks are unaffected by relocation, all clones always share the same
 //! controlled time state regardless of thread, so a single `ClockControl` can drive time for
 //! the entire test.
 //!

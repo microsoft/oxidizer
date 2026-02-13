@@ -18,7 +18,7 @@
 //! ## Thread-per-core Runtimes
 //!
 //! In thread-per-core architectures, each thread should own an isolated clock with its own
-//! timer storage. This eliminates cross-thread lock contention and provides linear scalability.
+//! timer storage. This eliminates cross-thread lock contention and scales linearly.
 //!
 //! The pattern is to clone the [`InactiveClock`], relocate each clone to its target thread
 //! using [`ThreadAware::relocated`], and then activate:
@@ -42,7 +42,7 @@
 //! ```
 //!
 //! After relocation, each thread's clock and driver operate on an independent set of timers.
-//! Timers registered on `clock_1` are only visible to `driver_1`, and vice versa. Each driver
+//! Timers registered on `clock_1` are only visible to `driver_1`, and the other way around. Each driver
 //! must be advanced independently by its owning thread.
 //!
 //! ## Multi-threaded Runtimes
