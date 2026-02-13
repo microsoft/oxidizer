@@ -11,9 +11,10 @@ use ohno::{EnrichableExt, enrich_err};
 fn enrich_err_ext_simple() {
     let err = app_err!("connection failed").enrich("database operation");
     let msg = err.to_string();
-    assert!(msg.starts_with("connection failed"));
-    assert!(msg.contains("database operation"));
-    assert!(msg.contains(file!()), "{msg}");
+    let lines: Vec<_> = msg.lines().collect();
+    assert_eq!(lines[0], "connection failed");
+    assert!(lines[1].starts_with("> database operation"), "{msg}");
+    assert!(lines[1].contains(file!()), "{msg}");
 }
 
 #[test]
@@ -21,9 +22,10 @@ fn enrich_err_ext_with() {
     let user_id = 123;
     let err = app_err!("not found").enrich_with(|| format!("failed to load user {user_id}"));
     let msg = err.to_string();
-    assert!(msg.starts_with("not found"));
-    assert!(msg.contains("failed to load user 123"));
-    assert!(msg.contains(file!()), "{msg}");
+    let lines: Vec<_> = msg.lines().collect();
+    assert_eq!(lines[0], "not found");
+    assert!(lines[1].starts_with("> failed to load user 123"), "{msg}");
+    assert!(lines[1].contains(file!()), "{msg}");
 }
 
 #[test]
@@ -32,10 +34,12 @@ fn enrich_err_ext_multiple_layers() {
     let ctx1 = base.enrich("http request");
     let ctx2 = ctx1.enrich_with(|| "api call");
     let msg = ctx2.to_string();
-    assert!(msg.starts_with("timeout"));
-    assert!(msg.contains("http request"));
-    assert!(msg.contains("api call"));
-    assert!(msg.contains(file!()), "{msg}");
+    let lines: Vec<_> = msg.lines().collect();
+    assert_eq!(lines[0], "timeout");
+    assert!(lines[1].starts_with("> http request"), "{msg}");
+    assert!(lines[1].contains(file!()), "{msg}");
+    assert!(lines[2].starts_with("> api call"), "{msg}");
+    assert!(lines[2].contains(file!()), "{msg}");
 }
 
 #[test]
