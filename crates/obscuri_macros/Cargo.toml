@@ -1,0 +1,26 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "obscuri_macros"
+description = "Macros for the obscuri crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "url", "parsing", "templates", "uri"]
+categories = ["encoding", "parser-implementations", "template-engine", "web-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/obscuri_macros"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+obscuri_macros_impl.workspace = true
+
+[lints]
+workspace = true

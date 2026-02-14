@@ -1,0 +1,43 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "obscuri"
+description = "Standards-compliant URI handling with templating, safety validation, and data classification"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "url", "psrsing", "templates", "uri"]
+categories = ["encoding", "parser-implementations", "template-engine", "web-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/obscuri"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+data_privacy.workspace = true
+http.workspace = true
+obscuri_macros.workspace = true
+ohno.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+mutants.workspace = true
+static_assertions.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "classified_templating"
+path = "examples/classified_templating.rs"
+
+[[example]]
+name = "uri_templating"
+path = "examples/uri_templating.rs"
