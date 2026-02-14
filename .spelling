@@ -126,6 +126,7 @@ gRPC
 Hardcoded
 hashers
 hedges
+hostname
 hotfix
 hotfixes
 How-tos
@@ -266,6 +267,9 @@ sys
 syscall
 sysinfo
 tdnf
+templated
+Templated
+templating
 testability
 timestamp
 timestamps
@@ -297,6 +301,11 @@ unregistered
 unregisters
 unsized
 untrusted
+Uri
+URI
+URIs
+URL
+URLs
 UTC
 UTF-8
 v4
