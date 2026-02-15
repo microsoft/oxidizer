@@ -11,8 +11,8 @@ use std::{iter, ptr};
 
 use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use nm::{Event, Magnitude};
-use thread_aware::{PerCore, ThreadAware};
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::{PerCore, ThreadAware};
 
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
@@ -45,8 +45,8 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// # }
 /// ```
 ///
-/// Buffers dropped on different cores return to the pool on that core, not the original
-/// allocation core. Without relocation, all clones share a single mutex-protected pool instance.
+/// Buffers dropped on different cores return to the pool on the original
+/// allocation core.
 #[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
 #[derive(Clone, Debug)]
 pub struct GlobalPool {
