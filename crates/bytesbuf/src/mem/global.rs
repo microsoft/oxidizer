@@ -11,6 +11,8 @@ use std::{iter, ptr};
 
 use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use nm::{Event, Magnitude};
+use thread_aware::{PerCore, ThreadAware};
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
@@ -20,10 +22,43 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 ///
 /// For clarity, the pool itself is not in any way global - rather the word "global" in the name
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
+///
+/// # Thread-aware relocation
+///
+/// `GlobalPool` implements [`ThreadAware`](thread_aware::ThreadAware), supporting per-core
+/// buffer caching in thread-per-core runtime architectures.
+///
+/// When relocated to a target thread, the underlying buffer pools are duplicated per core.
+/// After relocation, each core operates on independent buffers with no cross-thread lock contention.
+///
+/// ```
+/// use thread_aware::ThreadAware;
+/// use thread_aware::affinity::pinned_affinities;
+/// use bytesbuf::mem::GlobalPool;
+///
+/// # fn example() {
+/// let affinities = pinned_affinities(&[1, 1]);
+/// let root = GlobalPool::new();
+///
+/// let pool_core0 = root.clone().relocated(affinities[0].into(), affinities[0]);
+/// let pool_core1 = root.relocated(affinities[1].into(), affinities[1]);
+/// # }
+/// ```
+///
+/// Buffers dropped on different cores return to the pool on that core, not the original
+/// allocation core. Without relocation, all clones share a single mutex-protected pool instance.
 #[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
 #[derive(Clone, Debug)]
 pub struct GlobalPool {
-    inner: Arc<GlobalPoolInner>,
+    inner: thread_aware::Arc<GlobalPoolInner, PerCore>,
+}
+
+impl ThreadAware for GlobalPool {
+    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        Self {
+            inner: self.inner.relocated(source, destination),
+        }
+    }
 }
 
 impl GlobalPool {
@@ -36,6 +71,14 @@ impl GlobalPool {
     ///
     /// Clones of a pool act as shared handles and share the memory capacity - feel free to clone
     /// as needed for convenient referencing purposes.
+    ///
+    /// # Thread-per-Core Optimization
+    ///
+    /// For thread-per-core architectures, use [`ThreadAware::relocated`] to create per-core
+    /// instances of the pool. This eliminates lock contention by giving each core its own
+    /// independent buffer cache.
+    ///
+    /// [`ThreadAware::relocated`]: thread_aware::ThreadAware::relocated
     #[must_use]
     #[expect(
         clippy::new_without_default,
@@ -43,7 +86,7 @@ impl GlobalPool {
     )]
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(GlobalPoolInner::new()),
+            inner: thread_aware::Arc::new(GlobalPoolInner::new),
         }
     }
 
@@ -669,5 +712,31 @@ mod tests {
 
         let buf = memory.reserve(66_036);
         assert_eq!(buf.capacity(), 65_536 * 2);
+    }
+
+    #[test]
+    fn thread_aware_per_core_isolation() {
+        use thread_aware::ThreadAware;
+        use thread_aware::affinity::pinned_affinities;
+
+        let affinities = pinned_affinities(&[2]);
+        let source = affinities[0].into();
+        let dest = affinities[0];
+
+        let pool1 = GlobalPool::new();
+        let pool2 = pool1.clone().relocated(source, dest);
+
+        // Allocate from pool1
+        let mut buf1 = pool1.reserve(1024);
+        buf1.put_byte_repeated(42, 1024);
+        let _view1 = buf1.consume_all();
+
+        // Allocate from pool2 (different per-core instance)
+        let mut buf2 = pool2.reserve(1024);
+        buf2.put_byte_repeated(99, 1024);
+        let _view2 = buf2.consume_all();
+
+        // Both pools should work independently without contention
+        // This test mainly ensures compilation and basic functionality
     }
 }
