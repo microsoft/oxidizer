@@ -107,6 +107,12 @@ impl Display for BasePath {
     }
 }
 
+impl From<BasePath> for PathAndQuery {
+    fn from(base_path: BasePath) -> Self {
+        base_path.inner
+    }
+}
+
 #[cfg(test)]
 mod test {
     use ohno::ErrorExt;

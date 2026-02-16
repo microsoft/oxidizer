@@ -535,6 +535,62 @@ mod tests {
     }
 
     #[test]
+    fn test_redacted_debug_uri() {
+        let insensitive_paq = |paq: &'static str| TargetPathAndQuery::from_path_and_query(PathAndQuery::from_static(paq));
+
+        let redaction_engine = RedactionEngine::builder().build();
+
+        // Test with base URI and path and query
+        let base_uri = BaseUri::from_uri_static("https://example.com/api/v1/");
+        let paq = insensitive_paq("/sensitive/path?query=secret");
+        let uri = Uri::default().base_uri(base_uri.clone()).path_and_query(paq);
+
+        let mut redacted_debug = String::new();
+        redaction_engine.redacted_debug(&uri, &mut redacted_debug).unwrap();
+        assert_eq!(
+            redacted_debug, "https://example.com/api/v1/*",
+            "RedactedDebug should redact the path and query with asterisk"
+        );
+
+        // Test with path and query only (no base URI)
+        let paq_only = insensitive_paq("/sensitive/path");
+        let uri_no_base = Uri::default().path_and_query(paq_only);
+
+        let mut redacted_debug = String::new();
+        redaction_engine.redacted_debug(&uri_no_base, &mut redacted_debug).unwrap();
+        assert_eq!(redacted_debug, "*", "RedactedDebug should redact path-only URI to asterisk");
+
+        // Test with base URI only (no path and query)
+        let uri_base_only = Uri::default().base_uri(base_uri);
+
+        let mut redacted_debug = String::new();
+        redaction_engine.redacted_debug(&uri_base_only, &mut redacted_debug).unwrap();
+        assert_eq!(
+            redacted_debug, "https://example.com/api/v1/",
+            "RedactedDebug should show base URI when no path and query is present"
+        );
+
+        // Test empty URI
+        let empty_uri = Uri::default();
+        let mut redacted_debug = String::new();
+        redaction_engine.redacted_debug(&empty_uri, &mut redacted_debug).unwrap();
+        assert_eq!(redacted_debug, "", "RedactedDebug should return empty string for empty URI");
+
+        // Test with path that doesn't have leading slash
+        let paq_no_slash = insensitive_paq("sensitive/path");
+        let uri_no_slash = Uri::default()
+            .base_uri(BaseUri::from_uri_static("https://example.com/api/"))
+            .path_and_query(paq_no_slash);
+
+        let mut redacted_debug = String::new();
+        redaction_engine.redacted_debug(&uri_no_slash, &mut redacted_debug).unwrap();
+        assert_eq!(
+            redacted_debug, "https://example.com/api/*",
+            "RedactedDebug should handle paths without leading slash and avoid double slashes"
+        );
+    }
+
+    #[test]
     fn to_http_uri() {
         let uri = Uri::from_str("https://example.com/path?query=1").unwrap();
         let http_uri = uri.to_http_uri().unwrap();
@@ -547,5 +603,65 @@ mod tests {
         let uri = Uri::from_str("https://example.com/path?query=1").unwrap();
         let http_uri = uri.into_http_uri().unwrap();
         assert_eq!(http_uri.to_string(), "https://example.com/path?query=1");
+    }
+
+    #[test]
+    fn test_try_from_uri_to_http_uri_base_only() {
+        // Test match arm: (Some(base_uri), None)
+        let base_uri = BaseUri::from_uri_static("https://example.com/api/");
+        let uri = Uri::default().base_uri(base_uri);
+
+        let http_uri: http::Uri = uri.try_into().unwrap();
+        assert_eq!(http_uri.to_string(), "https://example.com/api/");
+    }
+
+    #[test]
+    fn test_try_from_uri_to_http_uri_path_only() {
+        // Test match arm: (None, Some(pq))
+        let path_and_query = PathAndQuery::from_static("/path?query=value");
+        let uri = Uri::default().path_and_query(path_and_query);
+
+        let http_uri: http::Uri = uri.try_into().unwrap();
+        assert_eq!(http_uri.to_string(), "/path?query=value");
+    }
+
+    #[test]
+    fn test_try_from_uri_to_target_path_and_query_error() {
+        // Test error case when URI has no path and query
+        let uri = Uri::default().base_uri(BaseUri::from_uri_static("https://example.com/"));
+
+        let result: Result<TargetPathAndQuery, ValidationError> = uri.try_into();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("does not have a path and query component"));
+    }
+
+    #[test]
+    fn test_try_from_uri_to_target_path_and_query_success() {
+        // Test successful conversion when URI has path and query
+        let path_and_query = PathAndQuery::from_static("/test/path?query=value");
+        let uri = Uri::default().path_and_query(path_and_query);
+
+        let target_paq: TargetPathAndQuery = uri.try_into().unwrap();
+        assert_eq!(target_paq.to_uri_string(), "/test/path?query=value");
+    }
+
+    #[test]
+    fn test_try_from_uri_to_path_and_query_success() {
+        // Test successful conversion when URI has path and query
+        let path_and_query = PathAndQuery::from_static("/success/path");
+        let uri = Uri::default().path_and_query(path_and_query);
+
+        let paq: PathAndQuery = uri.try_into().unwrap();
+        assert_eq!(paq.to_string(), "/success/path");
+    }
+
+    #[test]
+    fn test_try_from_uri_to_path_and_query_error() {
+        // Test error case when URI has no path and query
+        let uri = Uri::default().base_uri(BaseUri::from_uri_static("https://example.com/"));
+
+        let result: Result<PathAndQuery, ValidationError> = uri.try_into();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("does not have a path and query component"));
     }
 }

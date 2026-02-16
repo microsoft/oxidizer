@@ -69,6 +69,16 @@ impl Origin {
     }
 
     /// Set port for this `Origin` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use obscuri::Origin;
+    /// let origin = Origin::new("https", "example.com").unwrap();
+    /// let origin_with_port = origin.with_port(8443);
+    /// assert_eq!(origin_with_port.port(), 8443);
+    /// assert_eq!(format!("{}", origin_with_port), "https://example.com:8443");
+    /// ```
     #[expect(
         clippy::expect_used,
         reason = "the host is always valid, and we are even stricter about valid port than http crate, so this should never fail"
@@ -132,5 +142,23 @@ mod tests {
 
         let origin_explicit = Origin::new("https", "example.com:8443").unwrap();
         assert_eq!(origin_explicit.port(), 8443);
+    }
+
+    #[test]
+    fn test_origin_display() {
+        // Default ports omitted
+        let origin_http = Origin::new("http", "example.com").unwrap();
+        assert_eq!(format!("{origin_http}"), "http://example.com");
+
+        let origin_https = Origin::new("https", "example.com:443").unwrap();
+        assert_eq!(format!("{origin_https}"), "https://example.com");
+
+        // Custom ports included
+        let origin_custom = Origin::new("https", "example.com:8443").unwrap();
+        assert_eq!(format!("{origin_custom}"), "https://example.com:8443");
+
+        // IPv6 with custom port
+        let origin_ipv6 = Origin::new("https", "[::1]:8443").unwrap();
+        assert_eq!(format!("{origin_ipv6}"), "https://[::1]:8443");
     }
 }

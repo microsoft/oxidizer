@@ -22,5 +22,8 @@ proc-macro = true
 [dependencies]
 obscuri_macros_impl.workspace = true
 
+[dev-dependencies]
+mutants.workspace = true
+
 [lints]
 workspace = true
