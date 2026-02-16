@@ -16,6 +16,28 @@ license.workspace = true
 homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/obscuri"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "data_privacy::data_class::DataClass",
+    "data_privacy::redacted::RedactedDebug",
+    "data_privacy::redacted::RedactedDisplay",
+    "data_privacy::redaction_engine::RedactionEngine",
+    "data_privacy::sensitive::Sensitive",
+    "http::error::Error",
+    "http::uri::authority::Authority",
+    "http::uri::InvalidUri",
+    "http::uri::InvalidUriParts",
+    "http::uri::Parts",
+    "http::uri::path::PathAndQuery",
+    "http::uri::scheme::Scheme",
+    "http::uri::Uri",
+    "obscuri_macros::templated",
+    "obscuri_macros::UriFragment",
+    "obscuri_macros::UriUnsafeFragment",
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
