@@ -623,7 +623,7 @@ impl From<BaseUri> for http::Uri {
         let mut parts = Parts::default();
         parts.scheme = Some(value.origin.scheme);
         parts.authority = Some(value.origin.authority);
-        parts.path_and_query = Some(PathAndQuery::from_static("/"));
+        parts.path_and_query = Some(value.path.into());
 
         Self::from_parts(parts).expect("all inputs are already validated, this call never fails")
     }

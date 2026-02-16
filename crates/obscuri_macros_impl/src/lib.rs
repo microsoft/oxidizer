@@ -637,6 +637,26 @@ mod tests {
     }
 
     #[test]
+    fn test_enum_single_item_only_error() {
+        let attr = quote! {};
+        let item = quote! {
+            enum TestEnum {
+                Variant1(String, String),
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert_snapshot!(output_pretty, @r#"
+        enum TestEnum {
+            Variant1(String, String),
+        }
+        ::core::compile_error! {
+            "TemplatedUri enum variants must have exactly one field containing a TemplatedUri struct"
+        }
+        "#);
+    }
+
+    #[test]
     fn test_template_enum_impl() {
         let attr = quote! {};
         let item = quote! {
