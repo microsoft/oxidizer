@@ -41,7 +41,7 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         // Weird way of doing this as I couldn't quickly figure out a good way to make lifetimes happy
         if !self.types.contains::<O>() {
             let inputs = <<O as ResolveFrom<T>>::Inputs as ResolutionDeps<T>>::get(self);
-            let result = O::new(inputs);
+            let result = O::new_resolved_from(inputs);
             return self.types.entry().or_insert(result);
         }
 
