@@ -21,10 +21,19 @@ impl<'a> UriTemplate<'a> {
             .repeated()
             .collect::<Vec<TemplatePart<'a>>>()
             .validate(|parts, e, em| {
+                let Some(first_part) = parts.first() else {
+                    em.emit(Rich::custom(e.span(), "template cannot be empty"));
+                    return parts;
+                };
+
+                let first_part = if let TemplatePart::Content(first) = first_part {
+                    first.as_str()
+                } else {
+                    ""
+                };
+
                 // make sure the template starts with a slash
-                if let Some(TemplatePart::Content(first)) = parts.first()
-                    && !first.starts_with('/')
-                {
+                if !first_part.starts_with('/') {
                     em.emit(Rich::custom(e.span(), "template has to start with '/'"));
                 }
                 parts
@@ -329,11 +338,38 @@ mod test {
 
     #[test]
     fn test_parser_err() {
-        let input = "{first}/{+param1,param2}/{;param3,param4}/{^query2,query3}/{.dot1,dot2}{/slash1,slash2}{#fragment}";
+        let input = "/{first}/{+param1,param2}/{;param3,param4}/{^query2,query3}/{.dot1,dot2}{/slash1,slash2}{#fragment}";
         let result = UriTemplate::parse(input);
         assert_eq!(
             result.unwrap_err().message(),
-            "Failed to parse URI: [found ''^'' at 43..44 expected ''+'', ''#'', '';'', ''?'', ''&'', ''.'', ''/'', or comma separated parameters]"
+            "Failed to parse URI: [found ''^'' at 44..45 expected ''+'', ''#'', '';'', ''?'', ''&'', ''.'', ''/'', or comma separated parameters]"
+        );
+    }
+
+    #[test]
+    fn starts_with_slash_err() {
+        let input = "first";
+        let result = UriTemplate::parse(input);
+        assert_eq!(
+            result.unwrap_err().message(),
+            "Failed to parse URI: [template has to start with '/' at 0..5]"
+        );
+
+        let input = "{first}"; // The same with parameter group
+        let result = UriTemplate::parse(input);
+        assert_eq!(
+            result.unwrap_err().message(),
+            "Failed to parse URI: [template has to start with '/' at 0..7]"
+        );
+    }
+
+    #[test]
+    fn cant_be_empty() {
+        let input = "";
+        let result = UriTemplate::parse(input);
+        assert_eq!(
+            result.unwrap_err().message(),
+            "Failed to parse URI: [template cannot be empty at 0..0]"
         );
     }
 }

@@ -92,3 +92,23 @@ where
         self.declassify_ref()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uri_unsafe_fragment_string() {
+        let value = String::from("test_value");
+        let display = value.as_display();
+        assert_eq!(format!("{display}"), "test_value");
+    }
+
+    #[test]
+    fn test_uri_fragment_unsigned_integer() {
+        let value: u32 = 42;
+        let uri_safe = value.as_uri_safe();
+        assert_eq!(format!("{uri_safe}"), "42");
+    }
+}
+

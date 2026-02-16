@@ -1293,6 +1293,7 @@ dependencies = [
 name = "obscuri_macros"
 version = "0.1.0"
 dependencies = [
+ "mutants",
  "obscuri_macros_impl",
 ]
 
