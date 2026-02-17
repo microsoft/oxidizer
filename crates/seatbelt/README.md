@@ -93,30 +93,48 @@ for each module for details on how to use them.
 
 ## Tower Compatibility
 
-All resilience middleware ([`timeout::Timeout`][__link11], [`retry::Retry`][__link12], [`breaker::Breaker`][__link13]) are
-compatible with the Tower ecosystem when the `tower-service` feature is enabled. This allows
-you to use `tower::ServiceBuilder` to compose middleware stacks:
+All resilience middleware are compatible with the Tower ecosystem when the `tower-service`
+feature is enabled. This allows you to use `tower::ServiceBuilder` to compose middleware stacks:
 
 ```rust
+use seatbelt::retry::Retry;
+use seatbelt::timeout::Timeout;
+use seatbelt::{RecoveryInfo, ResilienceContext};
 use tower::ServiceBuilder;
 
+let context: ResilienceContext<String, Result<String, String>> =
+    ResilienceContext::new(&clock);
+
 let service = ServiceBuilder::new()
-    .layer(Retry::layer("my_retry", &context).clone_input().recovery_with(classify))
-    .layer(Timeout::layer("my_timeout", &context).timeout(Duration::from_secs(30)).timeout_output(on_timeout))
-    .service(my_inner_service);
+    .layer(
+        Retry::layer("my_retry", &context)
+            .clone_input()
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(_) => RecoveryInfo::retry(),
+            }),
+    )
+    .layer(
+        Timeout::layer("my_timeout", &context)
+            .timeout(Duration::from_secs(30))
+            .timeout_error(|_| "operation timed out".to_string()),
+    )
+    .service_fn(|input: String| async move {
+        Ok::<_, String>(format!("processed: {input}"))
+    });
 ```
 
 ## Features
 
 This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-* **`timeout`** - Enables the [`timeout`][__link14] middleware for canceling long-running operations.
-* **`retry`** - Enables the [`retry`][__link15] middleware for automatically retrying failed operations with
+* **`timeout`** - Enables the [`timeout`][__link11] middleware for canceling long-running operations.
+* **`retry`** - Enables the [`retry`][__link12] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`breaker`** - Enables the [`breaker`][__link16] middleware for preventing cascading failures.
+* **`breaker`** - Enables the [`breaker`][__link13] middleware for preventing cascading failures.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
-* **`tower-service`** - Enables [`tower_service::Service`][__link17] trait implementations for all
+* **`tower-service`** - Enables [`tower_service::Service`][__link14] trait implementations for all
   resilience middleware.
 
 
@@ -125,17 +143,14 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4oOVs9mHugyG0ly9d9LY5SbGyq6yhT5OnYbGxrlPrn7H5Z7YWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjKCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4m9a89kCnclG9jGIjV2D_1yGzTaydkW8mVgG84_sI5bv3pNYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4yLjCCZHRpY2tlMC4xLjKCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.2.0/seatbelt/breaker/index.html
- [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=timeout::Timeout
- [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=retry::Retry
- [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=breaker::Breaker
- [__link14]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
- [__link15]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
- [__link16]: https://docs.rs/seatbelt/0.2.0/seatbelt/breaker/index.html
- [__link17]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
+ [__link11]: https://docs.rs/seatbelt/0.2.0/seatbelt/timeout/index.html
+ [__link12]: https://docs.rs/seatbelt/0.2.0/seatbelt/retry/index.html
+ [__link13]: https://docs.rs/seatbelt/0.2.0/seatbelt/breaker/index.html
+ [__link14]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
  [__link2]: https://docs.rs/tick/0.1.2/tick/?search=Clock
  [__link3]: https://crates.io/crates/tick/0.1.2
  [__link4]: https://docs.rs/seatbelt/0.2.0/seatbelt/?search=ResilienceContext
