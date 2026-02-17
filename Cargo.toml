@@ -33,7 +33,7 @@ fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.3.0" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.3.1" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.3.0" }
