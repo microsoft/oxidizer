@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - 2026-02-16
+
+- ✔️ Tasks
+
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+
+- 🔄 Continuous Integration
+
+  - automatically publish release notes ([#247](https://github.com/microsoft/oxidizer/pull/247))
+
 ## [0.2.0] - 2026-01-28
 
 - 📚 Documentation
