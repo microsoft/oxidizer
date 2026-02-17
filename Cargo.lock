@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ohno",
  "static_assertions",
