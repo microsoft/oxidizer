@@ -92,10 +92,10 @@ impl Rfc2822 {
     /// This represents a Unix system time at `31 December 9999 23:59:59 UTC`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
-    /// The smallest value that can be represented by `Rfc2822`.
+    /// The Unix epoch represented as `Rfc2822`.
     ///
-    /// This represents a Unix system time at `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Timestamp::UNIX_EPOCH);
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
+    pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 
     pub(super) fn to_unix_epoch_duration(self) -> Duration {
         self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()

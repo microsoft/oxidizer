@@ -60,10 +60,10 @@ impl UnixSeconds {
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
 
-    /// The smallest value that can be represented by `UnixSeconds`.
+    /// The Unix epoch represented as `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC` (Unix epoch).
-    pub const MIN: Self = Self(Duration::ZERO);
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
+    pub const UNIX_EPOCH: Self = Self(Duration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
     ///
@@ -292,8 +292,8 @@ mod tests {
         let iso: Iso8601 = UnixSeconds::MAX.into();
         assert_eq!(iso, Iso8601::MAX);
 
-        let iso: Iso8601 = UnixSeconds::MIN.into();
-        assert_eq!(iso, Iso8601::MIN);
+        let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
+        assert_eq!(iso, Iso8601::UNIX_EPOCH);
     }
 
     #[test]
