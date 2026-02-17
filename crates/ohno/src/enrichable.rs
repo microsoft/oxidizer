@@ -47,6 +47,7 @@ pub trait EnrichableExt: Enrichable {
     /// It uses [`Location::caller`](std::panic::Location::caller) to capture the file and line number
     /// where this method is invoked.
     #[must_use]
+    #[track_caller]
     fn enrich(mut self, msg: impl Into<Cow<'static, str>>) -> Self
     where
         Self: Sized,
@@ -61,6 +62,7 @@ pub trait EnrichableExt: Enrichable {
     /// It uses [`Location::caller`](std::panic::Location::caller) to capture the file and line number
     /// where this method is invoked.
     #[must_use]
+    #[track_caller]
     fn enrich_with<F, R>(mut self, f: F) -> Self
     where
         F: FnOnce() -> R,

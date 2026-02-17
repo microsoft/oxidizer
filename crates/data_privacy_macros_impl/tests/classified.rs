@@ -39,17 +39,17 @@ fn test_classified_impl_random_args() {
 }
 
 #[test]
-fn test_classified_impl_named_fields() {
+fn test_classified_impl_too_many_named_fields() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {
-        struct EmailAddress { x : String }
+        struct EmailAddress { x: String, y: i32 }
     };
 
     let result = classified(attr_args, input);
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("Named fields aren't supported"));
+    assert!(err.to_string().contains("Struct must have exactly one field"));
 }
 
 #[test]
@@ -86,6 +86,21 @@ fn test_success() {
     let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
     let input = quote! {
         struct EmailAddress(String);
+    };
+
+    let result = classified(attr_args, input);
+    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
+    let pretty = prettyplease::unparse(&result_file);
+
+    assert_snapshot!(pretty);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_success_named_field() {
+    let attr_args = quote! { ExampleTaxonomy::PersonallyIdentifiableInformation };
+    let input = quote! {
+        struct Token { value: String }
     };
 
     let result = classified(attr_args, input);

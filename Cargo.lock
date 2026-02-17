@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytesbuf",
  "futures",
@@ -1873,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "many_cpus",
  "mutants",

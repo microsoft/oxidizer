@@ -30,12 +30,13 @@
 /// }
 /// ```
 pub use data_privacy_macros::RedactedDebug;
-/// Implements the [`Classified`](crate::Classified) trait on a newtype.
+/// Implements the [`Classified`](crate::Classified) trait on a newtype or single-field struct.
 ///
-/// This macro is applied to a newtype struct declaration. The newtype
+/// This macro is applied to a newtype struct or single-field struct declaration. The struct
 /// wraps an inner type that holds sensitive data. The macro generates
 /// an implementation of the [`Classified`](crate::Classified), [`Debug`], [`Deref`](core::ops::Deref),
-/// and [`DerefMut`](core::ops::DerefMut) traits.
+/// [`DerefMut`](core::ops::DerefMut), [`RedactedDebug`](crate::RedactedDebug),
+/// and [`RedactedDisplay`](crate::RedactedDisplay) traits.
 ///
 /// # Example
 ///

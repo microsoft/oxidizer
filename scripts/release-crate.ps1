@@ -157,6 +157,99 @@ function Compare-SemanticVersions {
     return 0  # versions are equal
 }
 
+# Determines whether a version bump is semver-incompatible, following Cargo's
+# semver compatibility rules:
+#   - For stable versions (>= 1.0.0): incompatible if the major version changes.
+#   - For pre-release versions (0.x.y, x >= 1): incompatible if the minor version changes.
+#   - For initial development versions (0.0.x): every change is incompatible.
+# Returns $true if the bump is incompatible, $false otherwise.
+function Test-SemverIncompatibleBump {
+    param(
+        [string]$oldVersion,
+        [string]$newVersion
+    )
+
+    $oldParts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
+    $newParts = $newVersion.Split('.') | ForEach-Object { [int]$_ }
+
+    while ($oldParts.Count -lt 3) { $oldParts += 0 }
+    while ($newParts.Count -lt 3) { $newParts += 0 }
+
+    # For versions >= 1.0.0, incompatible if major version changed
+    if ($oldParts[0] -ge 1) {
+        return $newParts[0] -ne $oldParts[0]
+    }
+
+    # For versions 0.x.y where x >= 1, incompatible if minor version changed
+    if ($oldParts[1] -ge 1) {
+        return $newParts[1] -ne $oldParts[1]
+    }
+
+    # For versions 0.0.x, every change is incompatible
+    return $newParts[2] -ne $oldParts[2]
+}
+
+# Finds published workspace crates that have a direct (non-dev, non-build) dependency
+# on the given crate. Uses 'cargo metadata' for reliable JSON-based dependency resolution
+# rather than TOML parsing. Returns an array of crate folder names (suitable for passing
+# to release-crate.ps1). Unpublished crates (publish = false) are excluded since they
+# do not need follow-up releases.
+function Get-DirectDependents {
+    param(
+        [string]$crateName,
+        [string]$repoRoot
+    )
+
+    $rootManifest = Join-Path $repoRoot "Cargo.toml"
+    $metadataJson = cargo metadata --format-version=1 --no-deps --manifest-path $rootManifest
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to run 'cargo metadata'. Skipping dependent crate check."
+        return @()
+    }
+
+    $metadata = $metadataJson | ConvertFrom-Json
+
+    # Normalize crate name for comparison (hyphens and underscores are equivalent in Cargo)
+    $normalizedTargetName = $crateName.Replace('-', '_')
+
+    $dependents = @()
+    $cratesDir = (Join-Path $repoRoot "crates").Replace('/', '\')
+
+    foreach ($package in $metadata.packages) {
+        # Normalize path separators for reliable comparison
+        $manifestDir = (Split-Path $package.manifest_path -Parent).Replace('/', '\')
+
+        # Only consider packages within the workspace crates directory
+        if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        # Skip the crate itself
+        $normalizedPackageName = $package.name.Replace('-', '_')
+        if ($normalizedPackageName -eq $normalizedTargetName) {
+            continue
+        }
+
+        # Skip crates that are not published (publish = [] in cargo metadata means publish = false)
+        if ($null -ne $package.publish -and $package.publish.Count -eq 0) {
+            continue
+        }
+
+        # Check if this package has a direct (non-dev, non-build) dependency on the target crate
+        foreach ($dep in $package.dependencies) {
+            $normalizedDepName = $dep.name.Replace('-', '_')
+            if ($normalizedDepName -eq $normalizedTargetName -and [string]::IsNullOrEmpty($dep.kind)) {
+                # Extract folder name from manifest path for use as release-crate.ps1 input
+                $folderName = Split-Path $manifestDir -Leaf
+                $dependents += $folderName
+                break
+            }
+        }
+    }
+
+    return $dependents
+}
+
 function Get-CurrentVersion {
     param([string]$cargoTomlPath)
 
@@ -468,6 +561,39 @@ function Update-Readme {
     }
 }
 
+# Displays a warning when a semver-incompatible release has been prepared and other
+# published workspace crates depend on the released crate. These dependents will need
+# their own releases to reference the new version. The user must decide for each
+# dependent whether the change is breaking in that crate's context and run
+# release-crate.ps1 accordingly.
+function Show-DependentCratesWarning {
+    param(
+        [string]$crateName,
+        [string]$oldVersion,
+        [string]$newVersion,
+        [string[]]$dependentCrates
+    )
+
+    Write-Host ""
+    Write-Host "⚠️  SEMVER-INCOMPATIBLE RELEASE DETECTED" -ForegroundColor Yellow
+    Write-Host "The version bump from $oldVersion to $newVersion is semver-incompatible." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "The following workspace crates have a direct dependency on '$crateName'" -ForegroundColor Yellow
+    Write-Host "and will also need to be released to reference the new version:" -ForegroundColor Yellow
+    Write-Host ""
+    foreach ($dependent in $dependentCrates) {
+        Write-Host "  - $dependent" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "For each dependent crate, decide whether this is a breaking or non-breaking" -ForegroundColor Yellow
+    Write-Host "change in that crate's context, then run:" -ForegroundColor Yellow
+    Write-Host ""
+    foreach ($dependent in $dependentCrates) {
+        Write-Host "  .\scripts\release-crate.ps1 $dependent --bump <major|minor|patch>" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+}
+
 function Show-FinalMessage {
     param(
         [string]$crateName,
@@ -558,6 +684,8 @@ if (-not [string]::IsNullOrEmpty($Version)) {
 
 # 6. EXECUTE WORKFLOW
 try {
+    $oldVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+
     $newVersion = Update-CrateVersion -crateName $CrateName -version $Version -bump $Bump -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
     if ($null -eq $newVersion) {
         Write-Error "Failed to update crate version. Aborting."
@@ -566,6 +694,14 @@ try {
 
     Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
     Update-Readme -crateName $CrateName -crateFolder $crateFolder
+
+    if (Test-SemverIncompatibleBump -oldVersion $oldVersion -newVersion $newVersion) {
+        $dependentCrates = Get-DirectDependents -crateName $CrateName -repoRoot $repoRoot
+        if ($dependentCrates.Count -gt 0) {
+            Show-DependentCratesWarning -crateName $CrateName -oldVersion $oldVersion -newVersion $newVersion -dependentCrates $dependentCrates
+        }
+    }
+
     Show-FinalMessage -crateName $CrateName -newVersion $newVersion
 }
 catch {
