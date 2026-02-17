@@ -258,19 +258,19 @@ fn process() -> Result<(), AppError> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7xRMk7SDB66G1v2n-Rmf3nUGyeREro-k6dWGzjgBXgBcFi-YWSCgmRvaG5vZTAuMy4wgmtvaG5vX21hY3Jvc2UwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7xRMk7SDB66G1v2n-Rmf3nUGyeREro-k6dWGzjgBXgBcFi-YWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
  [__link11]: https://docs.rs/ohno_macros/0.3.0/ohno_macros/?search=enrich_err
  [__link12]: https://docs.rs/ohno_macros/0.3.0/ohno_macros/?search=enrich_err
- [__link13]: https://docs.rs/ohno/0.3.0/ohno/?search=Enrichable
- [__link14]: https://docs.rs/ohno/0.3.0/ohno/?search=AppError
- [__link15]: https://docs.rs/ohno/0.3.0/ohno/?search=AppError
- [__link2]: https://docs.rs/ohno/0.3.0/ohno/?search=ErrorExt
- [__link3]: https://docs.rs/ohno/0.3.0/ohno/?search=OhnoCore
- [__link4]: https://docs.rs/ohno/0.3.0/ohno/?search=AppError
- [__link5]: https://docs.rs/ohno/0.3.0/ohno/?search=OhnoCore
+ [__link13]: https://docs.rs/ohno/0.3.1/ohno/?search=Enrichable
+ [__link14]: https://docs.rs/ohno/0.3.1/ohno/?search=AppError
+ [__link15]: https://docs.rs/ohno/0.3.1/ohno/?search=AppError
+ [__link2]: https://docs.rs/ohno/0.3.1/ohno/?search=ErrorExt
+ [__link3]: https://docs.rs/ohno/0.3.1/ohno/?search=OhnoCore
+ [__link4]: https://docs.rs/ohno/0.3.1/ohno/?search=AppError
+ [__link5]: https://docs.rs/ohno/0.3.1/ohno/?search=OhnoCore
  [__link6]: https://doc.rust-lang.org/stable/std/?search=error::Error
  [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link8]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
