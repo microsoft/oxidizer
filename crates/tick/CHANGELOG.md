@@ -5,6 +5,7 @@
 - ✨ Features
 
   - implement thread_aware in tick ([#255](https://github.com/microsoft/oxidizer/pull/255))
+  - rename `MIN` to `UNIX_EPOCH` ([#262](https://github.com/microsoft/oxidizer/pull/262))
 
 ## [0.1.2] - 2026-01-05
 
