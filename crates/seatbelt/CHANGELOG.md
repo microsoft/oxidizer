@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-02-17
+
+- ✨ Features
+
+  - switch to a new major version of `tick` crate
+  - add tower-service compatibility to seatbelt ([#252](https://github.com/microsoft/oxidizer/pull/252))
+
 ## [0.2.0] - 2026-01-20
 
 Initial release.
