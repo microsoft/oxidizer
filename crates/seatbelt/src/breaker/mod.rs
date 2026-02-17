@@ -291,6 +291,8 @@ pub(super) use callbacks::*;
 pub use layer::BreakerLayer;
 #[doc(inline)]
 pub use service::Breaker;
+#[cfg(feature = "tower-service")]
+pub use service::BreakerFuture;
 pub(crate) use service::BreakerShared;
 
 mod execution_result;

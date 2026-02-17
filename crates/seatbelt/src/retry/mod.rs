@@ -205,4 +205,6 @@ pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};
 pub use layer::RetryLayer;
 pub use service::Retry;
+#[cfg(feature = "tower-service")]
+pub use service::RetryFuture;
 pub(crate) use service::RetryShared;
