@@ -92,6 +92,9 @@ impl<In, Out> Timeout<In, Out, ()> {
     }
 }
 
+// IMPORTANT: The `layered::Service` impl below and the `tower_service::Service` impl further
+// down in this file contain logic-equivalent orchestration code. Any change to the `execute`
+// body MUST be mirrored in the `call` body, and vice versa. See crate-level AGENTS.md.
 impl<In, Out, S> Service<In> for Timeout<In, Out, S>
 where
     In: Send,
@@ -136,6 +139,9 @@ impl<Out> Future for TimeoutFuture<Out> {
     }
 }
 
+// IMPORTANT: The `tower_service::Service` impl below and the `layered::Service` impl above
+// contain logic-equivalent orchestration code. Any change to the `call` body MUST be mirrored
+// in the `execute` body, and vice versa. See crate-level AGENTS.md.
 #[cfg(any(feature = "tower-service", test))]
 impl<Req, Res, Err, S> tower_service::Service<Req> for Timeout<Req, Result<Res, Err>, S>
 where

@@ -104,17 +104,39 @@
 //!
 //! # Tower Compatibility
 //!
-//! All resilience middleware ([`timeout::Timeout`], [`retry::Retry`], [`breaker::Breaker`]) are
-//! compatible with the Tower ecosystem when the `tower-service` feature is enabled. This allows
-//! you to use `tower::ServiceBuilder` to compose middleware stacks:
+//! All resilience middleware are compatible with the Tower ecosystem when the `tower-service`
+//! feature is enabled. This allows you to use `tower::ServiceBuilder` to compose middleware stacks:
 //!
-//! ```rust,ignore
+//! ```rust
+//! # use std::time::Duration;
+//! # use tick::Clock;
+//! use seatbelt::retry::Retry;
+//! use seatbelt::timeout::Timeout;
+//! use seatbelt::{RecoveryInfo, ResilienceContext};
 //! use tower::ServiceBuilder;
 //!
+//! # async fn example(clock: Clock) {
+//! let context: ResilienceContext<String, Result<String, String>> =
+//!     ResilienceContext::new(&clock);
+//!
 //! let service = ServiceBuilder::new()
-//!     .layer(Retry::layer("my_retry", &context).clone_input().recovery_with(classify))
-//!     .layer(Timeout::layer("my_timeout", &context).timeout(Duration::from_secs(30)).timeout_output(on_timeout))
-//!     .service(my_inner_service);
+//!     .layer(
+//!         Retry::layer("my_retry", &context)
+//!             .clone_input()
+//!             .recovery_with(|result: &Result<String, String>, _| match result {
+//!                 Ok(_) => RecoveryInfo::never(),
+//!                 Err(_) => RecoveryInfo::retry(),
+//!             }),
+//!     )
+//!     .layer(
+//!         Timeout::layer("my_timeout", &context)
+//!             .timeout(Duration::from_secs(30))
+//!             .timeout_error(|_| "operation timed out".to_string()),
+//!     )
+//!     .service_fn(|input: String| async move {
+//!         Ok::<_, String>(format!("processed: {input}"))
+//!     });
+//! # }
 //! ```
 //!
 //! # Features
