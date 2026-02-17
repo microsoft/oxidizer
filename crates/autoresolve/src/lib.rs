@@ -49,8 +49,10 @@ pub struct ResolutionPathInTail<InnerPath>(PhantomData<InnerPath>);
 pub trait ResolutionCoveredByBase<Base, Path> {}
 
 impl<Head, Tail> ResolutionCoveredByBase<ResolutionBaseListNode<Head, Tail>, ResolutionPathInHead> for Head {}
-impl<Head, Tail, InnerPath> ResolutionCoveredByBase<ResolutionBaseListNode<Head, Tail>, ResolutionPathInTail<InnerPath>> for Head where
-    Head: ResolutionCoveredByBase<Tail, InnerPath>
+impl<OtherHead, Head, Tail, InnerPath> ResolutionCoveredByBase<ResolutionBaseListNode<OtherHead, Tail>, ResolutionPathInTail<InnerPath>>
+    for Head
+where
+    Head: ResolutionCoveredByBase<Tail, InnerPath>,
 {
 }
 
