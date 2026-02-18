@@ -209,4 +209,12 @@ mod tests {
         assert_eq!(scheme.as_str(), "https");
         assert_eq!(authority.as_str(), "example.com:8443");
     }
+
+    #[test]
+    fn test_with_port() {
+        let origin = Origin::new("https", "example.com").unwrap();
+        let with_port = origin.with_port(8443);
+        assert_eq!(with_port.port(), 8443);
+        assert_eq!(format!("{with_port}"), "https://example.com:8443");
+    }
 }
