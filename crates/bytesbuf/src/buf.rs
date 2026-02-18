@@ -933,7 +933,7 @@ impl BytesBuf {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn as_write<M: Memory + ?Sized>(&mut self, memory: &M) -> impl std::io::Write {
+    pub fn as_write<'m, M: Memory + ?Sized>(&mut self, memory: &'m M) -> BytesBufWrite<'_, 'm, M> {
         BytesBufWrite::new(self, memory)
     }
 }

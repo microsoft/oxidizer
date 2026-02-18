@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- ✨ Features
+
+  - `BytesBuf::as_write()` now returns the named `BytesBufWrite` type instead of `impl Write`, enabling it to be stored in struct fields ([#269](https://github.com/microsoft/oxidizer/issues/269))
+
 ## [0.3.0] - 2026-02-13
 
 - ✨ Features

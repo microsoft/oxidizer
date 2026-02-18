@@ -15,14 +15,15 @@ use crate::mem::Memory;
 ///
 /// [1]: crate::BytesBuf::as_write
 #[derive(Debug)]
-pub(crate) struct BytesBufWrite<'b, 'm, M: Memory + ?Sized> {
+pub struct BytesBufWrite<'b, 'm, M: Memory + ?Sized> {
     inner: &'b mut BytesBuf,
     memory: &'m M,
 }
 
 impl<'b, 'm, M: Memory + ?Sized> BytesBufWrite<'b, 'm, M> {
+    /// Creates a new `BytesBufWrite` adapter for the given [`BytesBuf`] and memory provider.
     #[must_use]
-    pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
+    pub const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
         Self { inner, memory }
     }
 }
