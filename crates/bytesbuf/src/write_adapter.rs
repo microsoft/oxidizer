@@ -21,9 +21,8 @@ pub struct BytesBufWrite<'b, 'm, M: Memory + ?Sized> {
 }
 
 impl<'b, 'm, M: Memory + ?Sized> BytesBufWrite<'b, 'm, M> {
-    /// Creates a new `BytesBufWrite` adapter for the given [`BytesBuf`] and memory provider.
     #[must_use]
-    pub const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
+    pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
         Self { inner, memory }
     }
 }
