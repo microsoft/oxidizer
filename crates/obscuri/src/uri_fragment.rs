@@ -111,4 +111,3 @@ mod tests {
         assert_eq!(format!("{uri_safe}"), "42");
     }
 }
-

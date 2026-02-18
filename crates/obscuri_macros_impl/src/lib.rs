@@ -846,4 +846,39 @@ mod tests {
         }
         "#);
     }
+
+    #[test]
+    fn test_template_attribute_parsing_error() {
+        // Test error handling for Opts::from_attributes in struct_template.rs
+        let attr = quote! { invalid_attribute_name="value" };
+        let item = quote! {
+            struct TestStruct {
+                param: String,
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert!(
+            output_pretty.contains("compile_error") || output_pretty.contains("error"),
+            "Output should contain error for invalid attribute: {output_pretty}"
+        );
+    }
+
+    #[test]
+    fn test_field_attribute_parsing_error() {
+        // Test error handling for Fields::from_fields in struct_template.rs
+        let attr = quote! { template="/{param}" };
+        let item = quote! {
+            struct TestStruct {
+                #[templated(invalid_field_attr)]
+                param: String,
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert!(
+            output_pretty.contains("compile_error") || output_pretty.contains("error"),
+            "Output should contain error for invalid field attribute: {output_pretty}"
+        );
+    }
 }
