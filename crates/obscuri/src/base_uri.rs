@@ -366,7 +366,7 @@ impl BaseUri {
     /// assert_eq!(base_uri.scheme().as_str(), "https");
     /// ```
     pub const fn scheme(&self) -> &Scheme {
-        &self.origin.scheme
+        self.origin.scheme()
     }
 
     /// Returns a reference to the authority component of this `base_uri`.
@@ -387,7 +387,7 @@ impl BaseUri {
     /// assert_eq!(base_uri.authority().as_str(), "example.com:1234");
     /// ```
     pub const fn authority(&self) -> &Authority {
-        &self.origin.authority
+        self.origin.authority()
     }
 
     /// Returns the host part of this `base_uri`.
@@ -400,7 +400,7 @@ impl BaseUri {
     /// assert_eq!(base_uri.host(), "example.com");
     /// ```
     pub fn host(&self) -> &str {
-        self.origin.authority.host()
+        self.origin.authority().host()
     }
 
     /// Returns the origin of this `base_uri` in the form `scheme://authority`.
@@ -620,9 +620,10 @@ impl From<BaseUri> for http::Uri {
     ///
     /// This conversion adds a minimal path component to ensure the resulting URI is valid.
     fn from(value: BaseUri) -> Self {
+        let (scheme, authority) = value.origin.into_parts();
         let mut parts = Parts::default();
-        parts.scheme = Some(value.origin.scheme);
-        parts.authority = Some(value.origin.authority);
+        parts.scheme = Some(scheme);
+        parts.authority = Some(authority);
         parts.path_and_query = Some(value.path.into());
 
         Self::from_parts(parts).expect("all inputs are already validated, this call never fails")

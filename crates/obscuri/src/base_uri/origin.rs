@@ -15,9 +15,9 @@ use crate::ValidationError;
 #[non_exhaustive]
 pub struct Origin {
     /// The URI scheme (e.g., HTTP or HTTPS).
-    pub scheme: Scheme,
+    scheme: Scheme,
     /// The authority component (hostname and optional port).
-    pub authority: Authority,
+    authority: Authority,
 }
 
 impl Origin {
@@ -51,6 +51,24 @@ impl Origin {
             scheme,
             authority: authority.try_into().map_err(Into::into)?,
         })
+    }
+
+    /// Returns a reference to the scheme.
+    #[must_use]
+    pub const fn scheme(&self) -> &Scheme {
+        &self.scheme
+    }
+
+    /// Returns a reference to the authority.
+    #[must_use]
+    pub const fn authority(&self) -> &Authority {
+        &self.authority
+    }
+
+    /// Consumes the origin and returns the scheme and authority.
+    #[must_use]
+    pub fn into_parts(self) -> (Scheme, Authority) {
+        (self.scheme, self.authority)
     }
 
     /// Returns the port of this origin.
@@ -160,5 +178,35 @@ mod tests {
         // IPv6 with custom port
         let origin_ipv6 = Origin::new("https", "[::1]:8443").unwrap();
         assert_eq!(format!("{origin_ipv6}"), "https://[::1]:8443");
+    }
+
+    #[test]
+    fn test_scheme_accessor() {
+        let origin_http = Origin::new("http", "example.com").unwrap();
+        assert_eq!(origin_http.scheme().as_str(), "http");
+
+        let origin_https = Origin::new("https", "example.com:8443").unwrap();
+        assert_eq!(origin_https.scheme().as_str(), "https");
+    }
+
+    #[test]
+    fn test_authority_accessor() {
+        let origin = Origin::new("https", "example.com:8443").unwrap();
+        assert_eq!(origin.authority().as_str(), "example.com:8443");
+
+        let origin_no_port = Origin::new("http", "example.com").unwrap();
+        assert_eq!(origin_no_port.authority().as_str(), "example.com");
+
+        let origin_ipv6 = Origin::new("https", "[::1]:8080").unwrap();
+        assert_eq!(origin_ipv6.authority().as_str(), "[::1]:8080");
+    }
+
+    #[test]
+    fn test_into_parts() {
+        let origin = Origin::new("https", "example.com:8443").unwrap();
+        let (scheme, authority) = origin.into_parts();
+
+        assert_eq!(scheme.as_str(), "https");
+        assert_eq!(authority.as_str(), "example.com:8443");
     }
 }
