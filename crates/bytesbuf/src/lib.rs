@@ -33,7 +33,8 @@
 //! * [`get_byte()`] reads a single byte.
 //! * [`copy_to_slice()`] copies bytes into a provided slice.
 //! * [`copy_to_uninit_slice()`] copies bytes into a provided uninitialized slice.
-//! * [`as_read()`] creates a `std::io::Read` adapter for reading bytes from the view.
+//! * [`reader()`] creates a [`BytesViewReader`] adapter for reading bytes from the view
+//!   via [`std::io::Read`] and [`std::io::BufRead`].
 //!
 //! ```
 //! # let memory = bytesbuf::mem::GlobalPool::new();
@@ -526,7 +527,7 @@
 //! [`get_byte()`]: crate::BytesView::get_byte
 //! [`copy_to_slice()`]: crate::BytesView::copy_to_slice
 //! [`copy_to_uninit_slice()`]: crate::BytesView::copy_to_uninit_slice
-//! [`as_read()`]: crate::BytesView::as_read
+//! [`reader()`]: crate::BytesView::reader
 //! [`first_slice()`]: crate::BytesView::first_slice
 //! [ViewAdvance]: crate::BytesView::advance
 //! [`put_num_le::<T>()`]: crate::BytesBuf::put_num_le
@@ -572,7 +573,7 @@ mod write_adapter;
 pub use buf::{BytesBuf, BytesBufRemaining, BytesBufVectoredWrite};
 pub use constants::MAX_INLINE_SPANS;
 pub use memory_guard::MemoryGuard;
-pub(crate) use read_adapter::BytesViewReader;
+pub use read_adapter::BytesViewReader;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
 pub use view::{BytesView, BytesViewSlices};

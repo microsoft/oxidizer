@@ -713,7 +713,10 @@ impl BytesView {
         new_view
     }
 
-    /// Exposes the instance through the [`Read`][std::io::Read] trait.
+    /// Returns a [`BytesViewReader`] for reading via [`Read`] and [`BufRead`].
+    ///
+    /// [`Read`]: std::io::Read
+    /// [`BufRead`]: std::io::BufRead
     ///
     /// # Example
     ///
@@ -724,7 +727,7 @@ impl BytesView {
     /// use bytesbuf::BytesView;
     ///
     /// let mut view = BytesView::copied_from_slice(b"Hello, world!", &memory);
-    /// let mut reader = view.as_read();
+    /// let mut reader = view.reader();
     ///
     /// let mut buffer = [0u8; 5];
     /// let bytes_read = reader.read(&mut buffer)?;
@@ -734,7 +737,7 @@ impl BytesView {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[must_use]
-    pub fn as_read(&mut self) -> impl std::io::Read {
+    pub fn reader(&mut self) -> BytesViewReader<'_> {
         BytesViewReader::new(self)
     }
 }
