@@ -269,8 +269,9 @@ fn generate_complex_tuple_constructors(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::{Index, parse_quote};
+
+    use super::*;
 
     fn named_field(name: &str) -> ErrorFieldRef {
         ErrorFieldRef::Named(syn::Ident::new(name, Span::call_site()))

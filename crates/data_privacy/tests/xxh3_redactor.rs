@@ -4,10 +4,8 @@
 #![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "xxh3")]
 
-use data_privacy::DataClass;
-use data_privacy::Redactor;
-use data_privacy::xxh3_redactor::REDACTED_LEN;
-use data_privacy::xxh3_redactor::xxH3Redactor;
+use data_privacy::xxh3_redactor::{REDACTED_LEN, xxH3Redactor};
+use data_privacy::{DataClass, Redactor};
 
 fn get_test_redactor() -> xxH3Redactor {
     let mut secret: Vec<u8> = vec![0; 192];

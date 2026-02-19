@@ -470,14 +470,16 @@ impl AsRef<Self> for Clock {
 mod tests {
     #![allow(clippy::arithmetic_side_effects, reason = "no need to be strict in tests")]
 
-    use std::{fmt::Debug, task::Context, thread::sleep};
+    use std::fmt::Debug;
+    use std::task::Context;
+    use std::thread::sleep;
 
     use futures::FutureExt;
     use thread_aware::affinity::pinned_affinities;
 
-    use crate::{ClockControl, runtime::InactiveClock};
-
     use super::*;
+    use crate::ClockControl;
+    use crate::runtime::InactiveClock;
 
     static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
 

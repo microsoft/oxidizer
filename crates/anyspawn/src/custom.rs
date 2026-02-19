@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::{fmt::Debug, pin::Pin, sync::Arc};
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use futures_channel::oneshot;
 

@@ -6,5 +6,7 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 
 Crate README files are auto-generated via `just readme`. Do not manually update them.
 
-Before pushing changes to the cloud, run `just readme` to ensure that readme files are up to date.
+## Pre-commit Checklist
 
+- Run `just format` before committing changes.
+- Run `just readme` before pushing changes to the cloud to ensure crate README files are up to date.

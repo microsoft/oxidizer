@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync;
+
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::closure::ErasedClosureOnce;
-use std::sync;
 
 pub type DataFn<T> = fn(&T, MemoryAffinity, PinnedAffinity) -> T;
 

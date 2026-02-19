@@ -561,12 +561,12 @@ mod buf_put;
 mod bytes_compat;
 mod constants;
 mod memory_guard;
-mod view_read;
 mod span;
 mod span_builder;
 mod vec;
 mod view;
 mod view_get;
+mod view_read;
 mod write_adapter;
 
 pub use buf::{BytesBuf, BytesBufRemaining, BytesBufVectoredWrite};

@@ -712,7 +712,6 @@ impl BytesView {
         new_view.append(other);
         new_view
     }
-
 }
 
 impl Default for BytesView {

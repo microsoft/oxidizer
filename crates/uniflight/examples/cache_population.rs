@@ -7,13 +7,9 @@
 //! The first request (leader) performs the work while others (followers) wait and
 //! receive a clone of the result.
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use uniflight::Merger;
 

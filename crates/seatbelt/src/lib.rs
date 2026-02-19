@@ -116,8 +116,7 @@
 //! use tower::ServiceBuilder;
 //!
 //! # async fn example(clock: Clock) {
-//! let context: ResilienceContext<String, Result<String, String>> =
-//!     ResilienceContext::new(&clock);
+//! let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock);
 //!
 //! let service = ServiceBuilder::new()
 //!     .layer(
@@ -133,9 +132,7 @@
 //!             .timeout(Duration::from_secs(30))
 //!             .timeout_error(|_| "operation timed out".to_string()),
 //!     )
-//!     .service_fn(|input: String| async move {
-//!         Ok::<_, String>(format!("processed: {input}"))
-//!     });
+//!     .service_fn(|input: String| async move { Ok::<_, String>(format!("processed: {input}")) });
 //! # }
 //! ```
 //!
