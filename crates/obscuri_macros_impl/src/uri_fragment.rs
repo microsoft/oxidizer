@@ -74,7 +74,7 @@ pub(crate) fn uri_unsafe_fragment_impl(input: DeriveInput) -> TokenStream {
     quote! {
         impl ::obscuri::UriUnsafeFragment for #ident {
             fn as_display(&self) -> impl ::std::fmt::Display {
-                <Self as ::std::string::ToString>::to_string(self)
+                &self.0
             }
         }
     }
