@@ -165,9 +165,24 @@ use crate::timers::TimerKey;
 /// }
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Clock {
     pub(crate) state: ClockState,
+}
+
+impl std::fmt::Debug for Clock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = match &self.state {
+            #[cfg(any(feature = "test-util", test))]
+            ClockState::ClockControl(_) => "controlled",
+            ClockState::System(_) => "system",
+        };
+
+        f.debug_struct("Clock")
+            .field("kind", &kind)
+            .field("timers", &self.state.timers_len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ThreadAware for Clock {
@@ -709,5 +724,38 @@ mod tests {
         assert_eq!(clock_2.state.timers_len(), 1);
         assert_eq!(driver_1.state.timers_len(), 1);
         assert_eq!(driver_2.state.timers_len(), 1);
+    }
+
+    #[test]
+    fn debug_system_clock() {
+        let clock = Clock::new_system_frozen();
+        let debug = format!("{clock:?}");
+
+        assert!(debug.contains("Clock"));
+        assert!(debug.contains("kind: \"system\""));
+        assert!(debug.contains("timers: 0"));
+    }
+
+    #[test]
+    fn debug_controlled_clock() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let debug = format!("{clock:?}");
+
+        assert!(debug.contains("Clock"));
+        assert!(debug.contains("kind: \"controlled\""));
+        assert!(debug.contains("timers: 0"));
+    }
+
+    #[test]
+    fn debug_clock_with_timers() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+
+        control.register_timer(Instant::now() + Duration::from_secs(100), Waker::noop().clone());
+        control.register_timer(Instant::now() + Duration::from_secs(200), Waker::noop().clone());
+
+        let debug = format!("{clock:?}");
+        assert!(debug.contains("timers: 2"));
     }
 }

@@ -67,12 +67,23 @@ use crate::{Clock, thread_aware_move};
 /// ```toml
 /// tick = { version = "*", features = ["test-util"] }
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ClockControl {
     /// Clock control requires controlling the passage of time across threads.
     /// For this reason, we need to use a mutex to ensure that state is consistent
     /// across all threads.
     state: Arc<Mutex<State>>,
+}
+
+impl std::fmt::Debug for ClockControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state.lock().expect("acquiring lock must always succeed");
+
+        f.debug_struct("ClockControl")
+            .field("time", &state.system_time)
+            .field("timers", &state.timers.len())
+            .finish_non_exhaustive()
+    }
 }
 
 thread_aware_move!(ClockControl);
@@ -356,7 +367,6 @@ impl ClockControl {
         self.with_state(|s| s.timers.next_timer())
     }
 
-    #[cfg(test)]
     pub(super) fn timers_len(&self) -> usize {
         self.with_state(|s| s.timers.len())
     }
@@ -793,5 +803,39 @@ mod tests {
 
         // The timer should still be registered since we couldn't advance further to reach it
         assert_eq!(control.timers_len(), 1);
+    }
+
+    #[test]
+    fn debug_default() {
+        let control = ClockControl::new();
+        let debug = format!("{control:?}");
+
+        assert!(debug.contains("ClockControl"));
+        assert!(debug.contains("time:"));
+        assert!(debug.contains("timers: 0"));
+    }
+
+    #[test]
+    fn debug_with_timers() {
+        let control = ClockControl::new();
+        let future = control.instant() + Duration::from_secs(100);
+
+        control.register_timer(future, Waker::noop().clone());
+
+        let debug = format!("{control:?}");
+
+        assert!(debug.contains("ClockControl"));
+        assert!(debug.contains("timers: 1"));
+    }
+
+    #[test]
+    fn debug_does_not_auto_advance() {
+        let control = ClockControl::new().auto_advance(Duration::from_secs(1));
+        let time_before = control.with_state(|s| s.system_time);
+
+        let _debug = format!("{control:?}");
+
+        let time_after = control.with_state(|s| s.system_time);
+        assert_eq!(time_before, time_after);
     }
 }
