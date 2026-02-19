@@ -36,3 +36,10 @@ pub trait Memory: Debug {
     #[must_use]
     fn reserve(&self, min_bytes: usize) -> BytesBuf;
 }
+
+impl<M: Memory + ?Sized> Memory for &M {
+    #[inline]
+    fn reserve(&self, min_bytes: usize) -> BytesBuf {
+        (*self).reserve(min_bytes)
+    }
+}

@@ -557,6 +557,7 @@ pub mod mem;
 
 mod buf;
 mod buf_put;
+mod buf_writer;
 #[cfg(any(test, feature = "bytes-compat"))]
 mod bytes_compat;
 mod constants;
@@ -567,16 +568,15 @@ mod span_builder;
 mod vec;
 mod view;
 mod view_get;
-mod write_adapter;
 
 pub use buf::{BytesBuf, BytesBufRemaining, BytesBufVectoredWrite};
+pub use buf_writer::BytesBufWriter;
 pub use constants::MAX_INLINE_SPANS;
 pub use memory_guard::MemoryGuard;
 pub(crate) use read_adapter::BytesViewReader;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
 pub use view::{BytesView, BytesViewSlices};
-pub use write_adapter::BytesBufWriter;
 
 #[cfg(test)]
 mod testing;
