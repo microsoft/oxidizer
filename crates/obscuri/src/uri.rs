@@ -57,7 +57,7 @@ pub struct Uri {
 
 impl Default for Uri {
     fn default() -> Self {
-        Self::with_base_and_path(None, None)
+        Self::new()
     }
 }
 
@@ -663,5 +663,27 @@ mod tests {
         let result: Result<PathAndQuery, ValidationError> = uri.try_into();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not have a path and query component"));
+    }
+
+    #[test]
+    fn test_uri_with_base_uri_only_to_string() {
+        // Test None branch (line 126) in to_string() method
+        let base_uri = BaseUri::from_uri_static("https://example.com/api/");
+        let uri = Uri::default().base_uri(base_uri);
+
+        let uri_string = uri.to_string();
+        assert_eq!(uri_string.declassify_ref(), "https://example.com/api/");
+    }
+
+    #[test]
+    fn test_uri_with_base_uri_only_redacted_display() {
+        // Test None branch (line 166) in RedactedDisplay::fmt() method
+        let base_uri = BaseUri::from_uri_static("https://example.com/api/v1/");
+        let uri = Uri::default().base_uri(base_uri);
+
+        let redaction_engine = RedactionEngine::builder().build();
+        let redacted = uri.to_redacted_string(&redaction_engine);
+
+        assert_eq!(redacted, "https://example.com/api/v1/");
     }
 }

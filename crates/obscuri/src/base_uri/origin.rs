@@ -79,11 +79,15 @@ impl Origin {
             return port;
         }
 
-        match self.scheme.as_str() {
-            "http" => 80,
-            "https" => 443,
-            _ => unreachable!("the scheme is always either http or https"),
+        if self.scheme == Scheme::HTTP {
+            return 80;
         }
+
+        if self.scheme == Scheme::HTTPS {
+            return 443;
+        }
+
+        unreachable!("the scheme is always either http or https")
     }
 
     /// Set port for this `Origin` instance.
@@ -145,6 +149,8 @@ impl Display for Origin {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
@@ -216,5 +222,15 @@ mod tests {
         let with_port = origin.with_port(8443);
         assert_eq!(with_port.port(), 8443);
         assert_eq!(format!("{with_port}"), "https://example.com:8443");
+    }
+
+    #[test]
+    #[should_panic(expected = "entered unreachable code: the scheme is always either http or https")]
+    fn test_with_impossible_scheme() {
+        let origin = Origin {
+            scheme: Scheme::from_str("ftp").unwrap(),
+            authority: Authority::from_static("example.com"),
+        };
+        origin.port();
     }
 }

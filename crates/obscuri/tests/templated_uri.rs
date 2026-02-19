@@ -19,6 +19,8 @@ enum TestTaxonomy {
     Oii,
     /// End User Pseudonymous Identifier
     Eupi,
+    /// Public data
+    Public,
 }
 
 #[classified(TestTaxonomy::Oii)]
@@ -28,6 +30,10 @@ struct OrgId(UriSafeString);
 #[classified(TestTaxonomy::Eupi)]
 #[derive(Clone, UriFragment)]
 struct UserId(UriSafeString);
+
+#[classified(TestTaxonomy::Public)]
+#[derive(Clone, UriUnsafeFragment)]
+struct PathFragment(String);
 
 #[templated(template = "/{+param}{/param2,param3}{?q1,q2}", unredacted)]
 #[derive(Clone)]
@@ -76,15 +82,17 @@ fn uri_with_template() {
 static_assertions::assert_impl_all!(UserInfo: Into<Uri>);
 
 #[derive(Clone)]
-#[templated(template = "/users/{user_id}/info")]
+#[templated(template = "/users/{user_id}/{+path_fragment}")]
 struct UserInfo {
     user_id: UserId,
+    path_fragment: PathFragment,
 }
 
 #[test]
 fn user_info_uri() {
     let test = UserInfo {
         user_id: UserId(UriSafeString::from_static("123e4567-e89b-12d3-a456-426614174000")),
+        path_fragment: PathFragment("info/details".to_string()),
     };
 
     assert_eq!(
@@ -92,23 +100,26 @@ fn user_info_uri() {
             .base_uri(BaseUri::from_uri_static("https://example.com"))
             .to_string()
             .declassify_ref(),
-        "https://example.com/users/123e4567-e89b-12d3-a456-426614174000/info"
+        "https://example.com/users/123e4567-e89b-12d3-a456-426614174000/info/details"
     );
 
     let target = test.into_uri().base_uri(BaseUri::from_uri_static("https://example.com"));
 
     assert_eq!(
         target.to_string().declassify_ref(),
-        "https://example.com/users/123e4567-e89b-12d3-a456-426614174000/info"
+        "https://example.com/users/123e4567-e89b-12d3-a456-426614174000/info/details"
     );
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(TemplatedPathAndQuery(UserInfo("/users/{user_id}/info"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(TemplatedPathAndQuery(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
-    assert_eq!(target.target_path_and_query().unwrap().template(), "/users/{user_id}/info");
+    assert_eq!(
+        target.target_path_and_query().unwrap().template(),
+        "/users/{user_id}/{path_fragment}"
+    );
     assert_eq!(
         target.to_redacted_string(&RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build(),),
-        "https://example.com/users/************************************/info",
+        "https://example.com/users/************************************/************",
         "redaction should not change the URI for non-classified fields"
     );
 }
@@ -327,4 +338,44 @@ fn test_target_path_and_query_label() {
     // Test with non-templated path
     let static_paq = TargetPathAndQuery::from_static("/static/path");
     assert_eq!(static_paq.label().as_deref(), None);
+}
+
+#[test]
+fn test_target_path_and_query_from_templated() {
+    use std::borrow::Cow;
+
+    use obscuri::uri::TargetPathAndQuery;
+
+    #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
+    #[derive(Clone)]
+    struct UserPosts {
+        user_id: UriSafeString,
+    }
+
+    let user_posts = UserPosts {
+        user_id: UriSafeString::from_static("123"),
+    };
+
+    let target_paq = TargetPathAndQuery::from_templated(user_posts);
+
+    // Verify template
+    assert_eq!(target_paq.template(), "/api/{user_id}/posts");
+
+    // Verify label
+    assert_eq!(target_paq.label(), Some(Cow::Borrowed("user_posts")));
+
+    // Verify to_uri_string
+    assert_eq!(target_paq.to_uri_string(), "/api/123/posts");
+
+    // Verify to_path_and_query
+    let path_and_query = target_paq.to_path_and_query().unwrap();
+    assert_eq!(path_and_query.to_string(), "/api/123/posts");
+
+    // Verify redacted string (unredacted because of unredacted attribute)
+    let redaction_engine = RedactionEngine::builder().build();
+    assert_eq!(target_paq.to_uri_string_redacted(&redaction_engine), "/api/123/posts");
+
+    // Verify it can be used in a Uri
+    let uri = target_paq.into_uri();
+    assert_eq!(uri.to_string().declassify_ref(), "/api/123/posts");
 }

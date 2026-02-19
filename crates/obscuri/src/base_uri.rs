@@ -651,9 +651,9 @@ impl Display for BaseUri {
         write!(f, "{}://", self.scheme())?;
 
         match (self.scheme().as_str(), self.port()) {
-            ("http", 80) | ("https", 443) => write!(f, "{}", self.host()),
-            _ => write!(f, "{}", self.authority()),
-        }?;
+            ("http", 80) | ("https", 443) => write!(f, "{}", self.host())?,
+            _ => write!(f, "{}", self.authority())?,
+        }
         write!(f, "{}", self.path)
     }
 }
@@ -915,6 +915,27 @@ mod tests {
             let uri: http::Uri = base_uri.into();
             assert_eq!(uri.to_string(), "https://example.com/");
         }
+
+        #[test]
+        fn origin_to_base_uri() {
+            let origin = Origin::new(Scheme::HTTPS, "example.com:8443").unwrap();
+            let base_uri: BaseUri = origin.into();
+
+            assert_eq!(base_uri.to_string(), "https://example.com:8443/");
+        }
+
+        #[test]
+        fn from_str_valid() {
+            let base_uri: BaseUri = "https://example.com:8443/api/".parse().unwrap();
+
+            assert_eq!(base_uri.to_string(), "https://example.com:8443/api/");
+        }
+
+        #[test]
+        fn from_str_invalid() {
+            let err = "not-a-valid-uri".parse::<BaseUri>().unwrap_err();
+            assert!(err.to_string().contains("URI must have both scheme and authority"));
+        }
     }
 
     mod display {
@@ -936,6 +957,40 @@ mod tests {
         fn custom_port() {
             let base_uri = BaseUri::from_uri_static("https://example.com:8443");
             assert_eq!(base_uri.to_string(), "https://example.com:8443/");
+        }
+    }
+
+    mod with_origin {
+        use super::*;
+
+        #[test]
+        fn replaces_origin() {
+            let base_uri = BaseUri::from_uri_static("https://example.com/api/");
+            let new_origin = Origin::new(Scheme::HTTPS, "new-example.com:8080").unwrap();
+
+            let new_base_uri = base_uri.with_origin(new_origin.clone());
+
+            assert_eq!(new_base_uri.origin(), &new_origin);
+            assert_eq!(new_base_uri.scheme(), &Scheme::HTTPS);
+            assert_eq!(new_base_uri.authority().as_str(), "new-example.com:8080");
+            assert_eq!(new_base_uri.port(), 8080);
+            assert_eq!(new_base_uri.path().as_str(), "/api/");
+            assert_eq!(new_base_uri.to_string(), "https://new-example.com:8080/api/");
+        }
+    }
+
+    mod with_port {
+        use super::*;
+
+        #[test]
+        fn changes_port() {
+            let base_uri = BaseUri::from_uri_static("https://example.com/api/");
+
+            let new_base_uri = base_uri.with_port(8443);
+
+            assert_eq!(new_base_uri.origin().port(), 8443);
+            assert_eq!(new_base_uri.port(), 8443);
+            assert_eq!(new_base_uri.to_string(), "https://example.com:8443/api/");
         }
     }
 }
