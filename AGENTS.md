@@ -6,7 +6,11 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 
 Crate README files are auto-generated via `just readme`. Do not manually update them.
 
+## Executing `just` commands
+
+If you only touch one crate, you may use `just package=crate_name command` to narrow command scope to one crate.
+
 ## Pre-commit Checklist
 
-- Run `just format` before committing changes.
-- Run `just readme` before pushing changes to the cloud to ensure crate README files are up to date.
+- Run `just format` to format code.
+- Run `just readme` to regenerate crate-level readme files.
