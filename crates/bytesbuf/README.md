@@ -42,8 +42,8 @@ There are many helper methods on this type for easily consuming bytes from the v
 * [`get_byte()`][__link4] reads a single byte.
 * [`copy_to_slice()`][__link5] copies bytes into a provided slice.
 * [`copy_to_uninit_slice()`][__link6] copies bytes into a provided uninitialized slice.
-* [`reader()`][__link7] creates a [`BytesViewReader`][__link8] adapter for reading bytes from the view
-  via [`std::io::Read`][__link9] and [`std::io::BufRead`][__link10].
+* [`BytesView`][__link7] implements [`std::io::Read`][__link8] and [`std::io::BufRead`][__link9] directly, since
+  it is already a buffered byte sequence.
 
 ```rust
 use bytesbuf::BytesView;
@@ -61,15 +61,15 @@ fn consume_message(mut message: BytesView) {
 }
 ```
 
-If the helper methods are not sufficient, you can access the byte sequence behind the [`BytesView`][__link11]
+If the helper methods are not sufficient, you can access the byte sequence behind the [`BytesView`][__link10]
 via byte slices using the following fundamental methods that underpin the convenience methods:
 
-* [`first_slice()`][__link12] returns the first slice of bytes that makes up the byte sequence. The
+* [`first_slice()`][__link11] returns the first slice of bytes that makes up the byte sequence. The
   length of this slice is determined by the memory layout of the byte sequence and the first slice
   may not contain all the bytes.
-* [`advance()`][__link13] marks bytes from the beginning of [`first_slice()`][__link14] as read, shrinking the
+* [`advance()`][__link12] marks bytes from the beginning of [`first_slice()`][__link13] as read, shrinking the
   view by the corresponding amount and moving remaining data up to the front.
-  When you advance past the slice returned by [`first_slice()`][__link15], the next call to [`first_slice()`][__link16]
+  When you advance past the slice returned by [`first_slice()`][__link14], the next call to [`first_slice()`][__link15]
   will return a new slice of bytes starting from the new front position of the view.
 
 ```rust
@@ -90,7 +90,7 @@ while !bytes.is_empty() {
 println!("Inspected a view over {len} bytes with slice lengths: {slice_lengths:?}");
 ```
 
-To reuse a [`BytesView`][__link17], clone it before consuming the contents. This is a cheap
+To reuse a [`BytesView`][__link16], clone it before consuming the contents. This is a cheap
 zero-copy operation.
 
 ```rust
@@ -112,24 +112,24 @@ assert_eq!(bytes.len(), 16);
 ## Producing Byte Sequences
 
 For creating a byte sequence, you first need some memory capacity to put the bytes into. This
-means you need a memory provider, which is a type that implements the [`Memory`][__link18] trait.
+means you need a memory provider, which is a type that implements the [`Memory`][__link17] trait.
 
 Obtaining a memory provider is generally straightforward. Simply use the first matching option
 from the following list:
 
 1. If you are creating byte sequences for the purpose of submitting them to a specific
    object of a known type (e.g. writing them to a `TcpConnection`), the target type will
-   typically implement the [`HasMemory`][__link19] trait, which gives you a suitable memory
-   provider instance via [`HasMemory::memory()`][__link20]. Use this as the memory provider - this
+   typically implement the [`HasMemory`][__link18] trait, which gives you a suitable memory
+   provider instance via [`HasMemory::memory()`][__link19]. Use this as the memory provider - this
    object will give you memory capacity with a configuration that is optimal for
    delivering bytes of data to that specific consumer (e.g. `TcpConnection`).
 1. If you are creating byte sequences as part of usage-neutral data processing, obtain an
-   instance of a shared [`GlobalPool`][__link21]. In a typical web application, the global memory pool
+   instance of a shared [`GlobalPool`][__link20]. In a typical web application, the global memory pool
    is a service exposed by the application framework. In a different context (e.g. example
-   or test code with no framework), you can create your own instance via [`GlobalPool::new()`][__link22].
+   or test code with no framework), you can create your own instance via [`GlobalPool::new()`][__link21].
 
 Once you have a memory provider, you can reserve memory from it by calling
-[`Memory::reserve()`][__link23] on it. This returns a [`BytesBuf`][__link24] with at least the requested
+[`Memory::reserve()`][__link22] on it. This returns a [`BytesBuf`][__link23] with at least the requested
 number of bytes of memory capacity.
 
 ```rust
@@ -140,17 +140,17 @@ let memory = connection.memory();
 let mut buf = memory.reserve(100);
 ```
 
-Now that you have the memory capacity in a [`BytesBuf`][__link25], you can fill the memory
-capacity with bytes of data. Creating byte sequences in a [`BytesBuf`][__link26] is an
+Now that you have the memory capacity in a [`BytesBuf`][__link24], you can fill the memory
+capacity with bytes of data. Creating byte sequences in a [`BytesBuf`][__link25] is an
 append-only process - you can only add data to the end of the buffered sequence.
 
-There are many helper methods on [`BytesBuf`][__link27] for easily appending bytes to the buffer:
+There are many helper methods on [`BytesBuf`][__link26] for easily appending bytes to the buffer:
 
-* [`put_num_le::<T>()`][__link28] appends numbers. Big-endian/native-endian variants also exist.
-* [`put_slice()`][__link29] appends a slice of bytes.
-* [`put_byte()`][__link30] appends a single byte.
-* [`put_byte_repeated()`][__link31] appends multiple repetitions of a byte.
-* [`put_bytes()`][__link32] appends an existing [`BytesView`][__link33].
+* [`put_num_le::<T>()`][__link27] appends numbers. Big-endian/native-endian variants also exist.
+* [`put_slice()`][__link28] appends a slice of bytes.
+* [`put_byte()`][__link29] appends a single byte.
+* [`put_byte_repeated()`][__link30] appends multiple repetitions of a byte.
+* [`put_bytes()`][__link31] appends an existing [`BytesView`][__link32].
 
 ```rust
 use bytesbuf::mem::Memory;
@@ -167,18 +167,18 @@ buf.put_slice(*b"Hello, world!");
 If the helper methods are not sufficient, you can write contents directly into mutable byte slices
 using the fundamental methods that underpin the convenience methods:
 
-* [`first_unfilled_slice()`][__link34] returns a mutable slice of uninitialized bytes from the beginning of the
+* [`first_unfilled_slice()`][__link33] returns a mutable slice of uninitialized bytes from the beginning of the
   buffer’s remaining capacity. The length of this slice is determined by the memory layout
   of the buffer and it may not contain all the capacity that has been reserved.
-* [`advance()`][__link35] declares that a number of bytes at the beginning of [`first_unfilled_slice()`][__link36]
+* [`advance()`][__link34] declares that a number of bytes at the beginning of [`first_unfilled_slice()`][__link35]
   have been initialized with data and are no longer unused. This will mark these bytes as valid for
-  consumption and advance [`first_unfilled_slice()`][__link37] to the next slice of unused memory capacity
+  consumption and advance [`first_unfilled_slice()`][__link36] to the next slice of unused memory capacity
   if the current slice has been completely filled.
 
 See `examples/bb_slice_by_slice_write.rs` for an example of how to use these methods.
 
-If you do not know exactly how much memory you need in advance, you can extend the [`BytesBuf`][__link38]
-capacity on demand by calling [`BytesBuf::reserve`][__link39]. You can use [`remaining_capacity()`][__link40]
+If you do not know exactly how much memory you need in advance, you can extend the [`BytesBuf`][__link37]
+capacity on demand by calling [`BytesBuf::reserve`][__link38]. You can use [`remaining_capacity()`][__link39]
 to identify how much unused memory capacity is available.
 
 ```rust
@@ -198,8 +198,8 @@ assert!(buf.capacity() >= 100 + 80);
 assert!(buf.remaining_capacity() >= 80);
 ```
 
-When you have written your byte sequence into the memory capacity of the [`BytesBuf`][__link41], you can consume
-the data in the buffer as a [`BytesView`][__link42].
+When you have written your byte sequence into the memory capacity of the [`BytesBuf`][__link40], you can consume
+the data in the buffer as a [`BytesView`][__link41].
 
 ```rust
 use bytesbuf::mem::Memory;
@@ -215,7 +215,7 @@ buf.put_slice(*b"Hello, world!");
 let message = buf.consume_all();
 ```
 
-This can be done piece by piece, and you can continue writing to the [`BytesBuf`][__link43]
+This can be done piece by piece, and you can continue writing to the [`BytesBuf`][__link42]
 after consuming some already written bytes.
 
 ```rust
@@ -236,8 +236,8 @@ buf.put_slice(*b"Hello, world!");
 let final_contents = buf.consume_all();
 ```
 
-If you already have a [`BytesView`][__link44] that you want to write into a [`BytesBuf`][__link45], call
-[`BytesBuf::put_bytes`][__link46]. This is a highly efficient zero-copy operation
+If you already have a [`BytesView`][__link43] that you want to write into a [`BytesBuf`][__link44], call
+[`BytesBuf::put_bytes`][__link45]. This is a highly efficient zero-copy operation
 that reuses the memory capacity of the view you are appending.
 
 ```rust
@@ -261,27 +261,27 @@ to mix and match memory from different providers, though this may disable some o
 ## Implementing Types that Produce or Consume Byte Sequences
 
 If you are implementing a type that produces or consumes byte sequences, you should
-implement the [`HasMemory`][__link47] trait to make it possible for the caller to use optimally
+implement the [`HasMemory`][__link46] trait to make it possible for the caller to use optimally
 configured memory when creating the byte sequences or buffers to use with your type.
 
 Even if the implementation of your type today is not capable of taking advantage of
 optimizations that depend on the memory configuration, it may be capable of doing so
 in the future or may, today or in the future, pass the data to another type that
-implements [`HasMemory`][__link48], which can take advantage of memory optimizations.
+implements [`HasMemory`][__link47], which can take advantage of memory optimizations.
 Therefore, it is best to implement this trait on all types that consume byte sequences
-via [`BytesView`][__link49] or produce byte sequences via [`BytesBuf`][__link50].
+via [`BytesView`][__link48] or produce byte sequences via [`BytesBuf`][__link49].
 
-The recommended implementation strategy for [`HasMemory`][__link51] is as follows:
+The recommended implementation strategy for [`HasMemory`][__link50] is as follows:
 
-* If your type always passes a [`BytesView`][__link52] or [`BytesBuf`][__link53] to another type that
-  implements [`HasMemory`][__link54], simply forward the memory provider from the other type.
+* If your type always passes a [`BytesView`][__link51] or [`BytesBuf`][__link52] to another type that
+  implements [`HasMemory`][__link53], simply forward the memory provider from the other type.
 * If your type can take advantage of optimizations enabled by specific memory configurations,
   (e.g. because it uses operating system APIs that unlock better performance when the memory
   is appropriately configured), return a memory provider that performs the necessary
   configuration.
-* If your type neither passes anything to another type that implements [`HasMemory`][__link55]
+* If your type neither passes anything to another type that implements [`HasMemory`][__link54]
   nor can take advantage of optimizations enabled by specific memory configurations, obtain
-  an instance of [`GlobalPool`][__link56] as a dependency and return it as the memory provider.
+  an instance of [`GlobalPool`][__link55] as a dependency and return it as the memory provider.
 
 Example of forwarding the memory provider (see `examples/bb_has_memory_forwarding.rs`
 for full code):
@@ -391,16 +391,16 @@ checked for compatibility.
 
 ## Compatibility with the `bytes` Crate
 
-The popular [`Bytes`][__link57] type from the `bytes` crate is often used in the Rust ecosystem to
+The popular [`Bytes`][__link56] type from the `bytes` crate is often used in the Rust ecosystem to
 represent simple byte buffers of consecutive bytes. For compatibility with this commonly used
-type, this crate offers conversion methods to translate between [`BytesView`][__link58] and [`Bytes`][__link59]
+type, this crate offers conversion methods to translate between [`BytesView`][__link57] and [`Bytes`][__link58]
 when the `bytes-compat` Cargo feature is enabled:
 
-* `BytesView::to_bytes()` converts a [`BytesView`][__link60] into a [`Bytes`][__link61] instance. This
+* `BytesView::to_bytes()` converts a [`BytesView`][__link59] into a [`Bytes`][__link60] instance. This
   is not always zero-copy because a byte sequence is not guaranteed to be consecutive in memory.
   You are discouraged from using this method in any performance-relevant logic path.
-* `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][__link62] instance
-  into a [`BytesView`][__link63]. This is an efficient zero-copy operation that reuses the memory of the
+* `BytesView::from(Bytes)` or `let s: BytesView = bytes.into()` converts a [`Bytes`][__link61] instance
+  into a [`BytesView`][__link62]. This is an efficient zero-copy operation that reuses the memory of the
   `Bytes` instance.
 
 ## Static Data
@@ -417,7 +417,7 @@ Optimal processing of static data requires satisfying multiple requirements:
 * We want to use memory that is optimally configured for the context in which the data is
   consumed (e.g. network connection, file, etc).
 
-The standard pattern here is to use [`OnceLock`][__link64] to lazily initialize a [`BytesView`][__link65] from
+The standard pattern here is to use [`OnceLock`][__link63] to lazily initialize a [`BytesView`][__link64] from
 the static data on first use, using memory from a memory provider that is optimal for the
 intended usage.
 
@@ -471,70 +471,69 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0unldGaz9_zG_GZfdbY_meGGwEPitlJS4QxG5Y698e_pdcSYWSBgmhieXRlc2J1ZmUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG91Jt_IDJ8uaGzw7UvcHuNDdG2jPnTC62v9nG8FGesia3fwjYWSBgmhieXRlc2J1ZmUwLjMuMA
  [__link0]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link10]: https://doc.rust-lang.org/stable/std/?search=io::BufRead
- [__link11]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link12]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::first_slice
- [__link13]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::advance
+ [__link10]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link11]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::first_slice
+ [__link12]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::advance
+ [__link13]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::first_slice
  [__link14]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::first_slice
  [__link15]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::first_slice
- [__link16]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::first_slice
- [__link17]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link18]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::Memory
- [__link19]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
+ [__link16]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link17]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::Memory
+ [__link18]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
+ [__link19]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory::memory
  [__link2]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link20]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory::memory
- [__link21]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::GlobalPool
- [__link22]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::GlobalPool::new
- [__link23]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::Memory::reserve
+ [__link20]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::GlobalPool
+ [__link21]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::GlobalPool::new
+ [__link22]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::Memory::reserve
+ [__link23]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
  [__link24]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
  [__link25]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
  [__link26]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link27]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link28]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_num_le
- [__link29]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_slice
+ [__link27]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_num_le
+ [__link28]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_slice
+ [__link29]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_byte
  [__link3]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::get_num_le
- [__link30]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_byte
- [__link31]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_byte_repeated
- [__link32]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_bytes
- [__link33]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link34]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
- [__link35]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::advance
+ [__link30]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_byte_repeated
+ [__link31]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_bytes
+ [__link32]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link33]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
+ [__link34]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::advance
+ [__link35]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
  [__link36]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
- [__link37]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::first_unfilled_slice
- [__link38]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link39]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::reserve
+ [__link37]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
+ [__link38]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::reserve
+ [__link39]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::remaining_capacity
  [__link4]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::get_byte
- [__link40]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::remaining_capacity
- [__link41]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link42]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link43]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link44]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link45]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link46]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_bytes
+ [__link40]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
+ [__link41]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link42]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
+ [__link43]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link44]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
+ [__link45]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf::put_bytes
+ [__link46]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
  [__link47]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
- [__link48]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
- [__link49]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link48]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link49]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
  [__link5]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::copy_to_slice
- [__link50]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
- [__link51]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
- [__link52]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link53]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
+ [__link50]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
+ [__link51]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link52]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesBuf
+ [__link53]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
  [__link54]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
- [__link55]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::HasMemory
- [__link56]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::GlobalPool
- [__link57]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link58]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link59]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link55]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=mem::GlobalPool
+ [__link56]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link57]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link58]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
+ [__link59]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
  [__link6]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::copy_to_uninit_slice
- [__link60]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link60]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
  [__link61]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link62]: https://docs.rs/bytes/latest/bytes/struct.Bytes.html
- [__link63]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link64]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
- [__link65]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
- [__link7]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView::reader
- [__link8]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesViewReader
- [__link9]: https://doc.rust-lang.org/stable/std/?search=io::Read
+ [__link62]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link63]: https://doc.rust-lang.org/stable/std/?search=sync::OnceLock
+ [__link64]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link7]: https://docs.rs/bytesbuf/0.3.0/bytesbuf/?search=BytesView
+ [__link8]: https://doc.rust-lang.org/stable/std/?search=io::Read
+ [__link9]: https://doc.rust-lang.org/stable/std/?search=io::BufRead

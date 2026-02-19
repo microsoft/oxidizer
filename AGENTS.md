@@ -5,3 +5,6 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 ## README Files
 
 Crate README files are auto-generated via `just readme`. Do not manually update them.
+
+Before pushing changes to the cloud, run `just readme` to ensure that readme files are up to date.
+
