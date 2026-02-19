@@ -95,6 +95,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use data_privacy::DataClass;
+
     use super::*;
 
     #[test]
@@ -109,5 +111,25 @@ mod tests {
         let value: u32 = 42;
         let uri_safe = value.as_uri_safe();
         assert_eq!(format!("{uri_safe}"), "42");
+    }
+
+    #[test]
+    fn test_uri_unsafe_fragment_sensitive() {
+        // Test line 78-84: UriUnsafeFragment for Sensitive<T> where T: Display
+        let data_class = DataClass::new("test", "sensitive");
+        let sensitive_string = Sensitive::new(String::from("secret_value"), data_class);
+
+        let display = sensitive_string.as_display();
+        assert_eq!(format!("{display}"), "secret_value");
+    }
+
+    #[test]
+    fn test_uri_fragment_sensitive() {
+        // Test line 87-93: UriFragment for Sensitive<T> where T: UriSafe
+        let data_class = DataClass::new("test", "safe");
+        let sensitive_num = Sensitive::new(100u32, data_class);
+
+        let uri_safe = sensitive_num.as_uri_safe();
+        assert_eq!(format!("{uri_safe}"), "100");
     }
 }

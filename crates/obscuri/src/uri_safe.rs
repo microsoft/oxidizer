@@ -290,6 +290,32 @@ mod tests {
         assert_eq!(safe.as_str(), "hello_world");
     }
 
+    #[test]
+    fn test_try_from_string_valid() {
+        let result = UriSafeString::try_from("valid_string_123".to_string());
+        assert_eq!(result.unwrap().as_str(), "valid_string_123");
+    }
+
+    #[test]
+    fn test_try_from_string_invalid() {
+        let result = UriSafeString::try_from("invalid{string}".to_string());
+        assert!(result.is_err());
+        result.unwrap_err();
+    }
+
+    #[test]
+    fn test_try_from_str_valid() {
+        let result = UriSafeString::try_from("valid_str_456");
+        assert_eq!(result.unwrap().as_str(), "valid_str_456");
+    }
+
+    #[test]
+    fn test_try_from_str_invalid() {
+        let result = UriSafeString::try_from("path/with/slashes");
+        assert!(result.is_err());
+        result.unwrap_err();
+    }
+
     // separate module to namespace generated tests and avoid conflicts
     mod from_static_reserved_characters {
         use super::*;
