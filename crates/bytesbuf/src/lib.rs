@@ -576,7 +576,7 @@ pub(crate) use read_adapter::BytesViewReader;
 pub(crate) use span::Span;
 pub(crate) use span_builder::SpanBuilder;
 pub use view::{BytesView, BytesViewSlices};
-pub use write_adapter::BytesBufWrite;
+pub use write_adapter::BytesBufWriter;
 
 #[cfg(test)]
 mod testing;

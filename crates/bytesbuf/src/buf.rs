@@ -8,7 +8,7 @@ use std::num::NonZero;
 use smallvec::SmallVec;
 
 use crate::mem::{Block, BlockMeta, BlockSize, Memory};
-use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
+use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
@@ -924,7 +924,7 @@ impl BytesBuf {
     ///
     /// let mut buf = memory.reserve(32);
     /// {
-    ///     let mut writer = buf.as_write(&memory);
+    ///     let mut writer = buf.writer(&memory);
     ///     writer.write_all(b"Hello, ")?;
     ///     writer.write_all(b"world!")?;
     /// }
@@ -933,8 +933,8 @@ impl BytesBuf {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn as_write<'m, M: Memory + ?Sized>(&mut self, memory: &'m M) -> BytesBufWrite<'_, 'm, M> {
-        BytesBufWrite::new(self, memory)
+    pub fn writer<'m, M: Memory + ?Sized>(&mut self, memory: &'m M) -> BytesBufWriter<'_, 'm, M> {
+        BytesBufWriter::new(self, memory)
     }
 }
 
@@ -2244,6 +2244,6 @@ mod tests {
     // Compile time test
     fn _can_use_in_dyn_traits(mem: &dyn Memory) {
         let mut buf = mem.reserve(123);
-        let _ = buf.as_write(mem);
+        let _ = buf.writer(mem);
     }
 }
