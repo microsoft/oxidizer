@@ -4,8 +4,8 @@
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use obscuri::{BaseUri, Uri, UriFragment, UriSafeString};
-use obscuri_macros::templated;
+use templated_uri::{BaseUri, Uri, UriFragment, UriSafeString};
+use templated_uri_macros::templated;
 
 // Example taxonomy for demonstration purposes
 #[taxonomy(example_taxonomy)]

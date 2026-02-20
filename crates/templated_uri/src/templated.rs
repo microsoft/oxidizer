@@ -22,7 +22,7 @@ use crate::{Uri, ValidationError};
 /// # Example
 ///
 /// ```
-/// use obscuri::{TemplatedPathAndQuery, UriSafeString, templated};
+/// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
 /// use uuid::Uuid;
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
@@ -55,7 +55,7 @@ use crate::{Uri, ValidationError};
 /// use data_privacy::{
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
-/// use obscuri::{TemplatedPathAndQuery, UriSafeString, templated};
+/// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
 /// use uuid::Uuid;
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]

@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 [package]
-name = "obscuri"
+name = "templated_uri"
 description = "Standards-compliant URI handling with templating, safety validation, and data classification"
 version = "0.1.0"
 readme = "README.md"
@@ -14,7 +14,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/obscuri"
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -31,9 +31,9 @@ allowed_external_types = [
     "http::uri::path::PathAndQuery",
     "http::uri::scheme::Scheme",
     "http::uri::Uri",
-    "obscuri_macros::templated",
-    "obscuri_macros::UriFragment",
-    "obscuri_macros::UriUnsafeFragment",
+    "templated_uri_macros::templated",
+    "templated_uri_macros::UriFragment",
+    "templated_uri_macros::UriUnsafeFragment",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
 ]
@@ -44,8 +44,8 @@ all-features = true
 [dependencies]
 data_privacy.workspace = true
 http.workspace = true
-obscuri_macros.workspace = true
 ohno.workspace = true
+templated_uri_macros.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

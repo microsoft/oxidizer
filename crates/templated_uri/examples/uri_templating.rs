@@ -2,8 +2,8 @@
 // Licensed under the MIT License.
 
 //! Example demonstrating the basic usage of templated URI in `fetch`
-use obscuri::{BaseUri, Uri, UriSafeString};
-use obscuri_macros::templated;
+use templated_uri::{BaseUri, Uri, UriSafeString};
+use templated_uri_macros::templated;
 
 #[templated(template = "/{org_id}/user/{user_id}/{item}", unredacted)]
 #[derive(Clone)]

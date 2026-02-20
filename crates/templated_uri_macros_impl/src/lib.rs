@@ -4,12 +4,14 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(hidden)]
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/obscuri_macros_impl/logo.png")]
 #![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/obscuri_macros_impl/favicon.ico"
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/templated_uri_macros_impl/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/templated_uri_macros_impl/favicon.ico"
 )]
 
-//! Macros for the [`obscuri`](https://docs.rs/obscuri) crate.
+//! Macros for the [`templated_uri`](https://docs.rs/templated_uri) crate.
 
 mod enum_template;
 pub(crate) mod error;
@@ -230,7 +232,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl obscuri::TemplatedPathAndQuery for Test {
+        impl templated_uri::TemplatedPathAndQuery for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -241,22 +243,25 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::obscuri::UriFragment;
-                use ::obscuri::UriUnsafeFragment;
+                use ::templated_uri::UriFragment;
+                use ::templated_uri::UriUnsafeFragment;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::obscuri::UriSafe = &param;
-                let param3: &dyn ::obscuri::UriSafe = &param3;
-                let param4: &dyn ::obscuri::UriSafe = &param4;
+                let param: &dyn ::templated_uri::UriSafe = &param;
+                let param3: &dyn ::templated_uri::UriSafe = &param3;
+                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
-            ) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            ) -> ::std::result::Result<
+                templated_uri::uri::PathAndQuery,
+                templated_uri::ValidationError,
+            > {
                 let uri_string = self.to_uri_string();
-                Ok(obscuri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(templated_uri::uri::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -285,9 +290,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for obscuri::uri::TargetPathAndQuery {
+        impl From<Test> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: Test) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
                     std::sync::Arc::new(value),
                 )
             }
@@ -318,7 +323,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl obscuri::TemplatedPathAndQuery for Test {
+        impl templated_uri::TemplatedPathAndQuery for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -329,22 +334,25 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::obscuri::UriFragment;
-                use ::obscuri::UriUnsafeFragment;
+                use ::templated_uri::UriFragment;
+                use ::templated_uri::UriUnsafeFragment;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::obscuri::UriSafe = &param;
-                let param3: &dyn ::obscuri::UriSafe = &param3;
-                let param4: &dyn ::obscuri::UriSafe = &param4;
+                let param: &dyn ::templated_uri::UriSafe = &param;
+                let param3: &dyn ::templated_uri::UriSafe = &param3;
+                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
-            ) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            ) -> ::std::result::Result<
+                templated_uri::uri::PathAndQuery,
+                templated_uri::ValidationError,
+            > {
                 let uri_string = self.to_uri_string();
-                Ok(obscuri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(templated_uri::uri::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -369,9 +377,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for obscuri::uri::TargetPathAndQuery {
+        impl From<Test> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: Test) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
                     std::sync::Arc::new(value),
                 )
             }
@@ -400,7 +408,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl obscuri::TemplatedPathAndQuery for Test {
+        impl templated_uri::TemplatedPathAndQuery for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -411,22 +419,25 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::obscuri::UriFragment;
-                use ::obscuri::UriUnsafeFragment;
+                use ::templated_uri::UriFragment;
+                use ::templated_uri::UriUnsafeFragment;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::obscuri::UriSafe = &param;
-                let param3: &dyn ::obscuri::UriSafe = &param3;
-                let param4: &dyn ::obscuri::UriSafe = &param4;
+                let param: &dyn ::templated_uri::UriSafe = &param;
+                let param3: &dyn ::templated_uri::UriSafe = &param3;
+                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
-            ) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            ) -> ::std::result::Result<
+                templated_uri::uri::PathAndQuery,
+                templated_uri::ValidationError,
+            > {
                 let uri_string = self.to_uri_string();
-                Ok(obscuri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(templated_uri::uri::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -451,9 +462,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for obscuri::uri::TargetPathAndQuery {
+        impl From<Test> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: Test) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
                     std::sync::Arc::new(value),
                 )
             }
@@ -482,7 +493,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl obscuri::TemplatedPathAndQuery for Test {
+        impl templated_uri::TemplatedPathAndQuery for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -493,22 +504,25 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::obscuri::UriFragment;
-                use ::obscuri::UriUnsafeFragment;
+                use ::templated_uri::UriFragment;
+                use ::templated_uri::UriUnsafeFragment;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::obscuri::UriSafe = &param;
-                let param3: &dyn ::obscuri::UriSafe = &param3;
-                let param4: &dyn ::obscuri::UriSafe = &param4;
+                let param: &dyn ::templated_uri::UriSafe = &param;
+                let param3: &dyn ::templated_uri::UriSafe = &param3;
+                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
-            ) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            ) -> ::std::result::Result<
+                templated_uri::uri::PathAndQuery,
+                templated_uri::ValidationError,
+            > {
                 let uri_string = self.to_uri_string();
-                Ok(obscuri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(templated_uri::uri::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -533,9 +547,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for obscuri::uri::TargetPathAndQuery {
+        impl From<Test> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: Test) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
                     std::sync::Arc::new(value),
                 )
             }
@@ -677,7 +691,7 @@ mod tests {
             FirstTemplate(First),
             SecondTemplate(Second),
         }
-        impl obscuri::TemplatedPathAndQuery for Test {
+        impl templated_uri::TemplatedPathAndQuery for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.rfc_6570_template(),
@@ -706,7 +720,10 @@ mod tests {
             }
             fn to_path_and_query(
                 &self,
-            ) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            ) -> ::std::result::Result<
+                templated_uri::uri::PathAndQuery,
+                templated_uri::ValidationError,
+            > {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.to_path_and_query(),
                     Test::SecondTemplate(template_variant) => {
@@ -750,9 +767,9 @@ mod tests {
                 Self::SecondTemplate(template_variant)
             }
         }
-        impl From<Test> for obscuri::uri::TargetPathAndQuery {
+        impl From<Test> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: Test) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
                     std::sync::Arc::new(value),
                 )
             }
@@ -768,7 +785,7 @@ mod tests {
 
         let output_pretty = pretty_parse_uri_fragment(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::obscuri::UriUnsafeFragment for MyFragment {
+        impl ::templated_uri::UriUnsafeFragment for MyFragment {
             fn as_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
@@ -784,7 +801,7 @@ mod tests {
 
         let output_pretty = pretty_parse_uri_fragment(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::obscuri::UriUnsafeFragment for CustomFragment {
+        impl ::templated_uri::UriUnsafeFragment for CustomFragment {
             fn as_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
@@ -897,8 +914,8 @@ mod tests {
 
         let output_pretty = pretty_parse_uri_safe_fragment(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::obscuri::UriFragment for SafeFragment {
-            fn as_uri_safe(&self) -> impl ::obscuri::UriSafe {
+        impl ::templated_uri::UriFragment for SafeFragment {
+            fn as_uri_safe(&self) -> impl ::templated_uri::UriSafe {
                 &self.0
             }
         }

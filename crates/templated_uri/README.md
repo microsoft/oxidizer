@@ -1,11 +1,11 @@
 <div align="center">
- <img src="./logo.png" alt="Obscuri Logo" width="96">
+ <img src="./logo.png" alt="Templated Uri Logo" width="96">
 
-# Obscuri
+# Templated Uri
 
-[![crate.io](https://img.shields.io/crates/v/obscuri.svg)](https://crates.io/crates/obscuri)
-[![docs.rs](https://docs.rs/obscuri/badge.svg)](https://docs.rs/obscuri)
-[![MSRV](https://img.shields.io/crates/msrv/obscuri)](https://crates.io/crates/obscuri)
+[![crate.io](https://img.shields.io/crates/v/templated_uri.svg)](https://crates.io/crates/templated_uri)
+[![docs.rs](https://docs.rs/templated_uri/badge.svg)](https://docs.rs/templated_uri)
+[![MSRV](https://img.shields.io/crates/msrv/templated_uri)](https://crates.io/crates/templated_uri)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
@@ -35,8 +35,8 @@ The crate centers around several key abstractions:
 ### Simple URI Construction
 
 ```rust
-use obscuri::uri::{PathAndQuery, TargetPathAndQuery};
-use obscuri::{BaseUri, Uri};
+use templated_uri::uri::{PathAndQuery, TargetPathAndQuery};
+use templated_uri::{BaseUri, Uri};
 
 // Create an endpoint (scheme + authority only)
 let base_uri = BaseUri::from_uri_static("https://api.example.com");
@@ -57,7 +57,7 @@ assert_eq!(
 For dynamic URIs with variable components, use the templating system:
 
 ```rust
-use obscuri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
+use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
 use uuid::Uuid;
 
 #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
@@ -83,7 +83,7 @@ The crate provides [`UriSafe`][__link5] trait implementations for types that are
 to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
 
 ```rust
-use obscuri::UriSafeString;
+use templated_uri::UriSafeString;
 
 // This will succeed - contains only safe characters
 let safe = UriSafeString::new(&"hello-world_123").unwrap();
@@ -102,7 +102,7 @@ For complex templates, use the `label` attribute to provide a concise identifier
 for telemetry. When present, the label takes precedence over the template string.
 
 ```rust
-use obscuri::{UriSafeString, templated};
+use templated_uri::{UriSafeString, templated};
 
 #[templated(
     template = "/{org}/users/{user_id}/reports/{report_type}",
@@ -123,7 +123,7 @@ in URIs. This is particularly important for compliance and data security:
 
 ```rust
 use data_privacy::Sensitive;
-use obscuri::{UriSafeString, templated};
+use templated_uri::{UriSafeString, templated};
 
 #[templated(template = "/{org_id}/user/{user_id}/")]
 #[derive(Clone)]
@@ -159,22 +159,22 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/obscuri">source code</a>.
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7z17Wpz_pFOG3Sgtc2zhgIWG_Zo5SnfNLaEG81kh3w2WQhmYWSDgmRodHRwZTEuNC4wgmdvYnNjdXJpZTAuMS4wgmR1dWlkZjEuMjEuMA
- [__link0]: https://docs.rs/obscuri/0.1.0/obscuri/?search=uri::Uri
- [__link1]: https://docs.rs/obscuri/0.1.0/obscuri/?search=BaseUri
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8e6cE1NH7G8G3uulRSyVAO5GwlA7xW3iabyG2mWXsEbP3weYWSDgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4wgmR1dWlkZjEuMjEuMA
+ [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
+ [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/
- [__link11]: https://docs.rs/obscuri/0.1.0/obscuri/?search=uri::Uri
+ [__link11]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link12]: https://docs.rs/http/1.4.0/http/?search=Uri
  [__link13]: https://docs.rs/hyper/latest/hyper/
  [__link14]: https://docs.rs/reqwest/latest/reqwest/
- [__link2]: https://docs.rs/obscuri/0.1.0/obscuri/?search=TemplatedPathAndQuery
- [__link3]: https://docs.rs/obscuri/0.1.0/obscuri/?search=UriSafe
- [__link4]: https://docs.rs/obscuri/0.1.0/obscuri/?search=UriSafeString
- [__link5]: https://docs.rs/obscuri/0.1.0/obscuri/?search=UriSafe
+ [__link2]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=TemplatedPathAndQuery
+ [__link3]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
+ [__link4]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
+ [__link5]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
  [__link6]: https://docs.rs/uuid/1.21.0/uuid/?search=Uuid
- [__link7]: https://docs.rs/obscuri/0.1.0/obscuri/?search=UriSafeString
+ [__link7]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
  [__link8]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link9]: https://docs.rs/obscuri/0.1.0/obscuri/?search=UriSafe
+ [__link9]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe

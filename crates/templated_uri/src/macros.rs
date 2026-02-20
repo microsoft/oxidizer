@@ -15,13 +15,13 @@
 /// # Example
 ///
 /// ```
-/// # use obscuri::{UriFragment, UriSafeString};
+/// # use templated_uri::{UriFragment, UriSafeString};
 /// #[derive(UriFragment)]
 /// struct UserId(UriSafeString);
 /// ```
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
-pub use obscuri_macros::UriFragment;
+pub use templated_uri_macros::UriFragment;
 /// Derives the `UriUnsafeFragment` trait for newtype wrappers with unrestricted characters.
 ///
 /// This derive macro implements `UriUnsafeFragment` for tuple structs with exactly one field.
@@ -37,7 +37,7 @@ pub use obscuri_macros::UriFragment;
 ///
 /// ```
 /// # use std::fmt::Display;
-/// use obscuri::UriUnsafeFragment;
+/// use templated_uri::UriUnsafeFragment;
 ///
 /// #[derive(UriUnsafeFragment)]
 /// struct PathSegment(String);
@@ -51,7 +51,7 @@ pub use obscuri_macros::UriFragment;
 ///
 /// This allows `PathSegment` to be used in URI templates with `{+param}` syntax where
 /// reserved characters like `/` should be preserved rather than percent-encoded.
-pub use obscuri_macros::UriUnsafeFragment;
+pub use templated_uri_macros::UriUnsafeFragment;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:
@@ -65,7 +65,7 @@ pub use obscuri_macros::UriUnsafeFragment;
 /// For structs, specify a URI template. Field names must match template parameter names.
 ///
 /// ```
-/// # use obscuri::templated;
+/// # use templated_uri::templated;
 /// #[templated(template = "/topic/{topic_id}", unredacted)]
 /// struct ListTopics {
 ///     topic_id: u32,
@@ -87,7 +87,7 @@ pub use obscuri_macros::UriUnsafeFragment;
 /// - `#[unredacted]`: Disable redaction for a specific field
 ///
 /// ```ignore
-/// # use obscuri::{templated, UriSafeString};
+/// # use templated_uri::{templated, UriSafeString};
 /// #[templated(template = "/{org_id}/product/{product_id}")]
 /// struct ProductPath {
 ///     org_id: OrgId,           // Will be redacted
@@ -102,7 +102,7 @@ pub use obscuri_macros::UriUnsafeFragment;
 /// The macro generates delegating implementations that forward to the inner type.
 ///
 /// ```ignore
-/// # use data_privacy::templated;
+/// # use templated_uri::templated;
 /// #[templated]
 /// enum ApiPath {
 ///     User(UserPath),
@@ -112,4 +112,4 @@ pub use obscuri_macros::UriUnsafeFragment;
 ///
 /// The enum will delegate all trait methods to whichever variant is active, and also generates
 /// `From<VariantType>` implementations for easy construction.
-pub use obscuri_macros::templated;
+pub use templated_uri_macros::templated;
