@@ -27,13 +27,12 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// # Multithreaded use
 ///
 /// Instances of this type should not be manually moved across threads (e.g. by capturing in a closure and
-/// handing to `thread::spawn()` or `tokio::spawn()`). While this will work, it will cause degraded performance
-/// for all clones from the same family.
+/// handing to `thread::spawn()` or `tokio::spawn()`). While the pool will still operate correctly, it will
+/// suffer degraded performance in all clones from the same family.
 ///
 /// This type is [thread-aware]. If moved across threads using thread-aware APIs, the performance
-/// penalty is not incurred.
-///
-/// If no suitable thread-aware API is available, use a thread-local pool via the `thread_local!` macro.
+/// penalty is not incurred. If no suitable thread-aware API is available, use a thread-local pool
+/// via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
 #[derive(Clone, Debug)]
