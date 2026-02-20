@@ -27,15 +27,15 @@ pub const DATA_CLASS_UNKNOWN_URI: DataClass = DataClass::new(env!("CARGO_PKG_NAM
 /// It can also handle templated paths and queries, allowing for dynamic URI generation based on templates.
 ///
 /// ```
-/// use obscuri::uri::PathAndQuery;
-/// use obscuri::{BaseUri, Uri};
+/// use templated_uri::uri::PathAndQuery;
+/// use templated_uri::{BaseUri, Uri};
 /// let base_uri = BaseUri::from_uri_static("http://example.com");
 /// let path_and_query = PathAndQuery::from_static("/path?query=1");
 /// let uri: Uri = Uri::new().base_uri(base_uri).path_and_query(path_and_query);
 /// ```
 ///
 /// ```
-/// use obscuri::{BaseUri, Uri, templated};
+/// use templated_uri::{BaseUri, Uri, templated};
 ///
 /// #[templated(template = "/example.com/{param}", unredacted)]
 /// #[derive(Clone)]
@@ -70,8 +70,8 @@ impl Uri {
 
     /// Creates a new [`Uri`] instance with the specified classified [`BaseUri`] and path and query.
     /// ```
-    /// use obscuri::uri::PathAndQuery;
-    /// use obscuri::{BaseUri, Uri};
+    /// use templated_uri::uri::PathAndQuery;
+    /// use templated_uri::{BaseUri, Uri};
     /// let base_uri = BaseUri::from_uri_static("http://example.com");
     /// let path_and_query = PathAndQuery::from_static("/path?query=1");
     /// let uri: Uri = Uri::with_base_and_path(Some(base_uri.into()), Some(path_and_query.into()));

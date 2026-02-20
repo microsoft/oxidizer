@@ -7,9 +7,9 @@ use std::fmt::Display;
 
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, Sensitive, classified, taxonomy};
-use obscuri::uri::DATA_CLASS_UNKNOWN_URI;
-use obscuri::{BaseUri, TemplatedPathAndQuery, Uri, UriFragment, UriSafeString, UriUnsafeFragment};
-use obscuri_macros::templated;
+use templated_uri::uri::DATA_CLASS_UNKNOWN_URI;
+use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriFragment, UriSafeString, UriUnsafeFragment};
+use templated_uri_macros::templated;
 use uuid::Uuid;
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
@@ -315,7 +315,7 @@ fn test_label_none_when_not_specified() {
 
 #[test]
 fn test_target_path_and_query_label() {
-    use obscuri::uri::TargetPathAndQuery;
+    use templated_uri::uri::TargetPathAndQuery;
 
     // Test with label
     let complex_path = ComplexReportPath {
@@ -344,7 +344,7 @@ fn test_target_path_and_query_label() {
 fn test_target_path_and_query_from_templated() {
     use std::borrow::Cow;
 
-    use obscuri::uri::TargetPathAndQuery;
+    use templated_uri::uri::TargetPathAndQuery;
 
     #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
     #[derive(Clone)]

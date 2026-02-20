@@ -39,7 +39,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         .collect();
 
     quote! {
-        impl obscuri::TemplatedPathAndQuery for #ident {
+        impl templated_uri::TemplatedPathAndQuery for #ident {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 match self {
                     #(#variant_matches =>template_variant.rfc_6570_template()),*
@@ -64,7 +64,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            fn to_path_and_query(&self) -> ::std::result::Result<templated_uri::uri::PathAndQuery, templated_uri::ValidationError> {
                 match self {
                     #(#variant_matches => template_variant.to_path_and_query()),*
                 }
@@ -96,9 +96,9 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
             }
         )*
 
-        impl From<#ident> for obscuri::uri::TargetPathAndQuery {
+        impl From<#ident> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: #ident) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(std::sync::Arc::new(value))
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(std::sync::Arc::new(value))
             }
         }
     }
