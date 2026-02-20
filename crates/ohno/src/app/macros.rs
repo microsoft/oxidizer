@@ -13,8 +13,7 @@
 /// # Examples
 ///
 /// ```rust
-/// use ohno::AppError;
-/// use ohno::app_err;
+/// use ohno::{AppError, app_err};
 ///
 /// // Create an error from a string literal
 /// let error = app_err!("something went wrong");
@@ -81,10 +80,10 @@ macro_rules! app_err {
 /// use ohno::{AppError, bail};
 ///
 /// fn parse_config(data: &str) -> Result<(), AppError> {
-///    if data.is_empty() {
-///        bail!("config data cannot be empty");
-///    }
-///    Ok(())
+///     if data.is_empty() {
+///         bail!("config data cannot be empty");
+///     }
+///     Ok(())
 /// }
 /// ```
 ///

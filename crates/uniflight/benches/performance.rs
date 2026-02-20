@@ -9,10 +9,8 @@
 
 #![allow(missing_docs, reason = "benchmark code")]
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use uniflight::Merger;

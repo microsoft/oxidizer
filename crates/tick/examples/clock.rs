@@ -7,7 +7,8 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use tick::{Clock, FutureExt, PeriodicTimer, fmt::Iso8601};
+use tick::fmt::Iso8601;
+use tick::{Clock, FutureExt, PeriodicTimer};
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {

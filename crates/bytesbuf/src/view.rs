@@ -10,7 +10,7 @@ use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
 use crate::mem::{BlockMeta, BlockSize, Memory};
-use crate::{BytesViewReader, MAX_INLINE_SPANS, MemoryGuard, Span};
+use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 
 /// A view over a sequence of immutable bytes.
 ///
@@ -711,31 +711,6 @@ impl BytesView {
         let mut new_view = self.clone();
         new_view.append(other);
         new_view
-    }
-
-    /// Exposes the instance through the [`Read`][std::io::Read] trait.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use std::io::Read;
-    ///
-    /// use bytesbuf::BytesView;
-    ///
-    /// let mut view = BytesView::copied_from_slice(b"Hello, world!", &memory);
-    /// let mut reader = view.as_read();
-    ///
-    /// let mut buffer = [0u8; 5];
-    /// let bytes_read = reader.read(&mut buffer)?;
-    ///
-    /// assert_eq!(bytes_read, 5);
-    /// assert_eq!(&buffer, b"Hello");
-    /// # Ok::<(), std::io::Error>(())
-    /// ```
-    #[must_use]
-    pub fn as_read(&mut self) -> impl std::io::Read {
-        BytesViewReader::new(self)
     }
 }
 

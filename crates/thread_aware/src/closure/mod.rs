@@ -5,9 +5,10 @@
 
 mod erased;
 
+pub(crate) use erased::ErasedClosureOnce;
+
 use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
-pub(crate) use erased::ErasedClosureOnce;
 
 /// Marks `FnOnce()`-like closures whose captured values all implement [`ThreadAware`].
 ///

@@ -14,6 +14,7 @@ pub trait SystemTimeExt: sealed::Sealed {
     ///
     /// ```
     /// use std::time::{Duration, SystemTime};
+    ///
     /// use tick::SystemTimeExt;
     ///
     /// let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);

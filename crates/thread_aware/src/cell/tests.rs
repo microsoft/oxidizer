@@ -1,10 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::{
-    self,
-    atomic::{AtomicI32, Ordering},
-};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{self};
 
 use crate::affinity::{MemoryAffinity, PinnedAffinity, pinned_affinities};
 use crate::closure::relocate;

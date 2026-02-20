@@ -38,14 +38,15 @@ mod employee;
 mod example_taxonomy;
 mod logging;
 
-use crate::employee::{Employee, EmployeeID, UserAddress, UserName};
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, Write, stdin, stdout};
+
 use data_privacy::RedactionEngine;
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use example_taxonomy::ExampleTaxonomy;
 use logging::{log, set_redaction_engine_for_logging};
-use std::fs::{File, OpenOptions};
-use std::io::BufReader;
-use std::io::{Write, stdin, stdout};
+
+use crate::employee::{Employee, EmployeeID, UserAddress, UserName};
 
 fn main() {
     // First step, we create a redaction engine that prescribes how to redact individual data classes.

@@ -48,7 +48,7 @@
 //! > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`] macro.
 //!
 //! ```rust
-//! use ohno::{OhnoCore, Error};
+//! use ohno::{Error, OhnoCore};
 //!
 //! #[derive(Error)]
 //! pub struct MyError {
@@ -133,7 +133,9 @@
 //! impl CustomError {
 //!     pub fn new(custom_logic: bool) -> Self {
 //!         // Your custom constructor logic here
-//!         Self { inner_error: OhnoCore::default() }
+//!         Self {
+//!             inner_error: OhnoCore::default(),
+//!         }
 //!     }
 //! }
 //! ```
@@ -221,8 +223,7 @@
 //!
 //! #[ohno::enrich_err("failed to open file")]
 //! fn open_file(path: &str) -> Result<String, MyError> {
-//!     std::fs::read_to_string(path)
-//!         .map_err(MyError::caused_by)
+//!     std::fs::read_to_string(path).map_err(MyError::caused_by)
 //! }
 //! // Error output will include: "failed to open file (at src/main.rs:42)"
 //! ```

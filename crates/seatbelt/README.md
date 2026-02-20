@@ -102,8 +102,7 @@ use seatbelt::timeout::Timeout;
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tower::ServiceBuilder;
 
-let context: ResilienceContext<String, Result<String, String>> =
-    ResilienceContext::new(&clock);
+let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock);
 
 let service = ServiceBuilder::new()
     .layer(
@@ -119,9 +118,7 @@ let service = ServiceBuilder::new()
             .timeout(Duration::from_secs(30))
             .timeout_error(|_| "operation timed out".to_string()),
     )
-    .service_fn(|input: String| async move {
-        Ok::<_, String>(format!("processed: {input}"))
-    });
+    .service_fn(|input: String| async move { Ok::<_, String>(format!("processed: {input}")) });
 ```
 
 ## Features
@@ -143,7 +140,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4m9a89kCnclG9jGIjV2D_1yGzTaydkW8mVgG84_sI5bv3pNYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjCCZHRpY2tlMC4yLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4XTWg5D20iXG5-sZfM55RcnG_PRlQIWXOiaG6Oh8f0TxP2DYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjCCZHRpY2tlMC4yLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.3.0/seatbelt/breaker/index.html
