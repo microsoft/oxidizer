@@ -330,7 +330,7 @@ fn empty_context_iter() {
 }
 
 #[test]
-fn context_iter_reverse_order() {
+fn context_iter_chronological_order() {
     let mut core = OhnoCore::default();
 
     let messages = ["msg 1", "msg 2", "msg 3", "msg 4", "msg 5"];
@@ -351,11 +351,11 @@ fn context_iter_reverse_order() {
     assert_eq!(
         messages,
         vec![
-            ("msg 5", "test.rs", 50),
-            ("msg 4", "test.rs", 40),
-            ("msg 3", "test.rs", 30),
-            ("msg 2", "test.rs", 20),
             ("msg 1", "test.rs", 10),
+            ("msg 2", "test.rs", 20),
+            ("msg 3", "test.rs", 30),
+            ("msg 4", "test.rs", 40),
+            ("msg 5", "test.rs", 50),
         ]
     );
 }

@@ -103,14 +103,14 @@ impl OhnoCore {
         self.data.backtrace.as_backtrace()
     }
 
-    /// Returns an iterator over the enrichment information in reverse order (most recent first).
+    /// Returns an iterator over the enrichment information in chronological order (oldest first).
     pub fn enrichments(&self) -> impl Iterator<Item = &EnrichmentEntry> {
-        self.data.enrichment.iter().rev()
+        self.data.enrichment.iter()
     }
 
-    /// Returns an iterator over just the enrichment messages in reverse order (most recent first).
+    /// Returns an iterator over just the enrichment messages in chronological order (oldest first).
     pub fn enrichment_messages(&self) -> impl Iterator<Item = &str> {
-        self.data.enrichment.iter().rev().map(|ctx| ctx.message.as_ref())
+        self.data.enrichment.iter().map(|ctx| ctx.message.as_ref())
     }
 
     /// Formats the main error message without backtrace and error enrichment.
@@ -305,7 +305,7 @@ mod tests {
         error.add_enrichment(EnrichmentEntry::new("ctx1", "test.rs", 1));
         error.add_enrichment(EnrichmentEntry::new("ctx2", "test.rs", 2));
         let messages: Vec<_> = error.enrichment_messages().collect();
-        assert_eq!(messages, vec!["ctx2", "ctx1"]);
+        assert_eq!(messages, vec!["ctx1", "ctx2"]);
     }
 
     #[test]

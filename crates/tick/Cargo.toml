@@ -69,11 +69,11 @@ workspace = true
 
 [[example]]
 name = "basic"
-required-features = ["tokio"]
+required-features = ["tokio", "fmt"]
 
 [[example]]
 name = "clock"
-required-features = ["tokio"]
+required-features = ["tokio", "fmt"]
 
 [[example]]
 name = "clock_control"

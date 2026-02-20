@@ -48,7 +48,7 @@ pub fn generate_unique_field_name(existing_fields: &[&syn::Ident]) -> syn::Ident
     let mut counter = 0;
     while existing_fields.iter().any(|ident| ident == &AsRef::<str>::as_ref(&candidate)) {
         counter += 1;
-        candidate = format!("{candidate}_{counter}");
+        candidate = format!("ohno_core_{counter}");
     }
 
     syn::Ident::new(&candidate, proc_macro2::Span::call_site())
@@ -109,5 +109,18 @@ mod tests {
 
         // Verify that the returned name is NOT in the existing fields
         assert!(!fields.iter().any(|ident| name == ident.to_string()));
+    }
+
+    #[test]
+    fn test_generate_unique_field_name_multiple_collisions() {
+        let ident1 = syn::Ident::new("ohno_core", proc_macro2::Span::call_site());
+        let ident2 = syn::Ident::new("ohno_core_1", proc_macro2::Span::call_site());
+        let ident3 = syn::Ident::new("ohno_core_2", proc_macro2::Span::call_site());
+        let fields = vec![&ident1, &ident2, &ident3];
+
+        let name = generate_unique_field_name(&fields);
+
+        // Should return "ohno_core_3", not a compounding name like "ohno_core_1_2_3"
+        assert_eq!(name.to_string(), "ohno_core_3");
     }
 }
