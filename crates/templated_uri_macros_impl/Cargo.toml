@@ -2,8 +2,8 @@
 # Licensed under the MIT License.
 
 [package]
-name = "obscuri_macros"
-description = "Macros for the obscuri crate."
+name = "templated_uri_macros_impl"
+description = "Macros for the templated_uri crate."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "url", "parsing", "templates", "uri"]
@@ -14,16 +14,23 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/obscuri_macros"
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri_macros_impl"
 
-[lib]
-proc-macro = true
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
-obscuri_macros_impl.workspace = true
+chumsky = { workspace = true, features = ["std"] }
+darling.workspace = true
+ohno.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
 mutants.workspace = true
+prettyplease.workspace = true
 
 [lints]
 workspace = true

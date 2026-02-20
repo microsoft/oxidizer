@@ -40,7 +40,7 @@ pub use origin::Origin;
 /// - Consider making common paths constants in your application code.
 ///
 /// ```rust
-/// # use obscuri::{BaseUri, uri::{Scheme, PathAndQuery}};
+/// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
 ///
 /// // Pre-create PathAndQuery objects (can be static or stored in a cache)
 /// let api_path = PathAndQuery::from_static("/api/v1/resources");
@@ -64,7 +64,7 @@ pub use origin::Origin;
 /// Creating `base_uri` with various constructors:
 ///
 /// ```
-/// # use obscuri::{BasePath, BaseUri, uri::Scheme, };
+/// # use templated_uri::{BasePath, BaseUri, uri::Scheme, };
 /// // From scheme and authority
 /// let base_uri1 = BaseUri::new(Scheme::HTTPS, "example.com")?;
 /// assert_eq!(base_uri1.to_string(), "https://example.com/");
@@ -87,7 +87,7 @@ pub use origin::Origin;
 /// Converting an `base_uri` to a complete URI:
 ///
 /// ```
-/// # use obscuri::{BaseUri, uri::{Scheme, PathAndQuery}};
+/// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
 /// let base_uri = BaseUri::new(Scheme::HTTPS, "api.example.com")?;
 ///
 /// // Combine with a path to create a complete URI
@@ -134,7 +134,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::{Scheme, Authority}};
+    /// # use templated_uri::{BaseUri, uri::{Scheme, Authority}};
     /// // Default HTTPS port (443)
     /// let base_uri = BaseUri::new(Scheme::HTTPS, "example.com")?;
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
@@ -183,7 +183,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme, BasePath};
+    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
     /// let base_uri =
     ///     BaseUri::new(Scheme::HTTPS, "example.com")?.with_path(BasePath::try_from("/api/v1/")?)?;
     ///
@@ -224,7 +224,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme, BasePath};
+    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
     /// let base_uri = BaseUri::from_parts(Scheme::HTTPS, "example.com", 1234, BasePath::default())?;
     /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -255,7 +255,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com:443");
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
     /// ```
@@ -288,7 +288,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::BaseUri;
+    /// # use templated_uri::BaseUri;
     /// let base_uri = BaseUri::from_uri_str("https://example.com:443")?;
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -297,7 +297,7 @@ impl BaseUri {
     /// Using a URI string with a path:
     ///
     /// ```
-    /// # use obscuri::BaseUri;
+    /// # use templated_uri::BaseUri;
     /// let base_uri = BaseUri::from_uri_str("https://example.com:443/path-prefix/")?;
     /// assert_eq!(base_uri.to_string(), "https://example.com/path-prefix/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -327,7 +327,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::BaseUri;
+    /// # use templated_uri::BaseUri;
     /// let uri = "https://example.com".parse::<http::Uri>()?;
     /// let base_uri = BaseUri::from_http_uri(&uri)?;
     /// // Note the added trailing slash, this is a behavior of http::Uri parsing which initializes a `/`
@@ -339,7 +339,7 @@ impl BaseUri {
     /// Using a URI string with a path:
     ///
     /// ```
-    /// # use obscuri::BaseUri;
+    /// # use templated_uri::BaseUri;
     /// let uri = "https://example.com/path/".parse::<http::Uri>()?;
     /// let base_uri = BaseUri::from_http_uri(&uri)?;
     /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
@@ -361,7 +361,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com");
     /// assert_eq!(base_uri.scheme().as_str(), "https");
     /// ```
@@ -376,13 +376,13 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com");
     /// assert_eq!(base_uri.authority().as_str(), "example.com");
     /// ```
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com:1234");
     /// assert_eq!(base_uri.authority().as_str(), "example.com:1234");
     /// ```
@@ -395,7 +395,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com:443");
     /// assert_eq!(base_uri.host(), "example.com");
     /// ```
@@ -413,7 +413,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, Origin, uri::{Scheme, Authority}};
+    /// # use templated_uri::{BaseUri, Origin, uri::{Scheme, Authority}};
     /// let base_uri = BaseUri::from_uri_static("https://example.com:443");
     /// let new_base_uri = base_uri.with_origin(Origin::new(Scheme::HTTPS, Authority::from_static("new-example.com:8080")).unwrap());
     /// assert_eq!(new_base_uri.to_string(), "https://new-example.com:8080/");
@@ -433,7 +433,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// // Explicit port
     /// let base_uri = BaseUri::from_uri_static("https://example.com:8443");
     /// assert_eq!(base_uri.port(), 8443);
@@ -454,7 +454,7 @@ impl BaseUri {
     ///
     /// # Examples
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let mut base_uri = BaseUri::from_uri_static("https://example.com");
     /// assert_eq!(base_uri.port(), 443);
     ///
@@ -476,14 +476,14 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com/some/path/");
     ///
     /// assert_eq!(base_uri.path().as_str(), "/some/path/");
     /// ```
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let base_uri = BaseUri::from_uri_static("https://example.com");
     ///
     /// assert_eq!(base_uri.path().as_str(), "/");
@@ -499,7 +499,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, uri::Scheme};
     /// let secure = BaseUri::from_uri_static("https://example.com");
     /// assert!(secure.is_https());
     ///
@@ -527,7 +527,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::{Scheme, PathAndQuery}};
+    /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
     /// let base_uri = BaseUri::from_uri_static("https://example.com");
     /// let uri = base_uri.build_http_uri("/api/resource?param=value")?;
     ///
@@ -540,7 +540,7 @@ impl BaseUri {
     ///
     /// Using a path prefix as a part of the [`BaseUri`]:
     /// ```
-    /// # use obscuri::{BaseUri, uri::{Scheme, PathAndQuery}};
+    /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
     /// let base_uri = BaseUri::from_uri_static("https://example.com/api/");
     /// let uri = base_uri.build_http_uri("resource?param=value")?;
     ///
@@ -554,7 +554,7 @@ impl BaseUri {
     /// Using a pre-existing `PathAndQuery`:
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::{Scheme, PathAndQuery}};
+    /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
     /// let base_uri = BaseUri::from_uri_static("https://example.com");
     ///
     /// // Pre-create and cache path and query to avoid parsing and extra allocations.
@@ -639,7 +639,7 @@ impl Display for BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{BaseUri, uri::Scheme, BasePath};
+    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
     /// let base_uri = BaseUri::from_parts(Scheme::HTTPS, "example.com", 443, BasePath::default())?;
     /// assert_eq!(format!("{}", base_uri), "https://example.com/");
     ///

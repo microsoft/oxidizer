@@ -27,8 +27,8 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use obscuri::uri::{PathAndQuery, TargetPathAndQuery};
-//! use obscuri::{BaseUri, Uri};
+//! use templated_uri::uri::{PathAndQuery, TargetPathAndQuery};
+//! use templated_uri::{BaseUri, Uri};
 //!
 //! // Create an endpoint (scheme + authority only)
 //! let base_uri = BaseUri::from_uri_static("https://api.example.com");
@@ -49,7 +49,7 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use obscuri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
+//! use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
 //! use uuid::Uuid;
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
@@ -75,7 +75,7 @@
 //! to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
 //!
 //! ```rust
-//! use obscuri::UriSafeString;
+//! use templated_uri::UriSafeString;
 //!
 //! // This will succeed - contains only safe characters
 //! let safe = UriSafeString::new(&"hello-world_123").unwrap();
@@ -94,7 +94,7 @@
 //! for telemetry. When present, the label takes precedence over the template string.
 //!
 //! ```rust
-//! use obscuri::{UriSafeString, templated};
+//! use templated_uri::{UriSafeString, templated};
 //!
 //! #[templated(
 //!     template = "/{org}/users/{user_id}/reports/{report_type}",
@@ -115,7 +115,7 @@
 //!
 //! ```rust
 //! use data_privacy::Sensitive;
-//! use obscuri::{UriSafeString, templated};
+//! use templated_uri::{UriSafeString, templated};
 //!
 //! #[templated(template = "/{org_id}/user/{user_id}/")]
 //! #[derive(Clone)]

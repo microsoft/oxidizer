@@ -36,8 +36,8 @@ pub(crate) fn uri_fragment_impl(input: DeriveInput) -> TokenStream {
 
     // Generate the implementation
     quote! {
-        impl ::obscuri::UriFragment for #ident {
-            fn as_uri_safe(&self) -> impl ::obscuri::UriSafe {
+        impl ::templated_uri::UriFragment for #ident {
+            fn as_uri_safe(&self) -> impl ::templated_uri::UriSafe {
                 &self.0
             }
         }
@@ -72,7 +72,7 @@ pub(crate) fn uri_unsafe_fragment_impl(input: DeriveInput) -> TokenStream {
 
     // Generate the implementation
     quote! {
-        impl ::obscuri::UriUnsafeFragment for #ident {
+        impl ::templated_uri::UriUnsafeFragment for #ident {
             fn as_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }

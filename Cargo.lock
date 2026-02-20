@@ -1276,43 +1276,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "obscuri"
-version = "0.1.0"
-dependencies = [
- "data_privacy",
- "http",
- "mutants",
- "obscuri_macros",
- "ohno",
- "static_assertions",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "obscuri_macros"
-version = "0.1.0"
-dependencies = [
- "mutants",
- "obscuri_macros_impl",
-]
-
-[[package]]
-name = "obscuri_macros_impl"
-version = "0.1.0"
-dependencies = [
- "chumsky",
- "darling",
- "insta",
- "mutants",
- "ohno",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "ohno"
 version = "0.3.1"
 dependencies = [
@@ -1991,6 +1954,43 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "templated_uri"
+version = "0.1.0"
+dependencies = [
+ "data_privacy",
+ "http",
+ "mutants",
+ "ohno",
+ "static_assertions",
+ "templated_uri_macros",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "templated_uri_macros"
+version = "0.1.0"
+dependencies = [
+ "mutants",
+ "templated_uri_macros_impl",
+]
+
+[[package]]
+name = "templated_uri_macros_impl"
+version = "0.1.0"
+dependencies = [
+ "chumsky",
+ "darling",
+ "insta",
+ "mutants",
+ "ohno",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

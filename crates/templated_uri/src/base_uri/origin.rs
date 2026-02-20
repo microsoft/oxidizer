@@ -95,7 +95,7 @@ impl Origin {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::Origin;
+    /// # use templated_uri::Origin;
     /// let origin = Origin::new("https", "example.com").unwrap();
     /// let origin_with_port = origin.with_port(8443);
     /// assert_eq!(origin_with_port.port(), 8443);
@@ -130,7 +130,7 @@ impl Display for Origin {
     /// # Examples
     ///
     /// ```
-    /// # use obscuri::{Origin, uri::Scheme};
+    /// # use templated_uri::{Origin, uri::Scheme};
     /// let origin = Origin::new(Scheme::HTTPS, "example.com:443").unwrap();
     /// assert_eq!(format!("{}", origin), "https://example.com");
     ///

@@ -145,7 +145,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         })
         .map(|f| {
             let ident = f.ident.as_ref().expect("struct fields must be named");
-            quote! { let #ident: &dyn ::obscuri::UriSafe = &#ident; }
+            quote! { let #ident: &dyn ::templated_uri::UriSafe = &#ident; }
         })
         .collect();
 
@@ -157,7 +157,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     );
 
     quote! {
-        impl obscuri::TemplatedPathAndQuery for #ident {
+        impl templated_uri::TemplatedPathAndQuery for #ident {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 #input_template
             }
@@ -171,17 +171,17 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
 
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::obscuri::UriFragment;
-                use ::obscuri::UriUnsafeFragment;
+                use ::templated_uri::UriFragment;
+                use ::templated_uri::UriUnsafeFragment;
                 #(#collect_params)*
                 #(#params_uri_safe)*
 
                 ::std::format!(#format_template)
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<obscuri::uri::PathAndQuery, obscuri::ValidationError> {
+            fn to_path_and_query(&self) -> ::std::result::Result<templated_uri::uri::PathAndQuery, templated_uri::ValidationError> {
                 let uri_string = self.to_uri_string();
-                Ok(obscuri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(templated_uri::uri::PathAndQuery::try_from(uri_string)?)
             }
         }
 
@@ -199,9 +199,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
         }
 
-        impl From<#ident> for obscuri::uri::TargetPathAndQuery {
+        impl From<#ident> for templated_uri::uri::TargetPathAndQuery {
             fn from(value: #ident) -> Self {
-                obscuri::uri::TargetPathAndQuery::TemplatedPathAndQuery(std::sync::Arc::new(value))
+                templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(std::sync::Arc::new(value))
             }
         }
     }

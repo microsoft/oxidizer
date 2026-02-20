@@ -97,7 +97,7 @@ impl UriSafeString {
     /// # Examples
     ///
     /// ```
-    /// use obscuri::UriSafeString;
+    /// use templated_uri::UriSafeString;
     ///
     /// let safe = UriSafeString::new(&"hello_world");
     /// assert!(safe.is_ok());
@@ -139,7 +139,7 @@ impl UriSafeString {
     /// # Examples
     ///
     /// ```
-    /// use obscuri::UriSafeString;
+    /// use templated_uri::UriSafeString;
     ///
     /// // This will compile successfully
     /// let safe = UriSafeString::from_static("hello_world");
@@ -202,7 +202,7 @@ impl TryFrom<String> for UriSafeString {
     /// ```
     /// use std::convert::TryFrom;
     ///
-    /// use obscuri::UriSafeString;
+    /// use templated_uri::UriSafeString;
     ///
     /// let safe = UriSafeString::try_from("hello_world".to_string());
     /// assert!(safe.is_ok());
@@ -226,7 +226,7 @@ impl<'a> TryFrom<&'a str> for UriSafeString {
     /// ```
     /// use std::convert::TryFrom;
     ///
-    /// use obscuri::UriSafeString;
+    /// use templated_uri::UriSafeString;
     ///
     /// let safe = UriSafeString::try_from("hello_world");
     /// assert!(safe.is_ok());
