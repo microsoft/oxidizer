@@ -14,6 +14,11 @@ If you only touch one crate, you may use `just package=crate_name command` to na
 
 - Run `just format` to format code.
 - Run `just readme` to regenerate crate-level readme files.
+- Run `just spellcheck` to check spelling in code comments and docs.
+
+## Spelling
+
+The spell checker dictionary is in the `.spelling` file, one word per line in arbitrary order.
 
 ## Changelogs
 
