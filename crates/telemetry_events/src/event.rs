@@ -1,9 +1,9 @@
 use std::any::Any;
 
-use opentelemetry::Value;
+use data_privacy::RedactionEngine;
 
 use crate::description::FieldDescription;
-use crate::{EventDescription, ProcessingInstructions};
+use crate::{EventDescription, ProcessingInstructions, TelemetrySafeValue};
 
 pub trait Event: Any + Send + Sync {
     const DESCRIPTION: EventDescription;
@@ -16,5 +16,5 @@ pub trait Event: Any + Send + Sync {
     ///
     /// AnyValue supports recursive structures that we don't really want our events to have, so
     /// we stick to Value.
-    fn value(&self, field: &FieldDescription) -> Value;
+    fn value(&self, field: &FieldDescription, redactor: &RedactionEngine) -> TelemetrySafeValue;
 }

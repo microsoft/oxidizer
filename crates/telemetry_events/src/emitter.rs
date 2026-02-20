@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use data_privacy::RedactionEngine;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use type_map::concurrent::TypeMap;
@@ -45,5 +46,6 @@ impl Emitter {
 pub(crate) struct EmitterData {
     pub(crate) logger_provider: SdkLoggerProvider,
     pub(crate) meter_provider: SdkMeterProvider,
+    pub(crate) redaction_engine: RedactionEngine,
     // TODO: custom type map for user-provided other things?
 }

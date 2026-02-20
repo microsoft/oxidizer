@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use data_privacy::{classified, taxonomy};
-use telemetry_events::{Event, EventDescription, FieldDescription};
+use data_privacy::{RedactionEngine, classified, taxonomy};
+use telemetry_events::{Event, EventDescription, FieldDescription, TelemetrySafeValue};
 
 #[taxonomy(ExampleTaxonomy)]
 enum DataClass {
@@ -36,9 +36,9 @@ impl Event for OutgoingRequest {
         todo!()
     }
 
-    fn value(&self, field: &FieldDescription) -> opentelemetry::Value {
+    fn value(&self, field: &FieldDescription, redaction_engine: &RedactionEngine) -> TelemetrySafeValue {
         match field.index {
-            0 => self.org_id.0.clone().into(),
+            0 => TelemetrySafeValue::from_redacted(&self.org_id, redaction_engine),
             1 => self.duration.as_secs_f64().into(),
             2 => self.size.into(),
             _ => panic!("unknown field index"),

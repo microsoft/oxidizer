@@ -1,7 +1,9 @@
+use data_privacy::RedactionEngine;
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::{KeyValue, StringValue, Value};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 pub enum InstrumentKind {
     UpDownCounter,
@@ -39,11 +41,11 @@ pub struct GenericProcessingInstructions {
 impl GenericProcessingInstructions {
     pub fn execute<T: Event>(&self, event: &T, emitter_data: &EmitterData) {
         if let Some(log_instructions) = &self.log_instructions {
-            log_instructions.execute(event, &emitter_data.logger_provider);
+            log_instructions.execute(event, &emitter_data.logger_provider, &emitter_data.redaction_engine);
         }
 
         if let Some(metric_instructions) = &self.metric_instructiosns {
-            metric_instructions.execute(event, &emitter_data.meter_provider);
+            metric_instructions.execute(event, &emitter_data.meter_provider, &emitter_data.redaction_engine);
         }
     }
 }
@@ -55,7 +57,7 @@ pub struct LogProcessingInstructions {
 }
 
 impl LogProcessingInstructions {
-    pub fn execute<T: Event>(&self, event: &T, logger_provider: &SdkLoggerProvider) {
+    pub fn execute<T: Event>(&self, event: &T, logger_provider: &SdkLoggerProvider, redactor: &RedactionEngine) {
         // TODO: this should probably be cached - benchmark first
         let logger = logger_provider.logger(self.logger_name);
 
@@ -64,7 +66,7 @@ impl LogProcessingInstructions {
         record.set_body(AnyValue::String(StringValue::from(self.message_template)));
         record.set_event_name(description.name);
         for field in &self.included_fields {
-            record.add_attribute(field.name, convert_to_any_value(event.value(&field)));
+            record.add_attribute(field.name, event.value(&field, redactor));
         }
         // TODO: other fields
         logger.emit(record);
@@ -80,11 +82,10 @@ pub struct MetricProcessingInstructions {
 }
 
 impl MetricProcessingInstructions {
-    fn execute<T: Event>(&self, event: &T, meter_provider: &opentelemetry_sdk::metrics::SdkMeterProvider) {
-        let value = match event.value(&self.metric_field) {
-            Value::I64(i) => i as f64,
-            Value::F64(f) => f,
-            _ => {
+    fn execute<T: Event>(&self, event: &T, meter_provider: &SdkMeterProvider, redactor: &RedactionEngine) {
+        let value = match event.value(&self.metric_field, redactor).to_number() {
+            Some(v) => v,
+            None => {
                 return; // TODO: what to do here?
             }
         };
@@ -93,7 +94,7 @@ impl MetricProcessingInstructions {
         let attributes = self
             .included_dimensions
             .iter()
-            .map(|field| KeyValue::new(field.name, event.value(field)))
+            .map(|field| KeyValue::new(field.name, event.value(field, redactor)))
             .collect::<Vec<_>>();
 
         // TODO: cache meters and instruments - benchmark first
