@@ -8,7 +8,7 @@ use std::num::NonZero;
 use smallvec::SmallVec;
 
 use crate::mem::{Block, BlockMeta, BlockSize, Memory};
-use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
+use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
@@ -909,7 +909,7 @@ impl BytesBuf {
         )
     }
 
-    /// Exposes the instance through the [`Write`][std::io::Write] trait.
+    /// Converts this instance into a [`Write`][std::io::Write] adapter.
     ///
     /// The memory capacity of the `BytesBuf` will be automatically extended on demand
     /// with additional capacity from the supplied memory provider.
@@ -922,19 +922,18 @@ impl BytesBuf {
     ///
     /// use bytesbuf::mem::Memory;
     ///
-    /// let mut buf = memory.reserve(32);
-    /// {
-    ///     let mut writer = buf.as_write(&memory);
-    ///     writer.write_all(b"Hello, ")?;
-    ///     writer.write_all(b"world!")?;
-    /// }
+    /// let buf = memory.reserve(32);
+    /// let mut writer = buf.into_writer(&memory);
+    /// writer.write_all(b"Hello, ")?;
+    /// writer.write_all(b"world!")?;
+    /// let mut buf = writer.into_inner();
     ///
     /// assert_eq!(buf.consume_all(), b"Hello, world!");
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn as_write<M: Memory + ?Sized>(&mut self, memory: &M) -> impl std::io::Write {
-        BytesBufWrite::new(self, memory)
+    pub fn into_writer<M: Memory>(self, memory: M) -> BytesBufWriter<M> {
+        BytesBufWriter::new(self, memory)
     }
 }
 
@@ -2243,7 +2242,7 @@ mod tests {
 
     // Compile time test
     fn _can_use_in_dyn_traits(mem: &dyn Memory) {
-        let mut buf = mem.reserve(123);
-        let _ = buf.as_write(mem);
+        let buf = mem.reserve(123);
+        let _ = buf.into_writer(mem);
     }
 }
