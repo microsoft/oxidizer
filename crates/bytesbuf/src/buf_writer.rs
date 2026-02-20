@@ -1,0 +1,218 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use std::io::Write;
+
+use crate::BytesBuf;
+use crate::mem::Memory;
+
+/// The minimum reservation size for a [`BytesBufWriter`] when the buffer has no existing capacity.
+const INITIAL_RESERVATION_BYTES: usize = 4096;
+
+/// The minimum reservation size for a [`BytesBufWriter`] when the buffer already has some capacity.
+const GROWTH_RESERVATION_BYTES: usize = 65536;
+
+/// Adapter that implements `std::io::Write` for [`BytesBuf`].
+///
+/// Create an instance via [`BytesBuf::into_writer()`][1].
+///
+/// The adapter will automatically extend the underlying [`BytesBuf`] as needed when writing
+/// by allocating additional memory capacity from the memory provider `M`.
+///
+/// [1]: crate::BytesBuf::into_writer
+#[derive(Debug)]
+pub struct BytesBufWriter<M: Memory> {
+    inner: BytesBuf,
+    memory: M,
+}
+
+impl<M: Memory> BytesBufWriter<M> {
+    #[must_use]
+    pub(crate) const fn new(inner: BytesBuf, memory: M) -> Self {
+        Self { inner, memory }
+    }
+
+    #[must_use]
+    /// Returns the wrapped [`BytesBuf`].
+    pub fn into_inner(self) -> BytesBuf {
+        self.inner
+    }
+
+    /// Ensures the buffer has enough remaining capacity for `required_bytes`, reserving more
+    /// memory from the memory provider if needed.
+    ///
+    /// The `Write` trait is designed for piece-by-piece writing in small increments, so callers
+    /// will typically make many small writes. Naively reserving only the exact amount requested
+    /// each time would cause excessive memory allocations. Instead, we reserve ahead because
+    /// more data is almost certainly coming.
+    ///
+    /// The reservation strategy balances between avoiding waste for small payloads (e.g. short
+    /// JSON error responses, where over-reserving could open a door to resource exhaustion) and
+    /// reducing allocation frequency for large payloads:
+    ///
+    /// * **Empty buffer, small payload (at most 4 KiB):** reserve 4 KiB. We assume the total data
+    ///   will be modest, so we keep the initial allocation small.
+    /// * **Otherwise:** reserve at least 64 KiB (or the payload size if larger). Once data
+    ///   crosses the 4 KiB boundary we are likely dealing with a large payload, so we take big
+    ///   bites to reduce the frequency of memory reservations.
+    fn ensure_sufficient_capacity(&mut self, required_bytes: usize) {
+        if self.inner.remaining_capacity() >= required_bytes {
+            return;
+        }
+
+        let reservation = if self.inner.capacity() == 0 && required_bytes <= INITIAL_RESERVATION_BYTES {
+            INITIAL_RESERVATION_BYTES
+        } else {
+            required_bytes.max(GROWTH_RESERVATION_BYTES)
+        };
+
+        self.inner.reserve(reservation, &self.memory);
+    }
+}
+
+impl<M: Memory> Write for BytesBufWriter<M> {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.ensure_sufficient_capacity(buf.len());
+        self.inner.put_slice(buf);
+        Ok(buf.len())
+    }
+
+    #[cfg_attr(test, mutants::skip)] // No-op, nothing to test.
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use new_zealand::nz;
+
+    use super::*;
+    use crate::mem::testing::{FixedBlockMemory, TransparentMemory};
+
+    #[test]
+    fn smoke_test_write_and_verify_data() {
+        let test_data = b"Hello, world! This is a test.";
+
+        let memory = TransparentMemory::new();
+        let builder = memory.reserve(100);
+
+        let mut write_adapter = builder.into_writer(&memory);
+
+        // no-op
+        write_adapter.flush().unwrap();
+
+        let bytes_written = write_adapter.write(test_data).expect("write should succeed");
+        assert_eq!(bytes_written, test_data.len());
+
+        let mut builder = write_adapter.into_inner();
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
+    }
+
+    #[test]
+    fn existing_content_is_preserved() {
+        let memory = TransparentMemory::new();
+        let mut builder = memory.reserve(100);
+
+        // Add some initial content to the builder
+        let initial_data = b"Initial content";
+        builder.put_slice(initial_data.as_slice());
+
+        let mut write_adapter = builder.into_writer(&memory);
+
+        let additional_data = b" - Additional data";
+        let bytes_written = write_adapter.write(additional_data).expect("write should succeed");
+        assert_eq!(bytes_written, additional_data.len());
+
+        let mut builder = write_adapter.into_inner();
+        // Verify both initial and additional data are present
+        let data = builder.consume_all();
+        let expected = b"Initial content - Additional data";
+        assert_eq!(data, expected.as_slice());
+    }
+
+    #[test]
+    fn sufficient_capacity_not_extended() {
+        let test_data = b"Small data"; // Much smaller than 100 bytes
+
+        let memory = FixedBlockMemory::new(nz!(1024));
+        let builder = memory.reserve(100);
+
+        let initial_capacity = builder.capacity();
+        assert!(initial_capacity >= 100);
+
+        let mut write_adapter = builder.into_writer(&memory);
+
+        // Write data that fits within existing capacity
+        let bytes_written = write_adapter.write(test_data).expect("write should succeed");
+        assert_eq!(bytes_written, test_data.len());
+
+        let mut builder = write_adapter.into_inner();
+
+        // Verify capacity hasn't changed (no new allocation needed)
+        assert_eq!(builder.capacity(), initial_capacity);
+
+        // Verify the data is there
+        let data = builder.consume_all();
+        assert_eq!(data, test_data.as_slice());
+    }
+
+    #[test]
+    fn empty_buffer_small_write_reserves_initial_size() {
+        let memory = TransparentMemory::new();
+        let buf = BytesBuf::new();
+        assert_eq!(buf.capacity(), 0);
+
+        let mut writer = buf.into_writer(&memory);
+        writer.write_all(b"hello").unwrap();
+
+        let buf = writer.into_inner();
+        assert!(
+            buf.capacity() >= INITIAL_RESERVATION_BYTES,
+            "expected capacity >= {INITIAL_RESERVATION_BYTES}, got {}",
+            buf.capacity()
+        );
+    }
+
+    #[test]
+    fn empty_buffer_large_write_reserves_growth_size() {
+        let memory = TransparentMemory::new();
+        let buf = BytesBuf::new();
+
+        let payload = vec![0u8; INITIAL_RESERVATION_BYTES + 1];
+
+        let mut writer = buf.into_writer(&memory);
+        writer.write_all(&payload).unwrap();
+
+        let buf = writer.into_inner();
+        assert!(
+            buf.capacity() >= GROWTH_RESERVATION_BYTES,
+            "expected capacity >= {GROWTH_RESERVATION_BYTES}, got {}",
+            buf.capacity()
+        );
+    }
+
+    #[test]
+    fn non_empty_buffer_reserves_growth_size() {
+        let memory = TransparentMemory::new();
+        let mut buf = memory.reserve(16);
+        buf.put_slice([1; 16]);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert!(buf.capacity() > 0);
+
+        let mut writer = buf.into_writer(&memory);
+        writer.write_all(b"more data").unwrap();
+
+        let buf = writer.into_inner();
+        assert!(
+            buf.capacity() >= 16 + GROWTH_RESERVATION_BYTES,
+            "expected capacity >= {}, got {}",
+            16 + GROWTH_RESERVATION_BYTES,
+            buf.capacity()
+        );
+    }
+}

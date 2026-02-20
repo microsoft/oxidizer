@@ -38,13 +38,17 @@ use crate::fmt::{Iso8601, Rfc2822};
 ///
 /// ```
 /// use std::time::{Duration, SystemTime};
+///
 /// use tick::fmt::UnixSeconds;
 ///
 /// let unix_seconds = "9999".parse::<UnixSeconds>()?;
 /// assert_eq!(unix_seconds.to_string(), "9999");
 ///
 /// let system_time: SystemTime = unix_seconds.into();
-/// assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(9999));
+/// assert_eq!(
+///     system_time,
+///     SystemTime::UNIX_EPOCH + Duration::from_secs(9999)
+/// );
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -81,12 +85,16 @@ impl UnixSeconds {
     ///
     /// ```
     /// use std::time::{Duration, SystemTime};
+    ///
     /// use tick::fmt::UnixSeconds;
     ///
     /// let unix_seconds = UnixSeconds::from_secs(10).unwrap();
     /// let system_time: SystemTime = unix_seconds.into();
     ///
-    /// assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(10));
+    /// assert_eq!(
+    ///     system_time,
+    ///     SystemTime::UNIX_EPOCH + Duration::from_secs(10)
+    /// );
     /// ```
     pub fn from_secs(seconds: u64) -> Result<Self, Error> {
         Self::try_from(Duration::from_secs(seconds)).map_err(|_error| {

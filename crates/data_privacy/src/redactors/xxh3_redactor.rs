@@ -3,9 +3,11 @@
 
 //! A redactor based on `xxh3`.
 
-use crate::{DataClass, Redactor};
 use core::fmt::Write;
+
 use xxhash_rust::xxh3::xxh3_64_with_secret;
+
+use crate::{DataClass, Redactor};
 
 /// The length of the redacted output in hex digits.
 pub const REDACTED_LEN: usize = 16;

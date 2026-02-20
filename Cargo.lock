@@ -272,6 +272,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "testing_aids",
+ "thread_aware",
  "windows-sys 0.61.2",
 ]
 

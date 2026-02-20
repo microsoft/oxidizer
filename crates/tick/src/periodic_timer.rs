@@ -7,10 +7,9 @@ use std::time::Duration;
 
 use futures_core::Stream;
 
-use crate::timers::TIMER_RESOLUTION;
-
 use super::Clock;
 use super::timers::TimerKey;
+use crate::timers::TIMER_RESOLUTION;
 
 /// A timer that periodically ticks.
 ///
@@ -181,8 +180,9 @@ mod tests {
     #[cfg(not(miri))]
     #[tokio::test]
     async fn next_ensure_awaited() {
-        use crate::FutureExt;
         use futures::StreamExt;
+
+        use crate::FutureExt;
 
         let clock = Clock::new_tokio();
         let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));

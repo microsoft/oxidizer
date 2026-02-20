@@ -4,8 +4,9 @@
 #![expect(missing_docs, reason = "Test code")]
 
 use core::hash::{Hash, Hasher};
-use data_privacy::DataClass;
 use std::collections::hash_map::DefaultHasher;
+
+use data_privacy::DataClass;
 
 #[test]
 fn new_should_create_data_class() {

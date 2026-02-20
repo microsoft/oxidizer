@@ -117,7 +117,7 @@
 //!
 //!
 //! ```rust
-//! use thread_aware::{ThreadAware, Arc, PerCore};
+//! use thread_aware::{Arc, PerCore, ThreadAware};
 //! # #[derive(Debug, Default)]
 //! # struct Client;
 //!
@@ -160,7 +160,6 @@ pub use core::ThreadAware;
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
-
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
@@ -207,6 +206,5 @@ pub use core::ThreadAware;
 /// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
-pub use cell::storage;
-pub use cell::{Arc, PerCore, PerNuma, PerProcess};
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 pub use wrappers::{Unaware, unaware};

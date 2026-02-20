@@ -4,9 +4,8 @@
 use std::fmt::Display;
 use std::panic::Location;
 
-use crate::{Enrichable, EnrichmentEntry};
-
 use super::AppError;
+use crate::{Enrichable, EnrichmentEntry};
 
 /// Transforms [`Result`] and [`Option`] types into [`AppError`] with additional message.
 ///

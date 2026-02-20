@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::{error::Error as StdError, sync::Arc};
+use std::error::Error as StdError;
+use std::sync::Arc;
 
 /// The core error information - either a transparent error, a wrapped error, or none.
 #[derive(Debug, Clone)]

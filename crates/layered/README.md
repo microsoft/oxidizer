@@ -50,9 +50,7 @@ Use [`Execute`][__link3] to turn any async function into a service:
 ```rust
 use layered::{Execute, Service};
 
-let greeter = Execute::new(|name: String| async move {
-    format!("Hello, {name}!")
-});
+let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!") });
 
 assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
 ```
@@ -101,10 +99,7 @@ where
 }
 
 // Stack layers with the service (layers apply outer to inner)
-let service = (
-    LogLayer,
-    Execute::new(|x: i32| async move { x * 2 }),
-).into_service();
+let service = (LogLayer, Execute::new(|x: i32| async move { x * 2 })).into_service();
 
 let result = service.execute(21).await;
 ```
@@ -126,7 +121,7 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2s7ZpjZBK-NG9NQa4QbaT-IGwXqFpV_FwWxG6nCK5_0IrsAYWSBgmdsYXllcmVkZTAuMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9cd3_rKpXlxG3cPQgH_Ia06Gylje5wjfL8MG8IUl5cvZMADYWSBgmdsYXllcmVkZTAuMy4w
  [__link0]: https://docs.rs/layered/0.3.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
  [__link10]: https://docs.rs/layered/0.3.0/layered/?search=Intercept

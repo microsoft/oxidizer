@@ -257,8 +257,9 @@ mod tests {
 
     #[test]
     fn tower_layer_adapter() {
-        use crate::{Execute, Stack};
         use tower_layer::Identity;
+
+        use crate::{Execute, Stack};
 
         let stack = (tower_layer(Identity::new()), Execute::new(|x: i32| async move { Ok::<_, ()>(x) }));
         let svc = stack.into_service();

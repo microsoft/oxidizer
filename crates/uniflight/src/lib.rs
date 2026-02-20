@@ -28,10 +28,13 @@
 //!
 //! // Multiple concurrent calls with the same key will share a single execution.
 //! // Note: you can pass &str directly when the key type is String.
-//! let result = group.execute("user:123", || async {
-//!     // This expensive operation runs only once, even if called concurrently
-//!     "expensive_result".to_string()
-//! }).await.expect("leader should not panic");
+//! let result = group
+//!     .execute("user:123", || async {
+//!         // This expensive operation runs only once, even if called concurrently
+//!         "expensive_result".to_string()
+//!     })
+//!     .await
+//!     .expect("leader should not panic");
 //! # }
 //! ```
 //!
@@ -62,8 +65,8 @@
 //! - [`PerCore`]: Separate state per core, no deduplication (useful for already-partitioned work)
 //!
 //! ```
-//! use uniflight::Merger;
 //! use thread_aware::PerNuma;
+//! use uniflight::Merger;
 //!
 //! # async fn example() {
 //! // NUMA-aware merger - each NUMA node gets its own deduplication scope
@@ -86,7 +89,10 @@
 //! # use uniflight::Merger;
 //! # async fn example() {
 //! let merger: Merger<String, String> = Merger::new();
-//! match merger.execute("key", || async { "result".to_string() }).await {
+//! match merger
+//!     .execute("key", || async { "result".to_string() })
+//!     .await
+//! {
 //!     Ok(value) => println!("got {value}"),
 //!     Err(err) => {
 //!         println!("leader panicked: {}", err.message());
@@ -124,26 +130,20 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/uniflight/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/uniflight/favicon.ico")]
 
-use std::{
-    borrow::Borrow,
-    fmt::Debug,
-    hash::Hash,
-    panic::AssertUnwindSafe,
-    sync::{Arc, Weak},
-};
+use std::borrow::Borrow;
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::panic::AssertUnwindSafe;
+use std::sync::{Arc, Weak};
 
 use ahash::RandomState;
 use async_once_cell::OnceCell;
-use dashmap::{
-    DashMap,
-    Entry::{Occupied, Vacant},
-};
+use dashmap::DashMap;
+use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use thread_aware::{
-    Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware,
-    affinity::{MemoryAffinity, PinnedAffinity},
-    storage::Strategy,
-};
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::storage::Strategy;
+use thread_aware::{Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware};
 
 /// Suppresses duplicate async operations identified by a key.
 ///
@@ -196,8 +196,8 @@ where
     /// # Examples
     ///
     /// ```
+    /// use thread_aware::{PerCore, PerNuma};
     /// use uniflight::Merger;
-    /// use thread_aware::{PerNuma, PerCore};
     ///
     /// // Default (PerProcess) - type can be inferred
     /// let global: Merger<String, String> = Merger::new();
@@ -486,9 +486,11 @@ impl<T> PanicAwareCell<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
     use thread_aware::affinity::pinned_affinities;
+
+    use super::*;
 
     #[test]
     fn relocated_delegates_to_inner() {

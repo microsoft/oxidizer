@@ -1,11 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use core::fmt::Debug;
+use std::fmt::Write;
+
+use rustc_hash::FxHashMap;
+
 use crate::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use crate::{DataClass, IntoDataClass};
-use core::fmt::Debug;
-use rustc_hash::FxHashMap;
-use std::fmt::Write;
 
 pub mod simple_redactor;
 
@@ -99,9 +101,10 @@ pub fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use data_privacy_macros::taxonomy;
     use rustc_hash::FxBuildHasher;
+
+    use super::*;
 
     #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
     #[test]

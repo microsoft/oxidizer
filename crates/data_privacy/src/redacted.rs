@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::RedactionEngine;
 use core::fmt::{Formatter, Result};
+
+use crate::RedactionEngine;
 
 /// Formats the redacted value using the given formatter.
 ///

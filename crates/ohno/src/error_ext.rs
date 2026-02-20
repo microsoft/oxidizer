@@ -84,9 +84,8 @@ pub trait ErrorExt: StdError {
 mod tests {
     use std::backtrace::BacktraceStatus;
 
-    use crate::backtrace::Backtrace;
-
     use super::*;
+    use crate::backtrace::Backtrace;
 
     #[ohno::error]
     struct TestError;

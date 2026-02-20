@@ -55,8 +55,9 @@ pub fn is_phantom_data(ty: &Type) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn test_parse_field_attrs_no_attrs() {

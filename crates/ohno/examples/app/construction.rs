@@ -3,8 +3,7 @@
 
 //! Demonstrates simple error construction with `app_err!` and `ohno::AppError::new()`.
 
-use ohno::AppError;
-use ohno::app_err;
+use ohno::{AppError, app_err};
 
 fn main() {
     let err = AppError::new("database connection failed");

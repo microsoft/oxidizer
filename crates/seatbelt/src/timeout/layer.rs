@@ -3,15 +3,14 @@
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
-use std::sync::Arc;
+use layered::Layer;
 
 use crate::timeout::*;
-use crate::utils::EnableIf;
-use crate::utils::TelemetryHelper;
+use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{NotSet, ResilienceContext, Set};
-use layered::Layer;
 
 /// Builder for configuring timeout resilience middleware.
 ///

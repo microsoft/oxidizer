@@ -3,18 +3,13 @@
 
 //! Integration tests for [`Merger::execute()`].
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{
-            AtomicUsize,
-            Ordering::{AcqRel, Acquire},
-        },
-    },
-    time::Duration,
-};
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::{AcqRel, Acquire};
+use std::time::Duration;
 
-use futures_util::{StreamExt, stream::FuturesUnordered};
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use uniflight::Merger;
 
 fn unreachable_future() -> std::future::Pending<String> {

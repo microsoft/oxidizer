@@ -53,7 +53,7 @@ this macro automatically implements [`std::error::Error`][__link6], [`std::fmt::
  > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`][__link10] macro.
 
 ```rust
-use ohno::{OhnoCore, Error};
+use ohno::{Error, OhnoCore};
 
 #[derive(Error)]
 pub struct MyError {
@@ -138,7 +138,9 @@ struct CustomError {
 impl CustomError {
     pub fn new(custom_logic: bool) -> Self {
         // Your custom constructor logic here
-        Self { inner_error: OhnoCore::default() }
+        Self {
+            inner_error: OhnoCore::default(),
+        }
     }
 }
 ```
@@ -227,8 +229,7 @@ struct MyError;
 
 #[ohno::enrich_err("failed to open file")]
 fn open_file(path: &str) -> Result<String, MyError> {
-    std::fs::read_to_string(path)
-        .map_err(MyError::caused_by)
+    std::fs::read_to_string(path).map_err(MyError::caused_by)
 }
 // Error output will include: "failed to open file (at src/main.rs:42)"
 ```
@@ -258,7 +259,7 @@ fn process() -> Result<(), AppError> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7xRMk7SDB66G1v2n-Rmf3nUGyeREro-k6dWGzjgBXgBcFi-YWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-eemFTsYv4VGxV8V6jA5F3wGxEo-mnGFa-6G0HcPMFBpRdrYWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

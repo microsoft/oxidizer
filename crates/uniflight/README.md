@@ -39,10 +39,13 @@ let group: Merger<String, String> = Merger::new();
 
 // Multiple concurrent calls with the same key will share a single execution.
 // Note: you can pass &str directly when the key type is String.
-let result = group.execute("user:123", || async {
-    // This expensive operation runs only once, even if called concurrently
-    "expensive_result".to_string()
-}).await.expect("leader should not panic");
+let result = group
+    .execute("user:123", || async {
+        // This expensive operation runs only once, even if called concurrently
+        "expensive_result".to_string()
+    })
+    .await
+    .expect("leader should not panic");
 ```
 
 ## Flexible Key Types
@@ -69,8 +72,8 @@ type parameter. This controls how the internal state is partitioned across threa
 * [`PerCore`][__link6]: Separate state per core, no deduplication (useful for already-partitioned work)
 
 ```rust
-use uniflight::Merger;
 use thread_aware::PerNuma;
+use uniflight::Merger;
 
 // NUMA-aware merger - each NUMA node gets its own deduplication scope
 let merger: Merger<String, String, PerNuma> = Merger::new_per_numa();
@@ -89,7 +92,10 @@ retrying. The panic message is captured and available via [`LeaderPanicked::mess
 
 ```rust
 let merger: Merger<String, String> = Merger::new();
-match merger.execute("key", || async { "result".to_string() }).await {
+match merger
+    .execute("key", || async { "result".to_string() })
+    .await
+{
     Ok(value) => println!("got {value}"),
     Err(err) => {
         println!("leader panicked: {}", err.message());
@@ -129,7 +135,7 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxgwNFq9VUtfG5xaBNm6U4VGG97W2YkyKkPjG4KVgSbTgdOrYWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-GLKhyiSDuBG53vClQ0bibwG1RKiKY8DLWOG2WNr0uorgHrYWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/uniflight/0.1.0/uniflight/struct.Merger.html
  [__link1]: https://docs.rs/uniflight/0.1.0/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash

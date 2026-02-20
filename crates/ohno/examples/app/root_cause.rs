@@ -5,8 +5,9 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::AppError;
 use std::io::Error as IoError;
+
+use ohno::AppError;
 
 #[ohno::error]
 struct DatabaseError;

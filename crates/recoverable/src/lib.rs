@@ -65,6 +65,7 @@
 //!
 //! ```rust
 //! use std::time::Duration;
+//!
 //! use recoverable::{RecoveryInfo, RecoveryKind};
 //!
 //! // Retry with a 30-second delay (e.g., from a Retry-After header)
@@ -261,6 +262,7 @@ impl RecoveryInfo {
     /// To specify a recovery delay hint, use the [`RecoveryInfo::delay`] method:
     /// ```rust
     /// use std::time::Duration;
+    ///
     /// use recoverable::RecoveryInfo;
     ///
     /// let recovery = RecoveryInfo::unavailable().delay(Duration::from_secs(300));
@@ -298,6 +300,7 @@ impl RecoveryInfo {
     ///
     /// ```rust
     /// use std::time::Duration;
+    ///
     /// use recoverable::{RecoveryInfo, RecoveryKind};
     ///
     /// // Service indicates to retry after 30 seconds

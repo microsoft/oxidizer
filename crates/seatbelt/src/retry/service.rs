@@ -349,14 +349,13 @@ where
 mod tests {
     use std::future::poll_fn;
 
-    use layered::Execute;
+    use layered::{Execute, Layer};
     use opentelemetry::KeyValue;
     use tick::ClockControl;
 
     use super::*;
     use crate::testing::{FailReadyService, MetricTester};
     use crate::{ResilienceContext, Set};
-    use layered::Layer;
 
     #[test]
     fn layer_ensure_defaults() {

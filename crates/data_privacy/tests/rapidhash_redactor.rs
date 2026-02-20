@@ -4,10 +4,8 @@
 #![expect(missing_docs, reason = "Test code")]
 #![cfg(feature = "rapidhash")]
 
-use data_privacy::DataClass;
-use data_privacy::Redactor;
-use data_privacy::rapidhash_redactor::REDACTED_LEN;
-use data_privacy::rapidhash_redactor::RapidHashRedactor;
+use data_privacy::rapidhash_redactor::{REDACTED_LEN, RapidHashRedactor};
+use data_privacy::{DataClass, Redactor};
 use rapidhash::v3::RapidSecrets;
 
 fn get_test_redactor() -> RapidHashRedactor {

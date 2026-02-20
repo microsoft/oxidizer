@@ -338,8 +338,9 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tower_layer::Identity;
+
+    use super::*;
 
     type I = Identity;
 

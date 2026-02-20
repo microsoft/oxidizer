@@ -3,8 +3,9 @@
 
 //! Primitives for thread-aware data storage.
 
-use crate::affinity::PinnedAffinity;
 use std::marker::PhantomData;
+
+use crate::affinity::PinnedAffinity;
 
 /// A strategy for storing data in a affinity-aware manner.
 pub trait Strategy {

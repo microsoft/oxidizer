@@ -8,8 +8,9 @@ use std::num::NonZero;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use many_cpus::SystemHardware;
+
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 
 const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hold - not safe to continue execution";
 
@@ -196,9 +197,10 @@ impl Processor {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use crate::affinity::{memory_affinities, pinned_affinities};
     use crate::registry::{NumaNode, ProcessorCount, ThreadRegistry};
-    use std::num::NonZero;
 
     #[test]
     #[cfg_attr(miri, ignore)]
@@ -293,8 +295,9 @@ mod tests {
 mod test_fake_hardware {
     use std::collections::HashSet;
 
-    use super::*;
     use many_cpus::fake::HardwareBuilder;
+
+    use super::*;
 
     macro_rules! nz {
         ($e:expr) => {

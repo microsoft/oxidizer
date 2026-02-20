@@ -3,7 +3,8 @@
 
 use std::time::Instant;
 
-use crate::{runtime::ClockGone, state::ClockState};
+use crate::runtime::ClockGone;
+use crate::state::ClockState;
 
 /// Drives timer advancement for the clock.
 ///

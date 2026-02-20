@@ -3,16 +3,16 @@
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
-use std::sync::Arc;
+use layered::Layer;
 
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::*;
 use crate::breaker::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};
 use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
-use layered::Layer;
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///

@@ -20,10 +20,32 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 ///
 /// For clarity, the pool itself is not in any way global - rather the word "global" in the name
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
+///
+/// Clones of this type are equivalent and share the same pool of memory as long as they remain on the same thread.
 #[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
+///
+/// # Multithreaded use
+///
+/// Instances of this type should not be manually moved across threads (e.g. by capturing in a closure and
+/// handing to `thread::spawn()` or `tokio::spawn()`). While the pool will still operate correctly, it will
+/// suffer degraded performance in all clones from the same family.
+///
+/// This type is [thread-aware]. If moved across threads using thread-aware APIs, the performance
+/// penalty is not incurred. If no suitable thread-aware API is available, use a thread-local pool
+/// via the `thread_local!` macro.
+///
+/// [thread-aware]: https://docs.rs/thread_aware
 #[derive(Clone, Debug)]
 pub struct GlobalPool {
-    inner: Arc<GlobalPoolInner>,
+    inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
+}
+
+impl thread_aware::ThreadAware for GlobalPool {
+    fn relocated(self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) -> Self {
+        Self {
+            inner: self.inner.relocated(source, destination),
+        }
+    }
 }
 
 impl GlobalPool {
@@ -43,7 +65,7 @@ impl GlobalPool {
     )]
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(GlobalPoolInner::new()),
+            inner: thread_aware::Arc::<_, thread_aware::PerCore>::new(GlobalPoolInner::new),
         }
     }
 
@@ -400,6 +422,7 @@ mod tests {
     use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
+    assert_impl_all!(GlobalPool: thread_aware::ThreadAware);
 
     /// Helper to assert all sub-pools are empty.
     fn assert_all_pools_empty(inner: &GlobalPoolInner) {
@@ -669,5 +692,32 @@ mod tests {
 
         let buf = memory.reserve(66_036);
         assert_eq!(buf.capacity(), 65_536 * 2);
+    }
+
+    #[test]
+    fn relocated_pool_works() {
+        use thread_aware::ThreadAware;
+        use thread_aware::affinity::pinned_affinities;
+
+        let affinities = pinned_affinities(&[2]);
+        let source = affinities[0].into();
+        let destination = affinities[1];
+
+        let memory = GlobalPool::new();
+
+        // Allocate from the original pool.
+        let mut buf = memory.reserve(100);
+        buf.put_byte(42);
+        let view = buf.consume_all();
+        assert_eq!(view.first_slice()[0], 42);
+
+        // Relocate the pool to a different affinity.
+        let relocated_memory = memory.relocated(source, destination);
+
+        // The relocated pool should work independently.
+        let mut buf2 = relocated_memory.reserve(200);
+        buf2.put_byte(99);
+        let view2 = buf2.consume_all();
+        assert_eq!(view2.first_slice()[0], 99);
     }
 }

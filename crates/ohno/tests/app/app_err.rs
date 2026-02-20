@@ -3,8 +3,7 @@
 
 //! Tests for the `app_err!` macro.
 
-use ohno::app_err;
-use ohno::assert_error_message;
+use ohno::{app_err, assert_error_message};
 
 #[test]
 fn app_err_with_string() {

@@ -7,8 +7,7 @@
 
 #![expect(clippy::unwrap_used, reason = "example code")]
 
-use ohno::AppError;
-use ohno::app_err;
+use ohno::{AppError, app_err};
 
 fn level3() -> Result<(), AppError> {
     Err(app_err!("error at deepest level"))

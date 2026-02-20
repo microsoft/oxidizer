@@ -20,6 +20,7 @@ time and timers, enabling faster and more robust testing.
 
 ```rust
 use std::time::Duration;
+
 use tick::{Clock, Delay};
 
 async fn produce_value(clock: &Clock) -> u64 {
@@ -38,8 +39,9 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tick::ClockControl;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_produce_value() {
@@ -225,7 +227,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4sfOT0eIwz0G2BmsZKRV3DvG2ii_QDAp2AQG0TzbSNYu64ZYWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCZHRpY2tlMC4yLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzMlfWB9hdkfGwdyjWN2zh_xG4wVy-B70uSjG_8Zj381ny-7YWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCZHRpY2tlMC4yLjA
  [__link0]: https://docs.rs/tick/0.2.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.2.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.2.0/tick/?search=FutureExt

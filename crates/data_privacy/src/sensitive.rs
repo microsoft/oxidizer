@@ -1,9 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactionEngine};
 use core::fmt::{Debug, Display, Formatter};
+
 use data_privacy::IntoDataClass;
+
+use crate::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactionEngine};
 
 /// Size of the stack-allocated buffer used for formatting before falling back to heap allocation.
 const STACK_BUFFER_SIZE: usize = 128;

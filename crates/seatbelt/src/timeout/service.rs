@@ -235,12 +235,11 @@ impl<In, Out> TimeoutShared<In, Out> {
 mod tests {
     use std::future::poll_fn;
 
-    use layered::{Execute, Stack};
+    use layered::{Execute, Layer, Stack};
     use tick::ClockControl;
 
     use super::*;
     use crate::testing::FailReadyService;
-    use layered::Layer;
 
     #[tokio::test]
     async fn timeout_emits_log() {

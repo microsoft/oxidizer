@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::redactors::{Redactor, Redactors};
-use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
 use core::fmt::Debug;
-use data_privacy::IntoDataClass;
 use std::fmt::{Display, Formatter, Write};
 use std::sync::Arc;
+
+use data_privacy::IntoDataClass;
+
+use crate::redactors::{Redactor, Redactors};
+use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
 
 /// Lets you apply redaction to classified data.
 ///
@@ -17,14 +19,14 @@ use std::sync::Arc;
 /// ## Example
 ///
 /// ```rust
-/// use data_privacy::{classified, RedactionEngine, taxonomy};
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+/// use data_privacy::{RedactionEngine, classified, taxonomy};
 ///
 /// // The taxonomy defines the different data classes we will use in our application.
 /// #[taxonomy(simple)]
 /// enum SimpleTaxonomy {
-///    Sensitive,
-///    ExtremelySensitive,
+///     Sensitive,
+///     ExtremelySensitive,
 /// }
 ///
 /// // A struct holding some data classified as sensitive.
@@ -32,7 +34,7 @@ use std::sync::Arc;
 /// struct Name(String);
 ///
 /// struct Person {
-///     name: Name,     // a bit of sensitive data we should not leak in logs
+///     name: Name, // a bit of sensitive data we should not leak in logs
 ///     age: u32,
 /// }
 ///

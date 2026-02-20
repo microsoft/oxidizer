@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::example_taxonomy::ExampleTaxonomy;
 use data_privacy_macros::{RedactedDebug, RedactedDisplay, classified};
 use derive_more::{Constructor, From};
 use serde::{Deserialize, Serialize};
+
+use crate::example_taxonomy::ExampleTaxonomy;
 
 #[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]
 #[derive(Clone, Hash, Serialize, Deserialize, Constructor, From)]

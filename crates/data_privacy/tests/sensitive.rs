@@ -3,11 +3,12 @@
 
 #![expect(missing_docs, reason = "Test code")]
 
+use std::cmp::Ordering;
+use std::hash::{Hash, Hasher};
+
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use data_privacy::{Classified, RedactionEngine, Sensitive};
 use data_privacy_macros::taxonomy;
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
 
 #[taxonomy(test)]
 #[derive(Debug)]

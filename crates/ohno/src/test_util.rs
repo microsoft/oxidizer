@@ -52,7 +52,8 @@ macro_rules! assert_error_message {
 
 #[cfg(test)]
 mod tests {
-    use crate::{OhnoCore, backtrace::Backtrace};
+    use crate::OhnoCore;
+    use crate::backtrace::Backtrace;
 
     #[derive(crate::Error)]
     struct MyTestError {
