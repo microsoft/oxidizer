@@ -25,6 +25,7 @@
 //!
 //! ```no_run
 //! use std::time::Duration;
+//!
 //! use tick::{Clock, Delay};
 //!
 //! async fn produce_value(clock: &Clock) -> u64 {
@@ -43,8 +44,9 @@
 //!
 //! #[cfg(test)]
 //! mod tests {
-//!     use super::*;
 //!     use tick::ClockControl;
+//!
+//!     use super::*;
 //!
 //!     #[tokio::test]
 //!     async fn test_produce_value() {

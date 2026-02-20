@@ -151,9 +151,11 @@ fn generate_from_implementations_tuple(
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
     use syn::parse_str;
+
+    use super::*;
 
     // Helper: parse DeriveInput from snippet
     fn di(src: &str) -> DeriveInput {

@@ -95,10 +95,7 @@ impl ClockControl {
     /// let time1 = clock.system_time();
     /// let time2 = clock.system_time();
     ///
-    /// assert_eq!(
-    ///     time2.duration_since(time1)?,
-    ///     Duration::from_secs(1)
-    /// );
+    /// assert_eq!(time2.duration_since(time1)?, Duration::from_secs(1));
     ///
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

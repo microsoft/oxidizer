@@ -3,10 +3,11 @@
 
 //! A redactor supporting a variety of simple transformations.
 
-use crate::DataClass;
-use crate::redactors::Redactor;
 use std::borrow::Cow;
 use std::fmt::Write;
+
+use crate::DataClass;
+use crate::redactors::Redactor;
 
 /// Mode of operation for the `SimpleRedactor`.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -6,7 +6,6 @@ mod tuples;
 
 #[doc(inline)]
 pub use stack::Stack;
-
 /// A trait for decorating a [`Service`](crate::Service) with middleware.
 ///
 /// A `Layer` takes an inner service and wraps it with additional behavior,

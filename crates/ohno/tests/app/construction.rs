@@ -3,8 +3,7 @@
 
 //! Tests for `AppError::new` construction.
 
-use ohno::AppError;
-use ohno::assert_error_message;
+use ohno::{AppError, assert_error_message};
 
 #[test]
 fn error_new_with_string() {

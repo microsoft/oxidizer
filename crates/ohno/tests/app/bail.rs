@@ -3,9 +3,7 @@
 
 //! Tests for bail! macro for early returns.
 
-use ohno::AppError;
-use ohno::assert_error_message;
-use ohno::bail;
+use ohno::{AppError, assert_error_message, bail};
 
 #[test]
 fn bail_with_string() {

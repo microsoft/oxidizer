@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::{fmt, time::SystemTimeError};
+use std::fmt;
+use std::time::SystemTimeError;
 
 /// The result type for fallible operations that use the [`Error`] type in the `time` module.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -22,8 +23,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// # Examples
 ///
 /// ```
-/// use tick::fmt::Iso8601;
 /// use tick::Error;
+/// use tick::fmt::Iso8601;
 ///
 /// "invalid date".parse::<Iso8601>().unwrap_err();
 /// ```
