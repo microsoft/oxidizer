@@ -73,7 +73,12 @@ impl<In, Out> ResilienceContext<In, Out> {
 
     #[cfg_attr(
         not(any(feature = "metrics", feature = "logs", test)),
-        expect(unused_variables, reason = "unused when logs nor metrics are used")
+        expect(
+            unused_variables,
+            clippy::unused_self,
+            clippy::needless_pass_by_value,
+            reason = "unused when logs nor metrics are used"
+        )
     )]
     #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
     pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {

@@ -70,10 +70,12 @@ where
 }
 
 impl<T> IntoAppError<T> for Option<T> {
+    #[track_caller]
     fn into_app_err(self, msg: impl Display) -> Result<T, AppError> {
         self.ok_or_else(|| AppError::new(msg.to_string()))
     }
 
+    #[track_caller]
     fn into_app_err_with<F, D>(self, msg_fn: F) -> Result<T, AppError>
     where
         F: FnOnce() -> D,

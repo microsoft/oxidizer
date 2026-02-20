@@ -52,7 +52,7 @@ pub fn list_packages(workspace_root: impl AsRef<Path>) -> Result<Vec<PackageMeta
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        ohno::bail!("cargo metadata failed: {stderr}");
+        ohno::bail!("cargo metadata failed: {}", stderr);
     }
 
     let metadata: CargoMetadata = serde_json::from_slice(&output.stdout).into_app_err("failed to parse cargo metadata output")?;

@@ -73,11 +73,11 @@ tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
 [[example]]
 name = "timeout"
-required-features = ["timeout"]
+required-features = ["timeout", "metrics"]
 
 [[example]]
 name = "timeout_advanced"
-required-features = ["timeout"]
+required-features = ["timeout", "metrics"]
 
 [[example]]
 name = "retry"
@@ -85,15 +85,15 @@ required-features = ["retry"]
 
 [[example]]
 name = "retry_advanced"
-required-features = ["retry"]
+required-features = ["retry", "metrics"]
 
 [[example]]
 name = "retry_outage"
-required-features = ["retry"]
+required-features = ["retry", "metrics"]
 
 [[example]]
 name = "resilience_pipeline"
-required-features = ["retry", "timeout"]
+required-features = ["retry", "timeout", "metrics"]
 
 [[example]]
 name = "tower"
