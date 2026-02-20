@@ -20,7 +20,22 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 ///
 /// For clarity, the pool itself is not in any way global - rather the word "global" in the name
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
+///
+/// Clones of this type are equivalent and share the same pool of memory as long as they remain on the same thread.
 #[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
+///
+/// # Multithreaded use
+///
+/// Instances of this type should not be manually moved across threads (e.g. by capturing in a closure and
+/// handing to `thread::spawn()` or `tokio::spawn()`). While this will work, it will cause degraded performance
+/// for all clones from the same family.
+///
+/// This type is [thread-aware]. If moved across threads using thread-aware APIs, the performance
+/// penalty is not incurred.
+///
+/// If no suitable thread-aware API is available, use a thread-local pool via the `thread_local!` macro.
+///
+/// [thread-aware]: https://docs.rs/thread_aware
 #[derive(Clone, Debug)]
 pub struct GlobalPool {
     inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
