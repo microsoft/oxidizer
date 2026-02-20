@@ -14,3 +14,7 @@ If you only touch one crate, you may use `just package=crate_name command` to na
 
 - Run `just format` to format code.
 - Run `just readme` to regenerate crate-level readme files.
+
+## Changelogs
+
+Do not manually edit `CHANGELOG.md` files. Changelogs are automatically updated on release.
