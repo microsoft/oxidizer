@@ -33,9 +33,9 @@ impl ClockState {
 }
 
 impl ClockState {
-    #[cfg(test)]
-    pub(super) fn timers_len(&self) -> usize {
+    pub(crate) fn timers_len(&self) -> usize {
         match self {
+            #[cfg(any(feature = "test-util", test))]
             Self::ClockControl(control) => control.timers_len(),
             Self::System(timers) => timers.with_timers(|t| t.len()),
         }
