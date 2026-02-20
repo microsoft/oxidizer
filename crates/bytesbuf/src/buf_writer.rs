@@ -8,29 +8,35 @@ use crate::mem::Memory;
 
 /// Adapter that implements `std::io::Write` for [`BytesBuf`].
 ///
-/// Create an instance via [`BytesBuf::as_write()`][1].
+/// Create an instance via [`BytesBuf::into_writer()`][1].
 ///
-/// The adapter will automatically extend the underlying sequence builder as needed when writing
+/// The adapter will automatically extend the underlying [`BytesBuf`] as needed when writing
 /// by allocating additional memory capacity from the memory provider `M`.
 ///
-/// [1]: crate::BytesBuf::as_write
+/// [1]: crate::BytesBuf::into_writer
 #[derive(Debug)]
-pub(crate) struct BytesBufWrite<'b, 'm, M: Memory + ?Sized> {
-    inner: &'b mut BytesBuf,
-    memory: &'m M,
+pub struct BytesBufWriter<M: Memory> {
+    inner: BytesBuf,
+    memory: M,
 }
 
-impl<'b, 'm, M: Memory + ?Sized> BytesBufWrite<'b, 'm, M> {
+impl<M: Memory> BytesBufWriter<M> {
     #[must_use]
-    pub(crate) const fn new(inner: &'b mut BytesBuf, memory: &'m M) -> Self {
+    pub(crate) const fn new(inner: BytesBuf, memory: M) -> Self {
         Self { inner, memory }
+    }
+
+    #[must_use]
+    /// Returns the wrapped [`BytesBuf`].
+    pub fn into_inner(self) -> BytesBuf {
+        self.inner
     }
 }
 
-impl<M: Memory + ?Sized> Write for BytesBufWrite<'_, '_, M> {
+impl<M: Memory> Write for BytesBufWriter<M> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.inner.reserve(buf.len(), self.memory);
+        self.inner.reserve(buf.len(), &self.memory);
         self.inner.put_slice(buf);
         Ok(buf.len())
     }
@@ -55,18 +61,17 @@ mod tests {
         let test_data = b"Hello, world! This is a test.";
 
         let memory = TransparentMemory::new();
-        let mut builder = memory.reserve(100);
+        let builder = memory.reserve(100);
 
-        {
-            let mut write_adapter = builder.as_write(&memory);
+        let mut write_adapter = builder.into_writer(&memory);
 
-            // no-op
-            write_adapter.flush().unwrap();
+        // no-op
+        write_adapter.flush().unwrap();
 
-            let bytes_written = write_adapter.write(test_data).expect("write should succeed");
-            assert_eq!(bytes_written, test_data.len());
-        }
+        let bytes_written = write_adapter.write(test_data).expect("write should succeed");
+        assert_eq!(bytes_written, test_data.len());
 
+        let mut builder = write_adapter.into_inner();
         let data = builder.consume_all();
         assert_eq!(data, test_data.as_slice());
     }
@@ -80,14 +85,13 @@ mod tests {
         let initial_data = b"Initial content";
         builder.put_slice(initial_data.as_slice());
 
-        {
-            let mut write_adapter = builder.as_write(&memory);
+        let mut write_adapter = builder.into_writer(&memory);
 
-            let additional_data = b" - Additional data";
-            let bytes_written = write_adapter.write(additional_data).expect("write should succeed");
-            assert_eq!(bytes_written, additional_data.len());
-        }
+        let additional_data = b" - Additional data";
+        let bytes_written = write_adapter.write(additional_data).expect("write should succeed");
+        assert_eq!(bytes_written, additional_data.len());
 
+        let mut builder = write_adapter.into_inner();
         // Verify both initial and additional data are present
         let data = builder.consume_all();
         let expected = b"Initial content - Additional data";
@@ -99,18 +103,18 @@ mod tests {
         let test_data = b"Small data"; // Much smaller than 100 bytes
 
         let memory = FixedBlockMemory::new(nz!(1024));
-        let mut builder = memory.reserve(100);
+        let builder = memory.reserve(100);
 
         let initial_capacity = builder.capacity();
         assert!(initial_capacity >= 100);
 
-        {
-            let mut write_adapter = builder.as_write(&memory);
+        let mut write_adapter = builder.into_writer(&memory);
 
-            // Write data that fits within existing capacity
-            let bytes_written = write_adapter.write(test_data).expect("write should succeed");
-            assert_eq!(bytes_written, test_data.len());
-        }
+        // Write data that fits within existing capacity
+        let bytes_written = write_adapter.write(test_data).expect("write should succeed");
+        assert_eq!(bytes_written, test_data.len());
+
+        let mut builder = write_adapter.into_inner();
 
         // Verify capacity hasn't changed (no new allocation needed)
         assert_eq!(builder.capacity(), initial_capacity);
