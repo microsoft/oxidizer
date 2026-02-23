@@ -124,7 +124,7 @@ For types containing fields not [`ThreadAware`][__link27], you can use [`Arc`][_
 strategy, and wrap them in an [`Arc`][__link29] that implements the trait.
 
 ```rust
-use thread_aware::{ThreadAware, Arc, PerCore};
+use thread_aware::{Arc, PerCore, ThreadAware};
 
 #[derive(Debug, Clone, ThreadAware)]
 struct Service {
@@ -148,7 +148,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7L1NV9wSafgG0Js_9dN9szEG9je4RDQjSI-G3g32DCW0DbWYWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjE
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5MT6aAp-ABuGy-pd26b7pShG0TsTpNCyjUHGwNfk8mMYEfpYWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC42LjE
  [__link0]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.6.1/thread_aware_macros/?search=ThreadAware

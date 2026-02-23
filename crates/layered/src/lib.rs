@@ -48,9 +48,7 @@
 //! use layered::{Execute, Service};
 //!
 //! # async fn example() {
-//! let greeter = Execute::new(|name: String| async move {
-//!     format!("Hello, {name}!")
-//! });
+//! let greeter = Execute::new(|name: String| async move { format!("Hello, {name}!") });
 //!
 //! assert_eq!(greeter.execute("World".into()).await, "Hello, World!");
 //! # }
@@ -101,10 +99,7 @@
 //!
 //! # async fn example() {
 //! // Stack layers with the service (layers apply outer to inner)
-//! let service = (
-//!     LogLayer,
-//!     Execute::new(|x: i32| async move { x * 2 }),
-//! ).into_service();
+//! let service = (LogLayer, Execute::new(|x: i32| async move { x * 2 })).into_service();
 //!
 //! let result = service.execute(21).await;
 //! # }

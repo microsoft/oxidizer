@@ -1,4 +1,4 @@
-304
+306
 →
 0.X.Y
 100k
@@ -145,8 +145,10 @@ interoperability
 interoperate
 invalidations
 jitter
+JSON
 IOCP
 IP
+KiB
 Kubernetes
 L1
 L2
@@ -293,6 +295,7 @@ tuples
 typesafe
 UDEPS
 unconfigured
+Multithreaded
 uncontended
 unhandleable
 unicode

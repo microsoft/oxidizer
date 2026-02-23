@@ -10,7 +10,6 @@ use crate::breaker::CircuitState;
 #[cfg(any(feature = "metrics", test))]
 use crate::breaker::telemetry::*;
 use crate::breaker::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
-
 use crate::utils::TelemetryHelper;
 #[cfg(any(feature = "metrics", test))]
 use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};

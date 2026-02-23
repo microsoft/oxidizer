@@ -245,14 +245,13 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
-    use layered::Execute;
+    use layered::{Execute, Layer};
     use tick::ClockControl;
 
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
     use crate::testing::FailReadyService;
     use crate::{RecoveryInfo, ResilienceContext, Set};
-    use layered::Layer;
 
     #[test]
     fn layer_ensure_defaults() {
