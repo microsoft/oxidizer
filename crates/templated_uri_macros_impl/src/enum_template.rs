@@ -42,7 +42,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         impl templated_uri::TemplatedPathAndQuery for #ident {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 match self {
-                    #(#variant_matches =>template_variant.rfc_6570_template()),*
+                    #(#variant_matches => template_variant.rfc_6570_template()),*
                 }
             }
 
