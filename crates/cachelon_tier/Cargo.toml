@@ -20,7 +20,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_ti
 all-features = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["ohno::enrichable::Enrichable", "ohno::error_ext::ErrorExt"]
+allowed_external_types = [
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+    "recoverable::RecoveryInfo",
+]
 
 [features]
 default = ["dynamic-cache"]

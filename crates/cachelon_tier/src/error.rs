@@ -105,6 +105,7 @@ impl Error {
     /// let error = Error::from_message("temporary failure")
     ///     .with_recovery(RecoveryInfo::retry());
     /// ```
+    #[must_use]
     pub fn with_recovery(self, recovery_info: RecoveryInfo) -> Self {
         Self { recovery_info, ..self }
     }

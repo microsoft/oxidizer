@@ -282,8 +282,8 @@ mod tests {
     async fn timeout_emits_metrics() {
         use opentelemetry::KeyValue;
 
-        use testing_aids::MetricTester;
         use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+        use testing_aids::MetricTester;
 
         let metrics = MetricTester::new();
         let clock = ClockControl::default()
