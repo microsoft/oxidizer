@@ -6,7 +6,7 @@ name = "templated_uri"
 description = "Standards-compliant URI handling with templating, safety validation, and data classification"
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "url", "psrsing", "templates", "uri"]
+keywords = ["oxidizer", "url", "parsing", "templates", "uri"]
 categories = ["encoding", "parser-implementations", "template-engine", "web-programming"]
 
 edition.workspace = true
