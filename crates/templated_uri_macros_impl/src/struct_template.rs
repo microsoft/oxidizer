@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(clippy::option_if_let_else, reason = "Darling's macro exapansion currently uses this pattern")]
+#![expect(clippy::option_if_let_else, reason = "Darling's macro expansion currently uses this pattern")]
 #![expect(
     clippy::needless_continue,
-    reason = "Darling's macro exapansion triggers this lint until next version gets released (https://github.com/TedDriggs/darling/pull/402)"
+    reason = "Darling's macro expansion triggers this lint until next version gets released (https://github.com/TedDriggs/darling/pull/402)"
 )]
 
 use std::collections::HashSet;

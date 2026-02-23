@@ -109,7 +109,7 @@ impl Origin {
     #[expect(clippy::missing_panics_doc, reason = "impossible panic")]
     pub fn with_port(self, port: u16) -> Self {
         let host = self.authority.host();
-        Self::new(self.scheme, format!("{host}:{port}")).expect("Scheme ahd host are already valid and port is a valid u16")
+        Self::new(self.scheme, format!("{host}:{port}")).expect("Scheme and host are already valid and port is a valid u16")
     }
 
     /// Checks if this origin uses the HTTPS scheme.
