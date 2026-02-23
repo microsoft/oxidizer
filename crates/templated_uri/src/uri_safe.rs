@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use pct_str::{PctString, UriReserved};
 use std::borrow::{Borrow, Cow};
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display};
 use std::net::IpAddr;
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
-use pct_str::{PctString, UriReserved};
 use uuid::Uuid;
 
 mod private {
@@ -86,89 +86,89 @@ impl Error for UriSafeError {}
 pub struct UriSafeString(Cow<'static, str>);
 
 impl UriSafeString {
-    /// Creates a new `UriSafeString`
+    /// Creates a `UriSafeString` by percent-encoding any reserved or unsafe characters.
     ///
-    /// Automatically url encodes all reserved characters and characters
-    /// that can't be represented in uri in a plain text form
-    ///
-    /// # Returns
-    ///
-    /// Returns  `UriSafeString`
+    /// This is the preferred constructor — it always succeeds by encoding any characters
+    /// that are not safe for URI templates as defined in RFC 6570.
     ///
     /// # Examples
     ///
     /// ```
     /// use templated_uri::UriSafeString;
     ///
-    /// let safe = UriSafeString::new(&"hello_world");
+    /// let safe = UriSafeString::encode("hello_world");
     /// assert_eq!(safe.as_str(), "hello_world");
     ///
-    /// let escaped_safe = UriSafeString::new(&"{hello}");
+    /// let escaped_safe = UriSafeString::encode("{hello}");
     /// assert_eq!(escaped_safe.as_str(), "%7Bhello%7D");
     /// ```
     ///
-    pub fn new(s: impl AsRef<str>) -> Self {
-        // Check for reserved characters according to RFC 6570
-        let encoded = PctString::encode(s.as_ref().chars(), UriReserved::Any);
-        Self(Cow::Owned(encoded.to_string()))
+    pub fn encode(s: impl AsRef<str>) -> Self {
+        let s = s.as_ref();
+        let encoded = PctString::encode(s.chars(), UriReserved::Any);
+        // If nothing was encoded the PctString contains the same characters — avoid
+        // a redundant allocation by comparing lengths (encoding can only grow the string).
+        if encoded.as_str().len() == s.len() {
+            Self(Cow::Owned(s.to_owned()))
+        } else {
+            Self(Cow::Owned(encoded.into_string()))
+        }
     }
 
-    /// Creates a new `UriSafeString` from a raw uri string
-    /// if the provided string doesn't contain any reserved characters as defined in RFC 6570.
-    /// or any other characters that may need urlencoding
+    /// Creates a `UriSafeString` from an already-encoded string, validating that it
+    /// contains only characters that are safe for URI templates as defined in RFC 6570.
     ///
-    /// # Returns
-    ///
-    /// Returns a Result containing either the `UriSafeString` or an `UriSafeError`
-    /// indicating which character is invalid and where it was found.
+    /// Unlike [`UriSafeString::encode`], this constructor does **not** encode anything —
+    /// it rejects the input if any reserved or unsafe character is found.
+    /// Use this when you already have a percent-encoded string and want to enforce
+    /// the invariant at the call site.
     ///
     /// # Examples
     ///
     /// ```
     /// use templated_uri::UriSafeString;
     ///
-    /// let safe = UriSafeString::new_raw("hello_world");
+    /// let safe = UriSafeString::try_new("hello_world");
     /// assert!(safe.is_ok());
     ///
-    /// let unsafe_str = UriSafeString::new_raw("{hello}");
+    /// let unsafe_str = UriSafeString::try_new("{hello}");
     /// assert!(unsafe_str.is_err());
     /// ```
     ///
     /// # Errors
     ///
     /// Returns a [`UriSafeError`] if the string contains reserved URI characters.
-    pub fn new_raw(raw: impl Into<String>) -> Result<Self, UriSafeError> {
+    pub fn try_new(raw: impl Into<String>) -> Result<Self, UriSafeError> {
         let raw = raw.into();
 
         let mut characters = raw.chars().enumerate();
 
         while let Some((i, c)) = characters.next() {
             if c == '%' {
-                // Check urlencoded string - must have exactly 2 hex digits after %
+                // Check URL encoded string - must have exactly 2 hex digits after %
                 for _ in 0..2 {
                     if !characters.next().is_some_and(|(_, c)| c.is_ascii_hexdigit()) {
                         return Err(UriSafeError {
                             invalid_char: '%',
-                            position: i
-                        })
+                            position: i,
+                        });
                     }
                 }
                 // Valid percent-encoded sequence, continue to next character
                 continue;
             }
 
-            if c.is_ascii_alphanumeric() || ['-','_', '~', '.'].contains(&c) {
-                continue
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '~' | '.') {
+                continue;
             }
 
             return Err(UriSafeError {
                 invalid_char: c,
-                position: i
-            })
+                position: i,
+            });
         }
 
         Ok(Self(Cow::Owned(raw)))
-
     }
 
     /// Returns a reference to the underlying string.
@@ -180,7 +180,7 @@ impl UriSafeString {
     /// Creates a `UriSafeString` from a string literal, verifying at compile time
     /// that the string does not contain any reserved characters.
     ///
-    /// Unlike [`UriSafeString::new`], string needs to be percent-encoded beforehand
+    /// Unlike [`UriSafeString::encode`], string needs to be percent-encoded beforehand
     ///
     /// # Examples
     ///
@@ -203,33 +203,35 @@ impl UriSafeString {
         // Use the same validation logic as in uri_safe! macro
         let bytes = s.as_bytes();
         let mut i = 0;
-        let mut pct_str_num: Option<u8> = None;
+        let mut url_encoded_char: Option<u8> = None;
 
         while i < bytes.len() {
             let b = bytes[i];
             i += 1;
-            // We are dealing with urlencoded string
-            if let Some(pct_num) = pct_str_num {
-                assert!(b.is_ascii_hexdigit(), "string contains invalid urlencoded character");
+            // We are dealing with URL encoded string
+            if let Some(pct_num) = url_encoded_char {
+                assert!(b.is_ascii_hexdigit(), "string contains invalid URL encoding character");
 
-                // If we are at the second character already, disable urlencoded check and continue
+                // If we are at the second character already, disable URL encoded check and continue
                 if pct_num == 1 {
-                    pct_str_num = None;
+                    url_encoded_char = None;
                     continue;
                 }
-                pct_str_num = Some(pct_num + 1);
+                url_encoded_char = Some(pct_num + 1);
             }
 
             if b == b'%' {
-                // Urlencoded start
-                pct_str_num = Some(0);
+                // URL encoded start
+                url_encoded_char = Some(0);
                 continue;
             }
 
-            assert!(b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'~' || b == b'.', "any reserved characters need to be urlencoded");
-
+            assert!(
+                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'~' | b'.'),
+                "any reserved characters need to be URL encoded"
+            );
         }
-        assert!(pct_str_num.is_none(), "string contains unfinished urlencoded character");
+        assert!(url_encoded_char.is_none(), "string contains unfinished URL encoded character");
         Self(Cow::Borrowed(s))
     }
 }
@@ -249,8 +251,8 @@ impl From<String> for UriSafeString {
     /// let encoded = UriSafeString::from("{hello}".to_string());
     /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
-    fn from(s: String) -> Self{
-        Self::new(s)
+    fn from(s: String) -> Self {
+        Self::encode(s)
     }
 }
 
@@ -270,7 +272,8 @@ impl<'a> From<&'a str> for UriSafeString {
     /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
     fn from(s: &'a str) -> Self {
-        Self::new(s) }
+        Self::encode(s)
+    }
 }
 
 impl AsRef<str> for UriSafeString {
@@ -281,7 +284,7 @@ impl AsRef<str> for UriSafeString {
 
 impl fmt::Display for UriSafeString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        std::write!(f, "{}", self.0)
+        f.write_str(&self.0)
     }
 }
 
@@ -295,7 +298,7 @@ mod tests {
         ($(($index:ident, $char:expr)),* $(,)?) => {
             $(
                 #[test]
-                #[should_panic(expected = "any reserved characters need to be urlencoded")]
+                #[should_panic(expected = "any reserved characters need to be URL encoded")]
                 fn $index() {
                     let _ = UriSafeString::from_static(concat!("hello", $char, "world"));
                 }
@@ -306,15 +309,12 @@ mod tests {
 
     #[test]
     fn test_uri_safe_string_creation() {
-        let safe = UriSafeString::new("hello_world");
+        let safe = UriSafeString::encode("hello_world");
         assert_eq!(safe.as_ref(), "hello_world");
 
         for reserved in RESERVED_CHARACTERS.chars() {
-            let encoded_str = UriSafeString::new(format!("hello_{reserved}_world"));
-            assert_eq!(
-                encoded_str.to_string(),
-                format!("hello_%{:02X}_world", reserved as u8)
-            );
+            let encoded_str = UriSafeString::encode(format!("hello_{reserved}_world"));
+            assert_eq!(encoded_str.to_string(), format!("hello_%{:02X}_world", reserved as u8));
         }
     }
 
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_raw_string_valid() {
-        let result = UriSafeString::new_raw("valid_string_123".to_string());
+        let result = UriSafeString::try_new("valid_string_123".to_string());
         assert_eq!(result.unwrap().as_str(), "valid_string_123");
     }
 
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_raw_string_reserved() {
-        let result = UriSafeString::new_raw("invalid{string}".to_string());
+        let result = UriSafeString::try_new("invalid{string}".to_string());
         assert!(result.is_err());
         result.unwrap_err();
     }
@@ -395,15 +395,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "string contains unfinished urlencoded character")]
+    #[should_panic(expected = "string contains unfinished URL encoded character")]
     fn from_static_urlencoded_short() {
         let _ = UriSafeString::from_static("hello%3");
     }
 
     #[test]
-    #[should_panic(expected = "string contains invalid urlencoded character")]
+    #[should_panic(expected = "string contains invalid URL encoding character")]
     fn from_static_urlencoded_bad_char() {
         let _ = UriSafeString::from_static("hello%3-world");
     }
-
 }

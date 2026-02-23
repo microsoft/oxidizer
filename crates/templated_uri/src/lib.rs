@@ -61,7 +61,7 @@
 //!
 //! let path = UserPostPath {
 //!     user_id: Uuid::new_v4(),
-//!     post_id: UriSafeString::new(&"my-post").unwrap(),
+//!     post_id: UriSafeString::encode("my-post"),
 //! };
 //!
 //! let uri = Uri::default()
@@ -77,11 +77,16 @@
 //! ```rust
 //! use templated_uri::UriSafeString;
 //!
-//! // This will succeed - contains only safe characters
-//! let safe = UriSafeString::new(&"hello-world_123").unwrap();
+//! // This will succeed - encodes unsafe characters into a URI-safe format
+//! let unsafe_string = UriSafeString::encode("hello world?foo=bar");
+//! assert_eq!(unsafe_string.as_str(), "hello%20world%3Ffoo%3Dbar");
 //!
-//! // This will fail - contains URI-reserved characters
-//! let unsafe_string = UriSafeString::new(&"hello world?foo=bar");
+//! // This will succeed - contains only safe characters
+//! let safe = UriSafeString::try_new("hello-world_123").unwrap();
+//! assert_eq!(safe.as_str(), "hello-world_123");
+//!
+//! // try_new() fails on URI-reserved characters
+//! let unsafe_string = UriSafeString::try_new("hello world?foo=bar");
 //! assert!(unsafe_string.is_err());
 //! ```
 //!

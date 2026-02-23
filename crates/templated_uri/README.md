@@ -69,7 +69,7 @@ struct UserPostPath {
 
 let path = UserPostPath {
     user_id: Uuid::new_v4(),
-    post_id: UriSafeString::new(&"my-post").unwrap(),
+    post_id: UriSafeString::encode("my-post"),
 };
 
 let uri = Uri::default()
@@ -85,11 +85,16 @@ to contain only URI-safe characters. This prevents common URI injection vulnerab
 ```rust
 use templated_uri::UriSafeString;
 
-// This will succeed - contains only safe characters
-let safe = UriSafeString::new(&"hello-world_123").unwrap();
+// This will succeed - encodes unsafe characters into a URI-safe format
+let unsafe_string = UriSafeString::encode("hello world?foo=bar");
+assert_eq!(unsafe_string.as_str(), "hello%20world%3Ffoo%3Dbar");
 
-// This will fail - contains URI-reserved characters
-let unsafe_string = UriSafeString::new(&"hello world?foo=bar");
+// This will succeed - contains only safe characters
+let safe = UriSafeString::try_new("hello-world_123").unwrap();
+assert_eq!(safe.as_str(), "hello-world_123");
+
+// try_new() fails on URI-reserved characters
+let unsafe_string = UriSafeString::try_new("hello world?foo=bar");
 assert!(unsafe_string.is_err());
 ```
 
@@ -162,7 +167,7 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8e6cE1NH7G8G3uulRSyVAO5GwlA7xW3iabyG2mWXsEbP3weYWSDgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4wgmR1dWlkZjEuMjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8C1eJC5uO8HGzmvsGWS5o9MG-OHjAOP2NBSG3YPWB4tuNjfYWSDgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4wgmR1dWlkZjEuMjEuMA
  [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/
