@@ -336,9 +336,7 @@ impl TargetPathAndQuery {
             Self::PathAndQuery(classified_pq) => {
                 // We can't use to_string in redaction because it automatically prepends a slash if the path doesn't start with one.
                 // as_str doesn't do that, so we declassify to get the inner PathAndQuery and then use as_str.
-                // TODO?! .reclassify()?
-                let declassified = classified_pq.declassify_ref().as_str().to_string();
-                let reclassified = Sensitive::new(declassified, classified_pq.data_class().clone());
+                let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
                 redaction_engine.redacted_to_string(&reclassified)
             }
             Self::TemplatedPathAndQuery(templated) => templated.deref().to_redacted_string(redaction_engine),

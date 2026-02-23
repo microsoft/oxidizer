@@ -418,7 +418,7 @@ impl BaseUri {
     /// let new_base_uri = base_uri.with_origin(Origin::new(Scheme::HTTPS, Authority::from_static("new-example.com:8080")).unwrap());
     /// assert_eq!(new_base_uri.to_string(), "https://new-example.com:8080/");
     /// ```
-    /// 
+    ///
     #[must_use]
     pub fn with_origin(self, origin: Origin) -> Self {
         Self { origin, path: self.path }

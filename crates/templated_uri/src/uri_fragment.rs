@@ -26,7 +26,7 @@ macro_rules! impl_uri_unsafe_fragment {
     ($t:ty) => {
         impl UriUnsafeFragment for $t {
             fn as_display(&self) -> impl Display {
-                self.to_string()
+                self
             }
         }
     };
