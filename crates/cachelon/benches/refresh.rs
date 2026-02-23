@@ -35,7 +35,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
             Cache::builder(clock.clone())
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(MockCache::<String, String>::new()))
-                .promotion_policy(FallbackPromotionPolicy::Always)
+                .promotion_policy(FallbackPromotionPolicy::always())
                 .build()
         });
         let key = "key".to_string();
@@ -59,7 +59,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(MockCache::<String, String>::new()))
                 .time_to_refresh(TimeToRefresh::new(Duration::from_secs(3600), Spawner::new_tokio()))
-                .promotion_policy(FallbackPromotionPolicy::Always)
+                .promotion_policy(FallbackPromotionPolicy::always())
                 .build()
         });
         let key = "key".to_string();
@@ -83,7 +83,7 @@ fn bench_refresh_overhead(c: &mut Criterion) {
                 .storage(mock_with_value("key", "value"))
                 .fallback(Cache::builder(clock).storage(mock_with_value("key", "refreshed")))
                 .time_to_refresh(TimeToRefresh::new(Duration::from_secs(0), Spawner::new_tokio()))
-                .promotion_policy(FallbackPromotionPolicy::Always)
+                .promotion_policy(FallbackPromotionPolicy::always())
                 .build()
         });
         let key = "key".to_string();

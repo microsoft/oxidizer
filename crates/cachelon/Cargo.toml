@@ -29,8 +29,8 @@ allowed_external_types = [
     "layered::service::Service",
     "tick::clock::Clock",
     # External dependencies
-    "opentelemetry::metrics::Meter::Meter",
-    "opentelemetry::metrics::Meter::MeterProvider",
+    "opentelemetry::metrics::meter::Meter",
+    "opentelemetry::metrics::meter::MeterProvider",
 ]
 
 [features]

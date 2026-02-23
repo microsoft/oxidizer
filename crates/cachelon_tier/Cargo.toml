@@ -23,6 +23,7 @@ all-features = true
 allowed_external_types = [
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
+    "recoverable::Recovery",
     "recoverable::RecoveryInfo",
 ]
 
