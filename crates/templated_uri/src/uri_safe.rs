@@ -7,7 +7,7 @@ use std::fmt;
 use std::fmt::{Debug, Display};
 use std::net::IpAddr;
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
-
+use pct_str::{PctString, UriReserved};
 use uuid::Uuid;
 
 mod private {
@@ -86,8 +86,36 @@ impl Error for UriSafeError {}
 pub struct UriSafeString(Cow<'static, str>);
 
 impl UriSafeString {
-    /// Creates a new `UriSafeString` if the provided string doesn't contain
-    /// any reserved characters as defined in RFC 6570.
+    /// Creates a new `UriSafeString`
+    ///
+    /// Automatically url encodes all reserved characters and characters
+    /// that can't be represented in uri in a plain text form
+    ///
+    /// # Returns
+    ///
+    /// Returns  `UriSafeString`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use templated_uri::UriSafeString;
+    ///
+    /// let safe = UriSafeString::new(&"hello_world");
+    /// assert_eq!(safe.as_str(), "hello_world");
+    ///
+    /// let escaped_safe = UriSafeString::new(&"{hello}");
+    /// assert_eq!(escaped_safe.as_str(), "%7Bhello%7D");
+    /// ```
+    ///
+    pub fn new(s: impl AsRef<str>) -> Self {
+        // Check for reserved characters according to RFC 6570
+        let encoded = PctString::encode(s.as_ref().chars(), UriReserved::Any);
+        Self(Cow::Owned(encoded.to_string()))
+    }
+
+    /// Creates a new `UriSafeString` from a raw uri string
+    /// if the provided string doesn't contain any reserved characters as defined in RFC 6570.
+    /// or any other characters that may need urlencoding
     ///
     /// # Returns
     ///
@@ -99,32 +127,48 @@ impl UriSafeString {
     /// ```
     /// use templated_uri::UriSafeString;
     ///
-    /// let safe = UriSafeString::new(&"hello_world");
+    /// let safe = UriSafeString::new_raw("hello_world");
     /// assert!(safe.is_ok());
     ///
-    /// let unsafe_str = UriSafeString::new(&"{hello}");
+    /// let unsafe_str = UriSafeString::new_raw("{hello}");
     /// assert!(unsafe_str.is_err());
     /// ```
     ///
     /// # Errors
     ///
     /// Returns a [`UriSafeError`] if the string contains reserved URI characters.
-    pub fn new(s: &impl ToString) -> Result<Self, UriSafeError> {
-        let s = s.to_string();
-        // Check for reserved characters according to RFC 6570
-        for (i, c) in s.char_indices() {
-            // Reserved characters in RFC 6570:
-            // - Template delimiters: '{', '}'
-            // - Reserved gen-delims (RFC 3986): ':', '/', '?', '#', '[', ']', '@'
-            // - Reserved sub-delims (RFC 3986): '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '='
-            if "{}/:?#[]@!$&'()*+,;=".contains(c) {
-                return Err(UriSafeError {
-                    invalid_char: c,
-                    position: i,
-                });
+    pub fn new_raw(raw: impl Into<String>) -> Result<Self, UriSafeError> {
+        let raw = raw.into();
+
+        let mut characters = raw.chars().enumerate();
+
+        while let Some((i, c)) = characters.next() {
+            if c == '%' {
+                // Check urlencoded string - must have exactly 2 hex digits after %
+                for _ in 0..2 {
+                    if !characters.next().is_some_and(|(_, c)| c.is_ascii_hexdigit()) {
+                        return Err(UriSafeError {
+                            invalid_char: '%',
+                            position: i
+                        })
+                    }
+                }
+                // Valid percent-encoded sequence, continue to next character
+                continue;
             }
+
+            if c.is_ascii_alphanumeric() || ['-','_', '~', '.'].contains(&c) {
+                continue
+            }
+
+            return Err(UriSafeError {
+                invalid_char: c,
+                position: i
+            })
         }
-        Ok(Self(Cow::Owned(s)))
+
+        Ok(Self(Cow::Owned(raw)))
+
     }
 
     /// Returns a reference to the underlying string.
@@ -135,6 +179,8 @@ impl UriSafeString {
 
     /// Creates a `UriSafeString` from a string literal, verifying at compile time
     /// that the string does not contain any reserved characters.
+    ///
+    /// Unlike [`UriSafeString::new`], string needs to be percent-encoded beforehand
     ///
     /// # Examples
     ///
@@ -151,92 +197,80 @@ impl UriSafeString {
     /// # Panics
     /// if the provided string contains any reserved characters.
     #[cfg_attr(test, mutants::skip)] // Mutating this function leads to infinite loop and timeout
-    #[expect(clippy::panic, reason = "panic is intentional for compile-time validation")]
     #[inline]
     #[must_use]
-    pub const fn from_static(s: &'static str) -> Self {
+    pub fn from_static(s: &'static str) -> Self {
         // Use the same validation logic as in uri_safe! macro
         let bytes = s.as_bytes();
         let mut i = 0;
+        let mut pct_str_num: Option<u8> = None;
+
         while i < bytes.len() {
             let b = bytes[i];
-            // Check for ASCII characters that are reserved
-            if b == b'{'
-                || b == b'}'
-                || b == b'/'
-                || b == b':'
-                || b == b'?'
-                || b == b'#'
-                || b == b'['
-                || b == b']'
-                || b == b'@'
-                || b == b'!'
-                || b == b'$'
-                || b == b'&'
-                || b == b'\''
-                || b == b'('
-                || b == b')'
-                || b == b'*'
-                || b == b'+'
-                || b == b','
-                || b == b';'
-                || b == b'='
-            {
-                // This will trigger a compile-time panic if an invalid character is found
-                panic!("string contains reserved character");
-            }
             i += 1;
+            // We are dealing with urlencoded string
+            if let Some(pct_num) = pct_str_num {
+                assert!(b.is_ascii_hexdigit(), "string contains invalid urlencoded character");
+
+                // If we are at the second character already, disable urlencoded check and continue
+                if pct_num == 1 {
+                    pct_str_num = None;
+                    continue;
+                }
+                pct_str_num = Some(pct_num + 1);
+            }
+
+            if b == b'%' {
+                // Urlencoded start
+                pct_str_num = Some(0);
+                continue;
+            }
+
+            assert!(b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'~' || b == b'.', "any reserved characters need to be urlencoded");
+
         }
+        assert!(pct_str_num.is_none(), "string contains unfinished urlencoded character");
         Self(Cow::Borrowed(s))
     }
 }
 
-impl TryFrom<String> for UriSafeString {
-    type Error = UriSafeError;
-
-    /// Attempts to convert a String to a `UriSafeString`, validating that it
-    /// doesn't contain any RFC 6570 reserved characters.
+impl From<String> for UriSafeString {
+    /// Converts a String to a `UriSafeString`, automatically percent-encoding
+    /// any RFC 6570 reserved characters.
     ///
     /// # Examples
     ///
     /// ```
-    /// use std::convert::TryFrom;
-    ///
     /// use templated_uri::UriSafeString;
     ///
-    /// let safe = UriSafeString::try_from("hello_world".to_string());
-    /// assert!(safe.is_ok());
+    /// let safe = UriSafeString::from("hello_world".to_string());
+    /// assert_eq!(safe.as_str(), "hello_world");
     ///
-    /// let unsafe_str = UriSafeString::try_from("{hello}".to_string());
-    /// assert!(unsafe_str.is_err());
+    /// let encoded = UriSafeString::from("{hello}".to_string());
+    /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::new(&s)
+    fn from(s: String) -> Self{
+        Self::new(s)
     }
 }
 
-impl<'a> TryFrom<&'a str> for UriSafeString {
-    type Error = UriSafeError;
-
-    /// Attempts to convert a `&str` to a `UriSafeString`, validating that it
-    /// doesn't contain any RFC 6570 reserved characters.
+impl<'a> From<&'a str> for UriSafeString {
+    /// Converts a `&str` to a `UriSafeString`, automatically percent-encoding
+    /// any RFC 6570 reserved characters.
     ///
     /// # Examples
     ///
     /// ```
-    /// use std::convert::TryFrom;
-    ///
     /// use templated_uri::UriSafeString;
     ///
-    /// let safe = UriSafeString::try_from("hello_world");
-    /// assert!(safe.is_ok());
+    /// let safe = UriSafeString::from("hello_world");
+    /// assert_eq!(safe.as_str(), "hello_world");
     ///
-    /// let unsafe_str = UriSafeString::try_from("{hello}");
-    /// assert!(unsafe_str.is_err());
+    /// let encoded = UriSafeString::from("{hello}");
+    /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
-    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
-        Self::new(&s)
-    }
+    fn from(s: &'a str) -> Self {
+        Self::new(s) }
 }
 
 impl AsRef<str> for UriSafeString {
@@ -261,7 +295,7 @@ mod tests {
         ($(($index:ident, $char:expr)),* $(,)?) => {
             $(
                 #[test]
-                #[should_panic(expected = "string contains reserved character")]
+                #[should_panic(expected = "any reserved characters need to be urlencoded")]
                 fn $index() {
                     let _ = UriSafeString::from_static(concat!("hello", $char, "world"));
                 }
@@ -272,14 +306,14 @@ mod tests {
 
     #[test]
     fn test_uri_safe_string_creation() {
-        let safe = UriSafeString::new(&"hello_world").unwrap();
+        let safe = UriSafeString::new("hello_world");
         assert_eq!(safe.as_ref(), "hello_world");
 
         for reserved in RESERVED_CHARACTERS.chars() {
-            let unsafe_str = UriSafeString::new(&format!("hello_{reserved})_world"));
+            let encoded_str = UriSafeString::new(format!("hello_{reserved}_world"));
             assert_eq!(
-                unsafe_str.unwrap_err().to_string(),
-                format!("invalid character '{reserved}' at position 6 for URI safe string")
+                encoded_str.to_string(),
+                format!("hello_%{:02X}_world", reserved as u8)
             );
         }
     }
@@ -291,29 +325,39 @@ mod tests {
     }
 
     #[test]
-    fn test_try_from_string_valid() {
-        let result = UriSafeString::try_from("valid_string_123".to_string());
+    fn test_from_string_valid() {
+        let result = UriSafeString::from("valid_string_123".to_string());
+        assert_eq!(result.as_str(), "valid_string_123");
+    }
+
+    #[test]
+    fn test_raw_string_valid() {
+        let result = UriSafeString::new_raw("valid_string_123".to_string());
         assert_eq!(result.unwrap().as_str(), "valid_string_123");
     }
 
     #[test]
-    fn test_try_from_string_invalid() {
-        let result = UriSafeString::try_from("invalid{string}".to_string());
-        assert!(result.is_err());
-        result.unwrap_err();
+    fn test_from_string_reserved() {
+        let result = UriSafeString::from("reserved{string}".to_string());
+        assert_eq!(result.as_str(), "reserved%7Bstring%7D");
     }
 
     #[test]
-    fn test_try_from_str_valid() {
-        let result = UriSafeString::try_from("valid_str_456");
-        assert_eq!(result.unwrap().as_str(), "valid_str_456");
+    fn test_raw_string_reserved() {
+        let result = UriSafeString::new_raw("invalid{string}".to_string());
+        assert!(result.is_err());
+        result.unwrap_err();
+    }
+    #[test]
+    fn test_from_str_valid() {
+        let result = UriSafeString::from("valid_str_456");
+        assert_eq!(result.as_str(), "valid_str_456");
     }
 
     #[test]
-    fn test_try_from_str_invalid() {
-        let result = UriSafeString::try_from("path/with/slashes");
-        assert!(result.is_err());
-        result.unwrap_err();
+    fn test_from_str_reserved() {
+        let result = UriSafeString::from("reserved{string}");
+        assert_eq!(result.as_str(), "reserved%7Bstring%7D");
     }
 
     // separate module to namespace generated tests and avoid conflicts
@@ -343,4 +387,23 @@ mod tests {
             (equal, "=")
         }
     }
+
+    #[test]
+    fn from_static_urlencoded() {
+        let result = UriSafeString::from_static("hello%3Dworld");
+        assert_eq!(result.as_str(), "hello%3Dworld");
+    }
+
+    #[test]
+    #[should_panic(expected = "string contains unfinished urlencoded character")]
+    fn from_static_urlencoded_short() {
+        let _ = UriSafeString::from_static("hello%3");
+    }
+
+    #[test]
+    #[should_panic(expected = "string contains invalid urlencoded character")]
+    fn from_static_urlencoded_bad_char() {
+        let _ = UriSafeString::from_static("hello%3-world");
+    }
+
 }

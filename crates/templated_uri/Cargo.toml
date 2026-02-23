@@ -47,6 +47,7 @@ http.workspace = true
 ohno.workspace = true
 templated_uri_macros.workspace = true
 uuid.workspace = true
+pct-str = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 mutants.workspace = true

@@ -83,6 +83,7 @@ opentelemetry = { version = "0.31.0", default-features = false }
 opentelemetry-stdout = { version = "0.31.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
+pct-str = { version = "3.0.1", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
