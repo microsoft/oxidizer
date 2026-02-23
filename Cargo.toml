@@ -25,7 +25,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 # local dependencies
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.3.0" }
-bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.2.0" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.3.0" }
 cachelon = { path = "crates/cachelon", default-features = false, version = "0.1.0" }
 cachelon_memory = { path = "crates/cachelon_memory", default-features = false, version = "0.1.0" }
 cachelon_service = { path = "crates/cachelon_service", default-features = false, version = "0.1.0" }
@@ -37,15 +37,15 @@ fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.3.0" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.3.1" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.2.0" }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.3.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
-tick = { path = "crates/tick", default-features = false, version = "0.1.2" }
+tick = { path = "crates/tick", default-features = false, version = "0.2.0" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
 # external dependencies
@@ -89,6 +89,7 @@ proc-macro2 = { version = "1.0.103", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 regex = { version = "1.12.2", default-features = false }
+rstest = { version = "0.24", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }

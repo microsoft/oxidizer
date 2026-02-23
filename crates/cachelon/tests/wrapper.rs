@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg(feature = "memory")]
+#![expect(missing_docs, reason = "Test code")]
 
 //! Integration tests for `CacheWrapper` public API (through Cache).
 

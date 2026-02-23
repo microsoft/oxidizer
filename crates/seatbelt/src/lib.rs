@@ -102,6 +102,43 @@
 //! - [`retry`] - Middleware that automatically retries failed operations.
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //!
+//! # Tower Compatibility
+//!
+//! All resilience middleware are compatible with the Tower ecosystem when the `tower-service`
+//! feature is enabled. This allows you to use `tower::ServiceBuilder` to compose middleware stacks:
+//!
+//! ```rust
+//! # use std::time::Duration;
+//! # use tick::Clock;
+//! use seatbelt::retry::Retry;
+//! use seatbelt::timeout::Timeout;
+//! use seatbelt::{RecoveryInfo, ResilienceContext};
+//! use tower::ServiceBuilder;
+//!
+//! # async fn example(clock: Clock) {
+//! let context: ResilienceContext<String, Result<String, String>> =
+//!     ResilienceContext::new(&clock);
+//!
+//! let service = ServiceBuilder::new()
+//!     .layer(
+//!         Retry::layer("my_retry", &context)
+//!             .clone_input()
+//!             .recovery_with(|result: &Result<String, String>, _| match result {
+//!                 Ok(_) => RecoveryInfo::never(),
+//!                 Err(_) => RecoveryInfo::retry(),
+//!             }),
+//!     )
+//!     .layer(
+//!         Timeout::layer("my_timeout", &context)
+//!             .timeout(Duration::from_secs(30))
+//!             .timeout_error(|_| "operation timed out".to_string()),
+//!     )
+//!     .service_fn(|input: String| async move {
+//!         Ok::<_, String>(format!("processed: {input}"))
+//!     });
+//! # }
+//! ```
+//!
 //! # Features
 //!
 //! This crate provides several optional features that can be enabled in your `Cargo.toml`:
@@ -112,6 +149,8 @@
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
+//! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
+//!   resilience middleware.
 
 #[doc(inline)]
 pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};

@@ -91,19 +91,15 @@ impl TelemetryConfig {
                 )
             };
 
-            #[cfg(not(any(feature = "metrics", test)))]
-            let (event_counter, operation_duration, cache_size) = (None, None, None);
-
-            #[cfg(any(feature = "logs", test))]
-            let logging_enabled = self.logs_enabled;
-            #[cfg(not(any(feature = "logs", test)))]
-            let logging_enabled = false;
-
             CacheTelemetry {
                 inner: Arc::from_unaware(CacheTelemetryInner {
-                    logging_enabled,
+                    #[cfg(any(feature = "logs", test))]
+                    logging_enabled: self.logs_enabled,
+                    #[cfg(any(feature = "metrics", test))]
                     event_counter,
+                    #[cfg(any(feature = "metrics", test))]
                     operation_duration,
+                    #[cfg(any(feature = "metrics", test))]
                     cache_size,
                 }),
             }

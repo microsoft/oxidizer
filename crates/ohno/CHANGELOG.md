@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-02-17
+
+- 🐛 Bug Fixes
+
+  - capture actual caller location instead of ohno internals ([#260](https://github.com/microsoft/oxidizer/pull/260))
+
 ## [0.3.0] - 2026-01-26
 
 - ✨ Features

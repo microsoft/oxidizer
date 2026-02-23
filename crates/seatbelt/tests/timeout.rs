@@ -7,35 +7,61 @@
 
 //! Integration tests for timeout middleware using only public API.
 
+use std::future::poll_fn;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
+use rstest::rstest;
 use seatbelt::ResilienceContext;
 use seatbelt::timeout::Timeout;
 use tick::{Clock, ClockControl};
+use tower_service::Service as TowerService;
 
+/// Helper to execute a service either via `layered::Service` or `tower_service::Service`.
+async fn execute_service<S, In, Out, Err>(service: &mut S, input: In, use_tower: bool) -> Result<Out, Err>
+where
+    S: Service<In, Out = Result<Out, Err>> + TowerService<In, Response = Out, Error = Err>,
+    S::Future: Send,
+    In: Send + 'static,
+    Out: Send + 'static,
+    Err: Send + 'static,
+{
+    if use_tower {
+        poll_fn(|cx| service.poll_ready(cx)).await?;
+        service.call(input).await
+    } else {
+        service.execute(input).await
+    }
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn no_timeout() {
+async fn no_timeout(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let context = ResilienceContext::new(clock);
 
     let stack = (
         Timeout::layer("test_timeout", &context)
-            .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
+            .timeout_output(|args| Ok::<_, String>(format!("timed out after {}ms", args.timeout().as_millis())))
             .timeout(Duration::from_secs(5)),
-        Execute::new(|input: String| async move { input }),
+        Execute::new(|input: String| async move { Ok::<_, String>(input) }),
     );
 
-    let service = stack.into_service();
-    let output = service.execute("test input".to_string()).await;
+    let mut service = stack.into_service();
+    let output = execute_service(&mut service, "test input".to_string(), use_tower).await;
 
-    assert_eq!(output, "test input".to_string());
+    assert_eq!(output, Ok("test input".to_string()));
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn timeout() {
+async fn timeout(#[case] use_tower: bool) {
     let clock = ClockControl::default()
         .auto_advance(Duration::from_millis(200))
         .auto_advance_limit(Duration::from_millis(500))
@@ -46,10 +72,10 @@ async fn timeout() {
 
     let stack = (
         Timeout::layer("test_timeout", &context)
-            .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
+            .timeout_output(|args| Ok::<_, String>(format!("timed out after {}ms", args.timeout().as_millis())))
             .timeout(Duration::from_millis(200))
             .on_timeout(move |out, args| {
-                assert_eq!("timed out after 200ms", out.as_str());
+                assert_eq!("timed out after 200ms", out.as_ref().unwrap().as_str());
                 assert_eq!(200, args.timeout().as_millis());
                 called.store(true, Ordering::SeqCst);
             }),
@@ -57,20 +83,23 @@ async fn timeout() {
             let clock = clock.clone();
             async move {
                 clock.delay(Duration::from_secs(1)).await;
-                input
+                Ok::<_, String>(input)
             }
         }),
     );
 
-    let service = stack.into_service();
-    let output = service.execute("test input".to_string()).await;
+    let mut service = stack.into_service();
+    let output = execute_service(&mut service, "test input".to_string(), use_tower).await;
 
-    assert_eq!(output, "timed out after 200ms");
+    assert_eq!(output, Ok("timed out after 200ms".to_string()));
     assert!(called_clone.load(Ordering::SeqCst));
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn timeout_override_ensure_respected() {
+async fn timeout_override_ensure_respected(#[case] use_tower: bool) {
     let clock = ClockControl::default()
         .auto_advance(Duration::from_millis(200))
         .auto_advance_limit(Duration::from_millis(5000))
@@ -78,9 +107,9 @@ async fn timeout_override_ensure_respected() {
 
     let stack = (
         Timeout::layer("test_timeout", &ResilienceContext::new(clock.clone()))
-            .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
+            .timeout_output(|args| Ok::<_, String>(format!("timed out after {}ms", args.timeout().as_millis())))
             .timeout(Duration::from_millis(200))
-            .timeout_override(|input, _args| {
+            .timeout_override(|input: &String, _args| {
                 if input == "ignore" {
                     return None;
                 }
@@ -91,23 +120,29 @@ async fn timeout_override_ensure_respected() {
             let clock = clock.clone();
             async move {
                 clock.delay(Duration::from_secs(10)).await;
-                input
+                Ok::<_, String>(input)
             }
         }),
     );
 
-    let service = stack.into_service();
+    let mut service = stack.into_service();
 
-    assert_eq!(service.execute("test input".to_string()).await, "timed out after 150ms");
-    assert_eq!(service.execute("ignore".to_string()).await, "timed out after 200ms");
+    let output1 = execute_service(&mut service, "test input".to_string(), use_tower).await;
+    assert_eq!(output1, Ok("timed out after 150ms".to_string()));
+
+    let output2 = execute_service(&mut service, "ignore".to_string(), use_tower).await;
+    assert_eq!(output2, Ok("timed out after 200ms".to_string()));
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn no_timeout_if_disabled() {
+async fn no_timeout_if_disabled(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let stack = (
         Timeout::layer("test_timeout", &ResilienceContext::new(&clock))
-            .timeout_output(|_args| "timed out".to_string())
+            .timeout_output(|_args| Ok::<_, String>("timed out".to_string()))
             .timeout(Duration::from_millis(200))
             .disable(),
         Execute::new({
@@ -116,37 +151,40 @@ async fn no_timeout_if_disabled() {
                 let clock = clock.clone();
                 async move {
                     clock.delay(Duration::from_secs(1)).await;
-                    input
+                    Ok::<_, String>(input)
                 }
             }
         }),
     );
 
-    let service = stack.into_service();
-    let output = service.execute("test input".to_string()).await;
+    let mut service = stack.into_service();
+    let output = execute_service(&mut service, "test input".to_string(), use_tower).await;
 
-    assert_eq!(output, "test input");
+    assert_eq!(output, Ok("test input".to_string()));
 }
 
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
 #[tokio::test]
-async fn clone_service_works_independently() {
+async fn clone_service_works_independently(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
-    let context: ResilienceContext<String, String> = ResilienceContext::new(&clock).name("test_pipeline");
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
 
     let stack = (
         Timeout::layer("test_timeout", &context)
-            .timeout_output(|args| format!("timed out after {}ms", args.timeout().as_millis()))
+            .timeout_output(|args| Ok::<_, String>(format!("timed out after {}ms", args.timeout().as_millis())))
             .timeout(Duration::from_secs(5)),
-        Execute::new(|input: String| async move { format!("processed:{input}") }),
+        Execute::new(|input: String| async move { Ok::<_, String>(format!("processed:{input}")) }),
     );
 
-    let service = stack.into_service();
-    let cloned_service = service.clone();
+    let mut service = stack.into_service();
+    let mut cloned_service = service.clone();
 
     // Both services should work independently
-    let result1 = service.execute("original".to_string()).await;
-    let result2 = cloned_service.execute("cloned".to_string()).await;
+    let result1 = execute_service(&mut service, "original".to_string(), use_tower).await;
+    let result2 = execute_service(&mut cloned_service, "cloned".to_string(), use_tower).await;
 
-    assert_eq!(result1, "processed:original");
-    assert_eq!(result2, "processed:cloned");
+    assert_eq!(result1, Ok("processed:original".to_string()));
+    assert_eq!(result2, Ok("processed:cloned".to_string()));
 }

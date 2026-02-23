@@ -44,8 +44,7 @@
 //!
 //! This crate is built around two primary traits:
 //!
-//! * The [`Classified`] trait is used to mark types that hold sensitive data. The trait exposes
-//!   explicit mechanisms to access the data in a safe and auditable way.
+//! * The [`Classified`] trait is used to mark types that hold sensitive data.
 //!
 //! * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
 //!   few implementations of this trait, such as [`SimpleRedactor`](simple_redactor::SimpleRedactor), but others can

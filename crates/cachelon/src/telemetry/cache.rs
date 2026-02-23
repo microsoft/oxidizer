@@ -23,6 +23,7 @@ use thread_aware::{Arc, PerCore};
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 #[derive(Clone, Debug)]
 pub(crate) struct CacheTelemetryInner {
+    #[cfg(any(feature = "logs", test))]
     pub(crate) logging_enabled: bool,
     #[cfg(any(feature = "metrics", test))]
     pub(crate) event_counter: Option<Counter<u64>>,
@@ -111,8 +112,8 @@ impl CacheActivity {
 impl CacheTelemetry {
     /// Records a cache operation with the given name, type, activity, and duration.
     #[cfg_attr(
-        not(any(feature = "metrics", test)),
-        expect(unused_variables, reason = "No-op when metrics are disabled")
+        not(any(feature = "logs", feature = "metrics", test)),
+        expect(unused_variables, reason = "No-op when both logs and metrics are disabled")
     )]
     #[inline]
     pub(crate) fn record(&self, cache_name: CacheName, operation: CacheOperation, activity: CacheActivity, duration: Duration) {

@@ -1,14 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::fmt::Debug;
 use std::ops::ControlFlow;
+#[cfg(any(feature = "tower-service", test))]
+use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
+use std::task::{Context, Poll};
 
 use layered::Service;
 use tick::Clock;
 
 use super::*;
-use crate::{NotSet, utils::EnableIf};
+use crate::NotSet;
+use crate::utils::EnableIf;
 
 /// Applies circuit breaker logic to prevent cascading failures.
 ///
@@ -67,6 +73,9 @@ impl<In, Out> Breaker<In, Out, ()> {
     }
 }
 
+// IMPORTANT: The `layered::Service` impl below and the `tower_service::Service` impl further
+// down in this file contain logic-equivalent orchestration code. Any change to the `execute`
+// body MUST be mirrored in the `call` body, and vice versa. See crate-level AGENTS.md.
 impl<In, Out: Send, S> Service<In> for Breaker<In, Out, S>
 where
     In: Send,
@@ -92,6 +101,79 @@ where
         self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
 
         output
+    }
+}
+
+/// Future returned by [`Breaker`] when used as a tower [`Service`](tower_service::Service).
+#[cfg(any(feature = "tower-service", test))]
+pub struct BreakerFuture<Out> {
+    inner: Pin<Box<dyn Future<Output = Out> + Send>>,
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Debug for BreakerFuture<Out> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BreakerFuture").finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(feature = "tower-service", test))]
+impl<Out> Future for BreakerFuture<Out> {
+    type Output = Out;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.as_mut().poll(cx)
+    }
+}
+
+// IMPORTANT: The `tower_service::Service` impl below and the `layered::Service` impl above
+// contain logic-equivalent orchestration code. Any change to the `call` body MUST be mirrored
+// in the `execute` body, and vice versa. See crate-level AGENTS.md.
+#[cfg(any(feature = "tower-service", test))]
+impl<Req, Res, Err, S> tower_service::Service<Req> for Breaker<Req, Result<Res, Err>, S>
+where
+    Err: Send + 'static,
+    Req: Send + 'static,
+    Res: Send + 'static,
+    S: tower_service::Service<Req, Response = Res, Error = Err> + Send + Sync + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Res;
+    type Error = Err;
+    type Future = BreakerFuture<Result<Res, Err>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Req) -> Self::Future {
+        if !self.shared.enable_if.call(&req) {
+            let future = self.inner.call(req);
+            return BreakerFuture { inner: Box::pin(future) };
+        }
+
+        let breaker_id = self.shared.get_breaker_id(&req);
+        let engine = self.shared.engines.get_engine(&breaker_id);
+
+        let (input, mode) = match self.shared.before_execute(engine.as_ref(), req, &breaker_id) {
+            ControlFlow::Continue(result) => result,
+            ControlFlow::Break(output) => {
+                return BreakerFuture {
+                    inner: Box::pin(async move { output }),
+                };
+            }
+        };
+
+        let shared = Arc::clone(&self.shared);
+        let future = self.inner.call(input);
+
+        BreakerFuture {
+            inner: Box::pin(async move {
+                let output = future.await;
+                shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+                output
+            }),
+        }
     }
 }
 
@@ -159,6 +241,7 @@ impl<In, Out> BreakerShared<In, Out> {
 #[cfg(test)]
 #[cfg(not(miri))]
 mod tests {
+    use std::future::poll_fn;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
@@ -167,6 +250,7 @@ mod tests {
 
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
+    use crate::testing::FailReadyService;
     use crate::{RecoveryInfo, ResilienceContext, Set};
     use layered::Layer;
 
@@ -406,5 +490,30 @@ mod tests {
                 }
             })
             .rejected_input(|_, _| "circuit is open".to_string())
+    }
+
+    #[test]
+    fn breaker_future_debug_contains_type_name() {
+        let future = BreakerFuture::<String> {
+            inner: Box::pin(async { "test".to_string() }),
+        };
+
+        let debug_output = format!("{future:?}");
+
+        assert!(debug_output.contains("BreakerFuture"));
+    }
+
+    #[tokio::test]
+    async fn poll_ready_propagates_inner_error() {
+        let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
+        let layer = Breaker::layer("test_breaker", &context)
+            .recovery_with(|_, _| RecoveryInfo::never())
+            .rejected_input(|_, _| Ok("rejected".to_string()));
+
+        let mut service = layer.layer(FailReadyService);
+
+        poll_fn(|cx| tower_service::Service::poll_ready(&mut service, cx))
+            .await
+            .unwrap_err();
     }
 }

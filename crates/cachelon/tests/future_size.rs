@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg(feature = "memory")]
+#![expect(missing_docs, reason = "Test code")]
 
 //! Tests to verify that cache future sizes remain bounded with nested fallback tiers.
 

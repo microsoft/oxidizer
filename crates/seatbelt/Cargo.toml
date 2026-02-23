@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -26,6 +26,7 @@ allowed_external_types = [
     "recoverable::RecoveryKind",
     "tick::clock::Clock",
     "tower_layer::Layer",
+    "tower_service::Service",
 ]
 
 [package.metadata.docs.rs]
@@ -38,6 +39,7 @@ retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
+tower-service = ["dep:tower-service"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
@@ -45,6 +47,7 @@ layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
 tick = { workspace = true }
+tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -53,16 +56,19 @@ criterion.workspace = true
 fastrand.workspace = true
 futures = { workspace = true, features = ["executor"] }
 http.workspace = true
-layered = { workspace = true }
+layered = { workspace = true, features = ["tower-service"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
+rstest.workspace = true
 static_assertions.workspace = true
 testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+tower = { workspace = true, features = ["util"] }
+tower-service.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
@@ -89,6 +95,10 @@ required-features = ["retry"]
 [[example]]
 name = "resilience_pipeline"
 required-features = ["retry", "timeout"]
+
+[[example]]
+name = "tower"
+required-features = ["retry", "timeout", "tower-service"]
 
 [[example]]
 name = "breaker"

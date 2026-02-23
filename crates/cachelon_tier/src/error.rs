@@ -103,7 +103,7 @@ impl Error {
     /// use recoverable::RecoveryInfo;
     ///
     /// let error = Error::from_message("temporary failure")
-    ///     .with_recovery(RecoveryInfo::RetryAfter(std::time::Duration::from_secs(5)));
+    ///     .with_recovery(RecoveryInfo::retry());
     /// ```
     pub fn with_recovery(self, recovery_info: RecoveryInfo) -> Self {
         Self { recovery_info, ..self }
