@@ -34,17 +34,17 @@ impl<T: Event> ProcessingInstructions<T> {
 }
 
 pub struct GenericProcessingInstructions {
-    log_instructions: Option<LogProcessingInstructions>,
-    metric_instructiosns: Option<MetricProcessingInstructions>,
+    log_instructions: Vec<LogProcessingInstructions>,
+    metric_instructiosns: Vec<MetricProcessingInstructions>,
 }
 
 impl GenericProcessingInstructions {
     pub fn execute<T: Event>(&self, event: &T, emitter_data: &EmitterData) {
-        if let Some(log_instructions) = &self.log_instructions {
+        for log_instructions in &self.log_instructions {
             log_instructions.execute(event, &emitter_data.logger_provider, &emitter_data.redaction_engine);
         }
 
-        if let Some(metric_instructions) = &self.metric_instructiosns {
+        for metric_instructions in &self.metric_instructiosns {
             metric_instructions.execute(event, &emitter_data.meter_provider, &emitter_data.redaction_engine);
         }
     }
