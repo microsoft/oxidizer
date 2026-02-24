@@ -309,9 +309,7 @@ fn stampede_protection_converts_panic_to_error() {
 
     impl CacheTier<String, i32> for PanickingCache {
         async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
-            if !self.panicked.swap(true, Ordering::SeqCst) {
-                panic!("simulated panic in cache tier");
-            }
+            assert!(self.panicked.swap(true, Ordering::SeqCst), "simulated panic in cache tier");
             Ok(None)
         }
 
