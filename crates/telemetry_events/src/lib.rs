@@ -6,5 +6,7 @@ mod value;
 
 pub use description::{EventDescription, FieldDescription};
 pub use event::Event;
-pub use processing::ProcessingInstructions;
+pub use processing::{
+    GenericProcessingInstructions, InstrumentKind, LogProcessingInstructions, MetricProcessingInstructions, ProcessingInstructions,
+};
 pub use value::TelemetrySafeValue;

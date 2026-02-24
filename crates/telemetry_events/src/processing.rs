@@ -19,8 +19,8 @@ pub struct ProcessingInstructions<T>
 where
     T: ?Sized,
 {
-    generic_instructions: GenericProcessingInstructions,
-    additional_processing: Option<Box<dyn Fn(&T) + Send + Sync>>,
+    pub generic_instructions: GenericProcessingInstructions,
+    pub additional_processing: Option<Box<dyn Fn(&T) + Send + Sync>>,
 }
 
 impl<T: Event> ProcessingInstructions<T> {
@@ -34,8 +34,8 @@ impl<T: Event> ProcessingInstructions<T> {
 }
 
 pub struct GenericProcessingInstructions {
-    log_instructions: Vec<LogProcessingInstructions>,
-    metric_instructiosns: Vec<MetricProcessingInstructions>,
+    pub log_instructions: Vec<LogProcessingInstructions>,
+    pub metric_instructiosns: Vec<MetricProcessingInstructions>,
 }
 
 impl GenericProcessingInstructions {
@@ -51,9 +51,9 @@ impl GenericProcessingInstructions {
 }
 
 pub struct LogProcessingInstructions {
-    logger_name: &'static str,
-    included_fields: Vec<FieldDescription>,
-    message_template: &'static str,
+    pub logger_name: &'static str,
+    pub included_fields: Vec<FieldDescription>,
+    pub message_template: &'static str,
 }
 
 impl LogProcessingInstructions {
@@ -74,11 +74,11 @@ impl LogProcessingInstructions {
 }
 
 pub struct MetricProcessingInstructions {
-    meter_name: &'static str,
-    instrument_name: &'static str,
-    included_dimensions: Vec<FieldDescription>,
-    metric_field: FieldDescription,
-    instrument_kind: InstrumentKind,
+    pub meter_name: &'static str,
+    pub instrument_name: &'static str,
+    pub included_dimensions: Vec<FieldDescription>,
+    pub metric_field: FieldDescription,
+    pub instrument_kind: InstrumentKind,
 }
 
 impl MetricProcessingInstructions {

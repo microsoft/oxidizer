@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use data_privacy::{RedactedDisplay, RedactedToString, RedactionEngine};
 use opentelemetry::Value;
 use opentelemetry::logs::AnyValue;
@@ -27,6 +29,12 @@ impl From<i64> for TelemetrySafeValue {
 impl From<f64> for TelemetrySafeValue {
     fn from(value: f64) -> Self {
         Self(TelemetrySafeValueInner::F64(value))
+    }
+}
+
+impl From<Duration> for TelemetrySafeValue {
+    fn from(value: Duration) -> Self {
+        Self(TelemetrySafeValueInner::F64(value.as_secs_f64()))
     }
 }
 
