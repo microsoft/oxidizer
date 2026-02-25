@@ -15,27 +15,27 @@ mod origin;
 pub use base_path::BasePath;
 pub use origin::Origin;
 
-/// An HTTP or HTTPS `base_uri` representing a target location without path information.
+/// An HTTP or HTTPS [`BaseUri`] representing a target location without path information.
 ///
-/// `base_uri` is a lightweight type that stores only the scheme and authority portions
+/// [`BaseUri`] is a lightweight type that stores only the scheme and authority portions
 /// of a URI, making it ideal for representing target destinations in HTTP scenarios.
 /// It deliberately omits path, query string, and fragment components, focusing solely on
 /// the remote target information.
 ///
-/// Use `base_uri` when you need to:
+/// Use [`BaseUri`] when you need to:
 ///
 /// - Store a base server location that will be combined with different paths.
 /// - Handle scenarios where storing the full URI is unnecessary. For example, a list
-///   of servers or `base_uri`.
+///   of servers or [`BaseUri`] values.
 /// - Expose a way to configure the base server location in your library. In this case,
-///   the library manages its own paths and the consumer cares only about the target `base_uri`.
+///   the library manages its own paths and the consumer cares only about the target [`BaseUri`].
 ///
 /// # Best Practices
 ///
-/// For optimal performance when working with `base_uri`, follow these practices:
+/// For optimal performance when working with [`BaseUri`], follow these practices:
 ///
 /// - Pre-create and cache static paths using `PathAndQuery::from_static` for frequently used paths.
-/// - Combine static paths with `base_uri` to create complete URIs without allocations.
+/// - Combine static paths with [`BaseUri`] to create complete URIs without allocations.
 /// - Use the `build_uri` method with these cached paths instead of passing strings each time.
 /// - Consider making common paths constants in your application code.
 ///
@@ -233,13 +233,13 @@ impl BaseUri {
         Self::new(scheme, format!("{}:{}", host.as_ref(), port))?.with_path(path)
     }
 
-    /// Creates an `base_uri` from a static URI string.
+    /// Creates an [`BaseUri`] from a static URI string.
     ///
-    /// This method parses a static string as a URI and creates an `base_uri` from it.
+    /// This method parses a static string as a URI and creates a [`BaseUri`] from it.
     /// The URI must contain both a scheme (HTTP or HTTPS) and an authority component.
     ///
-    /// Any path, query, or fragment components in the URI will be discarded.
-    /// Only the scheme and authority parts are used to construct the `base_uri`.
+    /// Any query string or fragment in the URI is silently discarded - only the scheme,
+    /// authority and path prefix are preserved.
     ///
     /// # Arguments
     ///
@@ -249,7 +249,7 @@ impl BaseUri {
     ///
     /// Panics if:
     ///
-    /// - The provided string is not a valid `base_uri` URI.
+    /// - The provided string is not a valid URI.
     /// - The scheme is not HTTP or HTTPS.
     ///
     /// # Examples
@@ -264,14 +264,14 @@ impl BaseUri {
         Self::from_http_uri(&http::Uri::from_static(uri)).expect("static str is not a valid base_uri URI")
     }
 
-    /// Creates an `base_uri` from a URI string.
+    /// Creates a [`BaseUri`] from a URI string.
     ///
-    /// This method parses a string as a URI and extracts the scheme and authority
-    /// components to create an `base_uri`. The URI must contain both components, and
-    /// the scheme must be either HTTP or HTTPS.
+    /// This method parses a string as a URI and extracts the scheme, authority and optional
+    /// path prefix to create a [`BaseUri`]. The URI must contain both a scheme and authority,
+    /// and the scheme must be either HTTP or HTTPS.
     ///
-    /// Any path, query, or fragment components in the URI will be discarded.
-    /// Only the scheme and authority parts are used to construct the `base_uri`.
+    /// Any query string or fragment in the URI is silently discarded - only the scheme,
+    /// authority and path prefix are preserved.
     ///
     /// # Arguments
     ///
@@ -294,12 +294,21 @@ impl BaseUri {
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     ///
-    /// Using a URI string with a path:
+    /// Using a URI string with a path prefix:
     ///
     /// ```
     /// # use templated_uri::BaseUri;
-    /// let base_uri = BaseUri::from_uri_str("https://example.com:443/path-prefix/")?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/path-prefix/");
+    /// let base_uri = BaseUri::from_uri_str("https://example.com/path/prefix/")?;
+    /// assert_eq!(base_uri.to_string(), "https://example.com/path/prefix/");
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// Query strings are discarded:
+    ///
+    /// ```
+    /// # use templated_uri::BaseUri;
+    /// let base_uri = BaseUri::from_uri_str("https://example.com/path/?query=1")?;
+    /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn from_uri_str(uri: &str) -> Result<Self, ValidationError> {
@@ -308,17 +317,17 @@ impl BaseUri {
             .and_then(|uri| Self::from_http_uri(&uri))
     }
 
-    /// Creates an `base_uri` from an existing `Uri`.
+    /// Creates a [`BaseUri`] from an existing `http::Uri`.
     ///
-    /// Extracts the scheme and authority components from a `Uri` object to create
-    /// an `base_uri`. The URI must contain both components.
+    /// Extracts the scheme, authority and optional path prefix from a `Uri` object to create
+    /// a [`BaseUri`]. The URI must contain both a scheme and authority component.
     ///
-    /// Any path, query, or fragment components in the URI will be discarded.
-    /// Only the scheme and authority parts are used to construct the `base_uri`.
+    /// Any query string or fragment in the URI is silently discarded - only the scheme,
+    /// authority and path are used.
     ///
     /// # Arguments
     ///
-    /// - `uri`: A reference to a `Uri` object.
+    /// - `uri`: A reference to an `http::Uri` object.
     ///
     /// # Errors
     ///
@@ -346,17 +355,31 @@ impl BaseUri {
     /// assert_eq!(base_uri.path().as_str(), "/path/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
+    ///
+    /// Query and fragment are discarded:
+    ///
+    /// ```
+    /// # use templated_uri::BaseUri;
+    /// let uri = "https://example.com/path/?query=1".parse::<http::Uri>()?;
+    /// let base_uri = BaseUri::from_http_uri(&uri)?;
+    /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
     pub fn from_http_uri(uri: &http::Uri) -> Result<Self, ValidationError> {
         let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority()) else {
             return Err(ValidationError::caused_by("URI must have both scheme and authority components"));
         };
 
-        let path = uri.path_and_query().map_or(Ok(BasePath::default()), BasePath::try_from)?;
+        // Use only the path component - query and fragment are not part of a base URI.
+        let path = match uri.path() {
+            "" | "/" => BasePath::default(),
+            p => BasePath::try_from(p)?,
+        };
 
         Self::new(scheme.clone(), authority.clone())?.with_path(path)
     }
 
-    /// Returns a reference to the scheme component of this `base_uri`.
+    /// Returns a reference to the scheme component of this [`BaseUri`].
     ///
     /// # Examples
     ///
@@ -369,7 +392,7 @@ impl BaseUri {
         self.origin.scheme()
     }
 
-    /// Returns a reference to the authority component of this `base_uri`.
+    /// Returns a reference to the authority component of this [`BaseUri`].
     ///
     /// The authority typically consists of a hostname and optional port.
     ///
@@ -390,7 +413,7 @@ impl BaseUri {
         self.origin.authority()
     }
 
-    /// Returns the host part of this `base_uri`.
+    /// Returns the host part of this [`BaseUri`].
     ///
     /// # Examples
     ///
@@ -403,7 +426,7 @@ impl BaseUri {
         self.origin.authority().host()
     }
 
-    /// Returns the origin of this `base_uri` in the form `scheme://authority`.
+    /// Returns the origin of this [`BaseUri`] in the form `scheme://authority`.
     pub fn origin(&self) -> &Origin {
         &self.origin
     }
@@ -424,7 +447,7 @@ impl BaseUri {
         Self { origin, path: self.path }
     }
 
-    /// Returns the port of this `base_uri`.
+    /// Returns the port of this [`BaseUri`].
     ///
     /// This method determines the port based on the following rules:
     /// 1. If the authority explicitly specifies a port, that port is returned.
@@ -763,9 +786,9 @@ mod tests {
         }
 
         #[test]
-        fn with_invalid_path() {
-            let err = BaseUri::from_uri_str("https://example.com/path").unwrap_err();
-            assert_eq!(err.message(), "the path must start and end with a slash");
+        fn strips_query_from_path() {
+            let base_uri = BaseUri::from_uri_str("https://example.com/path/?query=1&other=2").unwrap();
+            assert_eq!(base_uri.to_string(), "https://example.com/path/");
         }
 
         #[test]
@@ -793,6 +816,13 @@ mod tests {
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
             assert_eq!(base_uri.path().as_str(), "/path/");
+        }
+
+        #[test]
+        fn strips_query_from_path() {
+            let uri = http::Uri::from_static("https://example.com/path/?query=1");
+            let base_uri = BaseUri::from_http_uri(&uri).unwrap();
+            assert_eq!(base_uri.to_string(), "https://example.com/path/");
         }
 
         #[test]
