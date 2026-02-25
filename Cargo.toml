@@ -91,7 +91,7 @@ proc-macro2 = { version = "1.0.103", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 regex = { version = "1.12.2", default-features = false }
-rstest = { version = "0.24", default-features = false }
+rstest = { version = "0.26", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }

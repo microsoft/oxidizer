@@ -44,6 +44,15 @@ fn entrypoint(c: &mut Criterion) {
     let many_as_view = BytesView::from_views(many.iter().cloned());
     let many_as_vec = many_as_view.to_bytes().to_vec();
 
+    // Create a view that differs in the very first byte, for early-exit comparison benchmarks.
+    let different_first_byte = {
+        let mut data = TEST_DATA.to_vec();
+        data[0] = data[0].wrapping_add(1);
+        let first = BytesView::copied_from_slice(&data, &memory);
+        let rest = iter::repeat_n(test_data_as_view.clone(), MANY_SPANS - 1);
+        BytesView::from_views(iter::once(first).chain(rest))
+    };
+
     let ten = iter::repeat_n(test_data_as_view.clone(), 10).collect::<Vec<_>>();
     let ten_as_view = BytesView::from_views(ten.iter().cloned());
 
@@ -187,6 +196,31 @@ fn entrypoint(c: &mut Criterion) {
             },
             BatchSize::SmallInput,
         );
+    });
+
+    group.bench_function("slices_iterate", |b| {
+        b.iter(|| {
+            for (data, meta) in many_as_view.slices() {
+                _ = black_box(data);
+                _ = black_box(meta);
+            }
+        });
+    });
+
+    // Measures early-exit comparison where the data differs in the first byte.
+    // This isolates the overhead of starting a comparison (which previously required
+    // cloning the view) from the cost of actually comparing bytes.
+    group.bench_function("ne_view_early_exit", |b| {
+        b.iter(|| {
+            assert!(black_box(many_as_view != different_first_byte));
+        });
+    });
+
+    let different_first_byte_vec = different_first_byte.to_bytes().to_vec();
+    group.bench_function("ne_byte_slice_early_exit", |b| {
+        b.iter(|| {
+            assert!(black_box(many_as_view != different_first_byte_vec.as_slice()));
+        });
     });
 
     let allocs_op = allocs.operation("to_bytes_many_spans");
