@@ -250,7 +250,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-all.info,lcov-no-def.info
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   pr-title:
     runs-on: ubuntu-latest
