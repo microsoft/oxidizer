@@ -831,6 +831,8 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
     }
 }
 
+impl Eq for BytesView {}
+
 /// Iterator over the slices of a [`BytesView`] and their metadata.
 ///
 /// Returned by [`BytesView::slices()`] and provides each slice together with its
@@ -918,7 +920,7 @@ mod tests {
     use crate::BytesBuf;
     use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
 
-    assert_impl_all!(BytesView: Send, Sync);
+    assert_impl_all!(BytesView: Send, Sync, Eq);
 
     // BytesView intentionally does not implement From<&[u8]> because creating a view
     // requires a memory provider to ensure optimal memory configuration. Users should
