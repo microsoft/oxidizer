@@ -162,6 +162,20 @@ mod test {
     }
 
     #[test]
+    fn try_from_path_and_query_ref() {
+        let paq = PathAndQuery::from_static("/ref/path/");
+        let path = BasePath::try_from(&paq).unwrap();
+        assert_eq!(path.as_str(), "/ref/path/");
+    }
+
+    #[test]
+    fn try_from_path_and_query_ref_invalid() {
+        let paq: PathAndQuery = "/no-trailing-slash".parse().unwrap();
+        let err = BasePath::try_from(&paq).unwrap_err();
+        assert!(err.to_string().contains("the path must start and end with a slash"));
+    }
+
+    #[test]
     fn from_string() {
         let s = String::from("/string/path/");
         let p = s.as_bytes().as_ptr();
