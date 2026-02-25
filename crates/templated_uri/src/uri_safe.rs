@@ -88,7 +88,7 @@ pub struct UriSafeString(Cow<'static, str>);
 impl UriSafeString {
     /// Creates a `UriSafeString` by percent-encoding any reserved or unsafe characters.
     ///
-    /// This is the preferred constructor — it always succeeds by encoding any characters
+    /// This is the preferred constructor - it always succeeds by encoding any characters
     /// that are not safe for URI templates as defined in RFC 6570.
     ///
     /// # Examples
@@ -106,7 +106,7 @@ impl UriSafeString {
     pub fn encode(s: impl AsRef<str>) -> Self {
         let s = s.as_ref();
         let encoded = PctString::encode(s.chars(), UriReserved::Any);
-        // If nothing was encoded the PctString contains the same characters — avoid
+        // If nothing was encoded the PctString contains the same characters - avoid
         // a redundant allocation by comparing lengths (encoding can only grow the string).
         if encoded.as_str().len() == s.len() {
             Self(Cow::Owned(s.to_owned()))
@@ -118,7 +118,7 @@ impl UriSafeString {
     /// Creates a `UriSafeString` from an already-encoded string, validating that it
     /// contains only characters that are safe for URI templates as defined in RFC 6570.
     ///
-    /// Unlike [`UriSafeString::encode`], this constructor does **not** encode anything —
+    /// Unlike [`UriSafeString::encode`], this constructor does **not** encode anything -
     /// it rejects the input if any reserved or unsafe character is found.
     /// Use this when you already have a percent-encoded string and want to enforce
     /// the invariant at the call site.
@@ -337,6 +337,35 @@ mod tests {
     }
 
     #[test]
+    fn try_new_accepts_valid_percent_encoded_sequence() {
+        // A valid %XX sequence must be accepted - catches mutation that deletes `!`
+        // in the is_some_and check, which would incorrectly reject valid encodings.
+        let result = UriSafeString::try_new("hello%3Dworld");
+        assert!(result.is_ok(), "valid percent-encoded sequence should be accepted");
+        assert_eq!(result.unwrap().as_str(), "hello%3Dworld");
+    }
+
+    #[test]
+    fn test_try_new_invalid_percent_encoding() {
+        let result = UriSafeString::try_new("hello%3world".to_string());
+        assert!(result.is_err(), "string with invalid percent encoding should be rejected");
+        let err = result.unwrap_err();
+        assert_eq!(err.invalid_char, '%', "error should indicate the '%' character as invalid");
+        assert_eq!(err.position, 5, "error should indicate the position of the invalid '%' character");
+    }
+
+    #[test]
+    fn uri_safe_error_display_contains_char_and_position() {
+        let err = UriSafeError {
+            invalid_char: '{',
+            position: 5,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains('{'), "error message should contain the invalid character");
+        assert!(msg.contains('5'), "error message should contain the position");
+    }
+
+    #[test]
     fn test_from_string_reserved() {
         let result = UriSafeString::from("reserved{string}".to_string());
         assert_eq!(result.as_str(), "reserved%7Bstring%7D");
@@ -348,6 +377,7 @@ mod tests {
         assert!(result.is_err());
         result.unwrap_err();
     }
+
     #[test]
     fn test_from_str_valid() {
         let result = UriSafeString::from("valid_str_456");
