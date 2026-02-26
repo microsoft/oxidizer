@@ -1,0 +1,83 @@
+# cargo-delta configuration file
+
+# Patterns for files and folders to exclude from analysis.
+file_exclude_patterns = [
+     ".git*",
+     ".markdownlint.json",
+     ".vscode*",
+     "*.graphml",
+     "*.ico",
+     "*.j2",
+     "*.md",
+     "*.png",
+     "*.svg",
+     "LICENSE",
+     "target"
+]
+
+# Trip wire patterns - if any changed file matches these patterns,
+# all crates in the workspace are going to be considered impacted.
+trip_wire_patterns = [
+     ".ado/*",
+     ".cargo/*",
+     ".delta.toml",
+     ".editorconfig",
+     "*.just",
+     "Cargo.lock",
+     "Cargo.toml",
+     "clippy.toml",
+     "codecov.yml",
+     "constants.env",
+     "deny.toml",
+     "justfile",
+     "rust-toolchain.toml",
+     "rustfmt.toml",
+     "scripts/*",
+     "spellcheck.toml",
+     "unstable-rustfmt.toml"
+]
+
+[parser]
+# Enable/disable file reference detection from method calls.
+file_refs = true
+
+# List of method names that indicate file loading operations.
+# Common patterns: API calls that load files by path.
+file_methods = [
+    "file",       # ::file(path, ...)
+    "from_file",  # ::from_file(path, ...)
+    "load",       # ::load(path, ...)
+    "open",       # ::open(path, ...)
+    "read",       # ::read(path, ...)
+    "load_from"   # ::load_from(path, ...)
+]
+
+# Enable/disable detection of include macros.
+includes = true
+
+# List of macro names that include files at compile time.
+include_macros = [
+    "include_str",   # include_str!("file.txt")
+    "include_bytes"  # include_bytes!("file.bin")
+]
+
+# Enable/disable following mod declarations to discover module files.
+mods = true
+
+# List of custom macro names that declare modules.
+mod_macros = []
+
+# Enable/disable assume pattern matching for hard-to-detect dependencies.
+assume = true
+
+# List of glob patterns to match files and include them as dependencies.
+assume_patterns = [
+     "*.rs",
+     "*.snap",
+     "*.stderr"
+]
+
+[git]
+# The remote branch to compare against for determining changed files
+# If not specified, uses the default branch detection
+remote_branch = "origin/main"
