@@ -1,5 +1,4 @@
 # cargo-delta configuration file
-# This file shows the default configuration values used by cargo-delta
 
 # Patterns for files and folders to exclude from analysis.
 file_exclude_patterns = [
