@@ -75,10 +75,10 @@ fn test_detailed_enrich() {
     let enrichments: Vec<_> = error.enrichments().collect();
     assert_eq!(enrichments.len(), 3);
 
-    // Most recent first
-    assert_eq!(enrichments[0].message, "third message");
+    // Oldest first (chronological), matching display order
+    assert_eq!(enrichments[0].message, "first message");
     assert_eq!(enrichments[1].message, "second message");
-    assert_eq!(enrichments[2].message, "first message");
+    assert_eq!(enrichments[2].message, "third message");
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn test_trace_messages_iterator() {
     let error = OhnoCore::from("base").enrich("first").enrich("second");
 
     let messages: Vec<_> = error.enrichment_messages().collect();
-    assert_eq!(messages, vec!["second", "first"]);
+    assert_eq!(messages, vec!["first", "second"]);
 
     let display = error.to_string();
     let lines: Vec<_> = display.lines().collect();

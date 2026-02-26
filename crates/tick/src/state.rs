@@ -4,10 +4,8 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
-use thread_aware::{
-    PerCore, ThreadAware,
-    affinity::{MemoryAffinity, PinnedAffinity},
-};
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::{PerCore, ThreadAware};
 
 use crate::timers::Timers;
 

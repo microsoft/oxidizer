@@ -217,7 +217,7 @@ impl<In, Out> RetryShared<In, Out> {
 
     #[cfg_attr(
         not(any(feature = "logs", test)),
-        expect(unused_variables, reason = "unused when logs feature not used")
+        expect(unused_variables, clippy::unused_self, reason = "unused when logs feature not used")
     )]
     fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
         #[cfg(any(feature = "logs", test))]
@@ -349,14 +349,13 @@ where
 mod tests {
     use std::future::poll_fn;
 
-    use layered::Execute;
+    use layered::{Execute, Layer};
     use opentelemetry::KeyValue;
     use tick::ClockControl;
 
     use super::*;
     use crate::testing::{FailReadyService, MetricTester};
     use crate::{ResilienceContext, Set};
-    use layered::Layer;
 
     #[test]
     fn layer_ensure_defaults() {

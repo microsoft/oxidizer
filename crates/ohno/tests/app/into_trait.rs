@@ -3,8 +3,7 @@
 
 //! Tests for `IntoAppError` trait implementations.
 
-use ohno::assert_error_message;
-use ohno::{AppError, IntoAppError};
+use ohno::{AppError, IntoAppError, assert_error_message};
 
 #[test]
 fn result_into_app_err() {

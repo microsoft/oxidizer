@@ -72,6 +72,7 @@ You can specify when to retry an operation using the `delay` method:
 
 ```rust
 use std::time::Duration;
+
 use recoverable::{RecoveryInfo, RecoveryKind};
 
 // Retry with a 30-second delay (e.g., from a Retry-After header)
@@ -90,7 +91,7 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4cFLMVQymhvG3_1rzbl1X55G-vZhEWC9_13GwjdQK0PrVchYWSBgmtyZWNvdmVyYWJsZWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0kTlV5BY9JjG1XEgUXOk9osG0qtfsFjkEv6G42rYyAzzdCKYWSBgmtyZWNvdmVyYWJsZWUwLjEuMA
  [__link0]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.1.0/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.1.0/recoverable/trait.Recovery.html

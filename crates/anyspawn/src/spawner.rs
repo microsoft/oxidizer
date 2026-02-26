@@ -7,12 +7,11 @@ use std::fmt::Debug;
 #[cfg(feature = "custom")]
 use std::sync::Arc;
 
+#[cfg(feature = "custom")]
+use crate::custom::{BoxedFuture, CustomSpawner};
 use crate::handle::JoinHandle;
 #[cfg(any(feature = "tokio", feature = "custom"))]
 use crate::handle::JoinHandleInner;
-
-#[cfg(feature = "custom")]
-use crate::custom::{BoxedFuture, CustomSpawner};
 
 /// Runtime-agnostic task spawner.
 ///
@@ -34,6 +33,7 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 ///     println!("Task running!");
 /// });
 /// handle.await; // Wait for task to complete
+///     
 /// # }
 /// ```
 ///
@@ -80,7 +80,11 @@ use crate::custom::{BoxedFuture, CustomSpawner};
 ///
 /// let result = spawner
 ///     .spawn(async {
-///         if true { Ok(42) } else { Err("something went wrong") }
+///         if true {
+///             Ok(42)
+///         } else {
+///             Err("something went wrong")
+///         }
 ///     })
 ///     .await;
 ///

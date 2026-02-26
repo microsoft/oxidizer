@@ -14,12 +14,13 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::{self, RwLock};
 
+pub use builtin::{PerCore, PerNuma, PerProcess};
+pub use storage::{Storage, Strategy};
+
 use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::cell::factory::Factory;
 use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
-pub use builtin::{PerCore, PerNuma, PerProcess};
-pub use storage::{Storage, Strategy};
 
 /// Transferable reference counted type.
 ///

@@ -3,9 +3,11 @@
 
 //! A redactor based on `RapidHash`.
 
-use crate::{DataClass, Redactor};
 use core::fmt::Write;
+
 use rapidhash::v3::{RapidSecrets, rapidhash_v3_seeded};
+
+use crate::{DataClass, Redactor};
 
 /// The length of the redacted output in hex digits.
 pub const REDACTED_LEN: usize = 16;

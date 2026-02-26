@@ -51,6 +51,7 @@
 //!
 //! ```
 //! use std::time::{Duration, SystemTime};
+//!
 //! use tick::SystemTimeExt;
 //!
 //! let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
@@ -72,9 +73,8 @@ mod tests {
 
     use serde::{Deserialize, Serialize};
 
-    use crate::Clock;
-
     use super::*;
+    use crate::Clock;
 
     #[test]
     fn assert_json_format() {

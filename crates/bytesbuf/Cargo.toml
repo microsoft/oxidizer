@@ -27,6 +27,9 @@ allowed_external_types = [
     "bytes::buf::buf_mut::BufMut",
     "num_traits::ops::bytes::FromBytes",
     "num_traits::ops::bytes::ToBytes",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware::core::ThreadAware",
 ]
 
 [package.metadata.docs.rs]
@@ -45,6 +48,7 @@ new_zealand.workspace = true
 nm.workspace = true
 num-traits.workspace = true
 smallvec = { workspace = true, features = ["const_new", "union"] }
+thread_aware.workspace = true
 
 [dev-dependencies]
 alloc_tracker.workspace = true

@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::core::ThreadAware;
-use std::path::Path;
-use std::time::Duration;
-use std::{collections::HashMap, path::PathBuf};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -153,13 +154,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{ThreadAware, affinity::pinned_affinities};
+    use crate::ThreadAware;
+    use crate::affinity::pinned_affinities;
 
     #[test]
     #[cfg(feature = "threads")]
     fn test_hashmap() {
-        use crate::ThreadAware;
         use std::collections::HashMap;
+
+        use crate::ThreadAware;
 
         let affinities = pinned_affinities(&[2]);
         let source = affinities[0].into();

@@ -3,11 +3,9 @@
 
 //! [`JoinHandle`] for awaiting spawned task results.
 
-use std::{
-    fmt::Debug,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 #[cfg(feature = "custom")]
 use futures_channel::oneshot;

@@ -8,7 +8,7 @@ use std::num::NonZero;
 use smallvec::SmallVec;
 
 use crate::mem::{Block, BlockMeta, BlockSize, Memory};
-use crate::{BytesBufWrite, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
+use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
@@ -595,6 +595,118 @@ impl BytesBuf {
         unsafe { self.consume_checked(self.len()).unwrap_unchecked() }
     }
 
+    /// Splits off `count` bytes of remaining capacity from the buffer.
+    ///
+    /// Returns a new `BytesBuf` that owns that capacity and has no contents.
+    ///
+    /// The buffer's filled data (length) is not affected.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::mem::Memory;
+    ///
+    /// let mut buf = memory.reserve(64);
+    ///
+    /// buf.put_num_be(0xDEAD_u16);
+    ///
+    /// let remaining_before = buf.remaining_capacity();
+    /// let mut split = buf.split_off_remaining(20);
+    ///
+    /// // The split-off buffer has the requested capacity and no data.
+    /// assert!(split.remaining_capacity() >= 20);
+    /// assert!(split.is_empty());
+    ///
+    /// // The original buffer lost that capacity but kept its data.
+    /// assert_eq!(buf.remaining_capacity(), remaining_before - 20);
+    /// assert_eq!(buf.len(), 2);
+    ///
+    /// // The split-off buffer can be used independently.
+    /// split.put_num_be(0xBEEF_u16);
+    /// assert_eq!(split.len(), 2);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if `count` is greater than the [`remaining_capacity()`] of the buffer.
+    ///
+    /// [`remaining_capacity()`]: Self::remaining_capacity
+    #[must_use]
+    pub fn split_off_remaining(&mut self, count: usize) -> Self {
+        self.split_off_remaining_checked(count)
+            .expect("attempted to split off more remaining capacity than available in buffer")
+    }
+
+    /// Splits off `count` bytes of remaining capacity from the buffer.
+    ///
+    /// Returns a new `BytesBuf` that owns that capacity and has no contents, or `None`
+    /// if `count` is greater than the [`remaining_capacity()`] of the buffer.
+    ///
+    /// The buffer's filled data (length) is not affected.
+    ///
+    /// [`remaining_capacity()`]: Self::remaining_capacity
+    #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
+    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check produces invalid SpanBuilders.
+    pub fn split_off_remaining_checked(&mut self, count: usize) -> Option<Self> {
+        if count > self.remaining_capacity() {
+            return None;
+        }
+
+        if count == 0 {
+            return Some(Self::new());
+        }
+
+        let mut result_builders: SmallVec<[SpanBuilder; MAX_INLINE_SPANS]> = SmallVec::new();
+        let mut remaining = count;
+
+        // Walk span_builders_reversed from front (logically last builders, which are empty
+        // spare-capacity builders per type invariant). Drain as many whole builders as feasible first.
+        let mut whole_span_builders_to_take: usize = 0;
+
+        for span_builder in &self.span_builders_reversed {
+            if !span_builder.is_empty() {
+                // We have reached the last span builder (logically first) because it is the
+                // only one allowed to have data in it. As it is not empty, we exit the loop
+                // and will later split this span builder to get any remaining bytes.
+                break;
+            }
+
+            let capacity_in_span_builder = span_builder.remaining_capacity();
+
+            if capacity_in_span_builder > remaining {
+                // This span builder is too big - we have to split it, cannot take entirely.
+                break;
+            }
+
+            // Will not wrap - guarded by if-statement above.
+            remaining = remaining.wrapping_sub(capacity_in_span_builder);
+            // Will not wrap as that would imply that there are more span builders than there is virtual memory.
+            whole_span_builders_to_take = whole_span_builders_to_take.wrapping_add(1);
+        }
+
+        // Drain whole builders from the front (logically last builders).
+        result_builders.extend(self.span_builders_reversed.drain(..whole_span_builders_to_take));
+
+        // If we still need more capacity, split the next builder's available capacity.
+        if remaining > 0 {
+            let span_builder = self.span_builders_reversed.first_mut().expect(
+                "remaining_capacity() check at the top ensures a builder is available because we have not received enough capacity yet",
+            );
+
+            let remaining: u32 = remaining.try_into()
+                .expect("the span builder drain loop ensures that remaining capacity comes from one memory block yet the value is too big to fit into a memory block - impossible");
+            let split_count = NonZero::new(remaining).expect("guarded by if-statement above");
+
+            result_builders.push(span_builder.split_off_available(split_count));
+        }
+
+        self.available = self.available.checked_sub(count).expect("guarded by bounds check above");
+
+        Some(Self::from_span_builders(result_builders))
+    }
+
     /// Consumes `len` bytes from the first span builder and moves it to the frozen spans list.
     fn freeze_from_first(&mut self, len: NonZero<BlockSize>) {
         let span_builder = self
@@ -909,7 +1021,7 @@ impl BytesBuf {
         )
     }
 
-    /// Exposes the instance through the [`Write`][std::io::Write] trait.
+    /// Converts this instance into a [`Write`][std::io::Write] adapter.
     ///
     /// The memory capacity of the `BytesBuf` will be automatically extended on demand
     /// with additional capacity from the supplied memory provider.
@@ -922,19 +1034,18 @@ impl BytesBuf {
     ///
     /// use bytesbuf::mem::Memory;
     ///
-    /// let mut buf = memory.reserve(32);
-    /// {
-    ///     let mut writer = buf.as_write(&memory);
-    ///     writer.write_all(b"Hello, ")?;
-    ///     writer.write_all(b"world!")?;
-    /// }
+    /// let buf = memory.reserve(32);
+    /// let mut writer = buf.into_writer(&memory);
+    /// writer.write_all(b"Hello, ")?;
+    /// writer.write_all(b"world!")?;
+    /// let mut buf = writer.into_inner();
     ///
     /// assert_eq!(buf.consume_all(), b"Hello, world!");
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn as_write<M: Memory + ?Sized>(&mut self, memory: &M) -> impl std::io::Write {
-        BytesBufWrite::new(self, memory)
+    pub fn into_writer<M: Memory>(self, memory: M) -> BytesBufWriter<M> {
+        BytesBufWriter::new(self, memory)
     }
 }
 
@@ -2241,9 +2352,138 @@ mod tests {
         }
     }
 
+    #[test]
+    fn split_off_remaining_basic() {
+        let memory = FixedBlockMemory::new(nz!(100));
+        let mut buf = memory.reserve(100);
+
+        buf.put_num_ne(1234_u64);
+
+        let remaining_before_split = buf.remaining_capacity();
+
+        let split = buf.split_off_remaining(20);
+
+        // Original keeps its data and lost the split capacity.
+        assert_eq!(buf.len(), U64_SIZE);
+        assert_eq!(buf.remaining_capacity(), remaining_before_split - 20);
+
+        // Split-off buffer has the requested capacity and no data.
+        assert!(split.remaining_capacity() >= 20);
+        assert!(split.is_empty());
+    }
+
+    #[test]
+    fn split_off_remaining_write_to_split() {
+        let memory = FixedBlockMemory::new(nz!(100));
+        let mut buf = memory.reserve(100);
+
+        buf.put_num_ne(1111_u64);
+
+        let mut split = buf.split_off_remaining(40);
+
+        // Write into the split-off buffer.
+        split.put_num_ne(2222_u64);
+        split.put_num_ne(3333_u64);
+
+        assert_eq!(split.len(), TWO_U64_SIZE);
+
+        let mut split_view = split.consume_all();
+        assert_eq!(split_view.get_num_ne::<u64>(), 2222);
+        assert_eq!(split_view.get_num_ne::<u64>(), 3333);
+
+        // Original buffer data is unaffected.
+        let mut original_view = buf.consume_all();
+        assert_eq!(original_view.get_num_ne::<u64>(), 1111);
+    }
+
+    #[test]
+    fn split_off_remaining_all_capacity() {
+        let memory = FixedBlockMemory::new(nz!(100));
+        let mut buf = memory.reserve(100);
+        let full_capacity = buf.remaining_capacity();
+
+        let split = buf.split_off_remaining(full_capacity);
+
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(split.remaining_capacity(), full_capacity);
+    }
+
+    #[test]
+    fn split_off_remaining_zero() {
+        let memory = FixedBlockMemory::new(nz!(100));
+        let mut buf = memory.reserve(100);
+        let original_capacity = buf.remaining_capacity();
+
+        let split = buf.split_off_remaining(0);
+
+        assert_eq!(buf.remaining_capacity(), original_capacity);
+        assert!(split.is_empty());
+        assert_eq!(split.remaining_capacity(), 0);
+    }
+
+    #[test]
+    fn split_off_remaining_multi_block() {
+        let memory = FixedBlockMemory::new(nz!(10));
+
+        // Reserve enough to trigger multiple blocks.
+        let mut buf = memory.reserve(30);
+
+        buf.put_num_ne(1234_u64);
+
+        let original_remaining = buf.remaining_capacity();
+
+        // Split off more than one block's capacity to exercise draining + partial split.
+        let mut split = buf.split_off_remaining(15);
+
+        assert_eq!(buf.remaining_capacity(), original_remaining - 15);
+        assert_eq!(buf.len(), U64_SIZE);
+
+        // The split-off buffer capacity is usable.
+        split.put_byte_repeated(0xAA, 15);
+        assert_eq!(split.len(), 15);
+
+        // Original data is unaffected.
+        let mut original_view = buf.consume(U64_SIZE);
+        assert_eq!(original_view.get_num_ne::<u64>(), 1234);
+    }
+
+    #[test]
+    fn split_off_remaining_empty_buffer_no_capacity() {
+        let mut buf = BytesBuf::new();
+        assert_eq!(buf.remaining_capacity(), 0);
+
+        let split = buf.split_off_remaining(0);
+
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(split.len(), 0);
+        assert_eq!(split.remaining_capacity(), 0);
+    }
+
+    #[test]
+    fn split_off_remaining_panics_on_overflow() {
+        let memory = FixedBlockMemory::new(nz!(100));
+        let mut buf = memory.reserve(100);
+        let capacity = buf.remaining_capacity();
+
+        assert_panic!(buf.split_off_remaining(capacity + 1));
+    }
+
+    #[test]
+    fn split_off_remaining_checked_returns_none() {
+        let memory = FixedBlockMemory::new(nz!(100));
+        let mut buf = memory.reserve(100);
+        let capacity = buf.remaining_capacity();
+
+        assert!(buf.split_off_remaining_checked(capacity + 1).is_none());
+
+        // Buffer is unmodified.
+        assert_eq!(buf.remaining_capacity(), capacity);
+    }
+
     // Compile time test
     fn _can_use_in_dyn_traits(mem: &dyn Memory) {
-        let mut buf = mem.reserve(123);
-        let _ = buf.as_write(mem);
+        let buf = mem.reserve(123);
+        let _ = buf.into_writer(mem);
     }
 }

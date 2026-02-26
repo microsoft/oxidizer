@@ -3,10 +3,8 @@
 
 //! Spawning tasks with a custom spawner.
 
-use std::{
-    thread::{sleep, spawn},
-    time::Duration,
-};
+use std::thread::{sleep, spawn};
+use std::time::Duration;
 
 use anyspawn::Spawner;
 use futures::executor::block_on;
