@@ -3,7 +3,7 @@ source: crates/tick/src/clock_control.rs
 expression: control
 ---
 ClockControl {
-    UNIX offset: 123s,
-    timers: 1,
+    UNIX offset: "negative",
+    timers: 0,
     ..
 }

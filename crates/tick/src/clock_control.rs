@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::ClockState;
 use crate::timers::{TimerKey, Timers};
@@ -77,10 +77,16 @@ pub struct ClockControl {
 
 impl std::fmt::Debug for ClockControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClockControl")
-            .field("time", &self.system_time())
-            .field("timers", &self.timers_len())
-            .finish_non_exhaustive()
+        let mut debug = f.debug_struct("ClockControl");
+
+        let time = self.system_time();
+
+        match time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => debug.field("UNIX offset", &duration),
+            Err(_) => debug.field("UNIX offset", &"negative"),
+        };
+
+        debug.field("timers", &self.timers_len()).finish_non_exhaustive()
     }
 }
 
@@ -690,16 +696,6 @@ mod tests {
         assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(2000));
     }
 
-    // #[test]
-    // fn outside_range_message() {
-    //     let msg = format!(
-    //         "moving the clock outside of the supported time range is not possible: [{}, {}]",
-    //         SystemTime::UNIX_EPOCH,
-    //         SystemTime::UNIX_EPOCH + Duration::MAX
-    //     );
-    //     assert_eq!(OUTSIDE_RANGE_MESSAGE, msg);
-    // }
-
     #[test]
     fn new_at_with_system_time_ok() {
         let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(222);
@@ -803,12 +799,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(miri))]
     fn debug_ok() {
         let system = SystemTime::UNIX_EPOCH + Duration::from_secs(123);
         let control = ClockControl::new_at(system);
 
         let future = control.instant() + Duration::from_secs(100);
         control.register_timer(future, Waker::noop().clone());
+
+        assert_debug_snapshot!(control);
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn debug_negative_offset_ok() {
+        let system = SystemTime::UNIX_EPOCH - Duration::from_secs(123);
+        let control = ClockControl::new_at(system);
 
         assert_debug_snapshot!(control);
     }
