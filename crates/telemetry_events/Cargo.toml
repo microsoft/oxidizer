@@ -14,5 +14,8 @@ type-map.workspace = true
 data_privacy.workspace = true
 telemetry_events_macros.workspace = true
 
+[dev-dependencies]
+opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
+
 [lints]
 workspace = true

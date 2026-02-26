@@ -1818,6 +1818,7 @@ version = "0.1.0"
 dependencies = [
  "data_privacy",
  "opentelemetry",
+ "opentelemetry-stdout",
  "opentelemetry_sdk",
  "telemetry_events_macros",
  "type-map",

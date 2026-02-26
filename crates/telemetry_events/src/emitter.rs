@@ -36,6 +36,22 @@ pub struct EmitterPipeline {
 }
 
 impl EmitterPipeline {
+    pub fn new(
+        logger_provider: SdkLoggerProvider,
+        meter_provider: SdkMeterProvider,
+        redaction_engine: RedactionEngine,
+    ) -> Self {
+        Self {
+            instructions: Arc::new(Mutex::new(TypeMap::new())),
+            name_instruction_overrides: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            data: EmitterData {
+                logger_provider,
+                meter_provider,
+                redaction_engine,
+            },
+        }
+    }
+
     pub fn emit<T: Event>(&self, event: &T) {
         let name = T::DESCRIPTION.name;
         // TODO: we don't want to do this lookup on every emit - try to do something with generics to avoid it based on benchmarks
