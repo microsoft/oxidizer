@@ -45,11 +45,16 @@ use crate::utils::generate_unique_field_name;
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
 pub fn error(_args: TokenStream, input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
+    TokenStream::from(error_impl(&mut input))
+}
 
-    add_fiasko_error_derive(&mut input);
-    add_ohno_core_field(&mut input);
+fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
+    if let Err(err) = add_ohno_core_field(input) {
+        return err.to_compile_error();
+    }
+    add_fiasko_error_derive(input);
 
-    TokenStream::from(quote! { #input })
+    quote! { #input }
 }
 
 fn add_fiasko_error_derive(input: &mut DeriveInput) {
@@ -61,7 +66,7 @@ fn add_fiasko_error_derive(input: &mut DeriveInput) {
     );
 }
 
-fn add_ohno_core_field(input: &mut DeriveInput) {
+fn add_ohno_core_field(input: &mut DeriveInput) -> syn::Result<()> {
     if let Data::Struct(data_struct) = &mut input.data {
         match &mut data_struct.fields {
             Fields::Unit => {
@@ -95,8 +100,12 @@ fn add_ohno_core_field(input: &mut DeriveInput) {
                 });
             }
         }
+        Ok(())
     } else {
-        // Not a struct, can't transform
+        Err(syn::Error::new_spanned(
+            &input.ident,
+            "#[ohno::error] can only be applied to structs",
+        ))
     }
 }
 
@@ -134,7 +143,7 @@ mod tests {
             }
         };
 
-        crate::error_type_attr::add_ohno_core_field(&mut input);
+        crate::error_type_attr::add_ohno_core_field(&mut input).unwrap();
 
         let expected: proc_macro2::TokenStream = parse_quote! {
             struct TestError {
@@ -149,8 +158,7 @@ mod tests {
 
     #[test]
     fn test_add_ohno_core_field_with_enum() {
-        // Test that the function doesn't crash when given an enum
-        // This covers line 99 (the else branch for non-struct types)
+        // Test that the function returns an error when given an enum
         let mut input: DeriveInput = parse_quote! {
             enum TestError {
                 Variant1,
@@ -158,10 +166,44 @@ mod tests {
             }
         };
 
-        let original = input.to_token_stream().to_string();
-        crate::error_type_attr::add_ohno_core_field(&mut input);
+        let result = crate::error_type_attr::add_ohno_core_field(&mut input);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("#[ohno::error] can only be applied to structs"));
+    }
 
-        // The enum should remain unchanged since we can't transform it
-        assert_eq!(input.to_token_stream().to_string(), original);
+    #[test]
+    fn test_add_ohno_core_field_enum_produces_compile_error() {
+        // Verifies the to_compile_error() path used by the error proc macro (line 50)
+        let mut input: DeriveInput = parse_quote! {
+            enum NotAStruct {
+                A,
+            }
+        };
+
+        let err = crate::error_type_attr::add_ohno_core_field(&mut input).unwrap_err();
+        let compile_error = err.to_compile_error().to_string();
+
+        assert!(compile_error.contains("compile_error"));
+        assert!(
+            compile_error.contains("#[ohno::error] can only be applied to structs"),
+            "compile error should contain the expected message, got: {compile_error}"
+        );
+    }
+
+    #[test]
+    fn test_error_impl_returns_compile_error_for_enum() {
+        let mut input: DeriveInput = parse_quote! {
+            enum NotAStruct {
+                A,
+            }
+        };
+
+        let output = crate::error_type_attr::error_impl(&mut input).to_string();
+
+        assert!(
+            output.contains("compile_error"),
+            "error_impl should return a compile_error token stream for enums, got: {output}"
+        );
     }
 }
