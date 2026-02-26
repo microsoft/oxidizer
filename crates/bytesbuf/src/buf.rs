@@ -2448,6 +2448,19 @@ mod tests {
     }
 
     #[test]
+    fn split_off_remaining_empty_buffer_no_capacity() {
+        let mut buf = BytesBuf::new();
+        assert_eq!(buf.remaining_capacity(), 0);
+
+        let split = buf.split_off_remaining(0);
+
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.remaining_capacity(), 0);
+        assert_eq!(split.len(), 0);
+        assert_eq!(split.remaining_capacity(), 0);
+    }
+
+    #[test]
     fn split_off_remaining_panics_on_overflow() {
         let memory = FixedBlockMemory::new(nz!(100));
         let mut buf = memory.reserve(100);
