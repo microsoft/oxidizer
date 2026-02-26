@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-02-26
+
+- ✨ Features
+
+  - add BytesBuf::split_off_remaining ([#286](https://github.com/microsoft/oxidizer/pull/286))
+  - reduce unnecessary reference count jiggling ([#283](https://github.com/microsoft/oxidizer/pull/283))
+  - add missing Eq implementation for BytesView ([#281](https://github.com/microsoft/oxidizer/pull/281))
+  - impl ThreadAware for GlobalPool ([#273](https://github.com/microsoft/oxidizer/pull/273))
+  - clamp minimum reservation size in BytesBufWriter ([#277](https://github.com/microsoft/oxidizer/pull/277))
+  - improve ergonomics of BytesView::as_read() ([#272](https://github.com/microsoft/oxidizer/pull/272))
+  - make BytesBufWriter owning via into_writer() ([#274](https://github.com/microsoft/oxidizer/pull/274))
+
 ## [0.3.0] - 2026-02-13
 
 - ✨ Features
