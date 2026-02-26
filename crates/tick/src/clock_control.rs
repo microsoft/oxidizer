@@ -515,8 +515,6 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
-
     use super::*;
     use crate::fmt::UnixSeconds;
 
@@ -807,7 +805,7 @@ mod tests {
         let future = control.instant() + Duration::from_secs(100);
         control.register_timer(future, Waker::noop().clone());
 
-        assert_debug_snapshot!(control);
+        insta::assert_debug_snapshot!(control);
     }
 
     #[test]
@@ -816,6 +814,6 @@ mod tests {
         let system = SystemTime::UNIX_EPOCH - Duration::from_secs(123);
         let control = ClockControl::new_at(system);
 
-        assert_debug_snapshot!(control);
+        insta::assert_debug_snapshot!(control);
     }
 }
