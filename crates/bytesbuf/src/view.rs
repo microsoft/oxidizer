@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::marker::PhantomData;
+use std::iter;
 use std::num::NonZero;
 use std::ops::{Bound, RangeBounds};
-use std::{iter, mem};
 
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
@@ -727,33 +726,56 @@ impl PartialEq for BytesView {
             return false;
         }
 
-        let mut remaining_bytes = self.len();
-
         // The two views may have differently sized spans, so we only compare in steps
         // of the smallest span size offered by either view.
 
-        // We clone the views to create windows that we slide over the contents.
-        let mut self_view = self.clone();
-        let mut other_view = other.clone();
+        // We iterate over spans_reversed using indices to avoid cloning the views,
+        // which would increment atomic reference counts for every span.
+        let mut self_span_idx = self.spans_reversed.len();
+        let mut self_offset: usize = 0;
+        let mut other_span_idx = other.spans_reversed.len();
+        let mut other_offset: usize = 0;
+        let mut remaining_bytes = self.len();
 
         while remaining_bytes > 0 {
-            let self_slice = self_view.first_slice();
-            let other_slice = other_view.first_slice();
+            let self_span: &[u8] = &self.spans_reversed[self_span_idx - 1];
+            let other_span: &[u8] = &other.spans_reversed[other_span_idx - 1];
+
+            let self_slice = self_span
+                .get(self_offset..)
+                .expect("offset only advances within span length, reset to 0 on span boundary");
+            let other_slice = other_span
+                .get(other_offset..)
+                .expect("offset only advances within span length, reset to 0 on span boundary");
 
             let comparison_len = NonZero::new(self_slice.len().min(other_slice.len()))
                 .expect("both views said there are remaining bytes but we got an empty slice from at least one of them");
 
-            let self_slice = self_slice.get(..comparison_len.get()).expect("already checked that remaining > 0");
-            let other_slice = other_slice.get(..comparison_len.get()).expect("already checked that remaining > 0");
+            let self_slice = self_slice.get(..comparison_len.get()).expect("guarded by min() above");
+            let other_slice = other_slice.get(..comparison_len.get()).expect("guarded by min() above");
 
             if self_slice != other_slice {
                 // Something is different. That is enough for a determination.
                 return false;
             }
 
-            // Advance both views by the same amount.
-            self_view.advance(comparison_len.get());
-            other_view.advance(comparison_len.get());
+            // Advance within or past the current spans.
+            self_offset += comparison_len.get();
+            debug_assert!(self_offset <= self_span.len(), "guarded by min() above to never exceed span length");
+            if self_offset == self_span.len() {
+                self_span_idx -= 1;
+                self_offset = 0;
+            }
+
+            other_offset += comparison_len.get();
+            debug_assert!(
+                other_offset <= other_span.len(),
+                "guarded by min() above to never exceed span length"
+            );
+            if other_offset == other_span.len() {
+                other_span_idx -= 1;
+                other_offset = 0;
+            }
 
             remaining_bytes = remaining_bytes
                 .checked_sub(comparison_len.get())
@@ -761,8 +783,6 @@ impl PartialEq for BytesView {
         }
 
         debug_assert_eq!(remaining_bytes, 0);
-        debug_assert_eq!(self_view.len(), 0);
-        debug_assert_eq!(other_view.len(), 0);
 
         true
     }
@@ -778,13 +798,18 @@ impl PartialEq<&[u8]> for BytesView {
             return false;
         }
 
+        // We iterate over spans_reversed using an index to avoid cloning the view,
+        // which would increment atomic reference counts for every span.
+        let mut span_idx = self.spans_reversed.len();
+        let mut span_offset: usize = 0;
         let mut remaining_bytes = self.len();
 
-        // We clone the sequence to create a temporary view that we slide over the contents.
-        let mut self_view = self.clone();
-
         while remaining_bytes > 0 {
-            let self_slice = self_view.first_slice();
+            let span: &[u8] = &self.spans_reversed[span_idx - 1];
+            let self_slice = span
+                .get(span_offset..)
+                .expect("offset only advances within span length, reset to 0 on span boundary");
+
             let slice_size = NonZero::new(self_slice.len())
                 .expect("both sides of the comparison said there are remaining bytes but we got an empty slice from at least one of them");
 
@@ -792,13 +817,21 @@ impl PartialEq<&[u8]> for BytesView {
             let other_slice = other.get(..slice_size.get()).expect("already checked that remaining > 0");
 
             if self_slice != other_slice {
-                // Something is different. That is enough for a determination.
                 return false;
             }
 
-            // Advance the sequence by the same amount.
-            self_view.advance(slice_size.get());
-            other = other.get(slice_size.get()..).expect("guarded by min() above");
+            // Advance within or past the current span.
+            span_offset += slice_size.get();
+            debug_assert!(
+                span_offset <= span.len(),
+                "guarded by (..slice_size) logic above to never exceed span length"
+            );
+            if span_offset == span.len() {
+                span_idx -= 1;
+                span_offset = 0;
+            }
+
+            other = other.get(slice_size.get()..).expect("guarded by length check above");
 
             remaining_bytes = remaining_bytes
                 .checked_sub(slice_size.get())
@@ -806,8 +839,6 @@ impl PartialEq<&[u8]> for BytesView {
         }
 
         debug_assert_eq!(remaining_bytes, 0);
-        debug_assert_eq!(self_view.len(), 0);
-        debug_assert_eq!(other.len(), 0);
 
         true
     }
@@ -831,6 +862,8 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
     }
 }
 
+impl Eq for BytesView {}
+
 /// Iterator over the slices of a [`BytesView`] and their metadata.
 ///
 /// Returned by [`BytesView::slices()`] and provides each slice together with its
@@ -838,20 +871,20 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
 #[must_use]
 #[derive(Debug)]
 pub struct BytesViewSlices<'s> {
-    // This starts off as a clone of the view, just for ease of implementation.
-    // We consume the parts of the view we have already iterated over.
-    view: BytesView,
+    view: &'s BytesView,
 
-    // We keep a reference to the view we are iterating over, even though
-    // the current implementation does not use it (because a future one might).
-    _parent: PhantomData<&'s BytesView>,
+    // Index of the most recent that we have already returned.
+    //
+    // Index into spans_reversed, counting from the end (the logical first span).
+    // Starts at spans_reversed.len() (one past the end) and counts down toward 0.
+    previous_span_index: usize,
 }
 
 impl<'s> BytesViewSlices<'s> {
     pub(crate) fn new(view: &'s BytesView) -> Self {
         Self {
-            view: view.clone(),
-            _parent: PhantomData,
+            view,
+            previous_span_index: view.spans_reversed.len(),
         }
     }
 }
@@ -861,30 +894,16 @@ impl<'s> Iterator for BytesViewSlices<'s> {
 
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     fn next(&mut self) -> Option<Self::Item> {
-        if self.view.is_empty() {
+        if self.previous_span_index == 0 {
             return None;
         }
 
-        let slice = self.view.first_slice();
-        let meta = self.view.first_slice_meta();
+        self.previous_span_index -= 1;
+        let span = &self.view.spans_reversed[self.previous_span_index];
+        let slice: &'s [u8] = span;
+        let meta: Option<&'s dyn BlockMeta> = span.block_ref().meta();
 
-        // SAFETY: It is normally not possible to return a self-reference from an iterator because
-        // next() only has an implicit lifetime for `&self`, which cannot be named in `Item`.
-        // However, we can take advantage of the fact that a `BlockRef` implementation is required
-        // to guarantee that both the data and the metadata live as long as any clone of the memory
-        // block. Because the iterator has borrowed the parent `BytesView` we know that the memory
-        // block must live for as long as the iterator lives.
-        //
-        // Therefore we can just re-stamp the return values with the 's lifetime to indicate that
-        // they are valid for as long as the iterator has borrowed the parent BytesView for.
-        let slice_with_s = unsafe { mem::transmute::<&[u8], &'s [u8]>(slice) };
-        // SAFETY: Same reasoning as above - metadata lives as long as any clone of the block.
-        let meta_with_s = unsafe { mem::transmute::<Option<&dyn BlockMeta>, Option<&'s dyn BlockMeta>>(meta) };
-
-        // Seek forward to the next chunk before we return.
-        self.view.advance(self.view.first_slice().len());
-
-        Some((slice_with_s, meta_with_s))
+        Some((slice, meta))
     }
 }
 
@@ -918,7 +937,7 @@ mod tests {
     use crate::BytesBuf;
     use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
 
-    assert_impl_all!(BytesView: Send, Sync);
+    assert_impl_all!(BytesView: Send, Sync, Eq);
 
     // BytesView intentionally does not implement From<&[u8]> because creating a view
     // requires a memory provider to ensure optimal memory configuration. Users should
@@ -1379,6 +1398,15 @@ mod tests {
 
         assert_ne!(view1, view6);
         assert_ne!(view5, view6);
+
+        // Compare two multi-span views with misaligned span boundaries to exercise
+        // span index advancement on both sides of the comparison.
+        let view7_part1 = BytesView::copied_from_slice(b"Hel", &memory);
+        let view7_part2 = BytesView::copied_from_slice(b"lo, world!", &memory);
+        let view7 = BytesView::from_views([view7_part1, view7_part2]);
+
+        assert_eq!(view5, view7);
+        assert_eq!(view7, view5);
     }
 
     #[test]
@@ -1437,6 +1465,43 @@ mod tests {
         assert_ne!(b"Jello, world!", view2);
         assert_ne!(b"Hello, world! ", view2);
         assert_ne!(b"Hello, ", view2);
+    }
+
+    #[test]
+    fn first_slice_meta_empty_view() {
+        let view = BytesView::new();
+        assert!(view.first_slice_meta().is_none());
+    }
+
+    #[test]
+    fn first_slice_meta_no_metadata() {
+        let memory = TransparentMemory::new();
+        let view = BytesView::copied_from_slice(b"Hello", &memory);
+        // TransparentMemory does not attach metadata.
+        assert!(view.first_slice_meta().is_none());
+    }
+
+    #[test]
+    fn first_slice_meta_with_metadata() {
+        #[derive(Debug)]
+        struct TestMeta;
+        impl BlockMeta for TestMeta {}
+
+        // SAFETY: We are not allowed to drop this until all BlockRef are gone. This is fine
+        // because it is dropped at the end of the function, after all BlockRef instances.
+        let block = unsafe { TestMemoryBlock::new(nz!(100), Some(Box::new(TestMeta))) };
+        let block = pin!(block);
+
+        // SAFETY: We guarantee exclusive access to the memory capacity.
+        let mut span_builder = unsafe { block.as_ref().to_block() }.into_span_builder();
+        span_builder.put_slice(b"Hello");
+        let span = span_builder.consume(nz!(5));
+
+        let view = BytesView::from_spans(vec![span]);
+
+        let meta = view.first_slice_meta();
+        assert!(meta.is_some());
+        assert!(meta.unwrap().is::<TestMeta>());
     }
 
     #[test]
