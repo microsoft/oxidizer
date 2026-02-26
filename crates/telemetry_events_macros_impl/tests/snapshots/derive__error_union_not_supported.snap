@@ -1,0 +1,7 @@
+---
+source: crates/telemetry_events_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+::core::compile_error! {
+    "#[derive(Event)] does not support unions"
+}

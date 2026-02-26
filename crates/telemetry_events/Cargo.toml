@@ -12,6 +12,7 @@ opentelemetry = { workspace = true, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "logs"] }
 type-map.workspace = true
 data_privacy.workspace = true
+telemetry_events_macros.workspace = true
 
 [lints]
 workspace = true

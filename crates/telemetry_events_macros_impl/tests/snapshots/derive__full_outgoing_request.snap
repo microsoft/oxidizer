@@ -1,0 +1,105 @@
+---
+source: crates/telemetry_events_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl ::telemetry_events::Event for OutgoingRequest {
+    const DESCRIPTION: ::telemetry_events::EventDescription = ::telemetry_events::EventDescription {
+        name: "outgoing_request",
+        id: 0u64,
+        fields: &[
+            ::telemetry_events::FieldDescription {
+                name: "org_id",
+                index: 0u64,
+            },
+            ::telemetry_events::FieldDescription {
+                name: "request_type",
+                index: 1u64,
+            },
+            ::telemetry_events::FieldDescription {
+                name: "request_id",
+                index: 2u64,
+            },
+            ::telemetry_events::FieldDescription {
+                name: "operation",
+                index: 3u64,
+            },
+            ::telemetry_events::FieldDescription {
+                name: "duration",
+                index: 4u64,
+            },
+            ::telemetry_events::FieldDescription {
+                name: "size",
+                index: 5u64,
+            },
+        ],
+    };
+    fn default_instructions() -> ::telemetry_events::ProcessingInstructions<Self> {
+        ::telemetry_events::ProcessingInstructions {
+            generic_instructions: ::telemetry_events::GenericProcessingInstructions {
+                log_instructions: vec![
+                    ::telemetry_events::LogProcessingInstructions { logger_name :
+                    "outgoing_request", included_fields : vec![Self::DESCRIPTION
+                    .fields[0usize], Self::DESCRIPTION.fields[1usize], Self::DESCRIPTION
+                    .fields[2usize], Self::DESCRIPTION.fields[3usize], Self::DESCRIPTION
+                    .fields[4usize], Self::DESCRIPTION.fields[5usize]], message_template
+                    :
+                    "Outgoing request of type {request_type} from org {org_id} with duration {duration} and size {size}, request id {request_id} and operation {operation}",
+                    }, ::telemetry_events::LogProcessingInstructions { logger_name :
+                    "outgoing_request_summary", included_fields : vec![Self::DESCRIPTION
+                    .fields[0usize], Self::DESCRIPTION.fields[1usize], Self::DESCRIPTION
+                    .fields[3usize], Self::DESCRIPTION.fields[4usize], Self::DESCRIPTION
+                    .fields[5usize]], message_template :
+                    "Outgoing request with duration {duration} and size {size}", }
+                ],
+                metric_instructiosns: vec![
+                    ::telemetry_events::MetricProcessingInstructions { meter_name :
+                    "outgoing_request", instrument_name : "outgoing_request_duration",
+                    included_dimensions : vec![Self::DESCRIPTION.fields[1usize]],
+                    metric_field : Self::DESCRIPTION.fields[4usize], instrument_kind :
+                    InstrumentKind::Histogram, },
+                    ::telemetry_events::MetricProcessingInstructions { meter_name :
+                    "outgoing_request", instrument_name : "outgoing_request_size",
+                    included_dimensions : vec![Self::DESCRIPTION.fields[1usize],
+                    Self::DESCRIPTION.fields[3usize]], metric_field : Self::DESCRIPTION
+                    .fields[5usize], instrument_kind : InstrumentKind::Histogram, }
+                ],
+            },
+            additional_processing: None,
+        }
+    }
+    fn value(
+        &self,
+        field: &::telemetry_events::FieldDescription,
+        redactor: &::data_privacy::RedactionEngine,
+    ) -> ::telemetry_events::TelemetrySafeValue {
+        match field.index {
+            0u64 => {
+                ::telemetry_events::TelemetrySafeValue::from_redacted(
+                    &self.org_id,
+                    redactor,
+                )
+            }
+            1u64 => {
+                ::telemetry_events::TelemetrySafeValue::from_redacted(
+                    &self.request_type,
+                    redactor,
+                )
+            }
+            2u64 => {
+                ::telemetry_events::TelemetrySafeValue::from_redacted(
+                    &self.request_id,
+                    redactor,
+                )
+            }
+            3u64 => {
+                ::telemetry_events::TelemetrySafeValue::from_redacted(
+                    &self.operation,
+                    redactor,
+                )
+            }
+            4u64 => self.duration.into(),
+            5u64 => self.size.into(),
+            _ => panic!("Unknown field index"),
+        }
+    }
+}

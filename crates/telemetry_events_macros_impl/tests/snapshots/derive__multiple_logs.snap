@@ -1,0 +1,53 @@
+---
+source: crates/telemetry_events_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl ::telemetry_events::Event for MultiLogEvent {
+    const DESCRIPTION: ::telemetry_events::EventDescription = ::telemetry_events::EventDescription {
+        name: "multi_log",
+        id: 2u64,
+        fields: &[
+            ::telemetry_events::FieldDescription {
+                name: "count",
+                index: 0u64,
+            },
+            ::telemetry_events::FieldDescription {
+                name: "name",
+                index: 1u64,
+            },
+        ],
+    };
+    fn default_instructions() -> ::telemetry_events::ProcessingInstructions<Self> {
+        ::telemetry_events::ProcessingInstructions {
+            generic_instructions: ::telemetry_events::GenericProcessingInstructions {
+                log_instructions: vec![
+                    ::telemetry_events::LogProcessingInstructions { logger_name :
+                    "detailed", included_fields : vec![Self::DESCRIPTION.fields[0usize],
+                    Self::DESCRIPTION.fields[1usize]], message_template :
+                    "Detail: {name} {count}", },
+                    ::telemetry_events::LogProcessingInstructions { logger_name :
+                    "summary", included_fields : vec![Self::DESCRIPTION.fields[0usize]],
+                    message_template : "Summary: {count}", }
+                ],
+                metric_instructiosns: vec![],
+            },
+            additional_processing: None,
+        }
+    }
+    fn value(
+        &self,
+        field: &::telemetry_events::FieldDescription,
+        redactor: &::data_privacy::RedactionEngine,
+    ) -> ::telemetry_events::TelemetrySafeValue {
+        match field.index {
+            0u64 => self.count.into(),
+            1u64 => {
+                ::telemetry_events::TelemetrySafeValue::from_redacted(
+                    &self.name,
+                    redactor,
+                )
+            }
+            _ => panic!("Unknown field index"),
+        }
+    }
+}

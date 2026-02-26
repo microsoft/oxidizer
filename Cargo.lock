@@ -1819,7 +1819,28 @@ dependencies = [
  "data_privacy",
  "opentelemetry",
  "opentelemetry_sdk",
+ "telemetry_events_macros",
  "type-map",
+]
+
+[[package]]
+name = "telemetry_events_macros"
+version = "0.1.0"
+dependencies = [
+ "mutants",
+ "syn",
+ "telemetry_events_macros_impl",
+]
+
+[[package]]
+name = "telemetry_events_macros_impl"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

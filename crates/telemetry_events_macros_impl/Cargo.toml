@@ -1,0 +1,38 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "telemetry_events_macros_impl"
+description = "Macros for the telemetry_events crate."
+version = "0.1.0"
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/telemetry_events_macros_impl"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "proc_macro2::*",
+    "syn::attr::*",
+    "syn::error::*",
+    "syn::path::*",
+    "syn::ty::*",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
+
+[dev-dependencies]
+insta.workspace = true
+prettyplease.workspace = true
+
+[lints]
+workspace = true

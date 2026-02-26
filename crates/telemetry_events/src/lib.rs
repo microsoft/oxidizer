@@ -10,3 +10,5 @@ pub use processing::{
     GenericProcessingInstructions, InstrumentKind, LogProcessingInstructions, MetricProcessingInstructions, ProcessingInstructions,
 };
 pub use value::TelemetrySafeValue;
+
+pub use telemetry_events_macros::Event;

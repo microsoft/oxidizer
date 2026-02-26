@@ -1,0 +1,40 @@
+---
+source: crates/telemetry_events_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl ::telemetry_events::Event for SimpleEvent {
+    const DESCRIPTION: ::telemetry_events::EventDescription = ::telemetry_events::EventDescription {
+        name: "simple_event",
+        id: 1u64,
+        fields: &[
+            ::telemetry_events::FieldDescription {
+                name: "value",
+                index: 0u64,
+            },
+        ],
+    };
+    fn default_instructions() -> ::telemetry_events::ProcessingInstructions<Self> {
+        ::telemetry_events::ProcessingInstructions {
+            generic_instructions: ::telemetry_events::GenericProcessingInstructions {
+                log_instructions: vec![
+                    ::telemetry_events::LogProcessingInstructions { logger_name :
+                    "simple_event", included_fields : vec![Self::DESCRIPTION
+                    .fields[0usize]], message_template :
+                    "Simple event with value {value}", }
+                ],
+                metric_instructiosns: vec![],
+            },
+            additional_processing: None,
+        }
+    }
+    fn value(
+        &self,
+        field: &::telemetry_events::FieldDescription,
+        redactor: &::data_privacy::RedactionEngine,
+    ) -> ::telemetry_events::TelemetrySafeValue {
+        match field.index {
+            0u64 => self.value.into(),
+            _ => panic!("Unknown field index"),
+        }
+    }
+}
