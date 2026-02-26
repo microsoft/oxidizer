@@ -490,6 +490,7 @@ mod tests {
     use std::thread::sleep;
 
     use futures::FutureExt;
+    use insta::assert_debug_snapshot;
     use thread_aware::affinity::pinned_affinities;
 
     use super::*;
@@ -731,22 +732,15 @@ mod tests {
     #[test]
     fn debug_system_clock() {
         let clock = Clock::new_system_frozen();
-        let debug = format!("{clock:?}");
 
-        assert!(debug.contains("Clock"));
-        assert!(debug.contains("kind: \"system\""));
-        assert!(debug.contains("timers: 0"));
+        assert_debug_snapshot!(clock);
     }
 
     #[test]
     fn debug_controlled_clock() {
         let control = ClockControl::new();
         let clock = control.to_clock();
-        let debug = format!("{clock:?}");
-
-        assert!(debug.contains("Clock"));
-        assert!(debug.contains("kind: \"controlled\""));
-        assert!(debug.contains("timers: 0"));
+        assert_debug_snapshot!(clock);
     }
 
     #[test]
@@ -757,7 +751,6 @@ mod tests {
         control.register_timer(Instant::now() + Duration::from_secs(100), Waker::noop().clone());
         control.register_timer(Instant::now() + Duration::from_secs(200), Waker::noop().clone());
 
-        let debug = format!("{clock:?}");
-        assert!(debug.contains("timers: 2"));
+        assert_debug_snapshot!(clock);
     }
 }

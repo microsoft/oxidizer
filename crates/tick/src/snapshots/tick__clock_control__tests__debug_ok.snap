@@ -1,0 +1,11 @@
+---
+source: crates/tick/src/clock_control.rs
+expression: control
+---
+ClockControl {
+    time: SystemTime {
+        intervals: 116444737230000000,
+    },
+    timers: 1,
+    ..
+}

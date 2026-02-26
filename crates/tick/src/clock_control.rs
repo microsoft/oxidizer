@@ -77,11 +77,9 @@ pub struct ClockControl {
 
 impl std::fmt::Debug for ClockControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = self.state.lock().expect("acquiring lock must always succeed");
-
         f.debug_struct("ClockControl")
-            .field("time", &state.system_time)
-            .field("timers", &state.timers.len())
+            .field("time", &self.system_time())
+            .field("timers", &self.timers_len())
             .finish_non_exhaustive()
     }
 }
@@ -511,6 +509,8 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use insta::assert_debug_snapshot;
+
     use super::*;
     use crate::fmt::UnixSeconds;
 
@@ -803,36 +803,13 @@ mod tests {
     }
 
     #[test]
-    fn debug_default() {
-        let control = ClockControl::new();
-        let debug = format!("{control:?}");
+    fn debug_ok() {
+        let system = SystemTime::UNIX_EPOCH + Duration::from_secs(123);
+        let control = ClockControl::new_at(system);
 
-        assert!(debug.contains("ClockControl"));
-        assert!(debug.contains("time:"));
-        assert!(debug.contains("timers: 0"));
-    }
-
-    #[test]
-    fn debug_with_timers() {
-        let control = ClockControl::new();
         let future = control.instant() + Duration::from_secs(100);
-
         control.register_timer(future, Waker::noop().clone());
 
-        let debug = format!("{control:?}");
-
-        assert!(debug.contains("ClockControl"));
-        assert!(debug.contains("timers: 1"));
-    }
-
-    #[test]
-    fn debug_does_not_auto_advance() {
-        let control = ClockControl::new().auto_advance(Duration::from_secs(1));
-        let time_before = control.with_state(|s| s.system_time);
-
-        let _debug = format!("{control:?}");
-
-        let time_after = control.with_state(|s| s.system_time);
-        assert_eq!(time_before, time_after);
+        assert_debug_snapshot!(control);
     }
 }

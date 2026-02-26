@@ -1,0 +1,9 @@
+---
+source: crates/tick/src/clock.rs
+expression: clock
+---
+Clock {
+    kind: "controlled",
+    timers: 2,
+    ..
+}
