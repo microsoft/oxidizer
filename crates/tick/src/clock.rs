@@ -179,17 +179,11 @@ impl std::fmt::Debug for Clock {
             ClockState::System(_) => "system",
         };
 
-        let (proc, mem): (&dyn std::fmt::Debug, &dyn std::fmt::Debug) = match &self.affinity {
-            Some(a) => (&a.processor_index(), &a.memory_region_index()),
-            None => (&"None", &"None"),
-        };
-
         f.debug_struct("Clock")
             .field("kind", &kind)
             .field("timers", &self.state.timers_len())
             .field("alive", &self.state.alive())
-            .field("processor_affinity", proc)
-            .field("memory_affinity", mem)
+            .field("affinity", &self.affinity)
             .finish_non_exhaustive()
     }
 }

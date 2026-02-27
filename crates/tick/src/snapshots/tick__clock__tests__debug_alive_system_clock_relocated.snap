@@ -6,7 +6,13 @@ Clock {
     kind: "system",
     timers: 0,
     alive: false,
-    processor_affinity: 1,
-    memory_affinity: 0,
+    affinity: Some(
+        PinnedAffinity {
+            processor_index: 1,
+            memory_region_index: 0,
+            processor_count: 2,
+            memory_region_count: 1,
+        },
+    ),
     ..
 }
