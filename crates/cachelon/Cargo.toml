@@ -1,0 +1,153 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cachelon"
+description = "A composable, customizable multi-tier caching library with rich feature support."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "caching", "concurrency"]
+categories = ["caching", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachelon"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Workspace sibling crates
+    "anyspawn::spawner::Spawner",
+    "cachelon_memory::*",
+    "cachelon_service::*",
+    "cachelon_tier::*",
+    "layered::service::Service",
+    "tick::clock::Clock",
+    # External dependencies
+    "opentelemetry::metrics::meter::Meter",
+    "opentelemetry::metrics::meter::MeterProvider",
+]
+
+[features]
+default = ["memory"]
+dynamic-cache = ["dep:dynosaur"]
+logs = ["dep:opentelemetry", "dep:tracing"]
+test-util = ["cachelon_tier/test-util", "tick/test-util"]
+memory = ["dep:cachelon_memory"]
+metrics = ["dep:opentelemetry"]
+service = ["dep:cachelon_service", "dep:layered"]
+
+[dependencies]
+alloc_tracker = { workspace = true }
+anyspawn = { workspace = true, features = ["tokio"] }
+cachelon_memory = { path = "../cachelon_memory", optional = true }
+cachelon_service = { path = "../cachelon_service", optional = true }
+cachelon_tier = { path = "../cachelon_tier" }
+criterion = { workspace = true }
+dynosaur = { workspace = true, optional = true }
+fundle = { workspace = true, optional = true }
+futures = { workspace = true, features = ["async-await", "executor"] }
+layered = { workspace = true, optional = true }
+ohno = { workspace = true }
+opentelemetry = { workspace = true, optional = true, features = [
+    "metrics",
+    "logs",
+] }
+parking_lot = { version = "0.12.5" }
+pin-project-lite = { workspace = true }
+thread_aware = { workspace = true }
+tick = { workspace = true, features = [] }
+tracing = { workspace = true, optional = true }
+uniflight = { workspace = true }
+
+[dev-dependencies]
+cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }
+dynosaur = { workspace = true }
+fundle = { workspace = true }
+opentelemetry = { workspace = true, features = [
+    "metrics",
+    "logs",
+] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
+recoverable = { workspace = true }
+seatbelt = { workspace = true, features = ["retry"] }
+testing_aids = { path = "../testing_aids" }
+tick = { workspace = true, features = ["test-util", "tokio"] }
+tokio = { workspace = true, features = ["rt"] }
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+
+[[bench]]
+name = "operations"
+harness = false
+required-features = ["logs", "metrics", "test-util"]
+
+[[bench]]
+name = "dynamic"
+harness = false
+required-features = ["test-util"]
+
+[[bench]]
+name = "refresh"
+harness = false
+required-features = ["test-util"]
+
+[[example]]
+name = "simple"
+required-features = ["memory"]
+
+[[example]]
+name = "wrapped"
+required-features = ["memory", "logs", "metrics"]
+
+[[example]]
+name = "fallback"
+required-features = ["memory", "logs", "metrics"]
+
+[[example]]
+name = "multi_tier"
+required-features = ["memory", "logs", "metrics"]
+
+[[example]]
+name = "dynamic"
+required-features = ["dynamic-cache", "memory", "logs", "metrics"]
+
+[[example]]
+name = "get_or_insert"
+required-features = ["memory"]
+
+[[example]]
+name = "stampede_protection"
+required-features = ["memory"]
+
+[[example]]
+name = "refresh"
+required-features = ["memory"]
+
+[[example]]
+name = "mock_testing"
+required-features = ["test-util"]
+
+[[example]]
+name = "cache_as_service"
+required-features = ["memory", "service"]
+
+[[example]]
+name = "service_as_storage"
+required-features = ["service"]
+
+[[example]]
+name = "multi_tier_service"
+required-features = ["memory", "service"]
+
+[[example]]
+name = "service_middleware_composition"
+required-features = ["memory", "service"]
+
+[lints]
+workspace = true

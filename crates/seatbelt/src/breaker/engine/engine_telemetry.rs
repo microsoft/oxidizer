@@ -190,7 +190,7 @@ mod tests {
     use super::*;
     use crate::breaker::{EngineFake, HealthInfo, Stats};
     use crate::metrics::{create_meter, create_resilience_event_counter};
-    use crate::testing::MetricTester;
+    use testing_aids::MetricTester;
 
     #[test]
     fn enter_rejected_ensure_telemetry() {

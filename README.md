@@ -11,8 +11,9 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [Crates](#crates)
-- [About this Repo](#about-this-repo)
+- [The Oxidizer Project](#the-oxidizer-project)
+  - [Crates](#crates)
+  - [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
@@ -29,6 +30,9 @@ These are the primary crates built out of this repo:
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
+- [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros for the `data_privacy` crate.
+- [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/README.md) - Macros for the `data_privacy` crate.
+- [`cachelon`](./crates/echelon/README.md) - A composable, customizable multi-tier caching library with rich feature support.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.

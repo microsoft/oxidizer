@@ -1,0 +1,49 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cachelon_tier"
+description = "A composable, customizable multi-tier caching library with rich feature support."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "caching", "concurrency"]
+categories = ["caching", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachelon_tier"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+    "recoverable::Recovery",
+    "recoverable::RecoveryInfo",
+]
+
+[features]
+default = ["dynamic-cache"]
+dynamic-cache = ["dep:dynosaur"]
+test-util = ["dep:parking_lot"]
+
+[dependencies]
+dynosaur = { workspace = true, optional = true }
+ohno = { workspace = true }
+parking_lot = { workspace = true, optional = true }
+recoverable = { workspace = true }
+
+[dev-dependencies]
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt",
+], default-features = false }
+
+[lints]
+workspace = true

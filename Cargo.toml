@@ -26,6 +26,10 @@ homepage = "https://github.com/microsoft/oxidizer"
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.0" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
+cachelon = { path = "crates/cachelon", default-features = false, version = "0.1.0" }
+cachelon_memory = { path = "crates/cachelon_memory", default-features = false, version = "0.1.0" }
+cachelon_service = { path = "crates/cachelon_service", default-features = false, version = "0.1.0" }
+cachelon_tier = { path = "crates/cachelon_tier", default-features = false, version = "0.1.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
@@ -36,7 +40,7 @@ layered = { path = "crates/layered", default-features = false, version = "0.3.0"
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.1" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.0" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.3.1" }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.3.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
@@ -47,7 +51,6 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 # external dependencies
 ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
-anyhow = { version = "1.0.100", default-features = false }
 async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
@@ -65,7 +68,7 @@ futures-util = { version = "0.3.31", default-features = false }
 http = { version = "1.2.0", default-features = false, features = ["std"] }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
-jiff = { version = "0.2.21", default-features = false }
+jiff = { version = "0.2.16", default-features = false }
 libc = { version = "0.2.178", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
@@ -105,7 +108,6 @@ trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
-xutex = { version = "0.2.0", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]
