@@ -65,7 +65,7 @@ futures-util = { version = "0.3.31", default-features = false }
 http = { version = "1.2.0", default-features = false, features = ["std"] }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
-jiff = { version = "0.2.16", default-features = false }
+jiff = { version = "0.2.21", default-features = false }
 libc = { version = "0.2.178", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
 mockall = { version = "0.14.0", default-features = false }

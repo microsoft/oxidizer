@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::ClockState;
 use crate::timers::{TimerKey, Timers};
@@ -67,12 +67,27 @@ use crate::{Clock, thread_aware_move};
 /// ```toml
 /// tick = { version = "*", features = ["test-util"] }
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ClockControl {
     /// Clock control requires controlling the passage of time across threads.
     /// For this reason, we need to use a mutex to ensure that state is consistent
     /// across all threads.
     state: Arc<Mutex<State>>,
+}
+
+impl std::fmt::Debug for ClockControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("ClockControl");
+
+        let time = self.system_time();
+
+        match time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => debug.field("UNIX offset", &duration),
+            Err(_) => debug.field("UNIX offset", &"negative"),
+        };
+
+        debug.field("timers", &self.timers_len()).finish_non_exhaustive()
+    }
 }
 
 thread_aware_move!(ClockControl);
@@ -353,7 +368,6 @@ impl ClockControl {
         self.with_state(|s| s.timers.next_timer())
     }
 
-    #[cfg(test)]
     pub(super) fn timers_len(&self) -> usize {
         self.with_state(|s| s.timers.len())
     }
@@ -680,16 +694,6 @@ mod tests {
         assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(2000));
     }
 
-    // #[test]
-    // fn outside_range_message() {
-    //     let msg = format!(
-    //         "moving the clock outside of the supported time range is not possible: [{}, {}]",
-    //         SystemTime::UNIX_EPOCH,
-    //         SystemTime::UNIX_EPOCH + Duration::MAX
-    //     );
-    //     assert_eq!(OUTSIDE_RANGE_MESSAGE, msg);
-    // }
-
     #[test]
     fn new_at_with_system_time_ok() {
         let system_time = SystemTime::UNIX_EPOCH + Duration::from_secs(222);
@@ -790,5 +794,26 @@ mod tests {
 
         // The timer should still be registered since we couldn't advance further to reach it
         assert_eq!(control.timers_len(), 1);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn debug_ok() {
+        let system = SystemTime::UNIX_EPOCH + Duration::from_secs(123);
+        let control = ClockControl::new_at(system);
+
+        let future = control.instant() + Duration::from_secs(100);
+        control.register_timer(future, Waker::noop().clone());
+
+        insta::assert_debug_snapshot!(control);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn debug_negative_offset_ok() {
+        let system = SystemTime::UNIX_EPOCH - Duration::from_secs(123);
+        let control = ClockControl::new_at(system);
+
+        insta::assert_debug_snapshot!(control);
     }
 }
