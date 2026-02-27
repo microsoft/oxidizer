@@ -6,7 +6,7 @@ use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
-use seatbelt::hedging::{Hedging, HedgingMode};
+use seatbelt::hedging::Hedging;
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 
@@ -21,26 +21,6 @@ fn entry(c: &mut Criterion) {
     let service = Execute::new(|v: Input| async move { Output::from(v) });
     let operation = session.operation("no-hedging");
     group.bench_function("no-hedging", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
-        });
-    });
-
-    // With hedging (immediate, no recovery needed)
-    let context = ResilienceContext::new(Clock::new_frozen());
-
-    let service = (
-        Hedging::layer("bench", &context)
-            .clone_input()
-            .recovery_with(|_, _| RecoveryInfo::never())
-            .hedging_mode(HedgingMode::immediate()),
-        Execute::new(|v: Input| async move { Output::from(v) }),
-    )
-        .into_service();
-
-    let operation = session.operation("with-hedging-immediate");
-    group.bench_function("with-hedging-immediate", |b| {
         b.iter(|| {
             let _span = operation.measure_thread();
             _ = block_on(service.execute(Input));

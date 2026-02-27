@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 use std::fmt::Debug;
-use std::sync::Arc;
-use std::time::Duration;
 #[cfg(any(feature = "tower-service", test))]
 use std::pin::Pin;
+use std::sync::Arc;
 #[cfg(any(feature = "tower-service", test))]
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures_util::future::{Either, select};
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -145,7 +145,6 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-
     async fn run_delay_loop<F>(
         &self,
         futs: &mut FuturesUnordered<F>,
@@ -226,10 +225,7 @@ impl<In, Out> HedgingShared<In, Out> {
 
     fn invoke_on_hedge(&self, attempt: Attempt, hedge_delay: Duration) {
         if let Some(on_hedge) = &self.on_hedge {
-            on_hedge.call(OnHedgeArgs {
-                attempt,
-                hedge_delay,
-            });
+            on_hedge.call(OnHedgeArgs { attempt, hedge_delay });
         }
     }
 
