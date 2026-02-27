@@ -166,6 +166,11 @@ pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 mod context;
 pub use context::ResilienceContext;
 
+#[cfg(any(feature = "retry", feature = "hedging", test))]
+mod attempt;
+#[cfg(any(feature = "retry", feature = "hedging", test))]
+pub use attempt::Attempt;
+
 mod shared;
 pub use crate::shared::{NotSet, Set};
 

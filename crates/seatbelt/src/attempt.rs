@@ -3,7 +3,7 @@
 
 use std::fmt::Display;
 
-/// Represents a single attempt in a retry operation.
+/// Represents a single attempt in a resilience operation (retry, hedging, etc.).
 ///
 /// This struct tracks the current attempt index, and it provides methods to check if this is the
 /// first or last attempt.
@@ -14,8 +14,8 @@ use std::fmt::Display;
 /// - `is_first`: true
 /// - `is_last`: true
 ///
-/// This represents a single-shot operation with no retries, where the first
-/// attempt is also the final attempt.
+/// This represents a single-shot operation with no retries or hedges, where the
+/// first attempt is also the final attempt.
 ///
 /// # Examples
 ///

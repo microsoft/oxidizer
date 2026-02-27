@@ -3,28 +3,23 @@
 
 use tick::Clock;
 
+use crate::Attempt;
+
 /// Arguments for the [`try_clone_with`][super::HedgingLayer::try_clone_with] callback function.
 ///
 /// Provides context for input cloning operations during hedging.
 #[derive(Debug)]
 pub struct TryCloneArgs {
-    pub(super) attempt_index: u32,
-    pub(super) is_last: bool,
+    pub(super) attempt: Attempt,
 }
 
 impl TryCloneArgs {
-    /// Returns the index of the attempt this clone is for (0-based).
+    /// Returns the current attempt information.
     ///
     /// Index 0 is the original request, 1 is the first hedge, etc.
     #[must_use]
-    pub fn attempt_index(&self) -> u32 {
-        self.attempt_index
-    }
-
-    /// Returns true if this is the last planned attempt.
-    #[must_use]
-    pub fn is_last(&self) -> bool {
-        self.is_last
+    pub fn attempt(&self) -> Attempt {
+        self.attempt
     }
 }
 
@@ -88,11 +83,10 @@ mod tests {
     #[test]
     fn try_clone_args() {
         let args = TryCloneArgs {
-            attempt_index: 2,
-            is_last: true,
+            attempt: Attempt::new(2, true),
         };
-        assert_eq!(args.attempt_index(), 2);
-        assert!(args.is_last());
+        assert_eq!(args.attempt().index(), 2);
+        assert!(args.attempt().is_last());
     }
 
     #[test]

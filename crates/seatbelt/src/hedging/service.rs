@@ -16,6 +16,7 @@ use tick::Clock;
 use super::args::{OnHedgeArgs, RecoveryArgs, TryCloneArgs};
 use super::callbacks::*;
 use super::mode::HedgingMode;
+use crate::Attempt;
 use crate::utils::EnableIf;
 use crate::{NotSet, RecoveryKind};
 
@@ -109,8 +110,7 @@ where
 
         // Clone input for first attempt; if clone fails, fall back to direct execution.
         let args = TryCloneArgs {
-            attempt_index: 0,
-            is_last: total_attempts == 1,
+            attempt: Attempt::new(0, total_attempts == 1),
         };
         match self.shared.try_clone.call(&mut input, args) {
             Some(cloned) => futs.push(self.inner.execute(cloned)),
@@ -121,8 +121,7 @@ where
             // Launch all hedges immediately.
             for i in 1..total_attempts {
                 let args = TryCloneArgs {
-                    attempt_index: i,
-                    is_last: i == total_attempts.saturating_sub(1),
+                    attempt: Attempt::new(i, i == total_attempts.saturating_sub(1)),
                 };
                 self.shared.invoke_on_hedge(i.saturating_sub(1));
                 self.shared.emit_telemetry(i);
@@ -230,10 +229,8 @@ impl<In, Out> HedgingShared<In, Out> {
         launch: &mut impl FnMut(In) -> F,
     ) {
         *hedges_launched = hedges_launched.saturating_add(1);
-        let is_last = *hedges_launched >= max_hedged;
         let args = TryCloneArgs {
-            attempt_index: *hedges_launched,
-            is_last,
+            attempt: Attempt::new(*hedges_launched, *hedges_launched >= max_hedged),
         };
 
         self.invoke_on_hedge(hedges_launched.saturating_sub(1));
@@ -347,8 +344,7 @@ where
                 let mut futs = FuturesUnordered::new();
 
                 let args = TryCloneArgs {
-                    attempt_index: 0,
-                    is_last: total_attempts == 1,
+                    attempt: Attempt::new(0, total_attempts == 1),
                 };
                 if let Some(cloned) = shared.try_clone.call(&mut input, args) {
                     let mut svc = inner.clone();
@@ -361,8 +357,7 @@ where
                 if shared.hedging_mode.is_immediate() {
                     for i in 1..total_attempts {
                         let args = TryCloneArgs {
-                            attempt_index: i,
-                            is_last: i == total_attempts.saturating_sub(1),
+                            attempt: Attempt::new(i, i == total_attempts.saturating_sub(1)),
                         };
                         shared.invoke_on_hedge(i.saturating_sub(1));
                         shared.emit_telemetry(i);

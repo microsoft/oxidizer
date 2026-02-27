@@ -229,6 +229,7 @@ mod tests {
     use tick::Clock;
 
     use super::*;
+    use crate::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]
@@ -255,8 +256,7 @@ mod tests {
         let result = layer.try_clone.unwrap().call(
             &mut "test".to_string(),
             TryCloneArgs {
-                attempt_index: 0,
-                is_last: false,
+                attempt: Attempt::new(0, false),
             },
         );
         assert_eq!(result, Some("test".to_string()));

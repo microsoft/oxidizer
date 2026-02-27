@@ -91,6 +91,7 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
+pub use crate::attempt::Attempt;
 pub use args::{HedgingDelayArgs, OnHedgeArgs, RecoveryArgs, TryCloneArgs};
 pub use layer::HedgingLayer;
 pub use mode::HedgingMode;
