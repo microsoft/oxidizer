@@ -92,25 +92,22 @@ where
     type Out = Out;
 
     #[cfg_attr(test, mutants::skip)]
-    async fn execute(&self, mut input: In) -> Self::Out {
+    async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
-        match self.shared.run_hedging(&mut input, |cloned| self.inner.execute(cloned)).await {
-            Some(out) => out,
-            None => self.inner.execute(input).await,
-        }
+        self.shared.run_hedging(input, |cloned| self.inner.execute(cloned)).await
     }
 }
 
 impl<In, Out> HedgingShared<In, Out> {
     /// Core hedging orchestration shared by both layered and tower service impls.
     ///
-    /// Returns `Some(out)` when hedging produced a result, or `None` when the caller
-    /// should fall through to a direct passthrough call (no hedges configured or
-    /// input clone failed).
-    async fn run_hedging<F>(&self, input: &mut In, mut launch: impl FnMut(In) -> F) -> Option<Out>
+    /// Takes ownership of `input` and always returns an `Out`. When hedging is
+    /// bypassed (no hedges configured or input clone failed), the `launch` closure
+    /// is called directly with the original input.
+    async fn run_hedging<F>(&self, mut input: In, mut launch: impl FnMut(In) -> F) -> Out
     where
         F: Future<Output = Out>,
     {
@@ -118,22 +115,24 @@ impl<In, Out> HedgingShared<In, Out> {
         let total_attempts = max_hedged.saturating_add(1);
 
         if max_hedged == 0 {
-            return None;
+            return launch(input).await;
         }
 
         let args = TryCloneArgs {
             attempt: Attempt::new(0, total_attempts == 1),
         };
-        let first_cloned = self.try_clone.call(input, args)?;
+        let Some(first_cloned) = self.try_clone.call(&mut input, args) else {
+            return launch(input).await;
+        };
 
         if self.hedging_mode.is_immediate() {
-            return Some(self.run_immediate(input, first_cloned, &mut launch, total_attempts).await);
+            return self.run_immediate(&mut input, first_cloned, &mut launch, total_attempts).await;
         }
 
         // Delay / Dynamic mode: the first future stays unboxed.
         let mut futs = FuturesUnordered::new();
         futs.push(launch(first_cloned));
-        Some(self.run_delay_loop(&mut futs, input, max_hedged, launch).await)
+        self.run_delay_loop(&mut futs, &mut input, max_hedged, launch).await
     }
 
     /// Immediate mode: launch all hedges at once, box each future to keep the
@@ -349,19 +348,12 @@ where
 
         HedgingFuture {
             inner: Box::pin(async move {
-                let mut input = req;
-                if let Some(out) = shared
-                    .run_hedging(&mut input, |cloned| {
+                shared
+                    .run_hedging(req, |cloned| {
                         let mut svc = inner.clone();
                         svc.call(cloned)
                     })
                     .await
-                {
-                    out
-                } else {
-                    let mut svc = inner;
-                    svc.call(input).await
-                }
             }),
         }
     }
