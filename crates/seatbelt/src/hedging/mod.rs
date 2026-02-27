@@ -82,6 +82,7 @@
 //!   - `resilience.strategy.name`: Hedging identifier from [`Hedging::layer`]
 //!   - `resilience.event.name`: Always `hedge`
 //!   - `resilience.attempt.index`: Attempt index (1-based for hedges)
+//!   - `resilience.attempt.is_last`: Whether this is the last hedge attempt
 
 mod args;
 mod callbacks;

@@ -217,7 +217,7 @@ impl<In, Out> HedgingShared<In, Out> {
 
         if let Some(cloned) = self.clone_input.call(input, args) {
             self.invoke_on_hedge(attempt);
-            self.emit_telemetry(*hedges_launched);
+            self.emit_telemetry(attempt);
             futs.push(launch(cloned));
         }
     }
@@ -232,7 +232,7 @@ impl<In, Out> HedgingShared<In, Out> {
         not(any(feature = "logs", test)),
         expect(unused_variables, clippy::unused_self, reason = "unused when logs feature not used")
     )]
-    fn emit_telemetry(&self, attempt_index: u32) {
+    fn emit_telemetry(&self, attempt: Attempt) {
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
@@ -240,20 +240,22 @@ impl<In, Out> HedgingShared<In, Out> {
                 tracing::Level::INFO,
                 pipeline.name = %self.telemetry.pipeline_name,
                 strategy.name = %self.telemetry.strategy_name,
-                resilience.attempt.index = attempt_index,
+                resilience.attempt.index = attempt.index(),
+                resilience.attempt.is_last = attempt.is_last(),
             );
         }
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
-            use super::telemetry::{ATTEMPT_INDEX, HEDGE_EVENT};
+            use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_IS_LAST, HEDGE_EVENT};
             use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
             self.telemetry.report_metrics(&[
                 opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
                 opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                 opentelemetry::KeyValue::new(EVENT_NAME, HEDGE_EVENT),
-                opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt_index)),
+                opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
+                opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
             ]);
         }
     }
@@ -378,8 +380,9 @@ mod tests {
                 KeyValue::new("resilience.strategy.name", "test_hedging"),
                 KeyValue::new("resilience.event.name", "hedge"),
                 KeyValue::new("resilience.attempt.index", 1i64),
+                KeyValue::new("resilience.attempt.is_last", true),
             ],
-            Some(4),
+            Some(5),
         );
     }
 
@@ -409,6 +412,7 @@ mod tests {
         log_capture.assert_contains("log_test_pipeline");
         log_capture.assert_contains("log_test_hedging");
         log_capture.assert_contains("resilience.attempt.index");
+        log_capture.assert_contains("resilience.attempt.is_last");
     }
 
     #[test]
