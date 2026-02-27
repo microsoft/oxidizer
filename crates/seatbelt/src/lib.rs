@@ -11,6 +11,7 @@
         feature = "timeout",
         feature = "breaker",
         feature = "fallback",
+        feature = "hedging",
         feature = "metrics",
         feature = "logs"
     )),
@@ -180,10 +181,20 @@ pub mod breaker;
 #[cfg(any(feature = "fallback", test))]
 pub mod fallback;
 
+#[cfg(any(feature = "hedging", test))]
+pub mod hedging;
+
 #[cfg(any(feature = "retry", feature = "breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
+#[cfg(any(
+    feature = "retry",
+    feature = "breaker",
+    feature = "timeout",
+    feature = "fallback",
+    feature = "hedging",
+    test
+))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]

@@ -36,17 +36,19 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["timeout", "retry", "breaker", "fallback"]
+default = ["timeout", "retry", "breaker", "fallback", "hedging"]
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
+hedging = ["dep:futures-util"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true, features = ["alloc"] }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
