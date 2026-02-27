@@ -108,6 +108,10 @@ required-features = ["retry", "timeout", "tower-service"]
 name = "breaker"
 required-features = ["breaker", "metrics"]
 
+[[example]]
+name = "fallback"
+required-features = ["fallback"]
+
 [[bench]]
 name = "observability"
 harness = false
