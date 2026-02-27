@@ -180,7 +180,7 @@ mod tests {
         let ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
         let affinites = pinned_affinities(&[2]);
 
-        _ = ctx.relocated(affinites[0].into(), affinites[1].into());
+        _ = ctx.relocated(affinites[0].into(), affinites[1]);
     }
 
     #[cfg(not(miri))]
