@@ -23,7 +23,7 @@
 //! let stack = (
 //!     Fallback::layer("fallback", &context)
 //!         .should_fallback(|output: &String| output == "bad")
-//!         .fallback(|_output: String| "replacement".to_string()),
+//!         .fallback(|_output: String, _args| "replacement".to_string()),
 //!     Execute::new(my_operation),
 //! );
 //!
@@ -101,7 +101,7 @@
 //! let stack = (
 //!     Fallback::layer("my_fallback", &context)
 //!         .should_fallback(|output: &String| output.is_empty())
-//!         .fallback(|_output: String| "default_value".to_string()),
+//!         .fallback(|_output: String, _args| "default_value".to_string()),
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
@@ -124,7 +124,7 @@
 //! let stack = (
 //!     Fallback::layer("my_fallback", &context)
 //!         .should_fallback(|output: &String| output == "error")
-//!         .fallback_async(|_output: String| async {
+//!         .fallback_async(|_output: String, _args| async {
 //!             "fetched_from_cache".to_string()
 //!         }),
 //!     Execute::new(execute_unreliable_operation),
@@ -149,7 +149,7 @@
 //! let stack = (
 //!     Fallback::layer("my_fallback", &context)
 //!         .should_fallback(|output: &String| output == "bad")
-//!         .fallback(|_output: String| "safe_default".to_string())
+//!         .fallback(|_output: String, _args| "safe_default".to_string())
 //!         .before_fallback(|original: &mut String, _args| {
 //!             println!("fallback triggered, original output: {original}");
 //!         })
@@ -174,7 +174,7 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-pub use args::{AfterFallbackArgs, BeforeFallbackArgs};
+pub use args::{AfterFallbackArgs, BeforeFallbackArgs, FallbackActionArgs};
 pub(crate) use callbacks::{AfterFallback, BeforeFallback, FallbackAction, ShouldFallback};
 pub use layer::FallbackLayer;
 pub use service::Fallback;

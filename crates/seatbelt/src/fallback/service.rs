@@ -84,7 +84,7 @@ impl<In, Out> Fallback<In, Out, ()> {
     /// # fn example(context: ResilienceContext<String, String>) {
     /// let fallback_layer = Fallback::layer("my_fallback", &context)
     ///     .should_fallback(|output: &String| output == "bad")
-    ///     .fallback(|_output: String| "replacement".to_string());
+    ///     .fallback(|_output: String, _args| "replacement".to_string());
     /// # }
     /// ```
     ///
@@ -193,7 +193,7 @@ impl<In, Out: Send + 'static> FallbackShared<In, Out> {
             before_fallback.call(&mut output, BeforeFallbackArgs {});
         }
 
-        let mut new_output = self.fallback_action.call(output).await;
+        let mut new_output = self.fallback_action.call(output, FallbackActionArgs {}).await;
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
@@ -250,7 +250,7 @@ mod tests {
         let stack = (
             Fallback::layer("log_test_fallback", &context)
                 .should_fallback(|output: &String| output == "bad")
-                .fallback(|_output: String| "replaced".to_string()),
+                .fallback(|_output: String, _args| "replaced".to_string()),
             Execute::new(|_input: String| async { "bad".to_string() }),
         );
 
@@ -278,7 +278,7 @@ mod tests {
         let stack = (
             Fallback::layer("metrics_fallback", &context)
                 .should_fallback(|output: &String| output == "bad")
-                .fallback(|_output: String| "replaced".to_string()),
+                .fallback(|_output: String, _args| "replaced".to_string()),
             Execute::new(|_input: String| async { "bad".to_string() }),
         );
 
@@ -310,7 +310,7 @@ mod tests {
         let context = crate::ResilienceContext::<String, Result<String, String>>::new(tick::Clock::new_frozen()).name("test");
         let layer = Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output| Ok("fallback".to_string()));
+            .fallback(|_output, _args| Ok("fallback".to_string()));
 
         let mut service = layer.layer(FailReadyService);
 

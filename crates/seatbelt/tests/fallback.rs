@@ -50,7 +50,7 @@ async fn no_fallback_when_output_valid(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output| Ok::<_, String>("fallback_value".to_string()))
+            .fallback(|_output, _args| Ok::<_, String>("fallback_value".to_string()))
             .before_fallback(move |_output, _args| {
                 before_called.store(true, Ordering::SeqCst);
             })
@@ -89,7 +89,7 @@ async fn fallback_invoked_when_output_invalid(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output| Ok::<_, String>("replaced".to_string()))
+            .fallback(|_output, _args| Ok::<_, String>("replaced".to_string()))
             .before_fallback(move |output, _args| {
                 assert!(output.is_err(), "before_fallback should see the original error");
                 before_called.store(true, Ordering::SeqCst);
@@ -120,7 +120,7 @@ async fn fallback_async_invoked(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback_async(|_output| async { Ok::<_, String>("async_replacement".to_string()) }),
+            .fallback_async(|_output, _args| async { Ok::<_, String>("async_replacement".to_string()) }),
         Execute::new(|_input: String| async move { Err::<String, String>("fail".to_string()) }),
     );
 
@@ -141,7 +141,7 @@ async fn no_fallback_if_disabled(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output| Ok::<_, String>("should_not_appear".to_string()))
+            .fallback(|_output, _args| Ok::<_, String>("should_not_appear".to_string()))
             .disable(),
         Execute::new(|_input: String| async move { Err::<String, String>("service_error".to_string()) }),
     );
@@ -164,7 +164,7 @@ async fn enable_if_respected(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output| Ok::<_, String>("replaced".to_string()))
+            .fallback(|_output, _args| Ok::<_, String>("replaced".to_string()))
             .enable_if(|input: &String| input != "bypass"),
         Execute::new(|_input: String| async move { Err::<String, String>("fail".to_string()) }),
     );
@@ -191,7 +191,7 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output| Ok::<_, String>("replaced".to_string())),
+            .fallback(|_output, _args| Ok::<_, String>("replaced".to_string())),
         Execute::new(|input: String| async move { Ok::<_, String>(format!("processed:{input}")) }),
     );
 
@@ -216,7 +216,7 @@ async fn fallback_receives_original_output(#[case] use_tower: bool) {
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|output: Result<String, String>| {
+            .fallback(|output: Result<String, String>, _args| {
                 let original_err = output.unwrap_err();
                 Ok::<_, String>(format!("recovered from: {original_err}"))
             }),

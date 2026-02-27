@@ -138,10 +138,11 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
 impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
     /// Sets a synchronous fallback action.
     ///
-    /// The `action` receives the original (invalid) output and returns a
-    /// replacement output. This call replaces any previous fallback action.
+    /// The `action` receives the original (invalid) output and [`FallbackActionArgs`]
+    /// with additional context, and returns a replacement output. This call replaces
+    /// any previous fallback action.
     #[must_use]
-    pub fn fallback(mut self, action: impl Fn(Out) -> Out + Send + Sync + 'static) -> FallbackLayer<In, Out, S1, Set> {
+    pub fn fallback(mut self, action: impl Fn(Out, FallbackActionArgs) -> Out + Send + Sync + 'static) -> FallbackLayer<In, Out, S1, Set> {
         self.fallback_action = Some(FallbackAction::new_sync(action));
         self.into_state::<S1, Set>()
     }
@@ -158,18 +159,18 @@ impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
     where
         Out: Clone + Sync,
     {
-        self.fallback(move |_| value.clone())
+        self.fallback(move |_, _| value.clone())
     }
 
     /// Sets an asynchronous fallback action.
     ///
-    /// The `action` receives the original (invalid) output and returns a future
-    /// that resolves to the replacement output. This call replaces any previous
-    /// fallback action.
+    /// The `action` receives the original (invalid) output and [`FallbackActionArgs`]
+    /// with additional context, and returns a future that resolves to the replacement
+    /// output. This call replaces any previous fallback action.
     #[must_use]
     pub fn fallback_async<F, Fut>(mut self, action: F) -> FallbackLayer<In, Out, S1, Set>
     where
-        F: Fn(Out) -> Fut + Send + Sync + 'static,
+        F: Fn(Out, FallbackActionArgs) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Out> + Send + 'static,
     {
         self.fallback_action = Some(FallbackAction::new_async(action));
@@ -251,7 +252,7 @@ mod tests {
     fn fallback_sync_ensure_set_correctly() {
         let context = create_test_context();
         let layer: FallbackLayer<_, _, NotSet, Set> =
-            FallbackLayer::new("test".into(), &context).fallback(|_output: String| "replaced".to_string());
+            FallbackLayer::new("test".into(), &context).fallback(|_output: String, _args| "replaced".to_string());
 
         assert!(layer.fallback_action.is_some());
     }
@@ -260,9 +261,9 @@ mod tests {
     async fn fallback_async_ensure_set_correctly() {
         let context = create_test_context();
         let layer: FallbackLayer<_, _, NotSet, Set> =
-            FallbackLayer::new("test".into(), &context).fallback_async(|_output: String| async { "replaced".to_string() });
+            FallbackLayer::new("test".into(), &context).fallback_async(|_output: String, _args| async { "replaced".to_string() });
 
-        let result = layer.fallback_action.unwrap().call("bad".to_string()).await;
+        let result = layer.fallback_action.unwrap().call("bad".to_string(), FallbackActionArgs {}).await;
         assert_eq!(result, "replaced");
     }
 
@@ -336,7 +337,7 @@ mod tests {
 
     #[test]
     fn fallback_when_ready_ok() {
-        let layer: FallbackLayer<_, _, Set, Set> = create_ready_layer().fallback(|_| "new_fallback".to_string());
+        let layer: FallbackLayer<_, _, Set, Set> = create_ready_layer().fallback(|_, _| "new_fallback".to_string());
 
         assert!(layer.fallback_action.is_some());
     }
@@ -361,6 +362,6 @@ mod tests {
     fn create_ready_layer() -> FallbackLayer<String, String, Set, Set> {
         FallbackLayer::new("test".into(), &create_test_context())
             .should_fallback(|output: &String| output == "bad")
-            .fallback(|_output: String| "fallback_value".to_string())
+            .fallback(|_output: String, _args| "fallback_value".to_string())
     }
 }

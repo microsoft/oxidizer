@@ -3,14 +3,14 @@
 
 use std::pin::Pin;
 
-use super::{AfterFallbackArgs, BeforeFallbackArgs};
+use super::{AfterFallbackArgs, BeforeFallbackArgs, FallbackActionArgs};
 
 crate::utils::define_fn_wrapper!(ShouldFallback<Out>(Fn(&Out) -> bool));
 crate::utils::define_fn_wrapper!(BeforeFallback<Out>(Fn(&mut Out, BeforeFallbackArgs)));
 crate::utils::define_fn_wrapper!(AfterFallback<Out>(Fn(&mut Out, AfterFallbackArgs)));
 
-crate::utils::define_fn_wrapper!(SyncFallbackFn<Out>(Fn(Out) -> Out));
-crate::utils::define_fn_wrapper!(AsyncFallbackFn<Out>(Fn(Out) -> Pin<Box<dyn Future<Output = Out> + Send>>));
+crate::utils::define_fn_wrapper!(SyncFallbackFn<Out>(Fn(Out, FallbackActionArgs) -> Out));
+crate::utils::define_fn_wrapper!(AsyncFallbackFn<Out>(Fn(Out, FallbackActionArgs) -> Pin<Box<dyn Future<Output = Out> + Send>>));
 
 /// Wraps either a sync or async user-supplied fallback function.
 ///
@@ -24,24 +24,24 @@ pub(crate) enum FallbackAction<Out> {
 
 impl<Out: Send + 'static> FallbackAction<Out> {
     /// Create from a synchronous closure.
-    pub(crate) fn new_sync(f: impl Fn(Out) -> Out + Send + Sync + 'static) -> Self {
+    pub(crate) fn new_sync(f: impl Fn(Out, FallbackActionArgs) -> Out + Send + Sync + 'static) -> Self {
         Self::Sync(SyncFallbackFn::new(f))
     }
 
     /// Create from an asynchronous closure.
     pub(crate) fn new_async<F, Fut>(f: F) -> Self
     where
-        F: Fn(Out) -> Fut + Send + Sync + 'static,
+        F: Fn(Out, FallbackActionArgs) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Out> + Send + 'static,
     {
-        Self::Async(AsyncFallbackFn::new(move |out| Box::pin(f(out))))
+        Self::Async(AsyncFallbackFn::new(move |out, args| Box::pin(f(out, args))))
     }
 
     /// Invoke the fallback action.
-    pub(crate) async fn call(&self, out: Out) -> Out {
+    pub(crate) async fn call(&self, out: Out, args: FallbackActionArgs) -> Out {
         match self {
-            Self::Sync(f) => f.call(out),
-            Self::Async(f) => f.call(out).await,
+            Self::Sync(f) => f.call(out, args),
+            Self::Async(f) => f.call(out, args).await,
         }
     }
 }

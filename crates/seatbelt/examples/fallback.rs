@@ -22,8 +22,8 @@ async fn main() {
         Fallback::layer("my_fallback", &context)
             // Required: predicate that decides when fallback is needed
             .should_fallback(|output: &String| output.is_empty())
-            // Required: action that produces the replacement output
-            .fallback(|_output: String| "fallback_value".to_string()),
+            // Required: the replacement output
+            .fallback_output("fallback_value".to_string()),
         Execute::new(execute_operation),
     );
 
