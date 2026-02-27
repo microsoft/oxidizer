@@ -344,7 +344,7 @@ where
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(not(miri))] // Oxidizer runtime does not support Miri.
+#[cfg_attr(miri, ignore)] // Oxidizer runtime does not support Miri.
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;

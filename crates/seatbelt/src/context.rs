@@ -134,7 +134,7 @@ mod tests {
         assert!(matches!(telemetry.pipeline_name, Cow::Owned(_)));
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn test_create_event_reporter_with_multiple_clones_accumulates_events() {
         let clock = tick::Clock::new_frozen();
@@ -156,7 +156,7 @@ mod tests {
         assert!(dump.contains('3'));
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn test_meter_provider() -> (
         opentelemetry_sdk::metrics::SdkMeterProvider,
         opentelemetry_sdk::metrics::InMemoryMetricExporter,

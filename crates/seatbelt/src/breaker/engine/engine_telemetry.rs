@@ -181,7 +181,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 mod tests {
     use std::time::Instant;
 

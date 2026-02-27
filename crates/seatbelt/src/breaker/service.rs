@@ -239,7 +239,7 @@ impl<In, Out> BreakerShared<In, Out> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 mod tests {
     use std::future::poll_fn;
     use std::sync::atomic::{AtomicBool, Ordering};

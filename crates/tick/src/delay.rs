@@ -138,7 +138,7 @@ mod tests {
         static_assertions::assert_impl_all!(Delay: Send, Sync);
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn delay_ok() {
         let clock = Clock::new_tokio();

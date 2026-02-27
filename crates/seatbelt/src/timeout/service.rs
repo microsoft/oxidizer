@@ -230,7 +230,7 @@ impl<In, Out> TimeoutShared<In, Out> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(not(miri))] // tokio runtime does not support Miri.
+#[cfg_attr(miri, ignore)] // tokio runtime does not support Miri.
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;
