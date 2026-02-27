@@ -51,6 +51,12 @@ impl HedgingMode {
     ///
     /// All `N` concurrent requests start at the same time and the first
     /// successful result is returned.
+    ///
+    /// **Caution:** This mode multiplies the load on the downstream service by the total
+    /// number of attempts, original plus all hedges. Only use this when the downstream
+    /// service has sufficient capacity to absorb the additional requests. For most
+    /// scenarios, [`delay`][HedgingMode::delay] is a safer default because it avoids
+    /// sending hedges when the original request completes quickly.
     #[must_use]
     pub fn immediate() -> Self {
         Self {

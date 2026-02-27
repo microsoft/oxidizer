@@ -50,6 +50,17 @@
 //! The first result classified as non-recoverable (via the recovery callback) is returned
 //! immediately. Any remaining in-flight requests are cancelled.
 //!
+//! # When to Use Hedging
+//!
+//! Hedging increases overall load on the downstream service because it sends additional
+//! concurrent requests. The downstream service **must be able to handle this extra load**
+//! without degradation. If the downstream service is already under pressure, hedging can
+//! amplify the problem rather than reduce latency.
+//!
+//! If the downstream service cannot tolerate additional load, prefer [`retry`][crate::retry]
+//! instead - it only sends a new request after the previous one has completed or failed,
+//! keeping the total request rate bounded.
+//!
 //! # Configuration
 //!
 //! The [`HedgingLayer`] uses a type state pattern to enforce that all required properties are
