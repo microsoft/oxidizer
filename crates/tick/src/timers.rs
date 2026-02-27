@@ -48,7 +48,6 @@ pub(crate) struct Timers {
 }
 
 impl Timers {
-    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.wakers.len()
     }
