@@ -359,3 +359,86 @@ async fn enable_if_skips_hedging(#[case] use_tower: bool) {
     assert_eq!(result, Ok("normal".to_string()));
     assert_eq!(counter.load(Ordering::SeqCst), 1); // Only 1 call, no hedges
 }
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn clone_returning_none_skips_hedge(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input_with(|input, args| {
+                // Only clone for the original request (attempt 0), refuse all hedges.
+                (args.attempt().index() == 0).then(|| input.clone())
+            })
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(_) => RecoveryInfo::retry(),
+            })
+            .hedging_mode(HedgingMode::delay(Duration::from_millis(10)))
+            .max_hedged_attempts(2),
+        Execute::new(move |v: String| {
+            let count = counter_clone.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if count == 0 {
+                    Err::<String, String>("transient".to_string())
+                } else {
+                    Ok(format!("hedged:{v}"))
+                }
+            }
+        }),
+    );
+
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    // Clone refused all hedges, so only the original (recoverable) result returns.
+    assert_eq!(result, Err("transient".to_string()));
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn handle_unavailable_continues_hedging(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(e) if e == "unavailable" => RecoveryInfo::unavailable(),
+                Err(_) => RecoveryInfo::retry(),
+            })
+            .hedging_mode(HedgingMode::immediate())
+            .max_hedged_attempts(2)
+            .handle_unavailable(true),
+        Execute::new(move |v: String| {
+            let count = counter_clone.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if count == 0 {
+                    Err::<String, String>("unavailable".to_string())
+                } else {
+                    Ok(format!("ok:{v}"))
+                }
+            }
+        }),
+    );
+
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    // With handle_unavailable(true), the "unavailable" error is treated as recoverable,
+    // so hedging continues and a successful result is returned.
+    assert_eq!(result, Ok("ok:test".to_string()));
+}

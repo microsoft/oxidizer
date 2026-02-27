@@ -122,6 +122,9 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// - [`RecoveryInfo::never()`]: The result is acceptable - return it immediately
     /// - [`RecoveryInfo::retry()`]: The result is transient - continue waiting for hedges
+    /// - [`RecoveryInfo::unavailable()`]: The service is unavailable - by default returned
+    ///   immediately, but treated as transient when [`handle_unavailable(true)`][HedgingLayer::handle_unavailable]
+    ///   is configured
     #[must_use]
     pub fn recovery_with(
         mut self,

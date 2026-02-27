@@ -1619,6 +1619,7 @@ dependencies = [
  "criterion",
  "fastrand",
  "futures",
+ "futures-util",
  "http",
  "layered",
  "mutants",

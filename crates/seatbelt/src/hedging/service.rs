@@ -148,9 +148,9 @@ impl<In, Out> HedgingShared<In, Out> {
         for i in 1..total_attempts {
             let attempt = Attempt::new(i, i == total_attempts.saturating_sub(1));
             let args = CloneArgs { attempt };
-            self.invoke_on_hedge(attempt);
-            self.emit_telemetry(i);
             if let Some(cloned) = self.clone_input.call(input, args) {
+                self.invoke_on_hedge(attempt);
+                self.emit_telemetry(i);
                 futs.push(Box::pin(launch(cloned)));
             }
         }
@@ -164,6 +164,8 @@ impl<In, Out> HedgingShared<In, Out> {
         match recovery.kind() {
             RecoveryKind::Unavailable => self.handle_unavailable,
             RecoveryKind::Retry => true,
+            // Wildcard required because RecoveryKind is #[non_exhaustive].
+            // New variants default to non-recoverable; update when adding variants.
             RecoveryKind::Never | RecoveryKind::Unknown | _ => false,
         }
     }
@@ -226,7 +228,15 @@ impl<In, Out> HedgingShared<In, Out> {
                     }
                 }
             } else {
-                return self.drain_for_first_acceptable(futs).await;
+                // All hedges launched — drain remaining futures, preserving
+                // any recoverable result collected during the delay loop.
+                while let Some(out) = futs.next().await {
+                    if !self.is_recoverable(&out) {
+                        return out;
+                    }
+                    last_result = Some(out);
+                }
+                return last_result.expect("at least one attempt was launched");
             }
         }
     }
@@ -243,10 +253,9 @@ impl<In, Out> HedgingShared<In, Out> {
         let attempt = Attempt::new(*hedges_launched, *hedges_launched >= max_hedged);
         let args = CloneArgs { attempt };
 
-        self.invoke_on_hedge(attempt);
-        self.emit_telemetry(*hedges_launched);
-
         if let Some(cloned) = self.clone_input.call(input, args) {
+            self.invoke_on_hedge(attempt);
+            self.emit_telemetry(*hedges_launched);
             futs.push(launch(cloned));
         }
     }
