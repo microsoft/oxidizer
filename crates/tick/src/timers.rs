@@ -45,7 +45,9 @@ pub(crate) struct Timers {
     /// The [`Waker`] represents the task awaiting the timer.
     wakers: BTreeMap<TimerKey, Waker>,
     last_discriminator: u32,
+
     // Determines whether the timers are currently being advanced.
+    // This value is `false` if timers have not yet been advanced.
     alive: bool,
 }
 
