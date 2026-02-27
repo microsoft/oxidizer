@@ -107,6 +107,10 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// This is equivalent to calling [`clone_input_with`][HedgingLayer::clone_input_with] with
     /// `|input, _args| Some(input.clone())`.
+    ///
+    /// # Type Requirements
+    ///
+    /// The input type `In` must implement [`Clone`].
     #[must_use]
     pub fn clone_input(self) -> HedgingLayer<In, Out, Set, S2>
     where
@@ -138,6 +142,10 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// This is equivalent to calling [`recovery_with`][HedgingLayer::recovery_with] with
     /// `|output, _args| output.recovery()`.
+    ///
+    /// # Type Requirements
+    ///
+    /// The output type `Out` must implement [`Recovery`].
     #[must_use]
     pub fn recovery(self) -> HedgingLayer<In, Out, S1, Set>
     where
