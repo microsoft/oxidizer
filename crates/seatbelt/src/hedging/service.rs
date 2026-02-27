@@ -247,7 +247,8 @@ impl<In, Out> HedgingShared<In, Out> {
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
-            use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_IS_LAST, HEDGE_EVENT};
+            use super::telemetry::HEDGE_EVENT;
+            use crate::attempt::{ATTEMPT_INDEX, ATTEMPT_IS_LAST};
             use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
             self.telemetry.report_metrics(&[

@@ -235,7 +235,8 @@ impl<In, Out> RetryShared<In, Out> {
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
-            use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
+            use super::telemetry::RETRY_EVENT;
+            use crate::attempt::{ATTEMPT_INDEX, ATTEMPT_IS_LAST};
             use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
             self.telemetry.report_metrics(&[
@@ -243,7 +244,7 @@ impl<In, Out> RetryShared<In, Out> {
                 opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                 opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
+                opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
             ]);
         }
     }

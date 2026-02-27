@@ -3,6 +3,14 @@
 
 use std::fmt::Display;
 
+/// Telemetry attribute key for the attempt index.
+#[cfg(any(feature = "metrics", test))]
+pub(crate) const ATTEMPT_INDEX: &str = "resilience.attempt.index";
+
+/// Telemetry attribute key indicating whether this is the last attempt.
+#[cfg(any(feature = "metrics", test))]
+pub(crate) const ATTEMPT_IS_LAST: &str = "resilience.attempt.is_last";
+
 /// Represents a single attempt in a resilience operation (retry, hedging, etc.).
 ///
 /// This struct tracks the current attempt index, and it provides methods to check if this is the
