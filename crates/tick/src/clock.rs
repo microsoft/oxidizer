@@ -181,6 +181,7 @@ impl std::fmt::Debug for Clock {
         f.debug_struct("Clock")
             .field("kind", &kind)
             .field("timers", &self.state.timers_len())
+            .field("alive", &self.state.alive())
             .finish_non_exhaustive()
     }
 }
@@ -732,6 +733,16 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn debug_system_clock() {
         let clock = Clock::new_system_frozen();
+
+        insta::assert_debug_snapshot!(clock);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn debug_alive_system_clock() {
+        let clock = Clock::new_tokio();
+
+        clock.delay(Duration::from_millis(1)).await;
 
         insta::assert_debug_snapshot!(clock);
     }

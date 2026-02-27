@@ -5,6 +5,6 @@ expression: clock
 Clock {
     kind: "system",
     timers: 0,
-    alive: false,
+    alive: true,
     ..
 }
