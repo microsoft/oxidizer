@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf_io"
 description = "Asynchronous I/O abstractions expressed via `bytesbuf` types."
-version = "0.3.0"
+version = "0.4.0"
 readme = "README.md"
 keywords = ["oxidizer", "io", "zero-copy", "performance", "async"]
 categories = [

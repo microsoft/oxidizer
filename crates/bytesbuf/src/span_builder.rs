@@ -220,6 +220,39 @@ impl SpanBuilder {
         self.filled_bytes = self.filled_bytes.wrapping_add(count);
     }
 
+    /// Splits off `count` bytes of available (unfilled) capacity from the end of the span
+    /// builder, returning a new span builder that owns that capacity.
+    ///
+    /// The returned span builder shares the same underlying memory block (via a cloned
+    /// `BlockRef`) but owns a disjoint region of unfilled capacity at the end.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `count` is greater than the remaining capacity.
+    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check produces invalid pointers.
+    pub(crate) fn split_off_available(&mut self, count: NonZero<BlockSize>) -> Self {
+        assert!(count.get() as usize <= self.remaining_capacity());
+
+        // The new builder starts where the split point is: after our filled bytes
+        // plus whatever available capacity we keep.
+        let keep = self.available_bytes.wrapping_sub(count.get());
+
+        // SAFETY: We are seeking past filled bytes and the portion of available bytes we keep,
+        // landing at the start of the capacity we are splitting off. This is within the bounds
+        // of the memory block because `filled_bytes + keep + count == filled_bytes + available_bytes`
+        // which is the original total capacity, all within the block.
+        let new_start = unsafe { self.start.add((self.filled_bytes.wrapping_add(keep)) as usize) };
+
+        self.available_bytes = keep;
+
+        Self {
+            block_ref: self.block_ref.clone(),
+            start: new_start,
+            filled_bytes: 0,
+            available_bytes: count.get(),
+        }
+    }
+
     /// Appends a slice of bytes to the span builder.
     ///
     /// Convenience function for testing purposes, to allow a span builder to be easily
@@ -320,6 +353,56 @@ mod tests {
         assert_eq!(peeked.as_ref().len(), 0);
 
         _ = builder.consume(nz!(10));
+    }
+
+    #[test]
+    fn split_off_available_full() {
+        let mut builder = std_alloc_block::allocate(nz!(20)).into_span_builder();
+
+        assert_eq!(builder.remaining_capacity(), 20);
+
+        let split = builder.split_off_available(nz!(20));
+
+        assert_eq!(builder.remaining_capacity(), 0);
+        assert_eq!(builder.len(), 0);
+
+        assert_eq!(split.remaining_capacity(), 20);
+        assert_eq!(split.len(), 0);
+    }
+
+    #[test]
+    fn split_off_available_partial_with_data() {
+        let mut builder = std_alloc_block::allocate(nz!(20)).into_span_builder();
+
+        builder.put_slice(&1234_u64.to_ne_bytes());
+
+        assert_eq!(builder.len(), 8);
+        assert_eq!(builder.remaining_capacity(), 12);
+
+        let mut split = builder.split_off_available(nz!(5));
+
+        // Original retains its data and keeps some available capacity.
+        assert_eq!(builder.len(), 8);
+        assert_eq!(builder.remaining_capacity(), 7);
+
+        // Split-off builder has the requested capacity and no data.
+        assert_eq!(split.len(), 0);
+        assert_eq!(split.remaining_capacity(), 5);
+
+        // The split-off capacity is usable.
+        split.put_slice(&5678_u32.to_ne_bytes());
+        assert_eq!(split.len(), 4);
+        assert_eq!(split.remaining_capacity(), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn split_off_available_panics_on_overflow() {
+        let mut builder = std_alloc_block::allocate(nz!(10)).into_span_builder();
+        builder.put_slice(&1234_u64.to_ne_bytes());
+
+        // Only 2 bytes available, requesting 3.
+        builder.split_off_available(nz!(3));
     }
 
     #[test]

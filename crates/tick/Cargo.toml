@@ -55,6 +55,7 @@ chrono = { workspace = true, features = ["clock"] }
 chrono-tz = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true, features = ["default", "executor", "futures-executor"] }
+insta = { workspace = true }
 jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
@@ -69,11 +70,11 @@ workspace = true
 
 [[example]]
 name = "basic"
-required-features = ["tokio"]
+required-features = ["tokio", "fmt"]
 
 [[example]]
 name = "clock"
-required-features = ["tokio"]
+required-features = ["tokio", "fmt"]
 
 [[example]]
 name = "clock_control"

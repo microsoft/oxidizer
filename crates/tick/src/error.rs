@@ -125,7 +125,7 @@ mod tests {
         assert!(matches!(error.kind(), ErrorKind::Jiff(_)));
         assert_eq!(
             error.to_string(),
-            "parameter 'second' with value 9223372036854775807 is not in the required range of -377705023201..=253402207200"
+            "parameter 'Unix timestamp seconds' is not in the required range of -377705023201..=253402207200"
         );
         assert!(error.source().is_some());
     }

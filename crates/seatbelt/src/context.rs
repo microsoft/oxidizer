@@ -3,6 +3,10 @@
 
 use std::borrow::Cow;
 
+use thread_aware::{
+    ThreadAware,
+    affinity::{MemoryAffinity, PinnedAffinity},
+};
 use tick::Clock;
 
 pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
@@ -21,6 +25,15 @@ pub struct ResilienceContext<In, Out> {
     logs_enabled: bool,
     _in: std::marker::PhantomData<fn() -> In>,
     _out: std::marker::PhantomData<fn() -> Out>,
+}
+
+impl<In, Out> ThreadAware for ResilienceContext<In, Out> {
+    fn relocated(mut self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+        // Only clock is thread-aware for now. At some point, we also want
+        // telemetry to be tread-aware too.
+        self.clock = self.clock.relocated(source, destination);
+        self
+    }
 }
 
 impl<In, Out> ResilienceContext<In, Out> {
@@ -73,7 +86,12 @@ impl<In, Out> ResilienceContext<In, Out> {
 
     #[cfg_attr(
         not(any(feature = "metrics", feature = "logs", test)),
-        expect(unused_variables, reason = "unused when logs nor metrics are used")
+        expect(
+            unused_variables,
+            clippy::unused_self,
+            clippy::needless_pass_by_value,
+            reason = "unused when logs nor metrics are used"
+        )
     )]
     #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
     pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {
@@ -108,7 +126,13 @@ impl<In, Out> Clone for ResilienceContext<In, Out> {
 #[cfg(test)]
 mod tests {
 
+    use std::fmt::Debug;
+
+    use thread_aware::affinity::pinned_affinities;
+
     use super::*;
+
+    static_assertions::assert_impl_all!(ResilienceContext<(), ()>: Send, Sync, ThreadAware, Debug, Clone);
 
     #[test]
     fn test_new_with_clock_sets_default_pipeline_name() {
@@ -149,6 +173,14 @@ mod tests {
         assert!(dump.contains("resilience.event"));
         // Basic sanity that total of 3 was recorded somewhere in debug output.
         assert!(dump.contains('3'));
+    }
+
+    #[test]
+    fn relocate_ok() {
+        let ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
+        let affinites = pinned_affinities(&[2]);
+
+        _ = ctx.relocated(affinites[0].into(), affinites[1]);
     }
 
     #[cfg(not(miri))]
