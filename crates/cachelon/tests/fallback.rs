@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg(feature = "memory")]
+#![allow(missing_docs)]
 
 //! Integration tests for fallback cache behavior.
 //!

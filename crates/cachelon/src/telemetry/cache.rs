@@ -19,7 +19,7 @@ use crate::telemetry::attributes;
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 use thread_aware::{Arc, PerCore};
 
-/// Internal state for cache telemetry.
+/// Internal state for cache telemetry when features are enabled.
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 #[derive(Clone, Debug)]
 pub(crate) struct CacheTelemetryInner {
@@ -33,6 +33,11 @@ pub(crate) struct CacheTelemetryInner {
     pub(crate) cache_size: Option<Gauge<u64>>,
 }
 
+/// Internal state for cache telemetry when no features are enabled (no-op).
+#[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CacheTelemetryInner;
+
 /// Cache telemetry provider for OpenTelemetry integration.
 ///
 /// This type is created internally by [`TelemetryConfig::build()`] and handles
@@ -41,6 +46,9 @@ pub(crate) struct CacheTelemetryInner {
 pub struct CacheTelemetry {
     #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub(crate) inner: Arc<CacheTelemetryInner, PerCore>,
+    #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+    #[allow(dead_code, reason = "No-op telemetry when features are disabled")]
+    pub(crate) inner: CacheTelemetryInner,
 }
 
 #[derive(Debug, Clone, Copy)]

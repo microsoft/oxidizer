@@ -74,11 +74,6 @@ impl TelemetryConfig {
     /// Builds the telemetry collector from this configuration.
     #[must_use]
     pub(crate) fn build(self) -> CacheTelemetry {
-        #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
-        {
-            return CacheTelemetry {};
-        }
-
         #[cfg(any(feature = "logs", feature = "metrics", test))]
         {
             #[cfg(any(feature = "metrics", test))]
@@ -102,6 +97,14 @@ impl TelemetryConfig {
                     #[cfg(any(feature = "metrics", test))]
                     cache_size,
                 }),
+            }
+        }
+
+        #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+        {
+            _ = self;
+            CacheTelemetry {
+                inner: Default::default(),
             }
         }
     }
