@@ -160,7 +160,8 @@ impl<In, Out> HedgingShared<In, Out> {
 
         loop {
             if hedges_launched < max_hedged {
-                let delay = self.hedging_mode.delay_for(hedges_launched);
+                let next_attempt = Attempt::new(hedges_launched + 1, hedges_launched + 1 >= max_hedged);
+                let delay = self.hedging_mode.delay_for(next_attempt);
 
                 let outcome = {
                     let next = std::pin::pin!(futs.next());

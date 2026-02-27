@@ -192,7 +192,7 @@ async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
                 Err(_) => RecoveryInfo::retry(),
             })
             .hedging_mode(HedgingMode::dynamic(|args| {
-                Duration::from_millis(100 * u64::from(args.hedge_index() + 1))
+                Duration::from_millis(100 * u64::from(args.attempt().index()))
             }))
             .max_hedged_attempts(2),
         Execute::new(move |v: String| {

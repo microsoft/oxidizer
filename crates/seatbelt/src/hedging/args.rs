@@ -62,16 +62,16 @@ impl OnHedgeArgs {
 /// Provides context for computing the delay before the next hedge.
 #[derive(Debug)]
 pub struct HedgingDelayArgs {
-    pub(super) hedge_index: u32,
+    pub(super) attempt: Attempt,
 }
 
 impl HedgingDelayArgs {
-    /// Returns the 0-based index of the hedge about to be launched.
+    /// Returns the attempt information for the hedge about to be launched.
     ///
-    /// Index 0 is the first hedge, 1 is the second hedge, etc.
+    /// Attempt index 1 is the first hedge, 2 is the second hedge, etc.
     #[must_use]
-    pub fn hedge_index(&self) -> u32 {
-        self.hedge_index
+    pub fn attempt(&self) -> Attempt {
+        self.attempt
     }
 }
 
@@ -106,7 +106,10 @@ mod tests {
 
     #[test]
     fn hedging_delay_args() {
-        let args = HedgingDelayArgs { hedge_index: 0 };
-        assert_eq!(args.hedge_index(), 0);
+        let args = HedgingDelayArgs {
+            attempt: Attempt::new(1, false),
+        };
+        assert_eq!(args.attempt().index(), 1);
+        assert!(!args.attempt().is_last());
     }
 }

@@ -7,6 +7,7 @@ use std::time::Duration;
 use super::args::HedgingDelayArgs;
 use super::callbacks::DelayFn;
 use super::constants::DEFAULT_HEDGING_DELAY;
+use crate::Attempt;
 
 /// Defines how hedged requests are scheduled relative to each other.
 ///
@@ -30,7 +31,7 @@ use super::constants::DEFAULT_HEDGING_DELAY;
 ///
 /// // Compute delay dynamically
 /// let mode = HedgingMode::dynamic(|args: HedgingDelayArgs| {
-///     Duration::from_millis(100 * u64::from(args.hedge_index() + 1))
+///     Duration::from_millis(100 * u64::from(args.attempt().index()))
 /// });
 /// ```
 #[derive(Clone)]
@@ -80,11 +81,11 @@ impl HedgingMode {
         }
     }
 
-    pub(crate) fn delay_for(&self, hedge_index: u32) -> Duration {
+    pub(crate) fn delay_for(&self, attempt: Attempt) -> Duration {
         match &self.inner {
             HedgingModeInner::Immediate => Duration::ZERO,
             HedgingModeInner::Delay(d) => *d,
-            HedgingModeInner::Dynamic(f) => f.call(HedgingDelayArgs { hedge_index }),
+            HedgingModeInner::Dynamic(f) => f.call(HedgingDelayArgs { attempt }),
         }
     }
 
@@ -115,35 +116,39 @@ impl Debug for HedgingMode {
 mod tests {
     use super::*;
 
+    fn attempt(index: u32) -> Attempt {
+        Attempt::new(index, false)
+    }
+
     #[test]
     fn immediate_is_immediate() {
         let mode = HedgingMode::immediate();
         assert!(mode.is_immediate());
-        assert_eq!(mode.delay_for(0), Duration::ZERO);
-        assert_eq!(mode.delay_for(5), Duration::ZERO);
+        assert_eq!(mode.delay_for(attempt(1)), Duration::ZERO);
+        assert_eq!(mode.delay_for(attempt(5)), Duration::ZERO);
     }
 
     #[test]
     fn delay_returns_fixed_duration() {
         let mode = HedgingMode::delay(Duration::from_secs(1));
         assert!(!mode.is_immediate());
-        assert_eq!(mode.delay_for(0), Duration::from_secs(1));
-        assert_eq!(mode.delay_for(5), Duration::from_secs(1));
+        assert_eq!(mode.delay_for(attempt(1)), Duration::from_secs(1));
+        assert_eq!(mode.delay_for(attempt(5)), Duration::from_secs(1));
     }
 
     #[test]
     fn dynamic_computes_per_attempt() {
-        let mode = HedgingMode::dynamic(|args| Duration::from_millis(100 * u64::from(args.hedge_index() + 1)));
+        let mode = HedgingMode::dynamic(|args| Duration::from_millis(100 * u64::from(args.attempt().index())));
         assert!(!mode.is_immediate());
-        assert_eq!(mode.delay_for(0), Duration::from_millis(100));
-        assert_eq!(mode.delay_for(2), Duration::from_millis(300));
+        assert_eq!(mode.delay_for(attempt(1)), Duration::from_millis(100));
+        assert_eq!(mode.delay_for(attempt(3)), Duration::from_millis(300));
     }
 
     #[test]
     fn default_is_delay_2s() {
         let mode = HedgingMode::default();
         assert!(!mode.is_immediate());
-        assert_eq!(mode.delay_for(0), Duration::from_secs(2));
+        assert_eq!(mode.delay_for(attempt(1)), Duration::from_secs(2));
     }
 
     #[test]
@@ -169,11 +174,11 @@ mod tests {
         let mode = HedgingMode::delay(Duration::from_secs(1));
         #[expect(clippy::redundant_clone, reason = "testing that Clone impl works")]
         let cloned = mode.clone();
-        assert_eq!(cloned.delay_for(0), Duration::from_secs(1));
+        assert_eq!(cloned.delay_for(attempt(1)), Duration::from_secs(1));
 
         let mode = HedgingMode::dynamic(|_| Duration::from_millis(500));
         #[expect(clippy::redundant_clone, reason = "testing that Clone impl works")]
         let cloned = mode.clone();
-        assert_eq!(cloned.delay_for(0), Duration::from_millis(500));
+        assert_eq!(cloned.delay_for(attempt(1)), Duration::from_millis(500));
     }
 }
