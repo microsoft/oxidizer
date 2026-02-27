@@ -44,16 +44,16 @@ impl RecoveryArgs<'_> {
 /// Provides context when a new hedged request is about to be launched.
 #[derive(Debug)]
 pub struct OnHedgeArgs {
-    pub(super) hedge_index: u32,
+    pub(super) attempt: Attempt,
 }
 
 impl OnHedgeArgs {
-    /// Returns the 0-based index of the hedge being launched.
+    /// Returns the current attempt information.
     ///
-    /// Index 0 is the first hedge (the second overall request), etc.
+    /// Attempt index 1 is the first hedge (the second overall request), etc.
     #[must_use]
-    pub fn hedge_index(&self) -> u32 {
-        self.hedge_index
+    pub fn attempt(&self) -> Attempt {
+        self.attempt
     }
 }
 
@@ -98,8 +98,10 @@ mod tests {
 
     #[test]
     fn on_hedge_args() {
-        let args = OnHedgeArgs { hedge_index: 1 };
-        assert_eq!(args.hedge_index(), 1);
+        let args = OnHedgeArgs {
+            attempt: Attempt::new(1, false),
+        };
+        assert_eq!(args.attempt().index(), 1);
     }
 
     #[test]

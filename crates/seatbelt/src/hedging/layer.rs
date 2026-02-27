@@ -320,7 +320,9 @@ mod tests {
             called_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        layer.on_hedge.unwrap().call(OnHedgeArgs { hedge_index: 0 });
+        layer.on_hedge.unwrap().call(OnHedgeArgs {
+            attempt: Attempt::new(1, false),
+        });
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }
 

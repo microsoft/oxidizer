@@ -145,10 +145,9 @@ impl<In, Out> HedgingShared<In, Out> {
         futs.push(Box::pin(launch(first_cloned)));
 
         for i in 1..total_attempts {
-            let args = TryCloneArgs {
-                attempt: Attempt::new(i, i == total_attempts.saturating_sub(1)),
-            };
-            self.invoke_on_hedge(i.saturating_sub(1));
+            let attempt = Attempt::new(i, i == total_attempts.saturating_sub(1));
+            let args = TryCloneArgs { attempt };
+            self.invoke_on_hedge(attempt);
             self.emit_telemetry(i);
             if let Some(cloned) = self.try_clone.call(input, args) {
                 futs.push(Box::pin(launch(cloned)));
@@ -222,17 +221,7 @@ impl<In, Out> HedgingShared<In, Out> {
                     }
                 }
             } else {
-                match futs.next().await {
-                    Some(out) => {
-                        if !self.is_recoverable(&out) {
-                            return out;
-                        }
-                        last_result = Some(out);
-                    }
-                    None => {
-                        return last_result.expect("at least one attempt was launched");
-                    }
-                }
+                return self.drain_for_first_acceptable(futs).await;
             }
         }
     }
@@ -246,11 +235,10 @@ impl<In, Out> HedgingShared<In, Out> {
         launch: &mut impl FnMut(In) -> F,
     ) {
         *hedges_launched = hedges_launched.saturating_add(1);
-        let args = TryCloneArgs {
-            attempt: Attempt::new(*hedges_launched, *hedges_launched >= max_hedged),
-        };
+        let attempt = Attempt::new(*hedges_launched, *hedges_launched >= max_hedged);
+        let args = TryCloneArgs { attempt };
 
-        self.invoke_on_hedge(hedges_launched.saturating_sub(1));
+        self.invoke_on_hedge(attempt);
         self.emit_telemetry(*hedges_launched);
 
         if let Some(cloned) = self.try_clone.call(input, args) {
@@ -258,9 +246,9 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    fn invoke_on_hedge(&self, hedge_index: u32) {
+    fn invoke_on_hedge(&self, attempt: Attempt) {
         if let Some(on_hedge) = &self.on_hedge {
-            on_hedge.call(OnHedgeArgs { hedge_index });
+            on_hedge.call(OnHedgeArgs { attempt });
         }
     }
 
