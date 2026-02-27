@@ -1,0 +1,70 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+assertion_line: 99
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    #[inline]
+    #[doc(hidden)]
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        clippy::needless_pass_by_value,
+        clippy::use_self,
+        clippy::unused_self,
+        unused_variables,
+    )]
+    fn __fill_inner(&self, buf: &mut Vec<u8>) -> usize {
+        buf.push(1);
+        1
+    }
+    #[doc(hidden)]
+    #[allow(clippy::use_self)]
+    fn __fill_shim(ptr: *mut ()) {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __fill_RawTask {
+            self_ptr: *const (),
+            buf: *mut Vec<u8>,
+        }
+        let state = unsafe {
+            &*ptr.cast::<::sync_thunk::StackState<usize, __fill_RawTask>>()
+        };
+        let task = unsafe { state.take_task() }
+            .expect("thunk task was set before dispatch");
+        let self_ref = unsafe { &*task.self_ptr.cast::<Self>() };
+        let buf = unsafe { &mut *task.buf };
+        let panic_result = ::std::panic::catch_unwind(
+            ::std::panic::AssertUnwindSafe(|| { self_ref.__fill_inner(buf) }),
+        );
+        match panic_result {
+            Ok(result) => {
+                unsafe { state.complete(result) };
+            }
+            Err(_) => {
+                state.mark_panicked();
+            }
+        }
+        state.wake();
+    }
+    async fn fill(&self, buf: &mut Vec<u8>) -> usize {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __fill_RawTask {
+            self_ptr: *const (),
+            buf: *mut Vec<u8>,
+        }
+        unsafe impl Send for __fill_RawTask {}
+        let state = ::sync_thunk::StackState::<usize, __fill_RawTask>::new();
+        let raw_task = __fill_RawTask {
+            self_ptr: self as *const Self as *const (),
+            buf: buf as *mut Vec<u8>,
+        };
+        unsafe {
+            state.set_task(raw_task);
+        }
+        let work_item = ::sync_thunk::WorkItem::new(
+            state.as_mut_ptr().cast::<()>(),
+            Self::__fill_shim,
+        );
+        self.thunker.send(work_item);
+        ::sync_thunk::ThunkFuture::new(&state).await
+    }
+}

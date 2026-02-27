@@ -1,0 +1,77 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+assertion_line: 125
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    #[inline]
+    #[doc(hidden)]
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        clippy::needless_pass_by_value,
+        clippy::use_self,
+        clippy::unused_self,
+        unused_variables,
+    )]
+    fn __multi_inner(&self, a: u32, b: &str, c: &mut Vec<u8>) -> bool {
+        true
+    }
+    #[doc(hidden)]
+    #[allow(clippy::use_self)]
+    fn __multi_shim(ptr: *mut ()) {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __multi_RawTask {
+            self_ptr: *const (),
+            a: u32,
+            b: *const str,
+            c: *mut Vec<u8>,
+        }
+        let state = unsafe {
+            &*ptr.cast::<::sync_thunk::StackState<bool, __multi_RawTask>>()
+        };
+        let task = unsafe { state.take_task() }
+            .expect("thunk task was set before dispatch");
+        let self_ref = unsafe { &*task.self_ptr.cast::<Self>() };
+        let a = task.a;
+        let b = unsafe { &*task.b };
+        let c = unsafe { &mut *task.c };
+        let panic_result = ::std::panic::catch_unwind(
+            ::std::panic::AssertUnwindSafe(|| { self_ref.__multi_inner(a, b, c) }),
+        );
+        match panic_result {
+            Ok(result) => {
+                unsafe { state.complete(result) };
+            }
+            Err(_) => {
+                state.mark_panicked();
+            }
+        }
+        state.wake();
+    }
+    async fn multi(&self, a: u32, b: &str, c: &mut Vec<u8>) -> bool {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __multi_RawTask {
+            self_ptr: *const (),
+            a: u32,
+            b: *const str,
+            c: *mut Vec<u8>,
+        }
+        unsafe impl Send for __multi_RawTask {}
+        let state = ::sync_thunk::StackState::<bool, __multi_RawTask>::new();
+        let raw_task = __multi_RawTask {
+            self_ptr: self as *const Self as *const (),
+            a,
+            b: b as *const str,
+            c: c as *mut Vec<u8>,
+        };
+        unsafe {
+            state.set_task(raw_task);
+        }
+        let work_item = ::sync_thunk::WorkItem::new(
+            state.as_mut_ptr().cast::<()>(),
+            Self::__multi_shim,
+        );
+        self.thunker.send(work_item);
+        ::sync_thunk::ThunkFuture::new(&state).await
+    }
+}

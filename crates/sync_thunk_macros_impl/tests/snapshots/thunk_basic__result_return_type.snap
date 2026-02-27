@@ -1,0 +1,74 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+assertion_line: 151
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    #[inline]
+    #[doc(hidden)]
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        clippy::needless_pass_by_value,
+        clippy::use_self,
+        clippy::unused_self,
+        unused_variables,
+    )]
+    fn __fallible_inner(&self) -> std::io::Result<Vec<u8>> {
+        Ok(vec![])
+    }
+    #[doc(hidden)]
+    #[allow(clippy::use_self)]
+    fn __fallible_shim(ptr: *mut ()) {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __fallible_RawTask {
+            self_ptr: *const (),
+        }
+        let state = unsafe {
+            &*ptr
+                .cast::<
+                    ::sync_thunk::StackState<
+                        std::io::Result<Vec<u8>>,
+                        __fallible_RawTask,
+                    >,
+                >()
+        };
+        let task = unsafe { state.take_task() }
+            .expect("thunk task was set before dispatch");
+        let self_ref = unsafe { &*task.self_ptr.cast::<Self>() };
+        let panic_result = ::std::panic::catch_unwind(
+            ::std::panic::AssertUnwindSafe(|| { self_ref.__fallible_inner() }),
+        );
+        match panic_result {
+            Ok(result) => {
+                unsafe { state.complete(result) };
+            }
+            Err(_) => {
+                state.mark_panicked();
+            }
+        }
+        state.wake();
+    }
+    async fn fallible(&self) -> std::io::Result<Vec<u8>> {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __fallible_RawTask {
+            self_ptr: *const (),
+        }
+        unsafe impl Send for __fallible_RawTask {}
+        let state = ::sync_thunk::StackState::<
+            std::io::Result<Vec<u8>>,
+            __fallible_RawTask,
+        >::new();
+        let raw_task = __fallible_RawTask {
+            self_ptr: self as *const Self as *const (),
+        };
+        unsafe {
+            state.set_task(raw_task);
+        }
+        let work_item = ::sync_thunk::WorkItem::new(
+            state.as_mut_ptr().cast::<()>(),
+            Self::__fallible_shim,
+        );
+        self.thunker.send(work_item);
+        ::sync_thunk::ThunkFuture::new(&state).await
+    }
+}

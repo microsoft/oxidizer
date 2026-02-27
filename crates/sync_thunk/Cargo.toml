@@ -1,0 +1,45 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "sync_thunk"
+description = "Efficiently handle blocking calls in async code."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "blocking", "async"]
+categories = ["asynchronous", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/sync_thunk"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["sync_thunk_macros::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+crossfire.workspace = true
+sync_thunk_macros.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "from_field"
+
+[[example]]
+name = "from_method"
+
+[[example]]
+name = "from_parameter"
+
+[[example]]
+name = "from_static"
