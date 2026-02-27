@@ -460,4 +460,27 @@ mod tests {
             .await
             .unwrap_err();
     }
+
+    #[test]
+    fn execute_future_size_is_bounded() {
+        let context = ResilienceContext::<String, String>::new(Clock::new_frozen());
+        let service = Hedging::layer("bench", &context)
+            .clone_input()
+            .recovery_with(|_, _| RecoveryInfo::never())
+            .layer(Execute::new(|v: String| async move { v }));
+
+        let future = service.execute("test".to_string());
+        let size = std::mem::size_of_val(&future);
+
+        // Print the size so CI logs capture it for tracking over time.
+        println!("hedging execute future size: {size} bytes");
+
+        // Guard against accidental future bloat. Update this threshold
+        // deliberately if a change legitimately increases the future size.
+        let max_bytes = 512;
+        assert!(
+            size <= max_bytes,
+            "hedging execute future is {size} bytes, which exceeds the {max_bytes}-byte threshold"
+        );
+    }
 }
