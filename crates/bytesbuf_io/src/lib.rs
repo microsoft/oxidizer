@@ -25,6 +25,8 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf_io/favicon.ico")]
 
+mod concurrent_read;
+mod concurrent_write;
 mod error;
 mod read;
 mod read_ext;
@@ -33,6 +35,8 @@ mod read_futures;
 mod write;
 mod write_ext;
 
+pub use concurrent_read::ConcurrentRead;
+pub use concurrent_write::ConcurrentWrite;
 pub use error::{Error, Result};
 pub use read::Read;
 pub use read_ext::{ReadExt, ReadInspectDecision};
