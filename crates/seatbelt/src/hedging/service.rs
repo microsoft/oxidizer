@@ -2,8 +2,9 @@
 // Licensed under the MIT License.
 
 use std::fmt::Debug;
-use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(any(feature = "tower-service", test))]
+use std::pin::Pin;
 #[cfg(any(feature = "tower-service", test))]
 use std::task::{Context, Poll};
 
@@ -126,36 +127,9 @@ impl<In, Out> HedgingShared<In, Out> {
             return launch(input).await;
         };
 
-        if self.hedging_mode.is_immediate() {
-            return self.run_immediate(&mut input, first_cloned, &mut launch, total_attempts).await;
-        }
-
-        // Delay / Dynamic mode: the first future stays unboxed.
         let mut futs = FuturesUnordered::new();
         futs.push(launch(first_cloned));
         self.run_delay_loop(&mut futs, &mut input, max_hedged, launch).await
-    }
-
-    /// Immediate mode: launch all hedges at once, box each future to keep the
-    /// enum-future size constant and avoid bloating delay/dynamic variants.
-    async fn run_immediate<F>(&self, input: &mut In, first_cloned: In, launch: &mut impl FnMut(In) -> F, total_attempts: u32) -> Out
-    where
-        F: Future<Output = Out>,
-    {
-        let mut futs: FuturesUnordered<Pin<Box<F>>> = FuturesUnordered::new();
-        futs.push(Box::pin(launch(first_cloned)));
-
-        for i in 1..total_attempts {
-            let attempt = Attempt::new(i, i == total_attempts.saturating_sub(1));
-            let args = CloneArgs { attempt };
-            if let Some(cloned) = self.clone_input.call(input, args) {
-                self.invoke_on_hedge(attempt);
-                self.emit_telemetry(i);
-                futs.push(Box::pin(launch(cloned)));
-            }
-        }
-
-        self.drain_for_first_acceptable(&mut futs).await
     }
 
     fn is_recoverable(&self, out: &Out) -> bool {
@@ -170,19 +144,6 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    async fn drain_for_first_acceptable<F>(&self, futs: &mut FuturesUnordered<F>) -> Out
-    where
-        F: Future<Output = Out>,
-    {
-        let mut last_result = None;
-        while let Some(out) = futs.next().await {
-            if !self.is_recoverable(&out) {
-                return out;
-            }
-            last_result = Some(out);
-        }
-        last_result.expect("at least one attempt was launched")
-    }
 
     async fn run_delay_loop<F>(
         &self,

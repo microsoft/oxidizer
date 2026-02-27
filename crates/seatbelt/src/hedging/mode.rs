@@ -88,6 +88,7 @@ impl HedgingMode {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn is_immediate(&self) -> bool {
         matches!(self.inner, HedgingModeInner::Immediate)
     }
