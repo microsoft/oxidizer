@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(feature = "memory")]
-
 //! Integration tests for `CacheWrapper` public API (through Cache).
+
+#![cfg(feature = "memory")]
 
 use cachelon::{Cache, CacheEntry, Error};
 use std::time::Duration;

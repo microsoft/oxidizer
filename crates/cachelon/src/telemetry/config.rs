@@ -103,9 +103,7 @@ impl TelemetryConfig {
         #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
         {
             _ = self;
-            CacheTelemetry {
-                inner: Default::default(),
-            }
+            CacheTelemetry { inner: Default::default() }
         }
     }
 }

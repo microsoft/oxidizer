@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(feature = "memory")]
-
 //! Integration tests for Cache builder API.
+
+#![cfg(feature = "memory")]
 
 use std::time::Duration;
 
