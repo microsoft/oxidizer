@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-02-27
+
+- ✨ Features
+
+  - custom `Debug` implementation for `Clock` and `ClockControl` ([#275](https://github.com/microsoft/oxidizer/pull/275))
+
 ## [0.2.0] - 2026-02-13
 
 - ✨ Features
