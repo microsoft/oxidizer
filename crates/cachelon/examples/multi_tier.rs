@@ -19,8 +19,8 @@ enum UserData {
 impl fmt::Display for UserData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UserData::Found(name) => write!(f, "Found({name})"),
-            UserData::NotFound => write!(f, "NotFound"),
+            Self::Found(name) => write!(f, "Found({name})"),
+            Self::NotFound => write!(f, "NotFound"),
         }
     }
 }
