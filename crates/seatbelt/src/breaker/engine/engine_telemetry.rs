@@ -181,7 +181,6 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[cfg_attr(miri, ignore)]
 mod tests {
     use std::time::Instant;
 
@@ -193,6 +192,7 @@ mod tests {
     use crate::testing::MetricTester;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn enter_rejected_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Rejected,
@@ -214,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn exit_probe_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Accepted {
@@ -238,6 +239,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn circuit_closed_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Accepted {
@@ -261,6 +263,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn circuit_opened_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Accepted {

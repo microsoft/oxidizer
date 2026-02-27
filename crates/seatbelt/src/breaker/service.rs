@@ -239,7 +239,6 @@ impl<In, Out> BreakerShared<In, Out> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[cfg_attr(miri, ignore)]
 mod tests {
     use std::future::poll_fn;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -253,6 +252,7 @@ mod tests {
     use crate::testing::FailReadyService;
     use crate::{RecoveryInfo, ResilienceContext, Set};
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
@@ -266,6 +266,7 @@ mod tests {
         assert!(breaker.shared.enable_if.call(&"str".to_string()));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn before_execute_accepted() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -287,6 +288,7 @@ mod tests {
         assert_eq!(result, ("test".to_string(), ExecutionMode::Normal));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn before_execute_accepted_with_probing() {
         let probing_called = Arc::new(AtomicBool::new(false));
@@ -315,6 +317,7 @@ mod tests {
         assert!(probing_called_clone.load(std::sync::atomic::Ordering::SeqCst));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn before_execute_rejected() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -331,6 +334,7 @@ mod tests {
         assert_eq!(result, "rejected");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_unchanged() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -351,6 +355,7 @@ mod tests {
             .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_reopened() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -371,6 +376,7 @@ mod tests {
             .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_opened() {
         let opened_called = Arc::new(AtomicBool::new(false));
@@ -397,6 +403,7 @@ mod tests {
         assert!(opened_called_clone.load(Ordering::SeqCst));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_closed() {
         let closed_called = Arc::new(AtomicBool::new(false));
@@ -426,6 +433,7 @@ mod tests {
         assert!(closed_called_clone.load(Ordering::SeqCst));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn breaker_emits_logs() {
         use tracing_subscriber::util::SubscriberInitExt;
@@ -491,6 +499,7 @@ mod tests {
             .rejected_input(|_, _| "circuit is open".to_string())
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn breaker_future_debug_contains_type_name() {
         let future = BreakerFuture::<String> {
@@ -502,6 +511,7 @@ mod tests {
         assert!(debug_output.contains("BreakerFuture"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn poll_ready_propagates_inner_error() {
         let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
