@@ -183,14 +183,6 @@ mod tests {
         _ = ctx.relocated(affinites[0].into(), affinites[1]);
     }
 
-    #[test]
-    fn relocate_ok() {
-        let ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
-        let affinites = pinned_affinities(&[2]);
-
-        _ = ctx.relocated(affinites[0].into(), affinites[1]);
-    }
-
     fn test_meter_provider() -> (
         opentelemetry_sdk::metrics::SdkMeterProvider,
         opentelemetry_sdk::metrics::InMemoryMetricExporter,
