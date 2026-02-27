@@ -324,7 +324,6 @@ where
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;
@@ -339,6 +338,7 @@ mod tests {
     use crate::{RecoveryInfo, ResilienceContext};
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
         let layer: HedgingLayer<String, String, NotSet, NotSet> = Hedging::layer("test_hedging", &context);
@@ -356,6 +356,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore)]
     async fn hedging_emits_metrics() {
         let tester = MetricTester::new();
         let context = ResilienceContext::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
@@ -383,6 +384,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore)]
     async fn hedging_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
 
@@ -410,6 +412,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn hedging_future_debug_contains_struct_name() {
         let future = HedgingFuture::<String> {
             inner: Box::pin(async { "test".to_string() }),
@@ -419,6 +422,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore)]
     async fn poll_ready_propagates_inner_error() {
         let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
         let layer = Hedging::layer("test_hedging", &context)
@@ -433,6 +437,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn execute_future_size_is_bounded() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen());
         let service = Hedging::layer("bench", &context)
