@@ -3,10 +3,8 @@
 
 use std::borrow::Cow;
 
-use thread_aware::{
-    ThreadAware,
-    affinity::{MemoryAffinity, PinnedAffinity},
-};
+use thread_aware::ThreadAware;
+use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 use tick::Clock;
 
 pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
