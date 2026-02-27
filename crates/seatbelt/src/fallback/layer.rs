@@ -292,10 +292,7 @@ mod tests {
             called_clone.store(true, Ordering::SeqCst);
         });
 
-        layer
-            .after_fallback
-            .unwrap()
-            .call(&mut "output".to_string(), AfterFallbackArgs {});
+        layer.after_fallback.unwrap().call(&mut "output".to_string(), AfterFallbackArgs {});
 
         assert!(called.load(Ordering::SeqCst));
     }
@@ -332,8 +329,7 @@ mod tests {
     #[test]
     fn fallback_output_ok() {
         let context = create_test_context();
-        let layer: FallbackLayer<_, _, NotSet, Set> =
-            FallbackLayer::new("test".into(), &context).fallback_output("fixed".to_string());
+        let layer: FallbackLayer<_, _, NotSet, Set> = FallbackLayer::new("test".into(), &context).fallback_output("fixed".to_string());
 
         assert!(layer.fallback_action.is_some());
     }
