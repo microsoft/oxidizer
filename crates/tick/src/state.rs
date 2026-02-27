@@ -41,6 +41,14 @@ impl ClockState {
         }
     }
 
+    pub(crate) fn alive(&self) -> bool {
+        match self {
+            #[cfg(any(feature = "test-util", test))]
+            Self::ClockControl(_) => true,
+            Self::System(timers) => timers.with_timers(|t| t.alive()),
+        }
+    }
+
     #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
         match self {

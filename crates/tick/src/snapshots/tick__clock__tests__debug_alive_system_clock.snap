@@ -3,7 +3,7 @@ source: crates/tick/src/clock.rs
 expression: clock
 ---
 Clock {
-    kind: "controlled",
+    kind: "system",
     timers: 0,
     alive: true,
     affinity: None,
