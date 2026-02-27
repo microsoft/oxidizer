@@ -45,11 +45,19 @@ pub(crate) struct Timers {
     /// The [`Waker`] represents the task awaiting the timer.
     wakers: BTreeMap<TimerKey, Waker>,
     last_discriminator: u32,
+
+    // Determines whether the timers are currently being advanced.
+    // This value is `false` if timers have not yet been advanced.
+    alive: bool,
 }
 
 impl Timers {
     pub fn len(&self) -> usize {
         self.wakers.len()
+    }
+
+    pub fn alive(&self) -> bool {
+        self.alive
     }
 
     #[cfg(test)]
@@ -91,6 +99,8 @@ impl Timers {
     /// information about the timers that fired and when the next timer fires.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn advance_timers(&mut self, now: Instant) -> Option<Instant> {
+        self.alive = true;
+
         // We are adding 1ns to the instant to ensure that even timers whose deadline is the current
         // instant are advanced. This is required because of how BTreeMap::split_off works; it does
         // not include keys that are equal to the split key. Adding 1ns to the value makes this work.
