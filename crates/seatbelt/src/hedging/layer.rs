@@ -254,6 +254,7 @@ impl<In, Out, S> Layer<S> for HedgingLayer<In, Out, Set, Set> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
+    use std::time::Duration;
 
     use layered::Execute;
     use tick::Clock;
@@ -353,6 +354,7 @@ mod tests {
 
         layer.on_hedge.unwrap().call(OnHedgeArgs {
             attempt: Attempt::new(1, false),
+            hedge_delay: Duration::from_secs(2),
         });
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }

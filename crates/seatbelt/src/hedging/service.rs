@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(any(feature = "tower-service", test))]
 use std::pin::Pin;
 #[cfg(any(feature = "tower-service", test))]
@@ -180,13 +181,13 @@ impl<In, Out> HedgingShared<In, Out> {
                         last_result = Some(out);
                         // Result was recoverable — launch a hedge immediately
                         // instead of waiting for the delay timer again.
-                        self.launch_hedge(futs, input, &mut hedges_launched, max_hedged, &mut launch);
+                        self.launch_hedge(futs, input, &mut hedges_launched, max_hedged, Duration::ZERO, &mut launch);
                     }
                     SelectOutcome::Result(None) => {
                         return last_result.expect("at least one attempt was launched");
                     }
                     SelectOutcome::DelayExpired => {
-                        self.launch_hedge(futs, input, &mut hedges_launched, max_hedged, &mut launch);
+                        self.launch_hedge(futs, input, &mut hedges_launched, max_hedged, delay, &mut launch);
                     }
                 }
             } else {
@@ -209,6 +210,7 @@ impl<In, Out> HedgingShared<In, Out> {
         input: &mut In,
         hedges_launched: &mut u32,
         max_hedged: u32,
+        hedge_delay: Duration,
         launch: &mut impl FnMut(In) -> F,
     ) {
         *hedges_launched = hedges_launched.saturating_add(1);
@@ -216,15 +218,18 @@ impl<In, Out> HedgingShared<In, Out> {
         let args = CloneArgs { attempt };
 
         if let Some(cloned) = self.clone_input.call(input, args) {
-            self.invoke_on_hedge(attempt);
+            self.invoke_on_hedge(attempt, hedge_delay);
             self.emit_telemetry(attempt);
             futs.push(launch(cloned));
         }
     }
 
-    fn invoke_on_hedge(&self, attempt: Attempt) {
+    fn invoke_on_hedge(&self, attempt: Attempt, hedge_delay: Duration) {
         if let Some(on_hedge) = &self.on_hedge {
-            on_hedge.call(OnHedgeArgs { attempt });
+            on_hedge.call(OnHedgeArgs {
+                attempt,
+                hedge_delay,
+            });
         }
     }
 

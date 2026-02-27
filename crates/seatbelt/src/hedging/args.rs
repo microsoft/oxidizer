@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::time::Duration;
+
 use tick::Clock;
 
 use crate::Attempt;
@@ -45,6 +47,7 @@ impl RecoveryArgs<'_> {
 #[derive(Debug)]
 pub struct OnHedgeArgs {
     pub(super) attempt: Attempt,
+    pub(super) hedge_delay: Duration,
 }
 
 impl OnHedgeArgs {
@@ -54,6 +57,15 @@ impl OnHedgeArgs {
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
+    }
+
+    /// Returns the delay that was waited before this hedge was launched.
+    ///
+    /// For [`HedgingMode::immediate`][super::HedgingMode::immediate], this is always
+    /// [`Duration::ZERO`].
+    #[must_use]
+    pub fn hedge_delay(&self) -> Duration {
+        self.hedge_delay
     }
 }
 
@@ -100,8 +112,10 @@ mod tests {
     fn on_hedge_args() {
         let args = OnHedgeArgs {
             attempt: Attempt::new(1, false),
+            hedge_delay: Duration::from_millis(200),
         };
         assert_eq!(args.attempt().index(), 1);
+        assert_eq!(args.hedge_delay(), Duration::from_millis(200));
     }
 
     #[test]
