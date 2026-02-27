@@ -5,15 +5,15 @@ use tick::Clock;
 
 use crate::Attempt;
 
-/// Arguments for the [`try_clone_with`][super::HedgingLayer::try_clone_with] callback function.
+/// Arguments for the [`clone_input_with`][super::HedgingLayer::clone_input_with] callback function.
 ///
 /// Provides context for input cloning operations during hedging.
 #[derive(Debug)]
-pub struct TryCloneArgs {
+pub struct CloneArgs {
     pub(super) attempt: Attempt,
 }
 
-impl TryCloneArgs {
+impl CloneArgs {
     /// Returns the current attempt information.
     ///
     /// Index 0 is the original request, 1 is the first hedge, etc.
@@ -81,8 +81,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn try_clone_args() {
-        let args = TryCloneArgs {
+    fn clone_args() {
+        let args = CloneArgs {
             attempt: Attempt::new(2, true),
         };
         assert_eq!(args.attempt().index(), 2);

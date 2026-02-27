@@ -12,7 +12,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use layered::Service;
 use tick::Clock;
 
-use super::args::{OnHedgeArgs, RecoveryArgs, TryCloneArgs};
+use super::args::{CloneArgs, OnHedgeArgs, RecoveryArgs};
 use super::callbacks::*;
 use super::mode::HedgingMode;
 use crate::Attempt;
@@ -43,7 +43,7 @@ pub(crate) struct HedgingShared<In, Out> {
     pub(crate) clock: Clock,
     pub(crate) max_hedged_attempts: u32,
     pub(crate) hedging_mode: HedgingMode,
-    pub(crate) try_clone: TryClone<In>,
+    pub(crate) clone_input: CloneInput<In>,
     pub(crate) should_recover: ShouldRecover<Out>,
     pub(crate) on_hedge: Option<OnHedge>,
     pub(crate) enable_if: EnableIf<In>,
@@ -118,10 +118,10 @@ impl<In, Out> HedgingShared<In, Out> {
             return launch(input).await;
         }
 
-        let args = TryCloneArgs {
+        let args = CloneArgs {
             attempt: Attempt::new(0, total_attempts == 1),
         };
-        let Some(first_cloned) = self.try_clone.call(&mut input, args) else {
+        let Some(first_cloned) = self.clone_input.call(&mut input, args) else {
             return launch(input).await;
         };
 
@@ -146,10 +146,10 @@ impl<In, Out> HedgingShared<In, Out> {
 
         for i in 1..total_attempts {
             let attempt = Attempt::new(i, i == total_attempts.saturating_sub(1));
-            let args = TryCloneArgs { attempt };
+            let args = CloneArgs { attempt };
             self.invoke_on_hedge(attempt);
             self.emit_telemetry(i);
-            if let Some(cloned) = self.try_clone.call(input, args) {
+            if let Some(cloned) = self.clone_input.call(input, args) {
                 futs.push(Box::pin(launch(cloned)));
             }
         }
@@ -236,12 +236,12 @@ impl<In, Out> HedgingShared<In, Out> {
     ) {
         *hedges_launched = hedges_launched.saturating_add(1);
         let attempt = Attempt::new(*hedges_launched, *hedges_launched >= max_hedged);
-        let args = TryCloneArgs { attempt };
+        let args = CloneArgs { attempt };
 
         self.invoke_on_hedge(attempt);
         self.emit_telemetry(*hedges_launched);
 
-        if let Some(cloned) = self.try_clone.call(input, args) {
+        if let Some(cloned) = self.clone_input.call(input, args) {
             futs.push(launch(cloned));
         }
     }
@@ -366,7 +366,7 @@ mod tests {
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
         let layer: HedgingLayer<String, String, NotSet, NotSet> = Hedging::layer("test_hedging", &context);
-        let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).try_clone();
+        let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
         let hedging = layer.layer(Execute::new(|v: String| async move { v }));
 
@@ -386,7 +386,7 @@ mod tests {
             .use_metrics(tester.meter_provider());
 
         let service = Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_input, _args| RecoveryInfo::retry())
             .max_hedged_attempts(1)
             .hedging_mode(HedgingMode::immediate())
@@ -418,7 +418,7 @@ mod tests {
         let context = ResilienceContext::<String, String>::new(clock).name("log_test_pipeline").use_logs();
 
         let service = Hedging::layer("log_test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_, _| RecoveryInfo::retry())
             .max_hedged_attempts(1)
             .hedging_mode(HedgingMode::immediate())
@@ -446,7 +446,7 @@ mod tests {
         let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
         let layer = Hedging::layer("test_hedging", &context)
             .recovery_with(|_, _| RecoveryInfo::never())
-            .try_clone();
+            .clone_input();
 
         let mut service = layer.layer(FailReadyService);
 

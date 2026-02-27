@@ -4,10 +4,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::args::{HedgingDelayArgs, OnHedgeArgs, RecoveryArgs, TryCloneArgs};
+use super::args::{CloneArgs, HedgingDelayArgs, OnHedgeArgs, RecoveryArgs};
 use crate::RecoveryInfo;
 
-crate::utils::define_fn_wrapper!(TryClone<In>(Fn(&mut In, TryCloneArgs) -> Option<In>));
+crate::utils::define_fn_wrapper!(CloneInput<In>(Fn(&mut In, CloneArgs) -> Option<In>));
 crate::utils::define_fn_wrapper!(ShouldRecover<Out>(Fn(&Out, RecoveryArgs) -> RecoveryInfo));
 
 // Defined manually because the macro requires generic type parameters.

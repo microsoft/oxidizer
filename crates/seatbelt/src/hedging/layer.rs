@@ -20,21 +20,21 @@ use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 /// type-state pattern to enforce that required properties are configured before the hedging
 /// middleware can be built:
 ///
-/// - [`try_clone`][HedgingLayer::try_clone]: Required to specify how to clone inputs for hedge attempts
+/// - [`clone_input`][HedgingLayer::clone_input]: Required to specify how to clone inputs for hedge attempts
 /// - [`recovery`][HedgingLayer::recovery]: Required to determine if an output is acceptable
 ///
 /// For comprehensive examples, see the [hedging module][crate::hedging] documentation.
 ///
 /// # Type State
 ///
-/// - `S1`: Tracks whether [`try_clone`][HedgingLayer::try_clone] has been set
+/// - `S1`: Tracks whether [`clone_input`][HedgingLayer::clone_input] has been set
 /// - `S2`: Tracks whether [`recovery`][HedgingLayer::recovery] has been set
 #[derive(Debug)]
 pub struct HedgingLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     max_hedged_attempts: u32,
     hedging_mode: HedgingMode,
-    try_clone: Option<TryClone<In>>,
+    clone_input: Option<CloneInput<In>>,
     should_recover: Option<ShouldRecover<Out>>,
     on_hedge: Option<OnHedge>,
     enable_if: EnableIf<In>,
@@ -49,7 +49,7 @@ impl<In, Out> HedgingLayer<In, Out, NotSet, NotSet> {
             context: context.clone(),
             max_hedged_attempts: DEFAULT_MAX_HEDGED_ATTEMPTS,
             hedging_mode: HedgingMode::default(),
-            try_clone: None,
+            clone_input: None,
             should_recover: None,
             on_hedge: None,
             enable_if: EnableIf::always(),
@@ -89,28 +89,28 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// Sets the input cloning function for hedged attempts.
     ///
     /// Called before each attempt to produce a fresh input value. The `clone_fn`
-    /// receives a mutable reference to the input and [`TryCloneArgs`] containing
+    /// receives a mutable reference to the input and [`CloneArgs`] containing
     /// context about the attempt. Return `Some(cloned_input)` to proceed, or `None`
     /// to skip that hedge attempt.
     #[must_use]
-    pub fn try_clone_with(
+    pub fn clone_input_with(
         mut self,
-        clone_fn: impl Fn(&mut In, TryCloneArgs) -> Option<In> + Send + Sync + 'static,
+        clone_fn: impl Fn(&mut In, CloneArgs) -> Option<In> + Send + Sync + 'static,
     ) -> HedgingLayer<In, Out, Set, S2> {
-        self.try_clone = Some(TryClone::new(clone_fn));
+        self.clone_input = Some(CloneInput::new(clone_fn));
         self.into_state::<Set, S2>()
     }
 
     /// Automatically sets the input cloning function for types that implement [`Clone`].
     ///
-    /// This is equivalent to calling [`try_clone_with`][HedgingLayer::try_clone_with] with
+    /// This is equivalent to calling [`clone_input_with`][HedgingLayer::clone_input_with] with
     /// `|input, _args| Some(input.clone())`.
     #[must_use]
-    pub fn try_clone(self) -> HedgingLayer<In, Out, Set, S2>
+    pub fn clone_input(self) -> HedgingLayer<In, Out, Set, S2>
     where
         In: Clone,
     {
-        self.try_clone_with(|input, _args| Some(input.clone()))
+        self.clone_input_with(|input, _args| Some(input.clone()))
     }
 
     /// Sets the recovery classification function.
@@ -187,7 +187,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
             context: self.context,
             max_hedged_attempts: self.max_hedged_attempts,
             hedging_mode: self.hedging_mode,
-            try_clone: self.try_clone,
+            clone_input: self.clone_input,
             should_recover: self.should_recover,
             on_hedge: self.on_hedge,
             enable_if: self.enable_if,
@@ -205,7 +205,7 @@ impl<In, Out, S> Layer<S> for HedgingLayer<In, Out, Set, Set> {
             clock: self.context.get_clock().clone(),
             max_hedged_attempts: self.max_hedged_attempts,
             hedging_mode: self.hedging_mode.clone(),
-            try_clone: self.try_clone.clone().expect("try_clone must be set in Ready state"),
+            clone_input: self.clone_input.clone().expect("clone_input must be set in Ready state"),
             should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
             on_hedge: self.on_hedge.clone(),
             enable_if: self.enable_if.clone(),
@@ -239,7 +239,7 @@ mod tests {
 
         assert_eq!(layer.max_hedged_attempts, 1);
         assert!(!layer.hedging_mode.is_immediate());
-        assert!(layer.try_clone.is_none());
+        assert!(layer.clone_input.is_none());
         assert!(layer.should_recover.is_none());
         assert!(layer.on_hedge.is_none());
         assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_hedging");
@@ -247,15 +247,15 @@ mod tests {
     }
 
     #[test]
-    fn try_clone_sets_correctly() {
+    fn clone_input_sets_correctly() {
         let context = create_test_context();
         let layer = HedgingLayer::new("test".into(), &context);
 
-        let layer: HedgingLayer<_, _, Set, NotSet> = layer.try_clone_with(|input, _args| Some(input.clone()));
+        let layer: HedgingLayer<_, _, Set, NotSet> = layer.clone_input_with(|input, _args| Some(input.clone()));
 
-        let result = layer.try_clone.unwrap().call(
+        let result = layer.clone_input.unwrap().call(
             &mut "test".to_string(),
-            TryCloneArgs {
+            CloneArgs {
                 attempt: Attempt::new(0, false),
             },
         );
@@ -360,7 +360,7 @@ mod tests {
 
     fn create_ready_layer() -> HedgingLayer<String, String, Set, Set> {
         HedgingLayer::new("test".into(), &create_test_context())
-            .try_clone_with(|input, _args| Some(input.clone()))
+            .clone_input_with(|input, _args| Some(input.clone()))
             .recovery_with(|output, _args| {
                 if output.contains("error") {
                     RecoveryInfo::retry()

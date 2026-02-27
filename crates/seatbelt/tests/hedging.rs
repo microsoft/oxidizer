@@ -48,7 +48,7 @@ async fn hedging_disabled_passes_through(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .disable(),
         Execute::new(move |v: String| {
@@ -76,7 +76,7 @@ async fn immediate_mode_all_run_concurrently(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|result: &Result<String, String>, _| match result {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
@@ -115,7 +115,7 @@ async fn immediate_mode_returns_first_success(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|result: &Result<String, String>, _| match result {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
@@ -147,7 +147,7 @@ async fn delay_mode_launches_hedge_after_timeout(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|result: &Result<String, String>, _| match result {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
@@ -186,7 +186,7 @@ async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|result: &Result<String, String>, _| match result {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
@@ -226,7 +226,7 @@ async fn on_hedge_callback_invoked(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .hedging_mode(HedgingMode::immediate())
             .max_hedged_attempts(2)
@@ -255,7 +255,7 @@ async fn no_hedges_configured_passes_through(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .max_hedged_attempts(0),
         Execute::new(move |v: String| {
@@ -281,7 +281,7 @@ async fn all_fail_returns_last_result(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .hedging_mode(HedgingMode::immediate())
             .max_hedged_attempts(2),
@@ -306,7 +306,7 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|result: &Result<String, String>, _| match result {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
@@ -341,7 +341,7 @@ async fn enable_if_skips_hedging(#[case] use_tower: bool) {
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
         Hedging::layer("test_hedging", &context)
-            .try_clone()
+            .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .hedging_mode(HedgingMode::immediate())
             .max_hedged_attempts(2)

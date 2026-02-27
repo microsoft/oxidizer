@@ -22,7 +22,7 @@
 //!
 //! let stack = (
 //!     Hedging::layer("hedge", &context)
-//!         .try_clone()
+//!         .clone_input()
 //!         .recovery_with(|result, _| match result {
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(_) => RecoveryInfo::retry(),
@@ -55,7 +55,7 @@
 //! The [`HedgingLayer`] uses a type state pattern to enforce that all required properties are
 //! configured before the layer can be built:
 //!
-//! - [`try_clone`][HedgingLayer::try_clone]: Required function to clone inputs for hedged attempts
+//! - [`clone_input`][HedgingLayer::clone_input]: Required function to clone inputs for hedged attempts
 //! - [`recovery`][HedgingLayer::recovery]: Required function to classify whether an output is acceptable
 //!
 //! # Thread Safety
@@ -92,7 +92,7 @@ mod service;
 mod telemetry;
 
 pub use crate::attempt::Attempt;
-pub use args::{HedgingDelayArgs, OnHedgeArgs, RecoveryArgs, TryCloneArgs};
+pub use args::{CloneArgs, HedgingDelayArgs, OnHedgeArgs, RecoveryArgs};
 pub use layer::HedgingLayer;
 pub use mode::HedgingMode;
 pub use service::Hedging;
