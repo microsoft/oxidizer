@@ -68,6 +68,7 @@
 //! |-----------|---------------|-------------|---------------|
 //! | Max hedged attempts | `1` (2 total) | Additional hedge requests beyond the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
 //! | Hedging mode | `delay(2s)` | Wait 2 seconds before each hedge | [`hedging_mode`][HedgingLayer::hedging_mode] |
+//! | Handle unavailable | `false` | Unavailable responses are returned immediately | [`handle_unavailable`][HedgingLayer::handle_unavailable] |
 //! | Enable condition | Always enabled | Hedging is applied to all requests | [`enable_if`][HedgingLayer::enable_if] |
 //!
 //! # Telemetry

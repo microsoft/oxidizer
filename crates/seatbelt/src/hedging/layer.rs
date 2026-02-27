@@ -37,6 +37,7 @@ pub struct HedgingLayer<In, Out, S1 = Set, S2 = Set> {
     clone_input: Option<CloneInput<In>>,
     should_recover: Option<ShouldRecover<Out>>,
     on_hedge: Option<OnHedge>,
+    handle_unavailable: bool,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
     _state: PhantomData<fn(In, S1, S2) -> Out>,
@@ -52,6 +53,7 @@ impl<In, Out> HedgingLayer<In, Out, NotSet, NotSet> {
             clone_input: None,
             should_recover: None,
             on_hedge: None,
+            handle_unavailable: false,
             enable_if: EnableIf::always(),
             telemetry: context.create_telemetry(name),
             _state: PhantomData,
@@ -153,6 +155,21 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         self
     }
 
+    /// Configures whether the hedging middleware should treat unavailable services as
+    /// recoverable conditions.
+    ///
+    /// When enabled, [`RecoveryInfo::unavailable()`] classifications are treated as
+    /// recoverable - the hedge will continue waiting for other in-flight requests.
+    /// When disabled (default), unavailable responses are treated as acceptable results
+    /// and returned immediately.
+    ///
+    /// **Default**: false (unavailable responses are returned immediately)
+    #[must_use]
+    pub fn handle_unavailable(mut self, enable: bool) -> Self {
+        self.handle_unavailable = enable;
+        self
+    }
+
     /// Optionally enables the hedging middleware based on a condition.
     ///
     /// When disabled, requests pass through without hedging.
@@ -190,6 +207,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
             clone_input: self.clone_input,
             should_recover: self.should_recover,
             on_hedge: self.on_hedge,
+            handle_unavailable: self.handle_unavailable,
             enable_if: self.enable_if,
             telemetry: self.telemetry,
             _state: PhantomData,
@@ -208,6 +226,7 @@ impl<In, Out, S> Layer<S> for HedgingLayer<In, Out, Set, Set> {
             clone_input: self.clone_input.clone().expect("clone_input must be set in Ready state"),
             should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
             on_hedge: self.on_hedge.clone(),
+            handle_unavailable: self.handle_unavailable,
             enable_if: self.enable_if.clone(),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),
@@ -239,6 +258,7 @@ mod tests {
 
         assert_eq!(layer.max_hedged_attempts, 1);
         assert!(!layer.hedging_mode.is_immediate());
+        assert!(!layer.handle_unavailable);
         assert!(layer.clone_input.is_none());
         assert!(layer.should_recover.is_none());
         assert!(layer.on_hedge.is_none());
@@ -338,6 +358,15 @@ mod tests {
 
         let layer = layer.enable_always();
         assert!(layer.enable_if.call(&"anything".to_string()));
+    }
+
+    #[test]
+    fn handle_unavailable_defaults_to_false() {
+        let layer = create_ready_layer();
+        assert!(!layer.handle_unavailable);
+
+        let layer = layer.handle_unavailable(true);
+        assert!(layer.handle_unavailable);
     }
 
     #[test]

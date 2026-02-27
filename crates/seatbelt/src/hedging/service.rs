@@ -46,6 +46,7 @@ pub(crate) struct HedgingShared<In, Out> {
     pub(crate) clone_input: CloneInput<In>,
     pub(crate) should_recover: ShouldRecover<Out>,
     pub(crate) on_hedge: Option<OnHedge>,
+    pub(crate) handle_unavailable: bool,
     pub(crate) enable_if: EnableIf<In>,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub(crate) telemetry: crate::utils::TelemetryHelper,
@@ -160,7 +161,11 @@ impl<In, Out> HedgingShared<In, Out> {
     fn is_recoverable(&self, out: &Out) -> bool {
         let recovery = self.should_recover.call(out, RecoveryArgs { clock: &self.clock });
 
-        matches!(recovery.kind(), RecoveryKind::Retry | RecoveryKind::Unavailable)
+        match recovery.kind() {
+            RecoveryKind::Unavailable => self.handle_unavailable,
+            RecoveryKind::Retry => true,
+            RecoveryKind::Never | RecoveryKind::Unknown | _ => false,
+        }
     }
 
     async fn drain_for_first_acceptable<F>(&self, futs: &mut FuturesUnordered<F>) -> Out
@@ -374,6 +379,7 @@ mod tests {
         assert_eq!(hedging.shared.telemetry.strategy_name.to_string(), "test_hedging");
         assert_eq!(hedging.shared.max_hedged_attempts, 1);
         assert!(!hedging.shared.hedging_mode.is_immediate());
+        assert!(!hedging.shared.handle_unavailable);
         assert!(hedging.shared.on_hedge.is_none());
         assert!(hedging.shared.enable_if.call(&"str".to_string()));
     }
