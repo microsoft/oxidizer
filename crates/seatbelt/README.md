@@ -140,19 +140,19 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4XTWg5D20iXG5-sZfM55RcnG_PRlQIWXOiaG6Oh8f0TxP2DYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjCCZHRpY2tlMC4yLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4XTWg5D20iXG5-sZfM55RcnG_PRlQIWXOiaG6Oh8f0TxP2DYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
- [__link10]: https://docs.rs/seatbelt/0.3.0/seatbelt/breaker/index.html
- [__link11]: https://docs.rs/seatbelt/0.3.0/seatbelt/timeout/index.html
- [__link12]: https://docs.rs/seatbelt/0.3.0/seatbelt/retry/index.html
- [__link13]: https://docs.rs/seatbelt/0.3.0/seatbelt/breaker/index.html
+ [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
+ [__link11]: https://docs.rs/seatbelt/0.3.1/seatbelt/timeout/index.html
+ [__link12]: https://docs.rs/seatbelt/0.3.1/seatbelt/retry/index.html
+ [__link13]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
  [__link14]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
  [__link2]: https://docs.rs/tick/0.2.0/tick/?search=Clock
  [__link3]: https://crates.io/crates/tick/0.2.0
- [__link4]: https://docs.rs/seatbelt/0.3.0/seatbelt/?search=ResilienceContext
- [__link5]: https://docs.rs/seatbelt/0.3.0/seatbelt/?search=ResilienceContext
+ [__link4]: https://docs.rs/seatbelt/0.3.1/seatbelt/?search=ResilienceContext
+ [__link5]: https://docs.rs/seatbelt/0.3.1/seatbelt/?search=ResilienceContext
  [__link6]: https://docs.rs/recoverable/0.1.0/recoverable/?search=RecoveryInfo
  [__link7]: https://docs.rs/recoverable/0.1.0/recoverable/?search=Recovery
- [__link8]: https://docs.rs/seatbelt/0.3.0/seatbelt/timeout/index.html
- [__link9]: https://docs.rs/seatbelt/0.3.0/seatbelt/retry/index.html
+ [__link8]: https://docs.rs/seatbelt/0.3.1/seatbelt/timeout/index.html
+ [__link9]: https://docs.rs/seatbelt/0.3.1/seatbelt/retry/index.html
