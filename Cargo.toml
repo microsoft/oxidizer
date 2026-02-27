@@ -51,7 +51,6 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 # external dependencies
 ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
-anyhow = { version = "1.0.100", default-features = false }
 async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
@@ -109,7 +108,6 @@ trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
-xutex = { version = "0.2.0", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]
