@@ -130,5 +130,10 @@ name = "breaker"
 harness = false
 required-features = ["breaker"]
 
+[[bench]]
+name = "hedging"
+harness = false
+required-features = ["hedging"]
+
 [lints]
 workspace = true
