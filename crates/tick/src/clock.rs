@@ -167,7 +167,8 @@ use crate::timers::TimerKey;
 /// ```
 #[derive(Clone)]
 pub struct Clock {
-    pub(crate) state: ClockState,
+    state: ClockState,
+    affinity: Option<PinnedAffinity>,
 }
 
 impl std::fmt::Debug for Clock {
@@ -178,10 +179,17 @@ impl std::fmt::Debug for Clock {
             ClockState::System(_) => "system",
         };
 
+        let (proc, mem): (&dyn std::fmt::Debug, &dyn std::fmt::Debug) = match &self.affinity {
+            Some(a) => (&a.processor_index(), &a.memory_region_index()),
+            None => (&"None", &"None"),
+        };
+
         f.debug_struct("Clock")
             .field("kind", &kind)
             .field("timers", &self.state.timers_len())
             .field("alive", &self.state.alive())
+            .field("processor_affinity", proc)
+            .field("memory_affinity", mem)
             .finish_non_exhaustive()
     }
 }
@@ -190,6 +198,7 @@ impl ThreadAware for Clock {
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         Self {
             state: self.state.relocated(source, destination),
+            affinity: Some(destination),
         }
     }
 }
@@ -205,6 +214,10 @@ impl Clock {
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn new_tokio() -> Self {
         Self::new_tokio_core().0
+    }
+
+    pub(crate) fn new(state: ClockState) -> Self {
+        Self { state, affinity: None }
     }
 
     #[cfg(any(feature = "tokio", test))]
@@ -233,9 +246,7 @@ impl Clock {
     /// Used for testing. For this clock, timers do not advance.
     #[cfg(test)]
     pub(super) fn new_system_frozen() -> Self {
-        Self {
-            state: ClockState::new_system(),
-        }
+        Self::new(ClockState::new_system())
     }
 
     /// Creates a new frozen clock.
@@ -740,9 +751,19 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn debug_alive_system_clock() {
+        let _affinites = pinned_affinities(&[2]);
         let clock = Clock::new_tokio();
 
         clock.delay(Duration::from_millis(1)).await;
+
+        insta::assert_debug_snapshot!(clock);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn debug_alive_system_clock_relocated() {
+        let affinites = pinned_affinities(&[2]);
+        let clock = Clock::new_system_frozen().relocated(affinites[0].into(), affinites[1]);
 
         insta::assert_debug_snapshot!(clock);
     }

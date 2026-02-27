@@ -6,5 +6,7 @@ Clock {
     kind: "controlled",
     timers: 2,
     alive: true,
+    processor_affinity: "None",
+    memory_affinity: "None",
     ..
 }

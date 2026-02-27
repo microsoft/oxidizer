@@ -6,5 +6,7 @@ Clock {
     kind: "system",
     timers: 0,
     alive: true,
+    processor_affinity: "None",
+    memory_affinity: "None",
     ..
 }
