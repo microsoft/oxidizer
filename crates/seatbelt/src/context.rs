@@ -156,7 +156,6 @@ mod tests {
         assert!(dump.contains('3'));
     }
 
-    #[cfg_attr(miri, ignore)]
     fn test_meter_provider() -> (
         opentelemetry_sdk::metrics::SdkMeterProvider,
         opentelemetry_sdk::metrics::InMemoryMetricExporter,
