@@ -128,6 +128,8 @@ mod tests {
 
     use std::fmt::Debug;
 
+    use thread_aware::affinity::pinned_affinities;
+
     use super::*;
 
     static_assertions::assert_impl_all!(ResilienceContext<(), ()>: Send, Sync, ThreadAware, Debug, Clone);
@@ -171,6 +173,14 @@ mod tests {
         assert!(dump.contains("resilience.event"));
         // Basic sanity that total of 3 was recorded somewhere in debug output.
         assert!(dump.contains('3'));
+    }
+
+    #[test]
+    fn relocate_ok() {
+        let ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
+        let affinites = pinned_affinities(&[2]);
+
+        _ = ctx.relocated(affinites[0].into(), affinites[1].into());
     }
 
     #[cfg(not(miri))]
