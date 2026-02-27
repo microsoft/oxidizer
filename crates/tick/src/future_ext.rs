@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(timeout_error.to_string(), "future timed out");
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn timeout() {
         let clock = Clock::new_tokio();
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(error.to_string(), "future timed out");
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn timeout_happy_path() {
         let clock = Clock::new_tokio();

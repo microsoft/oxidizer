@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))] // Miri runtime scales with memory access size, so this takes forever.
+    #[cfg_attr(miri, ignore)] // Miri runtime scales with memory access size, so this takes forever.
     fn large_content_survives_trip() {
         const SIZE_10MB: usize = 10 * 1024 * 1024;
 
@@ -536,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))] // Miri runtime scales with memory access size, so this takes forever.
+    #[cfg_attr(miri, ignore)] // Miri runtime scales with memory access size, so this takes forever.
     fn two_large_views_different_patterns() {
         const SIZE_10MB: usize = 10 * 1024 * 1024;
 

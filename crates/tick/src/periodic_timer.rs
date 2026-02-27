@@ -177,7 +177,7 @@ mod tests {
         static_assertions::assert_impl_all!(PeriodicTimer: Send, Sync);
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn next_ensure_awaited() {
         use futures::StreamExt;
@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(timer.current_timer, None);
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ready_without_advancing_timers_ensure_timer_unregistered() {
         let clock = Clock::new_tokio();

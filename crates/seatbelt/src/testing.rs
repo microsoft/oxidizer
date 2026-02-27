@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(miri, expect(dead_code, reason = "too much noise to satisfy Miri's expectations"))]
-
 use std::io::Write;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

@@ -503,7 +503,7 @@ mod tests {
         static_assertions::assert_impl_all!(Clock: Send, Sync, AsRef<Clock>);
     }
 
-    #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.
+    #[cfg_attr(miri, ignore)] // Miri is not compatible with FFI calls this needs to make.
     #[test]
     fn test_now() {
         let now = std::time::SystemTime::now();
@@ -538,7 +538,7 @@ mod tests {
         );
     }
 
-    #[cfg(not(miri))] // Miri is not compatible with FFI calls this needs to make.
+    #[cfg_attr(miri, ignore)] // Miri is not compatible with FFI calls this needs to make.
     #[test]
     fn test_system_time() {
         let now = std::time::SystemTime::now();
@@ -561,14 +561,14 @@ mod tests {
         assert_eq!(clock.system_time(), control.system_time());
     }
 
-    #[cfg(not(miri))] // The logic we call talks to the real OS, which Miri cannot do.
+    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
     #[tokio::test]
     async fn tokio_ensure_timers_advancing() {
         let clock = Clock::new_tokio();
         clock.delay(Duration::from_millis(15)).await;
     }
 
-    #[cfg(not(miri))] // The logic we call talks to the real OS, which Miri cannot do.
+    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
     #[tokio::test]
     async fn tokio_ensure_future_finished_when_clock_dropped() {
         let (clock, handle) = Clock::new_tokio_core();
