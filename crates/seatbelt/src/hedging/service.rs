@@ -22,7 +22,7 @@ use crate::{NotSet, RecoveryKind};
 
 /// Applies hedging logic to service execution for tail-latency reduction.
 ///
-/// `Hedging` wraps an inner [`Service`] and launches speculative concurrent requests
+/// `Hedging` wraps an inner [`Service`] and launches additional concurrent requests
 /// to reduce the impact of slow responses. The first acceptable result is returned
 /// and remaining in-flight requests are cancelled.
 ///

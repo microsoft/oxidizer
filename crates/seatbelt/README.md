@@ -89,7 +89,7 @@ for each module for details on how to use them.
 
 * [`timeout`][__link8] - Middleware that cancels long-running operations.
 * [`retry`][__link9] - Middleware that automatically retries failed operations.
-* [`hedging`][__link10] - Middleware that reduces tail latency via speculative execution.
+* [`hedging`][__link10] - Middleware that reduces tail latency via additional concurrent execution.
 * [`breaker`][__link11] - Middleware that prevents cascading failures.
 * [`fallback`][__link12] - Middleware that replaces invalid output with a user-defined alternative.
 
@@ -130,7 +130,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 * **`timeout`** - Enables the [`timeout`][__link13] middleware for canceling long-running operations.
 * **`retry`** - Enables the [`retry`][__link14] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`hedging`** - Enables the [`hedging`][__link15] middleware for reducing tail latency via speculative
+* **`hedging`** - Enables the [`hedging`][__link15] middleware for reducing tail latency via additional
   concurrent requests with configurable delay modes.
 * **`breaker`** - Enables the [`breaker`][__link16] middleware for preventing cascading failures.
 * **`fallback`** - Enables the [`fallback`][__link17] middleware for replacing invalid output with a
@@ -146,7 +146,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6LALTCLBk5CG0VYiiC-lXDSG7W9XiHMlbD7G7veXweEjWpmYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5xvd3XZ9bf4G20nQB6SrZQxG_hBVTsb9hzVG7FQGdAtHay_YWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/hedging/index.html

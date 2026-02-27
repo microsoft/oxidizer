@@ -108,7 +108,7 @@
 //!
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
-//! - [`hedging`] - Middleware that reduces tail latency via speculative execution.
+//! - [`hedging`] - Middleware that reduces tail latency via additional concurrent execution.
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
 //!
@@ -153,7 +153,7 @@
 //! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
-//! - **`hedging`** - Enables the [`hedging`] middleware for reducing tail latency via speculative
+//! - **`hedging`** - Enables the [`hedging`] middleware for reducing tail latency via additional
 //!   concurrent requests with configurable delay modes.
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a

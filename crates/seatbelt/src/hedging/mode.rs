@@ -11,7 +11,7 @@ use crate::Attempt;
 
 /// Defines how hedged requests are scheduled relative to each other.
 ///
-/// `HedgingMode` controls the timing of speculative hedged requests:
+/// `HedgingMode` controls the timing of additional hedged requests:
 ///
 /// - [`immediate()`][HedgingMode::immediate] launches all hedges at once
 /// - [`delay()`][HedgingMode::delay] waits a fixed duration between each hedge

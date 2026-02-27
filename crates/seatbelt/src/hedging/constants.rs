@@ -6,7 +6,7 @@ use std::time::Duration;
 /// Default maximum hedged attempts: 1.
 ///
 /// One additional hedged attempt beyond the original request, resulting in 2 total
-/// concurrent attempts. This provides basic speculative execution benefits while
+/// concurrent attempts. This provides basic hedging benefits while
 /// limiting resource overhead.
 pub(super) const DEFAULT_MAX_HEDGED_ATTEMPTS: u32 = 1;
 

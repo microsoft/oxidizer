@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Hedging resilience middleware for reducing tail latency via speculative execution.
+//! Hedging resilience middleware for reducing tail latency via additional concurrent execution.
 //!
-//! This module provides hedging capabilities that launch concurrent speculative requests
+//! This module provides hedging capabilities that launch additional concurrent requests
 //! to reduce the impact of slow responses. The primary types are [`Hedging`] and [`HedgingLayer`]:
 //!
 //! - [`Hedging`] is the middleware that wraps an inner service and launches parallel hedge requests
