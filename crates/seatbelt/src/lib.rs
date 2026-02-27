@@ -6,7 +6,14 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/favicon.ico")]
 #![cfg_attr(
-    not(all(feature = "retry", feature = "timeout", feature = "breaker", feature = "metrics", feature = "logs")),
+    not(all(
+        feature = "retry",
+        feature = "timeout",
+        feature = "breaker",
+        feature = "fallback",
+        feature = "metrics",
+        feature = "logs"
+    )),
     expect(
         rustdoc::broken_intra_doc_links,
         reason = "too ugly to make 'live links' possible with the combination of features"
@@ -101,6 +108,7 @@
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
 //! - [`breaker`] - Middleware that prevents cascading failures.
+//! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
 //!
 //! # Tower Compatibility
 //!
@@ -144,6 +152,8 @@
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
+//! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a
+//!   user-defined alternative.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 //! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
@@ -167,10 +177,13 @@ pub mod retry;
 #[cfg(any(feature = "breaker", test))]
 pub mod breaker;
 
+#[cfg(any(feature = "fallback", test))]
+pub mod fallback;
+
 #[cfg(any(feature = "retry", feature = "breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
+#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]

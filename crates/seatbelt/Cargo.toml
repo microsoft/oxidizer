@@ -36,10 +36,11 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["timeout", "retry", "breaker"]
+default = ["timeout", "retry", "breaker", "fallback"]
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
+fallback = []
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 tower-service = ["dep:tower-service"]
