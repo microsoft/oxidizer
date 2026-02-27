@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(feature = "memory")]
-#![allow(missing_docs)]
-
 //! Integration tests for fallback cache behavior.
 //!
 //! Note: Tests for internal behavior (promotion policy internals, refresh mechanism)
 //! are in the unit tests in `src/fallback.rs`.
+
+#![cfg(feature = "memory")]
 
 use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use cachelon_tier::testing::MockCache;
