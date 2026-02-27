@@ -1629,6 +1629,7 @@ dependencies = [
  "recoverable",
  "rstest",
  "static_assertions",
+ "thread_aware",
  "tick",
  "tokio",
  "tower",

@@ -49,6 +49,7 @@ recoverable = { workspace = true }
 tick = { workspace = true }
 tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
+thread_aware = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker.workspace = true
