@@ -442,3 +442,66 @@ async fn handle_unavailable_continues_hedging(#[case] use_tower: bool) {
     // so hedging continues and a successful result is returned.
     assert_eq!(result, Ok("ok:test".to_string()));
 }
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
+    // Scenario: the original request is slow and doesn't finish within the hedge delay.
+    // A hedge is launched and both return successful (non-recoverable) results, but the
+    // original finishes first and its result is accepted.
+    use tokio::sync::Notify;
+
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    // The original waits for this signal before completing.
+    let original_go = Arc::new(Notify::new());
+    let original_go_clone = Arc::clone(&original_go);
+
+    // The hedge waits for this signal (never sent) to simulate being slower.
+    let hedge_block = Arc::new(Notify::new());
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(_) => RecoveryInfo::retry(),
+            })
+            // Hedge fires after 100ms
+            .hedging_mode(HedgingMode::delay(Duration::from_millis(100)))
+            .max_hedged_attempts(1)
+            .on_hedge(move |_: OnHedgeArgs| {
+                // When the hedge is about to launch, let the original complete.
+                original_go_clone.notify_one();
+            }),
+        Execute::new(move |v: String| {
+            let count = counter_clone.fetch_add(1, Ordering::SeqCst);
+            let go = Arc::clone(&original_go);
+            let block = Arc::clone(&hedge_block);
+            async move {
+                if count == 0 {
+                    // Original: wait until the hedge is launched, then succeed.
+                    go.notified().await;
+                    Ok::<_, String>(format!("original:{v}"))
+                } else {
+                    // Hedge: also succeeds, but is slower than the original.
+                    block.notified().await;
+                    Ok(format!("hedge:{v}"))
+                }
+            }
+        }),
+    );
+
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    // The original request wins because it finishes before the hedge.
+    assert_eq!(result, Ok("original:test".to_string()));
+    // Both attempts were launched (original + 1 hedge).
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
+}
