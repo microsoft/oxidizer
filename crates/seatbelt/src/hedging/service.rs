@@ -83,8 +83,8 @@ enum SelectOutcome<Out> {
 }
 
 // IMPORTANT: The `layered::Service` impl below and the `tower_service::Service` impl further
-// down in this file contain logic-equivalent orchestration code. Any change to the `execute`
-// body MUST be mirrored in the `call` body, and vice versa. See crate-level AGENTS.md.
+// down in this file both delegate to `HedgingShared::run_hedging` for the core orchestration.
+// Only the "passthrough" and "launch" mechanics differ between the two.
 impl<In, Out: Send, S> Service<In> for Hedging<In, Out, S>
 where
     In: Send,
@@ -98,49 +98,55 @@ where
             return self.inner.execute(input).await;
         }
 
-        let max_hedged = self.shared.max_hedged_attempts;
-        let total_attempts = max_hedged.saturating_add(1);
-
-        // If no hedges configured, pass through directly.
-        if max_hedged == 0 {
-            return self.inner.execute(input).await;
+        match self.shared.run_hedging(&mut input, |cloned| self.inner.execute(cloned)).await {
+            Some(out) => out,
+            None => self.inner.execute(input).await,
         }
-
-        let mut futs = FuturesUnordered::new();
-
-        // Clone input for first attempt; if clone fails, fall back to direct execution.
-        let args = TryCloneArgs {
-            attempt: Attempt::new(0, total_attempts == 1),
-        };
-        match self.shared.try_clone.call(&mut input, args) {
-            Some(cloned) => futs.push(self.inner.execute(cloned)),
-            None => return self.inner.execute(input).await,
-        }
-
-        if self.shared.hedging_mode.is_immediate() {
-            // Launch all hedges immediately.
-            for i in 1..total_attempts {
-                let args = TryCloneArgs {
-                    attempt: Attempt::new(i, i == total_attempts.saturating_sub(1)),
-                };
-                self.shared.invoke_on_hedge(i.saturating_sub(1));
-                self.shared.emit_telemetry(i);
-                if let Some(cloned) = self.shared.try_clone.call(&mut input, args) {
-                    futs.push(self.inner.execute(cloned));
-                }
-            }
-
-            return self.shared.drain_for_first_acceptable(&mut futs).await;
-        }
-
-        // Delay / Dynamic mode: race between results and hedge timers.
-        self.shared
-            .run_delay_loop(&mut futs, &mut input, max_hedged, |cloned| self.inner.execute(cloned))
-            .await
     }
 }
 
 impl<In, Out> HedgingShared<In, Out> {
+    /// Core hedging orchestration shared by both layered and tower service impls.
+    ///
+    /// Returns `Some(out)` when hedging produced a result, or `None` when the caller
+    /// should fall through to a direct passthrough call (no hedges configured or
+    /// input clone failed).
+    async fn run_hedging<F>(&self, input: &mut In, mut launch: impl FnMut(In) -> F) -> Option<Out>
+    where
+        F: Future<Output = Out>,
+    {
+        let max_hedged = self.max_hedged_attempts;
+        let total_attempts = max_hedged.saturating_add(1);
+
+        if max_hedged == 0 {
+            return None;
+        }
+
+        let mut futs = FuturesUnordered::new();
+
+        let args = TryCloneArgs {
+            attempt: Attempt::new(0, total_attempts == 1),
+        };
+        let cloned = self.try_clone.call(input, args)?;
+        futs.push(launch(cloned));
+
+        if self.hedging_mode.is_immediate() {
+            for i in 1..total_attempts {
+                let args = TryCloneArgs {
+                    attempt: Attempt::new(i, i == total_attempts.saturating_sub(1)),
+                };
+                self.invoke_on_hedge(i.saturating_sub(1));
+                self.emit_telemetry(i);
+                if let Some(cloned) = self.try_clone.call(input, args) {
+                    futs.push(launch(cloned));
+                }
+            }
+            return Some(self.drain_for_first_acceptable(&mut futs).await);
+        }
+
+        Some(self.run_delay_loop(&mut futs, input, max_hedged, launch).await)
+    }
+
     fn is_recoverable(&self, out: &Out) -> bool {
         let recovery = self.should_recover.call(out, RecoveryArgs { clock: &self.clock });
 
@@ -300,9 +306,8 @@ impl<Out> Future for HedgingFuture<Out> {
     }
 }
 
-// IMPORTANT: The `tower_service::Service` impl below and the `layered::Service` impl above
-// contain logic-equivalent orchestration code. Any change to the `call` body MUST be mirrored
-// in the `execute` body, and vice versa. See crate-level AGENTS.md.
+// The `tower_service::Service` impl below and the `layered::Service` impl above both
+// delegate to `HedgingShared::run_hedging` for the core orchestration.
 #[cfg(any(feature = "tower-service", test))]
 impl<Req, Res, Err, S> tower_service::Service<Req> for Hedging<Req, Result<Res, Err>, S>
 where
@@ -333,48 +338,18 @@ where
         HedgingFuture {
             inner: Box::pin(async move {
                 let mut input = req;
-                let max_hedged = shared.max_hedged_attempts;
-                let total_attempts = max_hedged.saturating_add(1);
-
-                if max_hedged == 0 {
-                    let mut svc = inner;
-                    return svc.call(input).await;
-                }
-
-                let mut futs = FuturesUnordered::new();
-
-                let args = TryCloneArgs {
-                    attempt: Attempt::new(0, total_attempts == 1),
-                };
-                if let Some(cloned) = shared.try_clone.call(&mut input, args) {
-                    let mut svc = inner.clone();
-                    futs.push(svc.call(cloned));
-                } else {
-                    let mut svc = inner;
-                    return svc.call(input).await;
-                }
-
-                if shared.hedging_mode.is_immediate() {
-                    for i in 1..total_attempts {
-                        let args = TryCloneArgs {
-                            attempt: Attempt::new(i, i == total_attempts.saturating_sub(1)),
-                        };
-                        shared.invoke_on_hedge(i.saturating_sub(1));
-                        shared.emit_telemetry(i);
-                        if let Some(cloned) = shared.try_clone.call(&mut input, args) {
-                            let mut svc = inner.clone();
-                            futs.push(svc.call(cloned));
-                        }
-                    }
-                    return shared.drain_for_first_acceptable(&mut futs).await;
-                }
-
-                shared
-                    .run_delay_loop(&mut futs, &mut input, max_hedged, |cloned| {
+                if let Some(out) = shared
+                    .run_hedging(&mut input, |cloned| {
                         let mut svc = inner.clone();
                         svc.call(cloned)
                     })
                     .await
+                {
+                    out
+                } else {
+                    let mut svc = inner;
+                    svc.call(input).await
+                }
             }),
         }
     }
