@@ -797,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn debug_ok() {
         let system = SystemTime::UNIX_EPOCH + Duration::from_secs(123);
         let control = ClockControl::new_at(system);
@@ -809,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn debug_negative_offset_ok() {
         let system = SystemTime::UNIX_EPOCH - Duration::from_secs(123);
         let control = ClockControl::new_at(system);

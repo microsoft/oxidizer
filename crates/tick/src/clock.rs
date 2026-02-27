@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn debug_system_clock() {
         let clock = Clock::new_system_frozen();
 
@@ -737,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn debug_controlled_clock() {
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn debug_clock_with_timers() {
         let control = ClockControl::new();
         let clock = control.to_clock();
