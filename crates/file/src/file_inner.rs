@@ -104,27 +104,28 @@ impl FileInner {
         write_lock(&self.file)?.seek(pos)
     }
 
-    pub async fn read_at_most_into(&mut self, len: usize, mut into: BytesBuf) -> Result<(usize, BytesBuf)> {
-        // Pre-reserve on the caller side to avoid cloning SharedMemory
-        // into the dispatch closure.
+    pub async fn read_max_into_bytebuf(&mut self, len: usize, into: &mut BytesBuf) -> Result<usize> {
         if into.remaining_capacity() < len {
             into.reserve(len - into.remaining_capacity(), &self.memory);
         }
         let file = Arc::clone(&self.file);
+        let raw = SendBufMut::new(into);
         self.dispatcher
-            .dispatch(move || {
+            .dispatch_scoped(move || {
+                // SAFETY: ScopedDispatchFuture guarantees the closure completes
+                // (or never starts) before the caller regains access to `into`.
+                let into = unsafe { raw.into_mut() };
                 let mut f = write_lock(&file)?;
-                let n = read_into_buf(&mut *f, &mut into, len)?;
-                Ok((n, into))
+                read_into_buf(&mut *f, into, len)
             })
             .await
     }
 
-    pub async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf)> {
-        self.read_at_most_into(DEFAULT_READ_SIZE, into).await
+    pub async fn read_into_bytebuf(&mut self, into: &mut BytesBuf) -> Result<usize> {
+        self.read_max_into_bytebuf(DEFAULT_READ_SIZE, into).await
     }
 
-    pub async fn read_at(&self, offset: u64, len: usize) -> Result<BytesView> {
+    pub async fn read_max_at(&self, offset: u64, len: usize) -> Result<BytesView> {
         let file = Arc::clone(&self.file);
         let mut buf = self.memory.reserve(len);
         self.dispatcher
@@ -136,7 +137,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_best_effort_at(&self, offset: u64, len: usize) -> Result<BytesView> {
+    pub async fn read_at(&self, offset: u64, len: usize) -> Result<BytesView> {
         let file = Arc::clone(&self.file);
         let mut buf = self.memory.reserve(len);
         self.dispatcher
@@ -156,17 +157,20 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_at_into(&self, offset: u64, len: usize, mut buf: BytesBuf) -> Result<(usize, BytesBuf)> {
+    pub async fn read_max_into_bytebuf_at(&self, offset: u64, len: usize, buf: &mut BytesBuf) -> Result<usize> {
         // Pre-reserve on the caller side.
         if buf.remaining_capacity() < len {
             buf.reserve(len - buf.remaining_capacity(), &self.memory);
         }
         let file = Arc::clone(&self.file);
+        let raw = SendBufMut::new(buf);
         self.dispatcher
-            .dispatch(move || {
+            .dispatch_scoped(move || {
+                // SAFETY: ScopedDispatchFuture guarantees the closure completes
+                // (or never starts) before the caller regains access to `buf`.
+                let buf = unsafe { raw.into_mut() };
                 let f = positional_lock(&file)?;
-                let n = positional_read_into_buf(&f, &mut buf, len, offset)?;
-                Ok((n, buf))
+                positional_read_into_buf(&f, buf, len, offset)
             })
             .await
     }
@@ -191,7 +195,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_slice(&mut self, buf: &mut [u8]) -> Result<usize> {
+    pub async fn read_max_into_slice(&mut self, buf: &mut [u8]) -> Result<usize> {
         let file = Arc::clone(&self.file);
         let raw = SendSliceMut::new(buf);
         self.dispatcher
@@ -205,7 +209,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_slice_best_effort(&mut self, buf: &mut [u8]) -> Result<usize> {
+    pub async fn read_into_slice(&mut self, buf: &mut [u8]) -> Result<usize> {
         let file = Arc::clone(&self.file);
         let raw = SendSliceMut::new(buf);
         self.dispatcher
@@ -227,7 +231,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_slice_exact(&mut self, buf: &mut [u8]) -> Result<()> {
+    pub async fn read_exact_into_slice(&mut self, buf: &mut [u8]) -> Result<()> {
         let file = Arc::clone(&self.file);
         let raw = SendSliceMut::new(buf);
         self.dispatcher
@@ -241,7 +245,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_slice_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+    pub async fn read_max_into_slice_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let file = Arc::clone(&self.file);
         let raw = SendSliceMut::new(buf);
         self.dispatcher
@@ -255,7 +259,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_slice_at_best_effort(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+    pub async fn read_into_slice_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
         let file = Arc::clone(&self.file);
         let raw = SendSliceMut::new(buf);
         self.dispatcher
@@ -278,7 +282,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn read_slice_at_exact(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
+    pub async fn read_exact_into_slice_at(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
         let file = Arc::clone(&self.file);
         let raw = SendSliceMut::new(buf);
         self.dispatcher
@@ -317,7 +321,7 @@ impl FileInner {
             .await
     }
 
-    pub async fn write_all_at(&self, offset: u64, mut data: BytesView) -> Result<()> {
+    pub async fn write_at(&self, offset: u64, mut data: BytesView) -> Result<()> {
         let file = Arc::clone(&self.file);
         self.dispatcher
             .dispatch(move || {
@@ -743,3 +747,33 @@ impl SendSliceMut {
 // SAFETY: Same as SendSlice — ScopedDispatchFuture guarantees the data
 // outlives the cross-thread access.
 unsafe impl Send for SendSliceMut {}
+
+/// A raw pointer to a [`BytesBuf`] that is [`Send`].
+///
+/// Same safety contract as [`SendSlice`] — the pointed-to `BytesBuf` must
+/// remain alive and exclusively owned for the duration of cross-thread access.
+struct SendBufMut {
+    ptr: *mut BytesBuf,
+}
+
+impl SendBufMut {
+    fn new(buf: &mut BytesBuf) -> Self {
+        Self {
+            ptr: std::ptr::from_mut(buf),
+        }
+    }
+
+    /// Reconstructs the original `&mut BytesBuf`.
+    ///
+    /// # Safety
+    ///
+    /// The original `BytesBuf` must still be alive and exclusively owned.
+    unsafe fn into_mut(self) -> &'static mut BytesBuf {
+        // SAFETY: caller guarantees the BytesBuf is alive and exclusively owned.
+        unsafe { &mut *self.ptr }
+    }
+}
+
+// SAFETY: Same as SendSlice — ScopedDispatchFuture guarantees the data
+// outlives the cross-thread access.
+unsafe impl Send for SendBufMut {}

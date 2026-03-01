@@ -326,8 +326,8 @@ mod read_only_file {
         dir.write_slice("ram.txt", b"hello world").await.unwrap();
         let mut f = ReadOnlyFile::open(&dir, "ram.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(32);
-        let (n, buf) = f.read_max_into_bytebuf(5, buf).await.unwrap();
+        let mut buf = mem.reserve(32);
+        let n = f.read_max_into_bytebuf(5, &mut buf).await.unwrap();
         assert_eq!(n, 5);
         assert_eq!(buf.len(), 5);
     }
@@ -338,8 +338,8 @@ mod read_only_file {
         dir.write_slice("rmi.txt", b"more data here").await.unwrap();
         let mut f = ReadOnlyFile::open(&dir, "rmi.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(128);
-        let (n, _buf) = f.read_into_bytebuf(buf).await.unwrap();
+        let mut buf = mem.reserve(128);
+        let n = f.read_into_bytebuf(&mut buf).await.unwrap();
         assert!(n > 0);
     }
 
@@ -1187,8 +1187,8 @@ mod read_only_new_api {
         dir.write_slice("riba.txt", b"ABCDEFGHIJ").await.unwrap();
         let f = ReadOnlyPositionalFile::open(&dir, "riba.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(16);
-        let (n, _buf) = f.read_into_bytebuf_at(5, buf).await.unwrap();
+        let mut buf = mem.reserve(16);
+        let n = f.read_into_bytebuf_at(5, &mut buf).await.unwrap();
         assert!(n > 0);
     }
 
@@ -1198,8 +1198,8 @@ mod read_only_new_api {
         dir.write_slice("reib.txt", b"hello world").await.unwrap();
         let mut f = ReadOnlyFile::open(&dir, "reib.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(32);
-        let buf = f.read_exact_into_bytebuf(5, buf).await.unwrap();
+        let mut buf = mem.reserve(32);
+        f.read_exact_into_bytebuf(5, &mut buf).await.unwrap();
         assert_eq!(buf.len(), 5);
     }
 
@@ -1209,8 +1209,8 @@ mod read_only_new_api {
         dir.write_slice("reibf.txt", b"hi").await.unwrap();
         let mut f = ReadOnlyFile::open(&dir, "reibf.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(32);
-        let err = f.read_exact_into_bytebuf(100, buf).await;
+        let mut buf = mem.reserve(32);
+        let err = f.read_exact_into_bytebuf(100, &mut buf).await;
         assert!(err.is_err());
     }
 
@@ -1220,8 +1220,8 @@ mod read_only_new_api {
         dir.write_slice("reiba.txt", b"0123456789").await.unwrap();
         let f = ReadOnlyPositionalFile::open(&dir, "reiba.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(32);
-        let buf = f.read_exact_into_bytebuf_at(2, 4, buf).await.unwrap();
+        let mut buf = mem.reserve(32);
+        f.read_exact_into_bytebuf_at(2, 4, &mut buf).await.unwrap();
         assert_eq!(buf.len(), 4);
     }
 
@@ -1231,8 +1231,8 @@ mod read_only_new_api {
         dir.write_slice("reibaf.txt", b"hi").await.unwrap();
         let f = ReadOnlyPositionalFile::open(&dir, "reibaf.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(32);
-        let err = f.read_exact_into_bytebuf_at(0, 100, buf).await;
+        let mut buf = mem.reserve(32);
+        let err = f.read_exact_into_bytebuf_at(0, 100, &mut buf).await;
         assert!(err.is_err());
     }
 
@@ -1565,8 +1565,8 @@ mod read_only_positional_file {
         dir.write_slice("rai.txt", b"ABCDEFGHIJ").await.unwrap();
         let f = ReadOnlyPositionalFile::open(&dir, "rai.txt").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(16);
-        let (n, buf) = f.read_max_into_bytebuf_at(2, 4, buf).await.unwrap();
+        let mut buf = mem.reserve(16);
+        let n = f.read_max_into_bytebuf_at(2, 4, &mut buf).await.unwrap();
         assert!(n > 0);
         assert!(!buf.is_empty());
     }
@@ -2013,8 +2013,8 @@ mod positional_file {
         let f = PositionalFile::create(&dir, "pfriba.txt").await.unwrap();
         f.write_slice_at(0, b"ABCDEFGHIJ").await.unwrap();
         let mem = GlobalPool::new();
-        let buf = mem.reserve(16);
-        let (n, _buf) = f.read_into_bytebuf_at(5, buf).await.unwrap();
+        let mut buf = mem.reserve(16);
+        let n = f.read_into_bytebuf_at(5, &mut buf).await.unwrap();
         assert!(n > 0);
     }
 

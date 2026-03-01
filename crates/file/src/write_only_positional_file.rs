@@ -104,7 +104,7 @@ impl WriteOnlyPositionalFile {
     ///
     /// Returns an error if the write operation fails.
     pub async fn write_at(&self, offset: u64, data: BytesView) -> Result<()> {
-        self.inner.write_all_at(offset, data).await
+        self.inner.write_at(offset, data).await
     }
 
     /// Writes a byte slice to the file at `offset`.

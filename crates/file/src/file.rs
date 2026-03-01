@@ -189,8 +189,7 @@ impl File {
         let mut buf = self.inner.memory().reserve(len);
         while buf.len() < len {
             let remaining = len - buf.len();
-            let (n, returned) = self.inner.read_at_most_into(remaining, buf).await?;
-            buf = returned;
+            let n = self.inner.read_max_into_bytebuf(remaining, &mut buf).await?;
             if n == 0 {
                 break;
             }
@@ -208,8 +207,8 @@ impl File {
     ///
     /// Returns an error if the read operation fails due to an I/O error.
     pub async fn read_max(&mut self, len: usize) -> Result<BytesView> {
-        let buf = self.inner.memory().reserve(len);
-        let (_, mut buf) = self.inner.read_at_most_into(len, buf).await?;
+        let mut buf = self.inner.memory().reserve(len);
+        let _ = self.inner.read_max_into_bytebuf(len, &mut buf).await?;
         Ok(buf.consume_all())
     }
 
@@ -226,8 +225,7 @@ impl File {
         let mut buf = self.inner.memory().reserve(len);
         while buf.len() < len {
             let remaining = len - buf.len();
-            let (n, returned) = self.inner.read_at_most_into(remaining, buf).await?;
-            buf = returned;
+            let n = self.inner.read_max_into_bytebuf(remaining, &mut buf).await?;
             if n == 0 {
                 return Err(Error::new(ErrorKind::UnexpectedEof, "failed to read exact number of bytes"));
             }
@@ -243,8 +241,8 @@ impl File {
     /// # Errors
     ///
     /// Returns an error if the read operation fails due to an I/O error.
-    pub async fn read_into_bytebuf(&mut self, buf: BytesBuf) -> Result<(usize, BytesBuf)> {
-        self.inner.read_more_into(buf).await
+    pub async fn read_into_bytebuf(&mut self, buf: &mut BytesBuf) -> Result<usize> {
+        self.inner.read_into_bytebuf(buf).await
     }
 
     /// Reads at most `len` bytes into the provided buffer in a single
@@ -255,8 +253,8 @@ impl File {
     /// # Errors
     ///
     /// Returns an error if the read operation fails due to an I/O error.
-    pub async fn read_max_into_bytebuf(&mut self, len: usize, buf: BytesBuf) -> Result<(usize, BytesBuf)> {
-        self.inner.read_at_most_into(len, buf).await
+    pub async fn read_max_into_bytebuf(&mut self, len: usize, buf: &mut BytesBuf) -> Result<usize> {
+        self.inner.read_max_into_bytebuf(len, buf).await
     }
 
     /// Reads exactly `len` bytes into the provided buffer.
@@ -268,17 +266,16 @@ impl File {
     ///
     /// Returns [`ErrorKind::UnexpectedEof`] if the file ends before `len`
     /// bytes are read, or another error on I/O failure.
-    pub async fn read_exact_into_bytebuf(&mut self, len: usize, mut buf: BytesBuf) -> Result<BytesBuf> {
+    pub async fn read_exact_into_bytebuf(&mut self, len: usize, buf: &mut BytesBuf) -> Result<()> {
         let start_len = buf.len();
         while buf.len() - start_len < len {
             let remaining = len - (buf.len() - start_len);
-            let (n, returned) = self.inner.read_at_most_into(remaining, buf).await?;
-            buf = returned;
+            let n = self.inner.read_max_into_bytebuf(remaining, buf).await?;
             if n == 0 {
                 return Err(Error::new(ErrorKind::UnexpectedEof, "failed to read exact number of bytes"));
             }
         }
-        Ok(buf)
+        Ok(())
     }
 
     /// Reads into the provided slice, making a best effort to fill it
@@ -291,7 +288,7 @@ impl File {
     ///
     /// Returns an error if a read operation fails due to an I/O error.
     pub async fn read_into_slice(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.inner.read_slice_best_effort(buf).await
+        self.inner.read_into_slice(buf).await
     }
 
     /// Reads at most `len` bytes into the provided slice in a single
@@ -306,7 +303,7 @@ impl File {
     /// Returns an error if the read operation fails due to an I/O error.
     pub async fn read_max_into_slice(&mut self, len: usize, buf: &mut [u8]) -> Result<usize> {
         assert!(len <= buf.len(), "len must not exceed buf.len()");
-        self.inner.read_slice(&mut buf[..len]).await
+        self.inner.read_max_into_slice(&mut buf[..len]).await
     }
 
     /// Fills the provided slice with exactly `buf.len()` bytes.
@@ -319,7 +316,7 @@ impl File {
     /// Returns [`ErrorKind::UnexpectedEof`] if the file ends before the
     /// slice is filled, or another error on I/O failure.
     pub async fn read_exact_into_slice(&mut self, buf: &mut [u8]) -> Result<()> {
-        self.inner.read_slice_exact(buf).await
+        self.inner.read_exact_into_slice(buf).await
     }
 
     /// Fills the provided uninitialized slice with exactly `buf.len()` bytes.
@@ -558,17 +555,19 @@ impl Memory for File {
 impl bytesbuf_io::Read for File {
     type Error = Error;
 
-    async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> core::result::Result<(usize, BytesBuf), Self::Error> {
-        Self::read_max_into_bytebuf(self, len, into).await
+    async fn read_at_most_into(&mut self, len: usize, mut into: BytesBuf) -> core::result::Result<(usize, BytesBuf), Self::Error> {
+        let n = self.inner.read_max_into_bytebuf(len, &mut into).await?;
+        Ok((n, into))
     }
 
-    async fn read_more_into(&mut self, into: BytesBuf) -> core::result::Result<(usize, BytesBuf), Self::Error> {
-        Self::read_into_bytebuf(self, into).await
+    async fn read_more_into(&mut self, mut into: BytesBuf) -> core::result::Result<(usize, BytesBuf), Self::Error> {
+        let n = self.inner.read_into_bytebuf(&mut into).await?;
+        Ok((n, into))
     }
 
     async fn read_any(&mut self) -> core::result::Result<BytesBuf, Self::Error> {
-        let buf = self.inner.memory().reserve(8192);
-        let (_, buf) = Self::read_into_bytebuf(self, buf).await?;
+        let mut buf = self.inner.memory().reserve(8192);
+        let _ = self.inner.read_into_bytebuf(&mut buf).await?;
         Ok(buf)
     }
 }

@@ -191,7 +191,7 @@ impl PositionalFile {
     ///
     /// Returns an error if a read operation fails due to an I/O error.
     pub async fn read_at(&self, offset: u64, len: usize) -> Result<BytesView> {
-        self.inner.read_best_effort_at(offset, len).await
+        self.inner.read_at(offset, len).await
     }
 
     /// Reads at most `len` bytes at `offset` in a single operation.
@@ -203,7 +203,7 @@ impl PositionalFile {
     ///
     /// Returns an error if the read operation fails due to an I/O error.
     pub async fn read_max_at(&self, offset: u64, len: usize) -> Result<BytesView> {
-        self.inner.read_at(offset, len).await
+        self.inner.read_max_at(offset, len).await
     }
 
     /// Reads exactly `len` bytes at `offset`.
@@ -228,13 +228,13 @@ impl PositionalFile {
     /// # Errors
     ///
     /// Returns an error if the read operation fails due to an I/O error.
-    pub async fn read_into_bytebuf_at(&self, offset: u64, buf: BytesBuf) -> Result<(usize, BytesBuf)> {
+    pub async fn read_into_bytebuf_at(&self, offset: u64, buf: &mut BytesBuf) -> Result<usize> {
         let len = if buf.remaining_capacity() > 0 {
             buf.remaining_capacity()
         } else {
             8192
         };
-        self.inner.read_at_into(offset, len, buf).await
+        self.inner.read_max_into_bytebuf_at(offset, len, buf).await
     }
 
     /// Reads at most `len` bytes at `offset` into the provided buffer in a
@@ -245,8 +245,8 @@ impl PositionalFile {
     /// # Errors
     ///
     /// Returns an error if the read operation fails due to an I/O error.
-    pub async fn read_max_into_bytebuf_at(&self, offset: u64, len: usize, buf: BytesBuf) -> Result<(usize, BytesBuf)> {
-        self.inner.read_at_into(offset, len, buf).await
+    pub async fn read_max_into_bytebuf_at(&self, offset: u64, len: usize, buf: &mut BytesBuf) -> Result<usize> {
+        self.inner.read_max_into_bytebuf_at(offset, len, buf).await
     }
 
     /// Reads exactly `len` bytes at `offset` into the provided buffer.
@@ -258,19 +258,18 @@ impl PositionalFile {
     ///
     /// Returns [`ErrorKind::UnexpectedEof`] if the file ends before `len`
     /// bytes are read, or another error on I/O failure.
-    pub async fn read_exact_into_bytebuf_at(&self, offset: u64, len: usize, mut buf: BytesBuf) -> Result<BytesBuf> {
+    pub async fn read_exact_into_bytebuf_at(&self, offset: u64, len: usize, buf: &mut BytesBuf) -> Result<()> {
         let start_len = buf.len();
         let mut current_offset = offset;
         while buf.len() - start_len < len {
             let remaining = len - (buf.len() - start_len);
-            let (n, returned) = self.inner.read_at_into(current_offset, remaining, buf).await?;
-            buf = returned;
+            let n = self.inner.read_max_into_bytebuf_at(current_offset, remaining, buf).await?;
             if n == 0 {
                 return Err(Error::new(ErrorKind::UnexpectedEof, "failed to read exact number of bytes"));
             }
             current_offset = offset.saturating_add((buf.len() - start_len) as u64);
         }
-        Ok(buf)
+        Ok(())
     }
 
     /// Reads into the provided slice at `offset`, making a best effort to
@@ -283,7 +282,7 @@ impl PositionalFile {
     ///
     /// Returns an error if a read operation fails due to an I/O error.
     pub async fn read_into_slice_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        self.inner.read_slice_at_best_effort(offset, buf).await
+        self.inner.read_into_slice_at(offset, buf).await
     }
 
     /// Reads at most `len` bytes at `offset` into the provided slice in a
@@ -298,7 +297,7 @@ impl PositionalFile {
     /// Returns an error if the read operation fails due to an I/O error.
     pub async fn read_max_into_slice_at(&self, offset: u64, len: usize, buf: &mut [u8]) -> Result<usize> {
         assert!(len <= buf.len(), "len must not exceed buf.len()");
-        self.inner.read_slice_at(offset, &mut buf[..len]).await
+        self.inner.read_max_into_slice_at(offset, &mut buf[..len]).await
     }
 
     /// Fills the provided slice with exactly `buf.len()` bytes starting at
@@ -312,7 +311,7 @@ impl PositionalFile {
     /// Returns [`ErrorKind::UnexpectedEof`] if the file ends before the
     /// slice is filled, or another error on I/O failure.
     pub async fn read_exact_into_slice_at(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
-        self.inner.read_slice_at_exact(offset, buf).await
+        self.inner.read_exact_into_slice_at(offset, buf).await
     }
 
     /// Fills the provided uninitialized slice with exactly `buf.len()` bytes
@@ -343,7 +342,7 @@ impl PositionalFile {
     ///
     /// Returns an error if the write operation fails.
     pub async fn write_at(&self, offset: u64, data: BytesView) -> Result<()> {
-        self.inner.write_all_at(offset, data).await
+        self.inner.write_at(offset, data).await
     }
 
     /// Writes a byte slice to the file at `offset`.

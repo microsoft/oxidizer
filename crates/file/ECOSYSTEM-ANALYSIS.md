@@ -5,348 +5,553 @@ file I/O libraries: **`tokio::fs`**, **`async-fs`** (smol-rs), and **`async_file
 
 ---
 
-## 1. Architecture & Threading Model
+## 1. Overview
 
-| Aspect                 | `file` (oxidizer)                                                            | `tokio::fs`                                              | `async-fs` (smol-rs)                                        | `async_file`                              |
-|------------------------|------------------------------------------------------------------------------|----------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------|
-| **Blocking strategy**  | Dedicated per-`Directory` thread pool (1–4 threads, auto-scaling)            | Global `spawn_blocking` pool (up to 512 threads)         | `blocking` crate shared pool                                | io_uring (Linux); platform-native AIO     |
-| **Thread pool scope**  | Scoped per `Root::bind` — each directory tree gets its own `Dispatcher`      | Runtime-global; shared with all `spawn_blocking` callers | Process-global; shared with all `blocking::unblock` callers | Kernel-managed submission queues          |
-| **Dispatch mechanism** | `flume` channel + `async_task` crate; tasks are polled via standard `Future` | Tokio's internal `spawn_blocking` → `JoinHandle`         | `blocking::Unblock` wrapper using pipe-based async bridge   | Ring buffer submission (io_uring SQE/CQE) |
-| **Runtime coupling**   | **None** — runtime-agnostic; works with tokio, smol, or any executor         | Requires tokio runtime                                   | Requires smol-compatible executor (or adapters)             | Linux-only; custom event loop             |
+### `file` crate (oxidizer)
 
-### Key Architectural Differences
+A zero-copy asynchronous filesystem API built around capability-based access control.
+All operations are scoped to a `Directory` capability obtained via `Root::bind`, with
+paths validated to prevent traversal escapes. Reads produce pooled `BytesView` values
+from the `bytesbuf` crate, enabling zero-copy data pipelines across subsystem
+boundaries. The crate provides six file types organized into seekable and positional
+families, each with read-only, write-only, and read-write variants enforced at the
+type level. A dedicated 1–4 thread pool (`Dispatcher`) per `Root::bind` bridges sync
+OS calls to async, using `flume` channels and the `async_task` crate. Runtime-agnostic:
+no dependency on tokio, smol, or any specific executor.
 
-**`file` crate**: Uses a *bounded*, dedicated thread pool (max 4 workers) per directory
-tree. Workers auto-scale based on queue depth and scale down after 10 s idle. This
-keeps the file I/O pool isolated from unrelated `spawn_blocking` work, preventing
-noisy-neighbor effects.
+### `tokio::fs`
 
-**`tokio::fs`**: Shares tokio's global blocking pool. Under heavy mixed workloads
-(e.g., CPU-intensive `spawn_blocking` tasks competing with file I/O), file operations
-may be starved. The pool can grow to 512 threads, which helps throughput but increases
-memory footprint and context-switch overhead.
+Tokio's filesystem module wraps `std::fs` operations in `spawn_blocking` calls on
+tokio's shared blocking thread pool (default limit: 512 threads). It provides a single
+`File` type that implements `AsyncRead`, `AsyncWrite`, and `AsyncSeek`. The API closely
+mirrors `std::fs` for familiarity. Tightly coupled to the tokio runtime — cannot be
+used without a tokio context. The de facto standard for async file I/O in the Rust
+ecosystem, with extensive community adoption and battle-tested production usage.
 
-**`async-fs`**: Similar to tokio but uses the `blocking` crate's auto-scaling pool.
-Simpler implementation; the `Unblock` wrapper uses an internal pipe for signaling
-readiness, adding a small per-operation overhead.
+### `async-fs` (smol-rs)
 
-**`async_file`**: The only crate in this comparison that uses true kernel async I/O
-(io_uring). This eliminates thread-pool overhead entirely on Linux ≥ 5.1. However, it
-is Linux-only and not cross-platform.
+A lightweight async filesystem wrapper from the smol ecosystem. Uses the `blocking`
+crate's auto-scaling thread pool to run `std::fs` operations off the async executor.
+Implements `futures::AsyncRead`, `AsyncWrite`, and `AsyncSeek`. Runtime-agnostic —
+works with tokio (via compat layers), smol, async-std, or any executor that polls
+standard `Future`s. Mirrors the `std::fs` API almost exactly, minimizing the learning
+curve. Minimal dependency footprint.
 
----
+### `async_file`
 
-## 2. API Design & Ergonomics
-
-### 2.1 File Opening
-
-| Feature                    | `file`                                             | `tokio::fs`                                  | `async-fs`                                   | `async_file`                   |
-|----------------------------|----------------------------------------------------|----------------------------------------------|----------------------------------------------|--------------------------------|
-| Open read-only             | `ReadOnlyFile::open(&dir, path)`                   | `File::open(path)`                           | `File::open(path)`                           | `File::open(path, priority)`   |
-| Create write-only          | `WriteOnlyFile::create(&dir, path)`                | `File::create(path)`                         | `File::create(path)`                         | `File::create(path, priority)` |
-| Open options               | `OpenOptions::new().read(true)...open(&dir, path)` | `OpenOptions::new().read(true)...open(path)` | `OpenOptions::new().read(true)...open(path)` | N/A                            |
-| **Typed file handles**     | ✅ `ReadOnlyFile`, `WriteOnlyFile`, `ReadWriteFile` | ❌ Single `File` type                         | ❌ Single `File` type                         | ❌ Single `File` type           |
-| **Capability-based paths** | ✅ All paths relative to `Directory`                | ❌ Absolute/arbitrary paths                   | ❌ Absolute/arbitrary paths                   | ❌ Absolute/arbitrary paths     |
-
-The `file` crate's **type-level access control** is a unique differentiator. A
-`ReadOnlyFile` physically cannot call `write()` — the method doesn't exist on the type.
-This is enforced at compile time, not just by OS permissions. The other three crates use
-a single `File` type where read/write errors are discovered at runtime.
-
-The **capability-based model** (`Root::bind` → `Directory` → relative paths) prevents
-path-traversal attacks by construction. Paths like `../../../etc/passwd` are rejected
-before any syscall is made. No other crate in this comparison offers this.
-
-### 2.2 Buffer Management
-
-| Feature                    | `file`                                        | `tokio::fs`                        | `async-fs`                         | `async_file`               |
-|----------------------------|-----------------------------------------------|------------------------------------|------------------------------------|----------------------------|
-| **Read output type**       | `BytesView` (pooled, ref-counted)             | `Vec<u8>` or `&mut [u8]`           | `Vec<u8>` or `&mut [u8]`           | Opaque `Data` (OS-managed) |
-| **Write input type**       | `BytesView` or `&[u8]`                        | `&[u8]`                            | `&[u8]`                            | `&[u8]` or `Data`          |
-| **Memory pooling**         | ✅ Tiered pool (1K/4K/16K/64K via `bytesbuf`)  | ❌ Allocator-managed `Vec`          | ❌ Allocator-managed `Vec`          | ✅ OS-managed buffers       |
-| **Zero-copy potential**    | ✅ Shared `BytesView` across subsystems        | ❌ Requires copy between subsystems | ❌ Requires copy between subsystems | Partial (within io_uring)  |
-| **Custom memory provider** | ✅ `_with_memory` variants on all constructors | ❌                                  | ❌                                  | ❌                          |
-
-The `file` crate's `BytesView`/`BytesBuf` system from `bytesbuf` enables a fundamentally
-different data flow. Data read from a file can be handed to a network socket (or another
-file) without any intermediate copies, *provided both endpoints share a memory provider*.
-This is impossible with `tokio::fs` or `async-fs`, where data must be copied into/out of
-`Vec<u8>` buffers at each boundary.
-
-### 2.3 Read API Richness
-
-| Method                  | `file`                             | `tokio::fs`             | `async-fs`              | `async_file`         |
-|-------------------------|------------------------------------|-------------------------|-------------------------|----------------------|
-| Read best-effort        | `read(len)` → `BytesView`          | `read(&mut buf)`        | `read(&mut buf)`        | `read(len)` → `Data` |
-| Read at most N          | `read_max(len)` → `BytesView`      | `read(&mut buf[..len])` | `read(&mut buf[..len])` | N/A                  |
-| Read exact              | `read_exact(len)` → `BytesView`    | `read_exact(&mut buf)`  | `read_exact(&mut buf)`  | N/A                  |
-| Positional read         | `read_at(offset, len)`             | ❌ (seek + read)         | ❌ (seek + read)         | ❌                    |
-| Positional read exact   | `read_exact_at(offset, len)`       | ❌                       | ❌                       | ❌                    |
-| Read into `BytesBuf`    | `read_into_bytebuf(buf)`           | N/A                     | N/A                     | N/A                  |
-| Read into `&mut [u8]`   | `read_into_slice(&mut buf)`        | ✅ (via `AsyncReadExt`)  | ✅ (via `AsyncReadExt`)  | ❌                    |
-| Read into `MaybeUninit` | `read_exact_into_uninit(&mut buf)` | ❌                       | ❌                       | ❌                    |
-| Read whole file         | `dir.read(path)`                   | `tokio::fs::read(path)` | `async_fs::read(path)`  | `file.read_all(pri)` |
-
-The `file` crate provides **three tiers of read methods** for each I/O pattern: returning
-`BytesView`, appending to `BytesBuf`, or filling a `&mut [u8]` slice. Each tier has
-streaming, positional, best-effort, at-most, and exact variants. This is significantly
-richer than any competitor.
-
-**Positional I/O** (`read_at` / `write_at`) is a standout feature. These methods use
-`pread`/`pwrite` (Unix) or `seek_read`/`seek_write` (Windows) to perform I/O at an
-arbitrary offset *without modifying the file cursor*. This enables safe concurrent reads
-from different offsets on the same file handle — impossible with the seek-then-read
-pattern used by the other crates.
-
-### 2.4 Write API
-
-| Method                 | `file`                                                  | `tokio::fs`                    | `async-fs`                    | `async_file` |
-|------------------------|---------------------------------------------------------|--------------------------------|-------------------------------|--------------|
-| Write `BytesView`      | `write(data)`                                           | N/A                            | N/A                           | N/A          |
-| Write `&[u8]`          | `write_slice(data)`                                     | `write_all(&data)`             | `write_all(&data)`            | N/A          |
-| Positional write       | `write_at(offset, data)`                                | ❌                              | ❌                             | ❌            |
-| Positional write slice | `write_slice_at(offset, data)`                          | ❌                              | ❌                             | ❌            |
-| Write whole file       | `dir.write(path, view)` / `dir.write_slice(path, data)` | `tokio::fs::write(path, data)` | `async_fs::write(path, data)` | ❌            |
+A specialized crate offering priority-based I/O scheduling with the potential for
+io_uring backends on Linux. Operations accept a priority parameter, enabling callers
+to express relative importance of I/O requests. Uses opaque memory types managed by
+the kernel/runtime. Focused on raw file I/O — no directory operations, no streaming
+traits, no seek. Targets workloads where I/O scheduling and latency matter more than
+API breadth.
 
 ---
 
-## 3. Trait Implementations
+## 2. Architecture Comparison
 
-| Trait                             | `file`                                  | `tokio::fs` | `async-fs` | `async_file` |
-|-----------------------------------|-----------------------------------------|-------------|------------|--------------|
-| `bytesbuf_io::Read`               | ✅ (on `ReadOnlyFile`, `ReadWriteFile`)  | —           | —          | —            |
-| `bytesbuf_io::Write`              | ✅ (on `WriteOnlyFile`, `ReadWriteFile`) | —           | —          | —            |
-| `tokio::io::AsyncRead`            | ❌                                       | ✅           | —          | —            |
-| `tokio::io::AsyncWrite`           | ❌                                       | ✅           | —          | —            |
-| `tokio::io::AsyncSeek`            | ❌                                       | ✅           | —          | —            |
-| `futures::AsyncRead`              | —                                       | —           | ✅          | —            |
-| `futures::AsyncWrite`             | —                                       | —           | ✅          | —            |
-| `futures::AsyncSeek`              | —                                       | —           | ✅          | —            |
-| `std::io::Read`                   | ✅ (sync fallback)                       | ❌           | ❌          | ❌            |
-| `std::io::Write`                  | ✅ (sync fallback)                       | ❌           | ❌          | ❌            |
-| `std::io::Seek`                   | ✅ (sync fallback)                       | ❌           | ❌          | ❌            |
-| `bytesbuf::mem::Memory`           | ✅                                       | —           | —          | —            |
-| `bytesbuf::mem::HasMemory`        | ✅                                       | —           | —          | —            |
-| `AsRawFd` / `AsFd` (Unix)         | ✅                                       | ✅           | ✅          | ❌            |
-| `AsRawHandle` / `AsHandle` (Win)  | ✅                                       | ✅           | ❌          | —            |
-| `From<ReadWriteFile>` conversions | ✅ (→ `ReadOnlyFile`, → `WriteOnlyFile`) | —           | —          | —            |
+Each crate must bridge synchronous OS file APIs (POSIX `read`/`write`, Windows
+`ReadFile`/`WriteFile`) to an async programming model. They take fundamentally
+different approaches.
 
-Notable: The `file` crate implements **both sync and async** I/O traits, allowing the
-same file handle to be used in sync contexts (blocking the calling thread) or async
-contexts. The other async crates do not provide sync trait implementations.
+### How each crate dispatches blocking I/O
+
+| Aspect                  | `file`                                                           | `tokio::fs`                        | `async-fs`                                 | `async_file`                      |
+|-------------------------|------------------------------------------------------------------|------------------------------------|--------------------------------------------|-----------------------------------|
+| **Thread pool**         | Dedicated per-`Root::bind` (1–4 threads)                         | Shared global (up to 512 threads)  | Shared global (`blocking` crate)           | Kernel-managed (io_uring SQE/CQE) |
+| **Scaling**             | Auto-scale up when pending > threads; idle scale-down after 10 s | Fixed max, grows on demand         | Auto-scaling, `blocking` crate managed     | N/A (kernel submission queue)     |
+| **Dispatch unit**       | `flume` channel + `async_task::Runnable`                         | `spawn_blocking` → `JoinHandle`    | `blocking::Unblock` + internal pipe        | Ring buffer submission            |
+| **Dispatches per read** | 1 per `dispatch` / `dispatch_scoped` call                        | 1 `spawn_blocking` per `poll_read` | 1 `blocking::unblock` per `poll_read`      | 1 SQE per operation               |
+| **Runtime coupling**    | **None** — any executor                                          | Requires tokio runtime             | Works with smol, async-std, tokio (compat) | Linux-only; custom event loop     |
+
+### `tokio::fs` — `spawn_blocking` into global pool
+
+Every call to `poll_read` or `poll_write` on a `tokio::fs::File` issues a
+`spawn_blocking` into tokio's shared blocking thread pool. The pool is shared with
+**all** `spawn_blocking` callers in the process (CPU-heavy tasks, DNS resolution,
+other I/O). Under mixed workloads, file I/O can be starved by unrelated blocking
+work. The pool can grow to 512 threads, which provides high throughput at the cost
+of memory footprint and context-switch overhead. Each dispatch requires acquiring a
+thread from the global pool, running the OS call, and signaling completion via a
+`JoinHandle`.
+
+### `async-fs` — `blocking` crate's thread pool
+
+Identical dispatch-per-poll approach, but uses the `blocking` crate's auto-scaling
+thread pool instead of tokio's. The `Unblock` wrapper uses an internal pipe for
+signaling readiness between the worker thread and the async task, adding a small
+per-operation overhead (a pipe `write` + `read` pair). Runtime-agnostic by design.
+
+### `async_file` — priority-based scheduling
+
+Operations accept a priority parameter and are submitted to a scheduling layer. On
+Linux, this can leverage io_uring for true kernel-level async I/O, eliminating thread
+pool overhead entirely. Uses opaque memory types allocated by the runtime. The trade-off
+is platform specificity (Linux-only for the io_uring path) and a narrow API surface.
+
+### `file` crate — dedicated `Dispatcher` with scoped dispatch
+
+Each `Root::bind` creates a `Dispatcher` — an isolated thread pool using a `flume`
+unbounded channel and `async_task` for scheduling. Key design choices:
+
+- **Bounded scaling**: starts with 1 worker thread, scales up to `MAX_THREADS` (4)
+  when `pending_count >= thread_count`, and scales back down after `IDLE_TIMEOUT`
+  (10 seconds) of inactivity. At least one worker always remains alive.
+
+- **Two dispatch modes**:
+  - `dispatch()`: for `'static` closures — returns a `DispatchFuture<T>`.
+  - `dispatch_scoped()`: for closures that borrow caller data via raw pointers —
+    returns a `ScopedDispatchFuture<T>` that **blocks on drop** if the closure
+    hasn't completed. This is the foundation for zero-copy slice I/O.
+
+- **Scoped dispatch for zero-copy**: Methods like `read_into_slice`, `write_slice`,
+  `read_into_slice_at`, and `write_slice_at` use `dispatch_scoped` with `SendSlice`,
+  `SendSliceMut`, and `SendBufMut` wrappers to send raw pointers to the worker
+  thread. The `ScopedDispatchFuture` guarantees the closure completes (or never
+  starts) before the caller's buffer is freed, making this safe even under
+  cancellation. The worker reads/writes directly into the caller's buffer — no
+  intermediate copy.
+
+- **Retry loops inside dispatch**: Methods like `read_into_slice` consolidate the
+  retry loop (handling short reads) into a single dispatch, executing entirely on the
+  worker thread. This avoids the per-chunk re-dispatch that tokio and async-fs require.
+
+- **Isolation**: The dedicated pool prevents noisy-neighbor effects from unrelated
+  `spawn_blocking` work. Four threads is sufficient for most file I/O workloads since
+  the bottleneck is typically disk throughput, not thread count.
 
 ---
 
-## 4. Performance Analysis
+## 3. API Design Comparison
 
-Benchmark results from the crate's `fs_comparison` benchmark suite, run on Windows with
-a tokio multi-thread runtime. All times are nanoseconds per iteration (lower is better).
+### Type System
 
-### 4.1 Sequential Write (one-shot `write` of entire buffer)
+| Feature                    | `file`                                                                | `tokio::fs`              | `async-fs`               | `async_file`            |
+|----------------------------|-----------------------------------------------------------------------|--------------------------|--------------------------|-------------------------|
+| **File types**             | 6 (3 seekable + 3 positional)                                         | 1 (`File`)               | 1 (`File`)               | 1 (`File`)              |
+| **Access enforcement**     | Compile-time (type-level)                                             | Runtime (OS error)       | Runtime (OS error)       | Runtime (OS error)      |
+| **Seekable family**        | `ReadOnlyFile`, `WriteOnlyFile`, `File`                               | —                        | —                        | —                       |
+| **Positional family**      | `ReadOnlyPositionalFile`, `WriteOnlyPositionalFile`, `PositionalFile` | —                        | —                        | —                       |
+| **Seekable vs positional** | Separate types: `&mut self` vs `&self`                                | Single type, seek + read | Single type, seek + read | No seek support         |
+| **Access narrowing**       | `File` → `ReadOnlyFile` via `From`                                    | N/A                      | N/A                      | N/A                     |
+| **Path model**             | Capability-based (`Directory` + relative path)                        | Absolute/arbitrary path  | Absolute/arbitrary path  | Absolute/arbitrary path |
+| **OpenOptions**            | `OpenOptions` + `PositionalOpenOptions`                               | `OpenOptions`            | `OpenOptions`            | N/A                     |
 
-| Size  | `std::fs` | `tokio::fs` | `file` crate | `file` vs tokio          |
-|-------|-----------|-------------|--------------|--------------------------|
-| 1 KB  | 420 µs    | 561 µs      | 567 µs       | ~1.01× (parity)          |
-| 64 KB | 3,044 µs  | 3,568 µs    | 3,495 µs     | ~0.98× (slightly faster) |
-| 1 MB  | 5,770 µs  | 7,590 µs    | 7,546 µs     | ~0.99× (parity)          |
+The `file` crate's type system encodes access permissions statically. A `ReadOnlyFile`
+has no `write` method — attempting to write is a compile error, not a runtime
+`EBADF`. The seekable/positional split is equally deliberate: seekable files take
+`&mut self` (enforcing sequential access), while positional files take `&self`
+(enabling concurrent I/O from multiple tasks).
 
-**Analysis**: For one-shot whole-file writes, the `file` crate and `tokio::fs` perform
-nearly identically. Both pay ~30% overhead vs sync `std::fs` at small sizes (dominated
-by thread-dispatch latency), converging as file size grows and actual I/O dominates.
+The `From` conversions allow permanent capability narrowing:
 
-### 4.2 Sequential Read (one-shot `read` of entire file)
-
-| Size  | `std::fs` | `tokio::fs` | `file` crate | `file` vs tokio |
-|-------|-----------|-------------|--------------|-----------------|
-| 1 KB  | 92 µs     | 146 µs      | 155 µs       | ~1.06×          |
-| 64 KB | 119 µs    | 184 µs      | 913 µs       | ~4.96× slower   |
-| 1 MB  | 591 µs    | 645 µs      | 1,210 µs     | ~1.88× slower   |
-
-**Analysis**: The `file` crate's sequential read path shows higher overhead at mid-range
-sizes. This is attributable to the `bytesbuf` pooled buffer allocation and multi-dispatch
-read loop (the crate reads in 8 KB chunks by default even for `dir.read()`, issuing
-multiple dispatch round-trips). For 64 KB files, this means ~8 dispatches vs tokio's
-single `spawn_blocking` call that reads the entire file at once.
-
-*Trade-off*: The `file` crate pays more per-read for the benefits of pooled memory and
-zero-copy `BytesView` output. Applications that subsequently forward the data (e.g., to
-a network socket) recoup this cost by avoiding a full-buffer copy at the next boundary.
-
-### 4.3 Streaming Read (1 MB file in 8 KB chunks)
-
-| Implementation | Time     | vs `std::fs` |
-|----------------|----------|--------------|
-| `std::fs`      | 516 µs   | 1.0×         |
-| `tokio::fs`    | 5,660 µs | 11.0×        |
-| `file` crate   | 5,793 µs | 11.2×        |
-
-**Analysis**: Both async crates perform nearly identically for chunked streaming reads.
-The ~11× overhead vs sync is dominated by the per-chunk dispatch cost (128 round-trips
-for a 1 MB file). This is inherent to the thread-pool dispatch model and would only be
-eliminated by kernel-level async I/O (io_uring).
-
-### 4.4 Streaming Write (128 × 8 KB chunks)
-
-| Implementation | Time     | vs `std::fs` |
-|----------------|----------|--------------|
-| `std::fs`      | 6,292 µs | 1.0×         |
-| `tokio::fs`    | 7,335 µs | 1.17×        |
-| `file` crate   | 7,178 µs | 1.14×        |
-
-**Analysis**: The `file` crate is ~2% faster than `tokio::fs` for streaming writes.
-Write overhead is lower than read overhead because writes are fire-and-forget (the OS
-buffers them in the page cache), so the dispatch round-trip is less impactful.
-
-### 4.5 Many Small Files (100 × 256-byte files: create + write + read + delete)
-
-| Implementation | Time     | vs `std::fs` |
-|----------------|----------|--------------|
-| `std::fs`      | 140.3 ms | 1.0×         |
-| `tokio::fs`    | 154.0 ms | 1.10×        |
-| `file` crate   | 153.5 ms | 1.09×        |
-
-**Analysis**: Essentially identical. For metadata-heavy workloads, the bottleneck is
-filesystem syscall latency, not dispatch overhead.
-
-### 4.6 Metadata (100 × `stat` calls)
-
-| Implementation | Time     | vs `std::fs` |
-|----------------|----------|--------------|
-| `std::fs`      | 2,900 µs | 1.0×         |
-| `tokio::fs`    | 7,496 µs | 2.58×        |
-| `file` crate   | 8,979 µs | 3.10×        |
-
-**Analysis**: The `file` crate is ~20% slower than tokio for metadata operations. This
-is likely due to the smaller, dedicated thread pool (max 4 workers vs tokio's 512) and
-the additional path validation (`safe_join`) on each call.
-
-### 4.7 Performance Summary
-
-```
-Benchmark               std::fs    tokio::fs    file crate    Winner (async)
-──────────────────────  ─────────  ───────────  ────────────  ──────────────
-Seq. Write 1 KB           420 µs      561 µs       567 µs    tokio (~1%)
-Seq. Write 64 KB        3,044 µs    3,568 µs     3,495 µs    file  (~2%)
-Seq. Write 1 MB         5,770 µs    7,590 µs     7,546 µs    file  (~1%)
-Seq. Read 1 KB             92 µs      146 µs       155 µs    tokio (~6%)
-Seq. Read 64 KB           119 µs      184 µs       913 µs    tokio (~5×)
-Seq. Read 1 MB            591 µs      645 µs     1,210 µs    tokio (~2×)
-Streaming Read 1 MB       516 µs    5,660 µs     5,793 µs    tokio (~2%)
-Streaming Write 1 MB    6,292 µs    7,335 µs     7,178 µs    file  (~2%)
-Many Small Files        140.3 ms    154.0 ms     153.5 ms    file  (~0.3%)
-Metadata ×100           2,900 µs    7,496 µs     8,979 µs    tokio (~17%)
+```rust
+let rw: File = File::open(&dir, "data.bin").await?;
+let ro: ReadOnlyFile = rw.into(); // write capability permanently dropped
 ```
 
----
+### Buffer Management
 
-## 5. Unique Features & Limitations
+| Feature                    | `file`                                                              | `tokio::fs`                             | `async-fs`                              | `async_file`              |
+|----------------------------|---------------------------------------------------------------------|-----------------------------------------|-----------------------------------------|---------------------------|
+| **Read output**            | `BytesView` (pooled, ref-counted, immutable)                        | `usize` bytes into caller's `&mut [u8]` | `usize` bytes into caller's `&mut [u8]` | Opaque `Vec<u8>` return   |
+| **Write input**            | `BytesView` or `&[u8]`                                              | `&[u8]`                                 | `&[u8]`                                 | `&[u8]`                   |
+| **Memory pooling**         | ✅ Tiered pool via `bytesbuf`                                        | ❌ Caller-managed allocation             | ❌ Caller-managed allocation             | ❌ OS/allocator-managed    |
+| **Zero-copy pipeline**     | ✅ Shared `BytesView` across file → socket                           | ❌ Copy at each boundary                 | ❌ Copy at each boundary                 | Partial (within io_uring) |
+| **Custom memory provider** | ✅ `_with_memory` constructors                                       | ❌                                       | ❌                                       | ❌                         |
+| **Direct slice I/O**       | ✅ `read_into_slice` / `write_slice` (zero-copy via scoped dispatch) | ✅ (standard `AsyncRead`/`AsyncWrite`)   | ✅ (standard `AsyncRead`/`AsyncWrite`)   | ❌                         |
+| **Buffered wrappers**      | Not needed (pooled buffers built-in)                                | `BufReader`/`BufWriter` for buffering   | `BufReader`/`BufWriter` for buffering   | N/A                       |
 
-### 5.1 `file` Crate — Unique Strengths
+The `file` crate offers three tiers of I/O methods:
 
-| Feature                       | Description                                                                         |
-|-------------------------------|-------------------------------------------------------------------------------------|
-| **Capability-based access**   | Path traversal attacks prevented by design; no absolute paths after `Root::bind`    |
-| **Type-level access control** | `ReadOnlyFile` / `WriteOnlyFile` / `ReadWriteFile` enforced at compile time         |
-| **Pooled buffer management**  | Tiered memory pool avoids per-read allocation; enables zero-copy data pipelines     |
-| **Custom memory providers**   | `_with_memory` variants allow cross-subsystem zero-copy (e.g., file → network)      |
-| **Positional I/O**            | `read_at` / `write_at` using `pread`/`pwrite` without cursor mutation               |
-| **MaybeUninit reads**         | `read_exact_into_uninit` for stack-allocated or pre-allocated uninitialized buffers |
-| **Runtime-agnostic**          | No dependency on tokio, smol, or any specific async runtime                         |
-| **Sync fallback**             | `std::io::Read/Write/Seek` implementations for blocking contexts                    |
-| **Scoped thread pool**        | Isolated 1–4 thread pool per directory tree; prevents noisy-neighbor effects        |
-| **File locking**              | `lock()`, `lock_shared()`, `try_lock()`, `unlock()` — async file locking API        |
+1. **`BytesView`/`BytesBuf` path** — `read_max`, `read_exact`, `write`: data
+   allocated from pooled memory. Zero-copy hand-off to downstream consumers that
+   share a memory provider.
 
-### 5.2 `file` Crate — Limitations
+2. **Slice path** — `read_into_slice`, `write_slice`: direct I/O into/from the
+   caller's `&mut [u8]` or `&[u8]` via scoped dispatch. No intermediate buffer.
 
-| Limitation                       | Detail                                                                                                 |
-|----------------------------------|--------------------------------------------------------------------------------------------------------|
-| **Sequential read overhead**     | Multi-dispatch chunked reads are slower than tokio's single-shot `spawn_blocking` for whole-file reads |
-| **Small thread pool**            | Max 4 workers may bottleneck under extreme concurrent I/O; tokio allows up to 512                      |
-| **No `AsyncRead`/`AsyncWrite`**  | Does not implement tokio or futures async traits; cannot be plugged into `tokio::io::copy` etc.        |
-| **`BytesView` learning curve**   | Unfamiliar buffer types for developers used to `Vec<u8>` / `&[u8]` patterns                            |
-| **Mandatory `Directory` handle** | No way to open a file by absolute path directly; always requires `Root::bind` first                    |
-| **No `Stream`/`AsyncIterator`**  | `ReadDir` uses `next_entry()` loop, not `Stream` trait                                                 |
+3. **`BytesBuf` append path** — `read_into_bytebuf`: reads directly into a
+   caller-provided `BytesBuf`, useful for accumulating data across multiple reads.
 
-### 5.3 `tokio::fs` — Strengths & Limitations
+### Directory Operations
 
-| Strengths                                                  | Limitations                                           |
-|------------------------------------------------------------|-------------------------------------------------------|
-| Ecosystem standard; works with all tokio-based libraries   | No capability-based access control                    |
-| `AsyncRead`/`AsyncWrite`/`AsyncSeek` trait implementations | No pooled buffer management; allocates `Vec` per read |
-| Large thread pool scales to heavy concurrent I/O           | Thread pool is shared with all `spawn_blocking` users |
-| Simple, familiar `std::fs`-like API                        | No type-level read/write distinction                  |
-|                                                            | No positional I/O (`pread`/`pwrite`)                  |
-|                                                            | Tightly coupled to tokio runtime                      |
+| Feature                  | `file`                                  | `tokio::fs`                       | `async-fs`                        | `async_file` |
+|--------------------------|-----------------------------------------|-----------------------------------|-----------------------------------|--------------|
+| **`read_dir`**           | ✅ via `Directory`                       | ✅ `tokio::fs::read_dir`           | ✅ `async_fs::read_dir`            | ❌            |
+| **`DirEntry` metadata**  | Eager (fetched during iteration)        | Lazy (separate `metadata()` call) | Lazy (separate `metadata()` call) | —            |
+| **`DirEntry` file_type** | Eager (from metadata, no extra syscall) | Lazy (`file_type()` may stat)     | Lazy (`file_type()` may stat)     | —            |
+| **Create directory**     | ✅ `DirBuilder`                          | ✅ `tokio::fs::create_dir_all`     | ✅ `async_fs::create_dir_all`      | ❌            |
+| **Symlink creation**     | ✅ `Directory::symlink`                  | ✅ `tokio::fs::symlink`            | ✅ `async_fs::symlink`             | ❌            |
+| **Capability scoping**   | ✅ `open_dir` narrows to subdirectory    | ❌ No scoping                      | ❌ No scoping                      | ❌            |
 
-### 5.4 `async-fs` (smol-rs) — Strengths & Limitations
-
-| Strengths                                           | Limitations                                                   |
-|-----------------------------------------------------|---------------------------------------------------------------|
-| Lightweight; minimal dependencies                   | Same limitations as tokio::fs (no pooling, no positional I/O) |
-| Runtime-agnostic (works with smol, async-std, etc.) | Uses pipe-based `Unblock` signaling (slight overhead)         |
-| Mirrors `std::fs` API exactly                       | No Windows handle traits (`AsRawHandle`)                      |
-| `futures` ecosystem trait compatibility             | Limited community adoption vs tokio                           |
-|                                                     | No file locking API                                           |
-
-### 5.5 `async_file` — Strengths & Limitations
-
-| Strengths                                                      | Limitations                                                   |
-|----------------------------------------------------------------|---------------------------------------------------------------|
-| True kernel async I/O via io_uring (zero thread-pool overhead) | **Linux-only** — not cross-platform                           |
-| Priority-based scheduling for I/O operations                   | Single in-flight operation per file handle                    |
-| OS-managed memory prevents use-after-free                      | Opaque `Data` type — harder to integrate with byte-slice APIs |
-| Lowest possible per-op latency on supported platforms          | Limited ecosystem integration (no `AsyncRead`/`AsyncWrite`)   |
-|                                                                | Requires Linux kernel ≥ 5.1                                   |
-|                                                                | Small community; minimal documentation                        |
+The `file` crate's `DirEntry` eagerly captures metadata and file type during directory
+iteration. This means `entry.metadata()` and `entry.file_type()` are instant (no
+syscall), avoiding the per-entry `stat` calls that `tokio::fs` and `async-fs`
+require for the same information.
 
 ---
 
-## 6. Feature Matrix Summary
+## 4. Benchmark Results
 
-| Feature                   | `file` | `tokio::fs` | `async-fs` | `async_file` |
-|---------------------------|:------:|:-----------:|:----------:|:------------:|
-| Cross-platform            |   ✅    |      ✅      |     ✅      |  ❌ (Linux)   |
-| Runtime-agnostic          |   ✅    |  ❌ (tokio)  |     ✅      |  ❌ (custom)  |
-| Capability-based security |   ✅    |      ❌      |     ❌      |      ❌       |
-| Type-level access control |   ✅    |      ❌      |     ❌      |      ❌       |
-| Pooled memory / zero-copy |   ✅    |      ❌      |     ❌      |   Partial    |
-| Custom memory providers   |   ✅    |      ❌      |     ❌      |      ❌       |
-| Positional I/O            |   ✅    |      ❌      |     ❌      |      ❌       |
-| Async file locking        |   ✅    |      ❌      |     ❌      |      ❌       |
-| Sync trait fallback       |   ✅    |      ❌      |     ❌      |      ❌       |
-| `AsyncRead`/`AsyncWrite`  |   ❌    |      ✅      |     ✅      |      ❌       |
-| Priority scheduling       |   ❌    |      ❌      |     ❌      |      ✅       |
-| True kernel async I/O     |   ❌    |      ❌      |     ❌      |      ✅       |
-| Directory operations      |   ✅    |      ✅      |     ✅      |      ❌       |
-| Symlink handling          |   ✅    |      ✅      |     ✅      |      ❌       |
-| `OpenOptions` builder     |   ✅    |      ✅      |     ✅      |      ❌       |
-| `DirBuilder`              |   ✅    |      ✅      |     ✅      |      ❌       |
-| `MaybeUninit` reads       |   ✅    |      ❌      |     ❌      |      ❌       |
-| Raw fd/handle access      |   ✅    |      ✅      |  ✅ (Unix)  |      ❌       |
+### Benchmark Methodology
+
+All benchmarks use [criterion](https://crates.io/crates/criterion) on Windows, reporting
+the **median** of multiple iterations. Each benchmark compares against the `std::fs`
+synchronous baseline under identical conditions. The `file` crate uses a dedicated 1–4
+thread pool (`Dispatcher`); `tokio::fs` uses the tokio blocking pool (`spawn_blocking`);
+`async-fs` uses the `blocking` crate's auto-scaling pool; `async_file` uses its own
+scheduling layer.
+
+### Results
+
+#### Sequential Write (whole file write)
+
+| Size  | `std::fs` | `tokio::fs` | `file` crate | `async-fs` |
+|-------|-----------|-------------|--------------|------------|
+| 1 KB  | 508 µs    | 655 µs      | 648 µs       | 742 µs     |
+| 64 KB | 2.87 ms   | 3.82 ms     | 3.61 ms      | 3.83 ms    |
+| 1 MB  | 5.68 ms   | 7.53 ms     | 7.43 ms      | 7.63 ms    |
+
+#### Sequential Read (whole file read)
+
+| Size  | `std::fs` | `tokio::fs` | `file` crate | `async-fs` | `async_file` |
+|-------|-----------|-------------|--------------|------------|--------------|
+| 1 KB  | 93 µs     | 147 µs      | 156 µs       | 147 µs     | 224 µs       |
+| 64 KB | 114 µs    | 174 µs      | 883 µs       | 181 µs     | 279 µs       |
+| 1 MB  | 569 µs    | 631 µs      | 997 µs       | 636 µs     | 717 µs       |
+
+#### Streaming Read (1 MB file, 8 KB chunks)
+
+| `std::fs` | `tokio::fs` | `file` crate | `async-fs` | `async_file` |
+|-----------|-------------|--------------|------------|--------------|
+| 504 µs    | 5.53 ms     | 5.94 ms      | 828 µs     | 5.61 ms      |
+
+#### Streaming Write (128 × 8 KB chunks)
+
+| `std::fs` | `tokio::fs` | `file` crate | `async-fs` |
+|-----------|-------------|--------------|------------|
+| 6.14 ms   | 7.39 ms     | 7.30 ms      | 5.74 ms    |
+
+#### Many Small Files (100 × 256 B: create + write + read + delete)
+
+| `std::fs` | `tokio::fs` | `file` crate | `async-fs` |
+|-----------|-------------|--------------|------------|
+| 141 ms    | 150 ms      | 150 ms       | 156 ms     |
+
+#### Metadata (100 stat calls)
+
+| `std::fs` | `tokio::fs` | `file` crate | `async-fs` | `async_file` |
+|-----------|-------------|--------------|------------|--------------|
+| 2.87 ms   | 7.12 ms     | 7.40 ms      | 7.32 ms    | 15.74 ms     |
+
+#### Positional Read (128 × 8 KB reads at offsets from 1 MB file)
+
+| `std::fs` | `tokio::fs` | `file` crate | `async-fs` |
+|-----------|-------------|--------------|------------|
+| 551 µs    | 10.04 ms    | 5.67 ms      | 24.37 ms   |
+
+#### Positional Write (128 × 8 KB writes at offsets)
+
+| `std::fs` | `tokio::fs` | `file` crate | `async-fs` |
+|-----------|-------------|--------------|------------|
+| 5.96 ms   | 9.80 ms     | 7.51 ms      | 14.93 ms   |
+
+#### Concurrent Positional Read (4 × 256 KB from 1 MB file)
+
+| `std::fs` (sequential) | `file` crate (sequential) | `file` crate (concurrent) |
+|------------------------|---------------------------|---------------------------|
+| 188 µs                 | 1.19 ms                   | 1.19 ms                   |
+
+### Key Observations
+
+1. **Sequential I/O**: All async crates add 20–50% overhead vs `std::fs` for whole-file
+   operations due to thread dispatch. The `file` crate and `tokio::fs` are comparable.
+
+2. **Sequential read 64 KB / 1 MB anomaly**: The `file` crate is slower for sequential
+   reads at larger sizes. This is because `Directory::read()` queries file metadata
+   first to size the buffer, then reads — two dispatched operations vs one for
+   `tokio::fs` / `async-fs`. This is a known trade-off for the pooled buffer
+   pre-allocation strategy.
+
+3. **Streaming I/O**: Per-chunk dispatch overhead dominates. All dispatch-per-read
+   crates (`tokio::fs`, `file`, `async_file`) are ~10× slower than `std::fs` for 8 KB
+   chunks. `async-fs` performs surprisingly well here due to the `blocking` crate's
+   optimized thread pool.
+
+4. **Positional I/O**: The `file` crate is ~1.8× faster than `tokio::fs` and ~4.3×
+   faster than `async-fs` for positional reads. This is because the `file` crate uses
+   native `pread`/`pwrite` (or `seek_read`/`seek_write` on Windows) in a single
+   dispatch, while `tokio::fs` and `async-fs` need separate seek + read dispatches.
+
+5. **Many small files & metadata**: All async crates cluster together (~7% overhead
+   vs `std::fs`), showing dispatch overhead is negligible for operations dominated by
+   actual I/O.
+
+6. **Concurrent positional reads**: On this single-machine benchmark, sequential and
+   concurrent positional reads are similar because the OS page cache serves the data
+   instantly. The concurrent advantage would show on actual disk I/O with higher
+   latency.
 
 ---
 
-## 7. Recommendations
+## 5. Performance Analysis
 
-**Choose the `file` crate when:**
-- Security is paramount (capability-based path sandboxing)
-- Building data pipelines where zero-copy buffer sharing matters
-- You need positional I/O for concurrent reads at different offsets
-- Runtime independence is required
-- Type-level enforcement of read vs write access is desired
+### Dispatch Overhead
 
-**Choose `tokio::fs` when:**
-- Already committed to the tokio ecosystem
-- Need `AsyncRead`/`AsyncWrite` compatibility with tokio combinators
-- Simple, well-documented API is preferred
-- Maximum raw sequential-read throughput is needed (single-shot reads)
+**tokio::fs / async-fs**: Each `poll_read` or `poll_write` call issues one
+`spawn_blocking` (or `blocking::unblock`), acquiring a thread from the shared global
+pool. Under load, acquiring a thread involves contention on the pool's internal queue
+and scheduler. For streaming reads (e.g., 1 MB in 8 KB chunks), this means 128
+separate thread-pool acquisitions.
 
-**Choose `async-fs` when:**
-- Using the smol runtime or need runtime-agnostic `futures` trait compatibility
-- Want the lightest possible async fs wrapper
-- Need a 1:1 mapping to `std::fs` with minimal learning curve
+**file crate**: Each call dispatches to a dedicated 1–4 thread pool with a `flume`
+channel (very low contention). Critically, scoped dispatch methods consolidate
+retry loops into a single round-trip: `read_into_slice` sends one closure that
+loops until the buffer is filled, executing entirely on the worker. This reduces
+128 dispatches to 1 for the same workload when using slice methods.
 
-**Choose `async_file` when:**
-- Targeting Linux exclusively and need the absolute lowest latency
-- I/O priority scheduling is a requirement
-- True kernel-level async I/O (io_uring) is needed to avoid thread-pool overhead
+### Read Path Comparison: "Read 1 MB file in 8 KB chunks"
+
+**tokio::fs** (via `AsyncReadExt::read`):
+```
+for each 8 KB chunk:
+  1. poll_read called
+  2. spawn_blocking: acquire thread from global 512-thread pool
+  3. Worker: std::fs::File::read(&mut buf[..8192])
+  4. Copy result into caller's &mut [u8]
+  5. Signal JoinHandle, wake task
+→ 128 spawn_blocking round-trips total
+```
+
+**file crate — `read_into_slice` (seekable, single dispatch)**:
+```
+1. dispatch_scoped: send closure to dedicated worker via flume
+2. Worker: loop { file.read(&mut buf[total..]) } until buf is full
+3. Signal ScopedDispatchFuture, wake task
+→ 1 dispatch round-trip; OS read directly into caller's &mut [u8] (zero-copy)
+```
+
+**file crate — `read_max` (seekable, BytesView path)**:
+```
+for each 8 KB chunk:
+  1. Reserve 8 KB from pooled BytesBuf
+  2. dispatch_scoped: send closure to dedicated worker
+  3. Worker: file.read into BytesBuf (pooled memory, no extra copy)
+  4. Return BytesView (ref-counted, zero-copy to downstream)
+→ 128 dispatches, but each uses pooled memory (no allocation)
+  and BytesView can be forwarded zero-copy
+```
+
+### Write Path Comparison: "Write 1 MB in 8 KB chunks"
+
+**tokio::fs** (via `AsyncWriteExt::write_all`):
+```
+for each 8 KB chunk:
+  1. poll_write called
+  2. spawn_blocking: acquire thread from global pool
+  3. Worker: std::fs::File::write(&buf[..8192])
+  4. Signal completion
+→ 128 spawn_blocking round-trips
+```
+
+**file crate — `write_slice` (seekable, single dispatch)**:
+```
+1. dispatch_scoped: send closure with SendSlice (raw pointer to caller's &[u8])
+2. Worker: file.write_all(data) — writes directly from caller's buffer
+3. ScopedDispatchFuture blocks on drop if cancelled (safety guarantee)
+→ 1 dispatch round-trip per write_slice call; zero-copy from caller's buffer
+```
+
+### Positional I/O
+
+Only the `file` crate offers dedicated positional file types:
+
+**file crate** — `ReadOnlyPositionalFile::read_exact_at`:
+```
+1. dispatch: send closure to worker
+2. Worker: single pread(fd, buf, offset) syscall
+3. Return BytesView
+→ 1 syscall, no cursor mutation, &self enables concurrent calls
+```
+
+**tokio::fs** — equivalent operation:
+```
+1. spawn_blocking: file.seek(SeekFrom::Start(offset))
+2. spawn_blocking: file.read_exact(&mut buf)
+→ 2 syscalls (seek + read), not atomic, &mut self prevents concurrency
+```
+
+Because positional methods take `&self`, multiple tasks can issue concurrent reads
+at different offsets on the same `ReadOnlyPositionalFile` handle — impossible with
+tokio's or async-fs's seek-then-read pattern.
+
+---
+
+## 6. Trait Support
+
+| Trait                                |                   `file`                    | `tokio::fs` | `async-fs` | `async_file` |
+|--------------------------------------|:-------------------------------------------:|:-----------:|:----------:|:------------:|
+| `bytesbuf_io::Read`                  |            ✅ seekable read types            |      —      |     —      |      —       |
+| `bytesbuf_io::Write`                 |           ✅ seekable write types            |      —      |     —      |      —       |
+| `tokio::io::AsyncRead`               |                      ❌                      |      ✅      |     —      |      —       |
+| `tokio::io::AsyncWrite`              |                      ❌                      |      ✅      |     —      |      —       |
+| `tokio::io::AsyncSeek`               |                      ❌                      |      ✅      |     —      |      —       |
+| `futures::AsyncRead`                 |                      —                      |      —      |     ✅      |      —       |
+| `futures::AsyncWrite`                |                      —                      |      —      |     ✅      |      —       |
+| `futures::AsyncSeek`                 |                      —                      |      —      |     ✅      |      —       |
+| `std::io::Read`                      |          ✅ (`sync-compat` feature)          |      ❌      |     ❌      |      ❌       |
+| `std::io::Write`                     |          ✅ (`sync-compat` feature)          |      ❌      |     ❌      |      ❌       |
+| `std::io::Seek`                      |          ✅ (`sync-compat` feature)          |      ❌      |     ❌      |      ❌       |
+| `bytesbuf::mem::HasMemory`           |              ✅ all file types               |      —      |     —      |      —       |
+| `bytesbuf::mem::Memory`              |              ✅ all file types               |      —      |     —      |      —       |
+| `AsRawFd` / `AsFd` (Unix)            |                      ✅                      |      ✅      |     ✅      |      ❌       |
+| `AsRawHandle` / `AsHandle` (Windows) |                      ✅                      |      ✅      |     ❌      |      —       |
+| `From` narrowing conversions         | ✅ `File` → `ReadOnlyFile` / `WriteOnlyFile` |      —      |     —      |      —       |
+
+The `file` crate's `sync-compat` feature enables `std::io::Read`, `Write`, and `Seek`
+on seekable file types, allowing the same handle to be used in blocking contexts. The
+`HasMemory` and `Memory` traits enable callers to allocate buffers from the file's
+memory provider, which is critical for zero-copy cross-subsystem data flows.
+
+---
+
+## 7. Unique Features
+
+### `file` crate only
+
+| Feature                                | Description                                                                                                                                                                      |
+|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Capability-based access control**    | `Root::bind` creates a `Directory` capability; all paths are relative and validated via `safe_join` to prevent traversal escapes (`../`, leading `/`)                            |
+| **6 file types**                       | 3 seekable (`ReadOnlyFile`, `WriteOnlyFile`, `File`) + 3 positional (`ReadOnlyPositionalFile`, `WriteOnlyPositionalFile`, `PositionalFile`)                                      |
+| **Scoped dispatch**                    | `dispatch_scoped` returns `ScopedDispatchFuture` that blocks on drop — enables zero-copy slice I/O with cancellation safety via `SendSlice`/`SendSliceMut`/`SendBufMut` wrappers |
+| **Custom memory providers**            | `_with_memory` constructors accept a `MemoryShared` so file reads land in memory optimal for downstream consumers (e.g., network socket buffers)                                 |
+| **Eager `DirEntry` metadata**          | Metadata and file type captured during iteration; no per-entry syscalls                                                                                                          |
+| **Auto-scaling dedicated thread pool** | 1–4 threads per `Root::bind`; scales on queue depth, idles down after 10 s; at least 1 worker always alive                                                                       |
+| **Access narrowing via `From`**        | `File` → `ReadOnlyFile` or `WriteOnlyFile`; `PositionalFile` → `ReadOnlyPositionalFile` or `WriteOnlyPositionalFile`                                                             |
+| **Sync compatibility**                 | `std::io::Read`/`Write`/`Seek` impls behind the `sync-compat` feature flag                                                                                                       |
+| **Positional I/O**                     | `pread`/`pwrite` (Unix) and `seek_read`/`seek_write` (Windows) via `&self` — true concurrent I/O on a single handle                                                              |
+
+### `tokio::fs` only
+
+| Feature                                  | Description                                                                                                   |
+|------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| **Deep ecosystem integration**           | Works seamlessly with tower, hyper, tonic, axum, and the entire tokio ecosystem                               |
+| **`AsyncRead`/`AsyncWrite`/`AsyncSeek`** | Plugs directly into `tokio::io::copy`, `BufReader`, `BufWriter`, `LinesStream`, and all tokio I/O combinators |
+| **Massive community**                    | Battle-tested in production at scale; extensive documentation, examples, and Stack Overflow coverage          |
+| **Large blocking pool**                  | Up to 512 threads — scales to highly concurrent I/O workloads where parallelism is the bottleneck             |
+| **Cooperative cancellation**             | Integrates with tokio's cooperative scheduling for cancellation                                               |
+
+### `async-fs` only
+
+| Feature                           | Description                                                                                    |
+|-----------------------------------|------------------------------------------------------------------------------------------------|
+| **Runtime-agnostic**              | Works with tokio (via `compat`), smol, async-std, or any `Future`-polling executor             |
+| **Minimal dependencies**          | Tiny dependency tree; ideal for projects that want async fs without pulling in a large runtime |
+| **`futures` trait compatibility** | Implements `futures::AsyncRead`/`AsyncWrite`/`AsyncSeek` for broad interoperability            |
+| **1:1 `std::fs` mirror**          | API surface matches `std::fs` almost exactly — minimal learning curve                          |
+
+### `async_file` only
+
+| Feature                        | Description                                                                                  |
+|--------------------------------|----------------------------------------------------------------------------------------------|
+| **Priority-based scheduling**  | Every I/O call accepts a priority parameter for relative scheduling of requests              |
+| **Potential io_uring backend** | Can leverage Linux's io_uring for true kernel-level async I/O with zero thread-pool overhead |
+| **OS-managed memory**          | Buffers managed by the kernel/runtime, avoiding user-space allocation overhead               |
+
+---
+
+## 8. Limitations
+
+### `file` crate
+
+| Limitation                        | Detail                                                                                                                    |
+|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| **No io_uring support**           | All I/O goes through blocking syscalls on worker threads; no kernel async I/O path                                        |
+| **Limited to 4 worker threads**   | `MAX_THREADS = 4` may bottleneck under extreme concurrent I/O; tokio allows 512                                           |
+| **No tokio/futures trait compat** | Does not implement `AsyncRead`/`AsyncWrite`; cannot plug into `tokio::io::copy` or `futures::io::copy` without an adapter |
+| **New and unproven**              | Smaller community and less production exposure than tokio::fs                                                             |
+| **`BytesView` learning curve**    | Unfamiliar buffer types for developers used to `Vec<u8>` / `&[u8]` patterns                                               |
+| **Mandatory `Directory` handle**  | Cannot open a file by absolute path directly; always requires `Root::bind` first                                          |
+| **No `Stream`/`AsyncIterator`**   | `ReadDir` uses `next_entry()` loop, not the `Stream` trait                                                                |
+
+### `tokio::fs`
+
+| Limitation                       | Detail                                                                                    |
+|----------------------------------|-------------------------------------------------------------------------------------------|
+| **No buffer management**         | No pooling; every read allocates or fills a caller-provided buffer; no zero-copy pipeline |
+| **No capability model**          | Accepts arbitrary absolute paths; no built-in path-traversal protection                   |
+| **No positional I/O**            | Must `seek` then `read`/`write` — two syscalls, not atomic, cursor contention             |
+| **No type-level access control** | Single `File` type; read vs write errors discovered at runtime                            |
+| **Runtime-locked to tokio**      | Cannot be used outside a tokio runtime context                                            |
+| **Shared blocking pool**         | File I/O competes with all other `spawn_blocking` work for thread pool resources          |
+
+### `async-fs`
+
+| Limitation                        | Detail                                                                           |
+|-----------------------------------|----------------------------------------------------------------------------------|
+| **Same API gaps as tokio**        | No buffer pooling, no capability model, no positional I/O, no type-level access  |
+| **Smaller ecosystem**             | Less community adoption than tokio::fs; fewer examples and integrations          |
+| **Pipe-based signaling overhead** | `Unblock` wrapper uses an internal pipe for readiness, adding per-operation cost |
+| **No Windows handle traits**      | Does not implement `AsRawHandle` / `AsHandle` on Windows                         |
+| **No file locking API**           | No async file locking support                                                    |
+
+### `async_file`
+
+| Limitation                       | Detail                                                                       |
+|----------------------------------|------------------------------------------------------------------------------|
+| **No directory operations**      | No `read_dir`, `create_dir`, `remove_dir`, or any directory API              |
+| **No streaming I/O**             | No `AsyncRead`/`AsyncWrite` traits; no chunked streaming                     |
+| **No seek**                      | No cursor-based seeking; offsets must be managed externally                  |
+| **Priority adds API complexity** | Every call requires a priority parameter, even when scheduling is irrelevant |
+| **Small community**              | Minimal documentation, few users, uncertain maintenance status               |
+| **Platform-limited**             | io_uring backend is Linux-only (kernel ≥ 5.1); limited cross-platform story  |
+
+---
+
+## 9. Summary Table
+
+| Feature                                           |         `file`         |    `tokio::fs`     |    `async-fs`     | `async_file` |
+|---------------------------------------------------|:----------------------:|:------------------:|:-----------------:|:------------:|
+| **Cross-platform**                                |           ✅            |         ✅          |         ✅         |  ❌ (Linux)   |
+| **Runtime-agnostic**                              |           ✅            |     ❌ (tokio)      |         ✅         |  ❌ (custom)  |
+| **Capability-based security**                     |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Type-level access control**                     |      ✅ (6 types)       |     ❌ (1 type)     |    ❌ (1 type)     |  ❌ (1 type)  |
+| **Pooled memory / zero-copy**                     |           ✅            |         ❌          |         ❌         |   Partial    |
+| **Custom memory providers**                       |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Positional I/O (`pread`/`pwrite`)**             |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Concurrent reads on same handle**               | ✅ (positional `&self`) |  ❌ (`&mut self`)   |  ❌ (`&mut self`)  |      ❌       |
+| **Scoped dispatch (cancellation-safe zero-copy)** |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Async file locking**                            |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Sync trait fallback**                           |   ✅ (`sync-compat`)    |         ❌          |         ❌         |      ❌       |
+| **Access narrowing (`From` conversions)**         |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Eager `DirEntry` metadata**                     |           ✅            |      ❌ (lazy)      |     ❌ (lazy)      |      —       |
+| **`AsyncRead` / `AsyncWrite`**                    |           ❌            |     ✅ (tokio)      |    ✅ (futures)    |      ❌       |
+| **Priority scheduling**                           |           ❌            |         ❌          |         ❌         |      ✅       |
+| **True kernel async I/O**                         |           ❌            |         ❌          |         ❌         |      ✅       |
+| **Directory operations**                          |           ✅            |         ✅          |         ✅         |      ❌       |
+| **Symlink handling**                              |           ✅            |         ✅          |         ✅         |      ❌       |
+| **`OpenOptions` builder**                         |     ✅ (2 variants)     |         ✅          |         ✅         |      ❌       |
+| **`DirBuilder`**                                  |           ✅            |         ✅          |         ✅         |      ❌       |
+| **`MaybeUninit` reads**                           |           ✅            |         ❌          |         ❌         |      ❌       |
+| **Raw fd/handle access**                          |   ✅ (Unix + Windows)   | ✅ (Unix + Windows) |   ✅ (Unix only)   |      ❌       |
+| **Thread pool isolation**                         |  ✅ (per-`Root::bind`)  | ❌ (global shared)  | ❌ (global shared) |     N/A      |
+| **Ecosystem maturity**                            |          New           |       Mature       |     Moderate      |    Niche     |
+
+### When to Choose Each
+
+**`file` crate**: Security-sensitive applications needing path-traversal protection,
+data pipelines requiring zero-copy buffer sharing across subsystems, workloads
+benefiting from positional I/O (databases, asset servers), or projects requiring
+runtime independence.
+
+**`tokio::fs`**: Projects already committed to the tokio ecosystem, applications
+needing `AsyncRead`/`AsyncWrite` compatibility with tokio combinators and middleware,
+or teams that prioritize community support and battle-tested stability.
+
+**`async-fs`**: Projects using the smol runtime or needing runtime-agnostic
+`futures`-trait compatibility with a minimal dependency footprint and a familiar
+`std::fs`-like API.
+
+**`async_file`**: Linux-only workloads where I/O scheduling priority is critical
+and true kernel async I/O (io_uring) is needed to eliminate thread-pool overhead.
