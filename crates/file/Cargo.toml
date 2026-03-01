@@ -1,0 +1,68 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "file"
+description = "Zero-copy asynchronous filesystem API."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["oxidizer", "file", "async", "filesystem"]
+categories = ["asynchronous", "filesystem"]
+
+edition.workspace = true
+rust-version = "1.89"
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/file"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["bytesbuf::*", "bytesbuf_io::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+sync-compat = []
+
+[dependencies]
+async-task.workspace = true
+bytesbuf.workspace = true
+bytesbuf_io.workspace = true
+flume.workspace = true
+
+[dev-dependencies]
+async-fs.workspace = true
+async_file.workspace = true
+criterion = { workspace = true, features = ["async_tokio"] }
+futures-lite.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "io-util"] }
+
+[[bench]]
+name = "fs_comparison"
+harness = false
+
+[[example]]
+name = "basic_read_write"
+
+[[example]]
+name = "directory_ops"
+
+[[example]]
+name = "file_types"
+
+[[example]]
+name = "open_options"
+
+[[example]]
+name = "positional_io"
+
+[[example]]
+name = "positional_types"
+
+[[example]]
+name = "streaming_io"
+
+[lints]
+workspace = true

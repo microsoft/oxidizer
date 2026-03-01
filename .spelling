@@ -1,11 +1,16 @@
-306
+321
+—
 →
 0.X.Y
 100k
 10k
 10ms
+16K
+1K
 1h
 1ms
+4K
+64K
 ACLs
 acyclic
 addrs
@@ -21,6 +26,7 @@ args
 AspNet
 async
 Async
+atomicity
 auditable
 backend
 backends
@@ -60,6 +66,7 @@ clippt
 clippy
 Clippy
 clonable
+cloneable
 C-MACRO-ATTR
 C-MACRO-VIS
 C-NEWTYPE
@@ -107,10 +114,12 @@ e.g.
 enum
 Enum
 enums
+EOF
 FFI-compatible
 fhl-scus4-app-win
 fhl-scus4-app-win2
 filesystem
+filesystems
 fn
 foldhash
 footguns
@@ -233,6 +242,7 @@ sans-io
 SCCACHE
 scopeguard
 SDKs
+seekable
 seeked
 SemVer
 serde
@@ -254,6 +264,7 @@ struct
 struct's
 structs
 Structs
+subdirectory
 submodule
 submodules
 subtrait
@@ -261,6 +272,8 @@ sudo
 supertrait
 supertraits
 Symcrypt
+symlink
+symlinks
 sys
 syscall
 sysinfo
@@ -268,6 +281,7 @@ tdnf
 testability
 timestamp
 timestamps
+TOCTOU
 Tokio
 Tokio's
 toml

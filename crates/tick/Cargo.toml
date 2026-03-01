@@ -48,7 +48,6 @@ thread_aware.workspace = true
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
-ohno = { workspace = true, features = ["app-err"] }
 
 #external
 chrono = { workspace = true, features = ["clock"] }
@@ -58,6 +57,7 @@ futures = { workspace = true, features = ["default", "executor", "futures-execut
 insta = { workspace = true }
 jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
+ohno = { workspace = true, features = ["app-err"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
