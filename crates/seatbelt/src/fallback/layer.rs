@@ -31,8 +31,6 @@ use crate::{NotSet, Set};
 pub struct FallbackLayer<In, Out, S1 = Set, S2 = Set> {
     should_fallback: Option<ShouldFallback<Out>>,
     fallback_action: Option<FallbackAction<Out>>,
-    before_fallback: Option<BeforeFallback<Out>>,
-    after_fallback: Option<AfterFallback<Out>>,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
     _state: PhantomData<fn(In, S1, S2) -> Out>,
@@ -44,8 +42,6 @@ impl<In, Out> FallbackLayer<In, Out, NotSet, NotSet> {
         Self {
             should_fallback: None,
             fallback_action: None,
-            before_fallback: None,
-            after_fallback: None,
             enable_if: EnableIf::always(),
             telemetry: context.create_telemetry(name),
             _state: PhantomData,
@@ -64,38 +60,6 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
     pub fn should_fallback(mut self, predicate: impl Fn(&Out) -> bool + Send + Sync + 'static) -> FallbackLayer<In, Out, Set, S2> {
         self.should_fallback = Some(ShouldFallback::new(predicate));
         self.into_state::<Set, S2>()
-    }
-
-    /// Configures a callback invoked before the fallback action runs.
-    ///
-    /// This callback receives a mutable reference to the original (invalid)
-    /// output that triggered the fallback and [`BeforeFallbackArgs`] with
-    /// additional context. It is useful for logging, capturing, or modifying
-    /// the original value before it is consumed by the fallback action.
-    ///
-    /// This call replaces any previous `before_fallback` callback.
-    ///
-    /// **Default**: None
-    #[must_use]
-    pub fn before_fallback(mut self, callback: impl Fn(&mut Out, BeforeFallbackArgs) + Send + Sync + 'static) -> Self {
-        self.before_fallback = Some(BeforeFallback::new(callback));
-        self
-    }
-
-    /// Configures a callback invoked after the fallback action completes.
-    ///
-    /// This callback receives a mutable reference to the replacement output
-    /// produced by the fallback action and [`AfterFallbackArgs`] with additional
-    /// context. Because the reference is mutable, the callback can modify the
-    /// replacement output before it is returned to the caller.
-    ///
-    /// This call replaces any previous `after_fallback` callback.
-    ///
-    /// **Default**: None
-    #[must_use]
-    pub fn after_fallback(mut self, callback: impl Fn(&mut Out, AfterFallbackArgs) + Send + Sync + 'static) -> Self {
-        self.after_fallback = Some(AfterFallback::new(callback));
-        self
     }
 
     /// Optionally enables the fallback middleware based on a condition.
@@ -184,8 +148,6 @@ impl<In, Out, S> Layer<S> for FallbackLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         let shared = FallbackShared {
             enable_if: self.enable_if.clone(),
-            before_fallback: self.before_fallback.clone(),
-            after_fallback: self.after_fallback.clone(),
             should_fallback: self.should_fallback.clone().expect("should_fallback must be set in Ready state"),
             fallback_action: self.fallback_action.clone().expect("fallback_action must be set in Ready state"),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -205,8 +167,6 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
             should_fallback: self.should_fallback,
             fallback_action: self.fallback_action,
             enable_if: self.enable_if,
-            before_fallback: self.before_fallback,
-            after_fallback: self.after_fallback,
             telemetry: self.telemetry,
             _state: PhantomData,
         }
@@ -217,7 +177,6 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     use layered::Execute;
     use tick::Clock;
@@ -232,8 +191,6 @@ mod tests {
 
         assert!(layer.should_fallback.is_none());
         assert!(layer.fallback_action.is_none());
-        assert!(layer.before_fallback.is_none());
-        assert!(layer.after_fallback.is_none());
         assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_fallback");
         assert!(layer.enable_if.call(&"test_input".to_string()));
     }
@@ -265,37 +222,6 @@ mod tests {
 
         let result = layer.fallback_action.unwrap().call("bad".to_string(), FallbackActionArgs {}).await;
         assert_eq!(result, "replaced");
-    }
-
-    #[test]
-    fn before_fallback_ok() {
-        let called = Arc::new(AtomicBool::new(false));
-        let called_clone = Arc::clone(&called);
-
-        let layer: FallbackLayer<_, _, Set, Set> = create_ready_layer().before_fallback(move |_output, _args| {
-            called_clone.store(true, Ordering::SeqCst);
-        });
-
-        layer
-            .before_fallback
-            .unwrap()
-            .call(&mut "output".to_string(), BeforeFallbackArgs {});
-
-        assert!(called.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn after_fallback_ok() {
-        let called = Arc::new(AtomicBool::new(false));
-        let called_clone = Arc::clone(&called);
-
-        let layer: FallbackLayer<_, _, Set, Set> = create_ready_layer().after_fallback(move |_output, _args| {
-            called_clone.store(true, Ordering::SeqCst);
-        });
-
-        layer.after_fallback.unwrap().call(&mut "output".to_string(), AfterFallbackArgs {});
-
-        assert!(called.load(Ordering::SeqCst));
     }
 
     #[test]

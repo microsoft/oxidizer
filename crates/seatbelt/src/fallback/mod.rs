@@ -58,7 +58,8 @@
 //!   clones a fixed value on every invocation.
 //!
 //! Both [`fallback`][FallbackLayer::fallback] and [`fallback_async`][FallbackLayer::fallback_async]
-//! receive the original (invalid) output as their argument and produce a replacement.
+//! receive the original (invalid) output and [`FallbackActionArgs`] with additional context,
+//! and produce a replacement.
 //!
 //! # Defaults
 //!
@@ -66,8 +67,6 @@
 //! |-----------|---------------|-------------|---------------|
 //! | Predicate | `None` (required) | Decides when fallback is needed | [`should_fallback`][FallbackLayer::should_fallback] |
 //! | Action | `None` (required) | Produces the replacement output | [`fallback`][FallbackLayer::fallback], [`fallback_async`][FallbackLayer::fallback_async], [`fallback_output`][FallbackLayer::fallback_output] |
-//! | Before-fallback callback | `None` | No observability by default | [`before_fallback`][FallbackLayer::before_fallback] |
-//! | After-fallback callback | `None` | No observability by default | [`after_fallback`][FallbackLayer::after_fallback] |
 //! | Enable condition | Always enabled | Fallback is applied to all requests | [`enable_if`][FallbackLayer::enable_if], [`enable_always`][FallbackLayer::enable_always], [`disable`][FallbackLayer::disable] |
 //!
 //! # Thread Safety
@@ -101,7 +100,7 @@
 //! let stack = (
 //!     Fallback::layer("my_fallback", &context)
 //!         .should_fallback(|output: &String| output.is_empty())
-//!         .fallback(|_output: String, _args| "default_value".to_string()),
+//!         .fallback_output("default_value".to_string()),
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!
@@ -150,12 +149,6 @@
 //!     Fallback::layer("my_fallback", &context)
 //!         .should_fallback(|output: &String| output == "bad")
 //!         .fallback(|_output: String, _args| "safe_default".to_string())
-//!         .before_fallback(|original: &mut String, _args| {
-//!             println!("fallback triggered, original output: {original}");
-//!         })
-//!         .after_fallback(|new_output: &mut String, _args| {
-//!             println!("fallback complete, new output: {new_output}");
-//!         })
 //!         .enable_if(|input: &String| !input.starts_with("bypass_")),
 //!     Execute::new(execute_unreliable_operation),
 //! );
@@ -174,8 +167,8 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-pub use args::{AfterFallbackArgs, BeforeFallbackArgs, FallbackActionArgs};
-pub(crate) use callbacks::{AfterFallback, BeforeFallback, FallbackAction, ShouldFallback};
+pub use args::FallbackActionArgs;
+pub(crate) use callbacks::{FallbackAction, ShouldFallback};
 pub use layer::FallbackLayer;
 pub use service::Fallback;
 #[cfg(feature = "tower-service")]

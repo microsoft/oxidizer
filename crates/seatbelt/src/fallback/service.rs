@@ -43,8 +43,6 @@ pub struct Fallback<In, Out, S> {
 #[derive(Debug)]
 pub(crate) struct FallbackShared<In, Out> {
     pub(crate) enable_if: EnableIf<In>,
-    pub(crate) before_fallback: Option<BeforeFallback<Out>>,
-    pub(crate) after_fallback: Option<AfterFallback<Out>>,
     pub(crate) should_fallback: ShouldFallback<Out>,
     pub(crate) fallback_action: FallbackAction<Out>,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -188,12 +186,8 @@ where
 }
 
 impl<In, Out: Send + 'static> FallbackShared<In, Out> {
-    async fn handle_fallback(&self, mut output: Out) -> Out {
-        if let Some(before_fallback) = &self.before_fallback {
-            before_fallback.call(&mut output, BeforeFallbackArgs {});
-        }
-
-        let mut new_output = self.fallback_action.call(output, FallbackActionArgs {}).await;
+    async fn handle_fallback(&self, output: Out) -> Out {
+        let new_output = self.fallback_action.call(output, FallbackActionArgs {}).await;
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
@@ -214,10 +208,6 @@ impl<In, Out: Send + 'static> FallbackShared<In, Out> {
                 pipeline.name = %self.telemetry.pipeline_name,
                 strategy.name = %self.telemetry.strategy_name,
             );
-        }
-
-        if let Some(after_fallback) = &self.after_fallback {
-            after_fallback.call(&mut new_output, AfterFallbackArgs {});
         }
 
         new_output

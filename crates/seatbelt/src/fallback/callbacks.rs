@@ -3,11 +3,9 @@
 
 use std::pin::Pin;
 
-use super::{AfterFallbackArgs, BeforeFallbackArgs, FallbackActionArgs};
+use super::FallbackActionArgs;
 
 crate::utils::define_fn_wrapper!(ShouldFallback<Out>(Fn(&Out) -> bool));
-crate::utils::define_fn_wrapper!(BeforeFallback<Out>(Fn(&mut Out, BeforeFallbackArgs)));
-crate::utils::define_fn_wrapper!(AfterFallback<Out>(Fn(&mut Out, AfterFallbackArgs)));
 
 crate::utils::define_fn_wrapper!(SyncFallbackFn<Out>(Fn(Out, FallbackActionArgs) -> Out));
 crate::utils::define_fn_wrapper!(AsyncFallbackFn<Out>(Fn(Out, FallbackActionArgs) -> Pin<Box<dyn Future<Output = Out> + Send>>));

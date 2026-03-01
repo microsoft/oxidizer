@@ -8,8 +8,6 @@
 //! Integration tests for fallback middleware using only public API.
 
 use std::future::poll_fn;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use layered::{Execute, Service, Stack};
 use rstest::rstest;
@@ -42,21 +40,11 @@ where
 async fn no_fallback_when_output_valid(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let context = ResilienceContext::new(clock);
-    let before_called = Arc::new(AtomicBool::new(false));
-    let before_called_clone = Arc::clone(&before_called);
-    let after_called = Arc::new(AtomicBool::new(false));
-    let after_called_clone = Arc::clone(&after_called);
 
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output, _args| Ok::<_, String>("fallback_value".to_string()))
-            .before_fallback(move |_output, _args| {
-                before_called.store(true, Ordering::SeqCst);
-            })
-            .after_fallback(move |_output, _args| {
-                after_called.store(true, Ordering::SeqCst);
-            }),
+            .fallback(|_output, _args| Ok::<_, String>("fallback_value".to_string())),
         Execute::new(|input: String| async move { Ok::<_, String>(input) }),
     );
 
@@ -64,14 +52,6 @@ async fn no_fallback_when_output_valid(#[case] use_tower: bool) {
     let output = execute_service(&mut service, "test input".to_string(), use_tower).await;
 
     assert_eq!(output, Ok("test input".to_string()));
-    assert!(
-        !before_called_clone.load(Ordering::SeqCst),
-        "before_fallback must not be called when output is valid"
-    );
-    assert!(
-        !after_called_clone.load(Ordering::SeqCst),
-        "after_fallback must not be called when output is valid"
-    );
 }
 
 #[rstest]
@@ -81,23 +61,11 @@ async fn no_fallback_when_output_valid(#[case] use_tower: bool) {
 async fn fallback_invoked_when_output_invalid(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let context = ResilienceContext::new(clock);
-    let before_called = Arc::new(AtomicBool::new(false));
-    let before_called_clone = Arc::clone(&before_called);
-    let after_called = Arc::new(AtomicBool::new(false));
-    let after_called_clone = Arc::clone(&after_called);
 
     let stack = (
         Fallback::layer("test_fallback", &context)
             .should_fallback(|output: &Result<String, String>| output.is_err())
-            .fallback(|_output, _args| Ok::<_, String>("replaced".to_string()))
-            .before_fallback(move |output, _args| {
-                assert!(output.is_err(), "before_fallback should see the original error");
-                before_called.store(true, Ordering::SeqCst);
-            })
-            .after_fallback(move |output, _args| {
-                assert_eq!("replaced", output.as_ref().unwrap().as_str());
-                after_called.store(true, Ordering::SeqCst);
-            }),
+            .fallback(|_output, _args| Ok::<_, String>("replaced".to_string())),
         Execute::new(|_input: String| async move { Err::<String, String>("service_error".to_string()) }),
     );
 
@@ -105,8 +73,6 @@ async fn fallback_invoked_when_output_invalid(#[case] use_tower: bool) {
     let output = execute_service(&mut service, "test input".to_string(), use_tower).await;
 
     assert_eq!(output, Ok("replaced".to_string()));
-    assert!(before_called_clone.load(Ordering::SeqCst));
-    assert!(after_called_clone.load(Ordering::SeqCst));
 }
 
 #[rstest]
