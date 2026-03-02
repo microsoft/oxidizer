@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +9,7 @@ use layered::Layer;
 
 use crate::timeout::*;
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, ResilienceContext, Set};
+use crate::{NotSet, ResilienceContext, Set, TelemetryString};
 
 /// Builder for configuring timeout resilience middleware.
 ///
@@ -40,7 +39,7 @@ pub struct TimeoutLayer<In, Out, S1 = Set, S2 = Set> {
 
 impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &ResilienceContext<In, Out>) -> Self {
+    pub(crate) fn new(name: TelemetryString, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             timeout: None,
             timeout_output: None,
@@ -176,10 +175,10 @@ impl<In, Out, S> Layer<S> for TimeoutLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         let shared = TimeoutShared {
             clock: self.context.get_clock().clone(),
-            timeout: self.timeout.expect("timeout must be set in Ready state"),
+            timeout: self.timeout.expect("enforced by the type state pattern"),
             enable_if: self.enable_if.clone(),
             on_timeout: self.on_timeout.clone(),
-            timeout_output: self.timeout_output.clone().expect("timeout_result must be set in Ready state"),
+            timeout_output: self.timeout_output.clone().expect("enforced by the type state pattern"),
             timeout_override: self.timeout_override.clone(),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),

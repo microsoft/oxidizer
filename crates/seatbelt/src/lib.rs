@@ -6,10 +6,17 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/seatbelt/favicon.ico")]
 #![cfg_attr(
-    not(all(feature = "retry", feature = "timeout", feature = "breaker", feature = "metrics", feature = "logs")),
+    not(all(
+        feature = "retry",
+        feature = "timeout",
+        feature = "breaker",
+        feature = "fallback",
+        feature = "metrics",
+        feature = "logs"
+    )),
     expect(
         rustdoc::broken_intra_doc_links,
-        reason = "too ugly to make 'live links' possible with the combination of features"
+        reason = "intra-doc links break when not all features are enabled"
     )
 )]
 
@@ -101,6 +108,25 @@
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
 //! - [`breaker`] - Middleware that prevents cascading failures.
+//! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
+//!
+//! # Middleware Ordering
+//!
+//! The order in which resilience middleware is composed **matters**. Layers apply outer to inner
+//! (the first layer in the tuple is outermost). A recommended ordering:
+//!
+//! ```text
+//! Request → [Fallback → [Retry → [Breaker → [Timeout → Operation]]]]
+//! ```
+//!
+//! - **Fallback** (outermost): guarantees a usable response even if every retry is exhausted.
+//! - **Retry**: retries the entire inner stack; each attempt gets its own timeout.
+//! - **Breaker**: short-circuits failing calls so retry can back off until the breaker resets.
+//! - **Timeout** (innermost): bounds each individual attempt.
+//!
+//! Keep `Timeout` **inside** `Retry` so that a timed-out attempt is aborted and retried
+//! correctly. If `Timeout` were outside, a single timeout would govern all attempts combined
+//! and could cancel everything with no chance to recover.
 //!
 //! # Tower Compatibility
 //!
@@ -144,6 +170,8 @@
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
+//! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a
+//!   user-defined alternative.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 //! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
@@ -167,10 +195,13 @@ pub mod retry;
 #[cfg(any(feature = "breaker", test))]
 pub mod breaker;
 
+#[cfg(any(feature = "fallback", test))]
+pub mod fallback;
+
 #[cfg(any(feature = "retry", feature = "breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
+#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]
@@ -179,3 +210,5 @@ mod metrics;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 pub(crate) mod testing;
+
+pub(crate) type TelemetryString = std::borrow::Cow<'static, str>;
