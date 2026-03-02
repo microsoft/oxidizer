@@ -1,14 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::TelemetryString;
-
 #[derive(Debug, Clone)]
 pub(crate) struct TelemetryHelper {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub(crate) pipeline_name: TelemetryString,
+    pub(crate) pipeline_name: crate::TelemetryString,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub(crate) strategy_name: TelemetryString,
+    pub(crate) strategy_name: crate::TelemetryString,
     #[cfg(any(feature = "metrics", test))]
     pub(crate) event_reporter: Option<opentelemetry::metrics::Counter<u64>>,
     #[cfg(any(feature = "logs", test))]

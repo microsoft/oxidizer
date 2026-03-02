@@ -4,8 +4,6 @@
 use tick::Clock;
 
 #[cfg(any(feature = "metrics", feature = "logs", test))]
-use crate::TelemetryString;
-#[cfg(any(feature = "metrics", feature = "logs", test))]
 use crate::breaker::CircuitState;
 #[cfg(any(feature = "metrics", test))]
 use crate::breaker::telemetry::*;
@@ -21,14 +19,14 @@ pub(crate) struct EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) telemetry: TelemetryHelper,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub(super) breaker_id: TelemetryString,
+    pub(super) breaker_id: crate::TelemetryString,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) clock: Clock,
 }
 
 impl<T> EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: TelemetryString, clock: Clock) -> Self {
+    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: crate::TelemetryString, clock: Clock) -> Self {
         Self {
             inner,
             telemetry,
@@ -38,7 +36,7 @@ impl<T> EngineTelemetry<T> {
     }
 
     #[cfg(not(any(feature = "metrics", feature = "logs", test)))]
-    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: TelemetryString, _clock: Clock) -> Self {
+    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: crate::TelemetryString, _clock: Clock) -> Self {
         Self { inner }
     }
 }
