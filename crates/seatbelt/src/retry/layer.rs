@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +10,7 @@ use layered::Layer;
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::*;
-use crate::utils::{EnableIf, TelemetryHelper};
+use crate::utils::{EnableIf, TelemetryHelper, TelemetryString};
 use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 
 /// Builder for configuring retry resilience middleware.
@@ -45,7 +44,7 @@ pub struct RetryLayer<In, Out, S1 = Set, S2 = Set> {
 
 impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &ResilienceContext<In, Out>) -> Self {
+    pub(crate) fn new(name: TelemetryString, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             context: context.clone(),
             max_attempts: DEFAULT_RETRY_ATTEMPTS.saturating_add(1),
@@ -377,8 +376,8 @@ impl<In, Out, S> Layer<S> for RetryLayer<In, Out, Set, Set> {
             clock: self.context.get_clock().clone(),
             max_attempts: self.max_attempts,
             backoff: self.backoff.clone().into(),
-            clone_input: self.clone_input.clone().expect("clone_input must be set in Ready state"),
-            should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
+            clone_input: self.clone_input.clone().expect("enforced by the type state pattern"),
+            should_recover: self.should_recover.clone().expect("enforced by the type state pattern"),
             on_retry: self.on_retry.clone(),
             enable_if: self.enable_if.clone(),
             #[cfg(any(feature = "logs", feature = "metrics", test))]

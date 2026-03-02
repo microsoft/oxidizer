@@ -110,6 +110,24 @@
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
 //!
+//! # Middleware Ordering
+//!
+//! The order in which resilience middleware is composed **matters**. Layers apply outer to inner
+//! (the first layer in the tuple is outermost). A recommended ordering:
+//!
+//! ```text
+//! Request → [Fallback → [Retry → [Breaker → [Timeout → Operation]]]]
+//! ```
+//!
+//! - **Fallback** (outermost) — guarantees a usable response even if every retry is exhausted.
+//! - **Retry** — retries the entire inner stack; each attempt gets its own timeout.
+//! - **Breaker** — short-circuits failing calls so retry can back off until the breaker resets.
+//! - **Timeout** (innermost) — bounds each individual attempt.
+//!
+//! Keep `Timeout` **inside** `Retry` so that a timed-out attempt is aborted and retried
+//! correctly. If `Timeout` were outside, a single timeout would govern all attempts combined
+//! and could cancel everything with no chance to recover.
+//!
 //! # Tower Compatibility
 //!
 //! All resilience middleware are compatible with the Tower ecosystem when the `tower-service`

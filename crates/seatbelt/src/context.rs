@@ -9,6 +9,8 @@ use thread_aware::{
 };
 use tick::Clock;
 
+use crate::utils::TelemetryString;
+
 pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 
 /// Shared configuration and dependencies for a pipeline of resilience middleware.
@@ -19,7 +21,7 @@ pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 #[non_exhaustive]
 pub struct ResilienceContext<In, Out> {
     clock: Clock,
-    name: Cow<'static, str>,
+    name: TelemetryString,
     #[cfg(any(feature = "metrics", test))]
     meter: Option<opentelemetry::metrics::Meter>,
     logs_enabled: bool,
@@ -94,7 +96,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         )
     )]
     #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
-    pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {
+    pub(crate) fn create_telemetry(&self, strategy_name: TelemetryString) -> crate::utils::TelemetryHelper {
         crate::utils::TelemetryHelper {
             #[cfg(any(feature = "metrics", test))]
             event_reporter: self.meter.as_ref().map(crate::metrics::create_resilience_event_counter),

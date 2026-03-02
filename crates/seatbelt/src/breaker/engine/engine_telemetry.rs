@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
-
 use tick::Clock;
 
 #[cfg(any(feature = "metrics", feature = "logs", test))]
@@ -10,9 +8,9 @@ use crate::breaker::CircuitState;
 #[cfg(any(feature = "metrics", test))]
 use crate::breaker::telemetry::*;
 use crate::breaker::{CircuitEngine, EnterCircuitResult, ExecutionMode, ExecutionResult, ExitCircuitResult};
-use crate::utils::TelemetryHelper;
 #[cfg(any(feature = "metrics", test))]
 use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+use crate::utils::{TelemetryHelper, TelemetryString};
 
 /// Wrapper around a circuit engine to add telemetry capabilities.
 #[derive(Debug)]
@@ -21,14 +19,14 @@ pub(crate) struct EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) telemetry: TelemetryHelper,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub(super) breaker_id: Cow<'static, str>,
+    pub(super) breaker_id: TelemetryString,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) clock: Clock,
 }
 
 impl<T> EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: Cow<'static, str>, clock: Clock) -> Self {
+    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: TelemetryString, clock: Clock) -> Self {
         Self {
             inner,
             telemetry,
@@ -38,7 +36,7 @@ impl<T> EngineTelemetry<T> {
     }
 
     #[cfg(not(any(feature = "metrics", feature = "logs", test)))]
-    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: Cow<'static, str>, _clock: Clock) -> Self {
+    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: TelemetryString, _clock: Clock) -> Self {
         Self { inner }
     }
 }

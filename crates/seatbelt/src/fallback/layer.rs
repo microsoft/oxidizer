@@ -7,7 +7,7 @@ use std::sync::Arc;
 use layered::Layer;
 
 use crate::fallback::*;
-use crate::utils::{EnableIf, TelemetryHelper};
+use crate::utils::{EnableIf, TelemetryHelper, TelemetryString};
 use crate::{NotSet, Set};
 
 /// Builder for configuring fallback resilience middleware.
@@ -38,7 +38,7 @@ pub struct FallbackLayer<In, Out, S1 = Set, S2 = Set> {
 
 impl<In, Out> FallbackLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: std::borrow::Cow<'static, str>, context: &crate::ResilienceContext<In, Out>) -> Self {
+    pub(crate) fn new(name: TelemetryString, context: &crate::ResilienceContext<In, Out>) -> Self {
         Self {
             should_fallback: None,
             fallback_action: None,
@@ -148,8 +148,8 @@ impl<In, Out, S> Layer<S> for FallbackLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         let shared = FallbackShared {
             enable_if: self.enable_if.clone(),
-            should_fallback: self.should_fallback.clone().expect("should_fallback must be set in Ready state"),
-            fallback_action: self.fallback_action.clone().expect("fallback_action must be set in Ready state"),
+            should_fallback: self.should_fallback.clone().expect("enforced by the type state pattern"),
+            fallback_action: self.fallback_action.clone().expect("enforced by the type state pattern"),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
             telemetry: self.telemetry.clone(),
         };

@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +10,7 @@ use layered::Layer;
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::*;
 use crate::breaker::engine::probing::ProbesOptions;
-use crate::utils::{EnableIf, TelemetryHelper};
+use crate::utils::{EnableIf, TelemetryHelper, TelemetryString};
 use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 
 /// Builder for configuring circuit breaker resilience middleware.
@@ -50,7 +49,7 @@ pub struct BreakerLayer<In, Out, S1 = Set, S2 = Set> {
 
 impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &ResilienceContext<In, Out>) -> Self {
+    pub(crate) fn new(name: TelemetryString, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             context: context.clone(),
             recovery: None,
@@ -345,8 +344,8 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         let shared = BreakerShared {
             clock: self.context.get_clock().clone(),
-            recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
-            rejected_input: self.rejected_input.clone().expect("rejected_input must be set in Ready state"),
+            recovery: self.recovery.clone().expect("enforced by the type state pattern"),
+            rejected_input: self.rejected_input.clone().expect("enforced by the type state pattern"),
             enable_if: self.enable_if.clone(),
             engines: self.engines(),
             on_opened: self.on_opened.clone(),
