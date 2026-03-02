@@ -75,6 +75,7 @@ enum Mode {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "simpler tests")]
 mod tests {
     use super::*;
     use crate::breaker::engine::probing::ProbeOptions;
@@ -122,7 +123,6 @@ mod tests {
             ProbeOptions::SingleProbe { cooldown } if *cooldown == custom
         ));
 
-        #[expect(clippy::float_cmp, reason = "Test")]
         for probe in &probes[1..] {
             if let ProbeOptions::HealthProbe(h) = probe {
                 assert_eq!(h.stage_duration(), custom);

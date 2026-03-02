@@ -93,6 +93,7 @@ impl HealthProbeOptions {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "simpler tests")]
 mod tests {
     use static_assertions::assert_impl_all;
 
@@ -157,7 +158,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn health_probe_options_ctor_ok() {
         let sampling_duration = Duration::from_secs(60);
         let failure_threshold = 0.2;
@@ -190,7 +190,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn probes_options_progressive_ok() {
         let options = ProbesOptions::progressive(Duration::from_secs(30), 0.2);
         let probes: Vec<_> = options.probes().collect();

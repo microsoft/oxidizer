@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +11,7 @@ use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAUL
 use super::*;
 use crate::breaker::engine::probing::ProbesOptions;
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
+use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, TelemetryString};
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///
@@ -50,7 +49,7 @@ pub struct BreakerLayer<In, Out, S1 = Set, S2 = Set> {
 
 impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: Cow<'static, str>, context: &ResilienceContext<In, Out>) -> Self {
+    pub(crate) fn new(name: TelemetryString, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             context: context.clone(),
             recovery: None,
@@ -345,8 +344,8 @@ impl<In, Out, S> Layer<S> for BreakerLayer<In, Out, Set, Set> {
     fn layer(&self, inner: S) -> Self::Service {
         let shared = BreakerShared {
             clock: self.context.get_clock().clone(),
-            recovery: self.recovery.clone().expect("recovery must be set in Ready state"),
-            rejected_input: self.rejected_input.clone().expect("rejected_input must be set in Ready state"),
+            recovery: self.recovery.clone().expect("enforced by the type state pattern"),
+            rejected_input: self.rejected_input.clone().expect("enforced by the type state pattern"),
             enable_if: self.enable_if.clone(),
             engines: self.engines(),
             on_opened: self.on_opened.clone(),
@@ -404,6 +403,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "simpler tests")]
 mod tests {
     use std::fmt::Debug;
 
@@ -415,7 +415,6 @@ mod tests {
     use crate::testing::RecoverableType;
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn new_creates_correct_initial_state() {
         let context = create_test_context();
         let layer: BreakerLayer<_, _, NotSet, NotSet> = BreakerLayer::new("test_breaker".into(), &context);
@@ -540,7 +539,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn failure_threshold_sets_correctly() {
         let layer = create_ready_layer();
 
@@ -606,7 +604,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn default_values_are_correct() {
         let context = create_test_context();
         let layer = BreakerLayer::new("test".into(), &context);
@@ -619,7 +616,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     pub fn half_open_mode_ok() {
         let layer = create_ready_layer().half_open_mode(HalfOpenMode::quick());
         assert_eq!(layer.half_open_mode, HalfOpenMode::quick());
