@@ -16,7 +16,7 @@
     )),
     expect(
         rustdoc::broken_intra_doc_links,
-        reason = "too ugly to make 'live links' possible with the combination of features"
+        reason = "intra-doc links break when not all features are enabled"
     )
 )]
 
