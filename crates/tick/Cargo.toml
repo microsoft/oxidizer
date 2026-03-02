@@ -4,7 +4,7 @@
 [package]
 name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["data-structures"]

@@ -74,7 +74,7 @@ impl InactiveClock {
     #[must_use]
     pub fn activate(self) -> (Clock, ClockDriver) {
         let state = self.state;
-        let clock = Clock { state: state.clone() };
+        let clock = Clock::new(state.clone());
         let driver = ClockDriver::new(state);
 
         (clock, driver)
