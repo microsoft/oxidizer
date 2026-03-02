@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use layered::Layer;
 
-use crate::fallback::*;
 use crate::utils::{EnableIf, TelemetryHelper, TelemetryString};
 use crate::{NotSet, Set};
+use crate::{ResilienceContext, fallback::*};
 
 /// Builder for configuring fallback resilience middleware.
 ///
@@ -38,7 +38,7 @@ pub struct FallbackLayer<In, Out, S1 = Set, S2 = Set> {
 
 impl<In, Out> FallbackLayer<In, Out, NotSet, NotSet> {
     #[must_use]
-    pub(crate) fn new(name: TelemetryString, context: &crate::ResilienceContext<In, Out>) -> Self {
+    pub(crate) fn new(name: TelemetryString, context: &ResilienceContext<In, Out>) -> Self {
         Self {
             should_fallback: None,
             fallback_action: None,
