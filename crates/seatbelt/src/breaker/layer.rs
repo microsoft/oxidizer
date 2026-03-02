@@ -154,7 +154,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// **Default**: 0.1 (`10%` failure rate)
     #[must_use]
     pub fn failure_threshold(mut self, threshold: f32) -> Self {
-        self.failure_threshold = threshold.min(1.0);
+        self.failure_threshold = threshold.clamp(0.0, 1.0);
         self
     }
 
