@@ -197,7 +197,6 @@ mod callbacks;
 mod constants;
 mod layer;
 mod service;
-#[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
 pub use crate::attempt::Attempt;

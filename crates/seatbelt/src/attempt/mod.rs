@@ -3,6 +3,9 @@
 
 use std::fmt::Display;
 
+#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
+pub(crate) mod telemetry;
+
 /// Represents a single attempt in a resilience operation.
 ///
 /// This struct tracks the current attempt index, and it provides methods to check if this is the

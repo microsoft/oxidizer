@@ -100,11 +100,17 @@ where
         loop {
             let (original_input, attempt_input) = self.shared.clone_input(input, attempt, previous_recovery.clone());
 
+            // create telemetry tracker before the await point for drop safety
+            let attempt_telemetry = self.shared.create_attempt_telemetry(attempt, super::telemetry::RETRY_EVENT);
+
             // execute inner service
             let out = self.inner.execute(attempt_input).await;
 
-            // evaluate whether to retry
-            match self.shared.evaluate_attempt(original_input, out, attempt, &mut delays) {
+            // evaluate whether to retry (consumes attempt_telemetry)
+            match self
+                .shared
+                .evaluate_attempt(original_input, out, attempt, &mut delays, attempt_telemetry)
+            {
                 ControlFlow::Continue(state) => {
                     self.shared.clock.delay(state.delay).await;
                     input = state.input;
@@ -136,6 +142,7 @@ impl<In, Out> RetryShared<In, Out> {
         mut out: Out,
         attempt: Attempt,
         delays: &mut impl Iterator<Item = Duration>,
+        mut attempt_telemetry: crate::attempt::telemetry::AttemptTelemetry<'_>,
     ) -> ControlFlow<Out, ContinueRetry<In>> {
         let recovery = self.should_recover.call(
             &out,
@@ -146,17 +153,20 @@ impl<In, Out> RetryShared<In, Out> {
         );
 
         if !self.is_recoverable(&recovery) {
+            attempt_telemetry.affirm(recovery.kind(), Duration::ZERO);
             return ControlFlow::Break(out);
         }
 
         let Some(next_attempt) = attempt.increment(self.max_attempts) else {
-            self.emit_telemetry(attempt, Duration::ZERO, recovery.kind());
+            attempt_telemetry.affirm(recovery.kind(), Duration::ZERO);
+            attempt_telemetry.set_emit();
             return ControlFlow::Break(out);
         };
 
         let retry_delay = compute_retry_delay(&recovery, delays);
 
-        self.emit_telemetry(attempt, retry_delay, recovery.kind());
+        attempt_telemetry.affirm(recovery.kind(), retry_delay);
+        attempt_telemetry.set_emit();
 
         if let Some(input) = self.try_restore_input(original_input.as_ref(), &mut out, attempt, &recovery) {
             original_input = Some(input);
@@ -216,37 +226,20 @@ impl<In, Out> RetryShared<In, Out> {
     }
 
     #[cfg_attr(
-        not(any(feature = "logs", test)),
-        expect(unused_variables, clippy::unused_self, reason = "unused when logs feature not used")
+        not(any(feature = "logs", feature = "metrics", test)),
+        expect(clippy::unused_self, reason = "telemetry reference unused when features not enabled")
     )]
-    fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration, recovery_kind: RecoveryKind) {
-        #[cfg(any(feature = "logs", test))]
-        if self.telemetry.logs_enabled {
-            tracing::event!(
-                name: "seatbelt.retry",
-                tracing::Level::WARN,
-                pipeline.name = %self.telemetry.pipeline_name,
-                strategy.name = %self.telemetry.strategy_name,
-                resilience.attempt.index = attempt.index(),
-                resilience.attempt.is_last = attempt.is_last(),
-                resilience.retry.delay = retry_delay.as_secs_f32(),
-                resilience.attempt.recovery.kind = %recovery_kind,
-            );
-        }
-
-        #[cfg(any(feature = "metrics", test))]
-        if self.telemetry.metrics_enabled() {
-            use super::telemetry::RETRY_EVENT;
-            use crate::utils::{ATTEMPT_INDEX, ATTEMPT_IS_LAST, ATTEMPT_RECOVERY_KIND, EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
-
-            self.telemetry.report_metrics(&[
-                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
-                opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
-                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind.to_string()),
-            ]);
+    fn create_attempt_telemetry(&self, attempt: Attempt, event_name: &'static str) -> crate::attempt::telemetry::AttemptTelemetry<'_> {
+        crate::attempt::telemetry::AttemptTelemetry {
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
+            telemetry: &self.telemetry,
+            #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+            _marker: std::marker::PhantomData,
+            attempt,
+            event_name,
+            retry_delay: Duration::ZERO,
+            recovery_kind: None,
+            emit: false,
         }
     }
 }
@@ -327,10 +320,13 @@ where
                 loop {
                     let (original_input, attempt_input) = shared.clone_input(input, attempt, previous_recovery.clone());
 
+                    // create telemetry tracker before the await point for drop safety
+                    let attempt_telemetry = shared.create_attempt_telemetry(attempt, super::telemetry::RETRY_EVENT);
+
                     let out = inner.call(attempt_input).await;
 
-                    // evaluate whether to retry
-                    match shared.evaluate_attempt(original_input, out, attempt, &mut delays) {
+                    // evaluate whether to retry (consumes attempt_telemetry)
+                    match shared.evaluate_attempt(original_input, out, attempt, &mut delays, attempt_telemetry) {
                         ControlFlow::Continue(state) => {
                             shared.clock.delay(state.delay).await;
                             input = state.input;
@@ -427,7 +423,7 @@ mod tests {
 
         let _ = service.execute("test".to_string()).await;
 
-        log_capture.assert_contains("seatbelt::retry");
+        log_capture.assert_contains("seatbelt::attempt::telemetry");
         log_capture.assert_contains("log_test_pipeline");
         log_capture.assert_contains("log_test_retry");
         log_capture.assert_contains("resilience.attempt.index");
