@@ -67,6 +67,14 @@ impl HalfOpenMode {
     }
 }
 
+impl Default for HalfOpenMode {
+    /// Returns [`HalfOpenMode::progressive(None)`](HalfOpenMode::progressive),
+    /// matching the default used by [`BreakerLayer`](crate::breaker::BreakerLayer).
+    fn default() -> Self {
+        Self::progressive(None)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Mode {
     Quick,
@@ -160,6 +168,11 @@ mod tests {
         assert!(matches!(mode1.inner, Mode::Progressive(Some(_))));
         assert!(matches!(mode2.inner, Mode::Progressive(Some(_))));
         assert!(matches!(mode3.inner, Mode::Progressive(None)));
+    }
+
+    #[test]
+    fn default_is_progressive_none() {
+        assert_eq!(HalfOpenMode::default(), HalfOpenMode::progressive(None));
     }
 
     #[test]
