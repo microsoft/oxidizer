@@ -182,7 +182,6 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::ResilienceContext;
 
     #[test]
     fn new_needs_should_fallback_and_action() {
