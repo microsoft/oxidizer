@@ -168,8 +168,8 @@ impl Window {
 
     fn update(&mut self, result: ExecutionResult) {
         match result {
-            ExecutionResult::Success => self.successes += 1,
-            ExecutionResult::Failure => self.failures += 1,
+            ExecutionResult::Success => self.successes = self.successes.saturating_add(1),
+            ExecutionResult::Failure => self.failures = self.failures.saturating_add(1),
         }
     }
 }
