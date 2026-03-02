@@ -214,7 +214,7 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "duct",
- "ohno",
+ "ohno 0.3.1",
  "serde",
  "serde_json",
 ]
@@ -285,7 +285,7 @@ dependencies = [
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno",
+ "ohno 0.3.1",
  "testing_aids",
  "trait-variant",
 ]
@@ -411,13 +411,13 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpulist"
-version = "1.0.4"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "008abe0a6734be222147bad0a6233cbe22e558bba7f3a35c90d85fd90dd25cd0"
+checksum = "27e145d61bcc300ab99ad638807b98ab8b6daf7b51775d10350a05a127207941"
 dependencies = [
  "itertools 0.14.0",
  "new_zealand",
- "thiserror",
+ "ohno 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -649,9 +649,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "folo_ffi"
-version = "0.1.10"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb929208a4b0187184f37cc84c90c42de5abd4d95a881dc46cf79a418ac0dc36"
+checksum = "61a9c3e3367e07b13340c00f2e0e7cba14569d4b0a905e9b70a0dd21d3645aa6"
 
 [[package]]
 name = "fragile"
@@ -1050,9 +1050,9 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "many_cpus"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38c310ea469cec8e38e96906a6d95e6e9779bb92641da9a41e5b81df66070da1"
+checksum = "aba34466328b676589e8ca75b9e28e735ed355ed35c6da14de5b8cc2a086d10d"
 dependencies = [
  "cpulist",
  "derive_more",
@@ -1108,9 +1108,9 @@ checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
 
 [[package]]
 name = "new_zealand"
-version = "1.0.4"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf02e79143cf0338ae784080017707ed8ec073a05bc1218680cf26594e4ed2f"
+checksum = "6a1a6f5fd5c95c0c913af85fa74168f6bd49f467c3fd6b479521a2791101128f"
 
 [[package]]
 name = "nm"
@@ -1168,10 +1168,20 @@ version = "0.3.1"
 dependencies = [
  "futures",
  "mutants",
- "ohno_macros",
+ "ohno_macros 0.3.0",
  "regex",
  "thiserror",
  "tokio",
+ "typeid",
+]
+
+[[package]]
+name = "ohno"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ded938ea5c95b58460485bda64557bdcbf9067099fd7003ae23af0620bdc7a48"
+dependencies = [
+ "ohno_macros 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "typeid",
 ]
 
@@ -1182,6 +1192,17 @@ dependencies = [
  "insta",
  "mutants",
  "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "ohno_macros"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13afa6566040d0a66174d23ddd75fdee2c93e205cd57ff9abbecfb709014f6b"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn",
@@ -1488,7 +1509,7 @@ dependencies = [
 name = "recoverable"
 version = "0.1.0"
 dependencies = [
- "ohno",
+ "ohno 0.3.1",
  "static_assertions",
 ]
 
@@ -1622,7 +1643,7 @@ dependencies = [
  "http",
  "layered",
  "mutants",
- "ohno",
+ "ohno 0.3.1",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -1923,7 +1944,7 @@ dependencies = [
  "insta",
  "jiff",
  "mutants",
- "ohno",
+ "ohno 0.3.1",
  "pin-project-lite",
  "serde",
  "serde_core",
