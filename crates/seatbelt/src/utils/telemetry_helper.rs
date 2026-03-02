@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-pub(crate) type TelemetryString = std::borrow::Cow<'static, str>;
+use crate::TelemetryString;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TelemetryHelper {

@@ -9,7 +9,7 @@ use thread_aware::{
 };
 use tick::Clock;
 
-use crate::utils::TelemetryString;
+use crate::TelemetryString;
 
 pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 

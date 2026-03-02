@@ -210,3 +210,5 @@ mod metrics;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 pub(crate) mod testing;
+
+pub(crate) type TelemetryString = std::borrow::Cow<'static, str>;

@@ -10,7 +10,7 @@ mod attributes;
 pub(crate) use attributes::*;
 
 mod telemetry_helper;
-pub(crate) use telemetry_helper::{TelemetryHelper, TelemetryString};
+pub(crate) use telemetry_helper::TelemetryHelper;
 
 define_fn_wrapper!(EnableIf<In>(Fn(&In) -> bool));
 
