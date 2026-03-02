@@ -403,6 +403,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "simpler tests")]
 mod tests {
     use std::fmt::Debug;
 
@@ -414,7 +415,6 @@ mod tests {
     use crate::testing::RecoverableType;
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn new_creates_correct_initial_state() {
         let context = create_test_context();
         let layer: BreakerLayer<_, _, NotSet, NotSet> = BreakerLayer::new("test_breaker".into(), &context);
@@ -539,7 +539,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn failure_threshold_sets_correctly() {
         let layer = create_ready_layer();
 
@@ -605,7 +604,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn default_values_are_correct() {
         let context = create_test_context();
         let layer = BreakerLayer::new("test".into(), &context);
@@ -618,7 +616,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     pub fn half_open_mode_ok() {
         let layer = create_ready_layer().half_open_mode(HalfOpenMode::quick());
         assert_eq!(layer.half_open_mode, HalfOpenMode::quick());

@@ -176,11 +176,11 @@ impl Window {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "simpler tests")]
 mod tests {
     use super::*;
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn factory_ok() {
         let builder = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5);
         let metrics = builder.build();
@@ -197,7 +197,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn record_when_empty() {
         let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
         let start = Instant::now();
@@ -209,7 +208,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn create_health_info_healthy_when_not_throughput() {
         let metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
 
@@ -221,7 +219,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn record_twice() {
         let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 2);
         let start = Instant::now();
@@ -235,7 +232,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn record_ensure_old_window_discarded() {
         let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
         let start = Instant::now();
@@ -259,7 +255,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "Test")]
     fn ensure_multiple_windows_created() {
         let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
         let start = Instant::now();
