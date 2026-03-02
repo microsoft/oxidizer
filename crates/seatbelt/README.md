@@ -92,6 +92,24 @@ for each module for details on how to use them.
 * [`breaker`][__link10] - Middleware that prevents cascading failures.
 * [`fallback`][__link11] - Middleware that replaces invalid output with a user-defined alternative.
 
+## Middleware Ordering
+
+The order in which resilience middleware is composed **matters**. Layers apply outer to inner
+(the first layer in the tuple is outermost). A recommended ordering:
+
+```text
+Request → [Fallback → [Retry → [Breaker → [Timeout → Operation]]]]
+```
+
+* **Fallback** (outermost): guarantees a usable response even if every retry is exhausted.
+* **Retry**: retries the entire inner stack; each attempt gets its own timeout.
+* **Breaker**: short-circuits failing calls so retry can back off until the breaker resets.
+* **Timeout** (innermost): bounds each individual attempt.
+
+Keep `Timeout` **inside** `Retry` so that a timed-out attempt is aborted and retried
+correctly. If `Timeout` were outside, a single timeout would govern all attempts combined
+and could cancel everything with no chance to recover.
+
 ## Tower Compatibility
 
 All resilience middleware are compatible with the Tower ecosystem when the `tower-service`
@@ -143,7 +161,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7ex-QytcOD7G68zUdsKZSbfGxj8uPQFr6glG0BRkUJSnjr0YWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9IsIH4lMIlZG6yvQLD54xwlGzZ0zF8hNPP6G0829eA2zV-FYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMIJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
