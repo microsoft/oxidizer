@@ -78,7 +78,7 @@
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when a timeout occurs
+//! - **When**: Emitted when the inner service does not complete within the configured timeout duration
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
