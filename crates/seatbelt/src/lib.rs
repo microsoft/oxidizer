@@ -119,10 +119,10 @@
 //! Request → [Fallback → [Retry → [Breaker → [Timeout → Operation]]]]
 //! ```
 //!
-//! - **Fallback** (outermost) — guarantees a usable response even if every retry is exhausted.
-//! - **Retry** — retries the entire inner stack; each attempt gets its own timeout.
-//! - **Breaker** — short-circuits failing calls so retry can back off until the breaker resets.
-//! - **Timeout** (innermost) — bounds each individual attempt.
+//! - **Fallback** (outermost): guarantees a usable response even if every retry is exhausted.
+//! - **Retry**: retries the entire inner stack; each attempt gets its own timeout.
+//! - **Breaker**: short-circuits failing calls so retry can back off until the breaker resets.
+//! - **Timeout** (innermost): bounds each individual attempt.
 //!
 //! Keep `Timeout` **inside** `Retry` so that a timed-out attempt is aborted and retried
 //! correctly. If `Timeout` were outside, a single timeout would govern all attempts combined
