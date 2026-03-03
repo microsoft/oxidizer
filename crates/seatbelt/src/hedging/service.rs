@@ -115,19 +115,22 @@ impl<In, Out> HedgingShared<In, Out> {
         F: Future<Output = Out>,
     {
         let total_attempts = self.max_hedged_attempts.saturating_add(1);
-        if total_attempts == 1 {
-            return launch(input).await;
-        }
-
         let attempt = Attempt::new(0, total_attempts == 1);
         let args = CloneArgs { attempt };
+
         let Some(mut first_cloned) = self.clone_input.call(&mut input, args) else {
+            self.invoke_on_execute(&mut input, attempt, Duration::ZERO);
             return launch(input).await;
         };
 
+        // launch the first execution
         self.invoke_on_execute(&mut first_cloned, attempt, Duration::ZERO);
+        let future = launch(first_cloned);
+
+        // and store it in the futures unordered set
         let mut futs = FuturesUnordered::new();
-        futs.push(launch(first_cloned));
+        futs.push(future);
+
         self.run_delay_loop(&mut futs, &mut input, attempt, total_attempts, launch).await
     }
 
