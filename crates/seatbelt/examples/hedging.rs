@@ -12,13 +12,18 @@ use seatbelt::hedging::Hedging;
 use seatbelt::hedging::HedgingMode;
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[tokio::main]
 async fn main() {
+    // Set up tracing subscriber for logs to console
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
+
     let clock = Clock::new_tokio();
-    let context = ResilienceContext::new(&clock);
+    let context = ResilienceContext::new(&clock).use_logs();
 
     let op_clock = clock.clone();
 
