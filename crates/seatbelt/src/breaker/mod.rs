@@ -160,8 +160,8 @@
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when the circuit state transitions (opened, closed, probed) or when an
-//!   input is rejected due to an open circuit
+//! - **When**: Emitted when the circuit state transitions (opened, closed) or when an
+//!   input is rejected or allowed to enter when the circuit is in open state.
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Circuit breaker identifier from [`Breaker::layer`]
