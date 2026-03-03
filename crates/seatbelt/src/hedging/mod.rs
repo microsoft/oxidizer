@@ -95,17 +95,32 @@
 //!
 //! # Telemetry
 //!
+//! Hedging telemetry is **drop-safe**: it is emitted even for in-flight futures that are
+//! cancelled when an acceptable result arrives. Each launched attempt carries a telemetry
+//! guard that reports on drop.
+//!
+//! Telemetry is emitted when:
+//! - A result is **recoverable** — reported with the actual [`RecoveryKind`][crate::RecoveryKind]
+//! - A future is **abandoned** (dropped before completing) — reported with recovery kind `"abandoned"`
+//!
+//! Telemetry is **not** emitted for non-recoverable (accepted) results.
+//!
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted for each hedged request launched
+//! - **When**: Emitted for recoverable and abandoned attempts
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Hedging identifier from [`Hedging::layer`]
 //!   - `resilience.event.name`: Always `hedge`
-//!   - `resilience.attempt.index`: Attempt index (1-based for hedges)
-//!   - `resilience.attempt.is_last`: Whether this is the last hedge attempt
-//!   - `resilience.attempt.recovery.kind`: The recovery classification that triggered the hedge (empty when hedge is launched by delay expiration)
+//!   - `resilience.attempt.index`: Attempt index (0 for original, 1+ for hedges)
+//!   - `resilience.attempt.is_last`: Whether this is the last attempt
+//!   - `resilience.attempt.recovery.kind`: The recovery classification (`retry`, `unavailable`, or `abandoned`)
+//!
+//! ## Logs
+//!
+//! Log events include all metric attributes plus `resilience.hedge.delay` (the delay
+//! in seconds waited before launching the attempt).
 //!
 //! # Examples
 //!
@@ -190,7 +205,6 @@ mod constants;
 mod layer;
 mod mode;
 mod service;
-#[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
 pub use crate::attempt::Attempt;

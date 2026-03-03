@@ -104,6 +104,44 @@ where
     }
 }
 
+use super::telemetry::TelemetryGuard;
+
+/// Wraps an inner future with a [`TelemetryGuard`] so that abandoned (dropped)
+/// futures still emit telemetry.
+///
+/// When polled to completion the guard is returned alongside the output so the
+/// caller can classify the result. When the future is dropped before completing
+/// the guard's [`Drop`] impl reports the attempt as `"abandoned"`.
+struct GuardedFuture<F> {
+    inner: F,
+    guard: Option<TelemetryGuard>,
+}
+
+impl<F> GuardedFuture<F> {
+    fn new(inner: F, guard: TelemetryGuard) -> Self {
+        Self { inner, guard: Some(guard) }
+    }
+}
+
+impl<F: Future> Future for GuardedFuture<F> {
+    type Output = (F::Output, TelemetryGuard);
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        // SAFETY: `inner` is structurally pinned; `guard` is `Unpin` and we
+        // only access it via `Option::take` which does not move `inner`.
+        let this = unsafe { self.get_unchecked_mut() };
+        let inner = unsafe { std::pin::Pin::new_unchecked(&mut this.inner) };
+        match inner.poll(cx) {
+            std::task::Poll::Ready(out) => {
+                let guard = this.guard.take()
+                    .expect("GuardedFuture polled after completion");
+                std::task::Poll::Ready((out, guard))
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
 impl<In, Out> HedgingShared<In, Out> {
     /// Core hedging orchestration shared by both layered and tower service impls.
     ///
@@ -123,13 +161,10 @@ impl<In, Out> HedgingShared<In, Out> {
             return launch(input).await;
         };
 
-        // launch the first execution
         self.invoke_on_execute(&mut first_cloned, attempt, Duration::ZERO);
-        let future = launch(first_cloned);
-
-        // and store it in the futures unordered set
+        let guard = self.create_guard(attempt, Duration::ZERO);
         let mut futs = FuturesUnordered::new();
-        futs.push(future);
+        futs.push(GuardedFuture::new(launch(first_cloned), guard));
 
         self.run_delay_loop(&mut futs, &mut input, attempt, total_attempts, launch).await
     }
@@ -148,7 +183,7 @@ impl<In, Out> HedgingShared<In, Out> {
 
     async fn run_delay_loop<F>(
         &self,
-        futs: &mut FuturesUnordered<F>,
+        futs: &mut FuturesUnordered<GuardedFuture<F>>,
         input: &mut In,
         mut attempt: Attempt,
         total_attempts: u32,
@@ -173,31 +208,37 @@ impl<In, Out> HedgingShared<In, Out> {
                 };
 
                 match outcome {
-                    SelectOutcome::Result(Some(out)) => {
+                    SelectOutcome::Result(Some((out, mut guard))) => {
                         let Some(recovery_kind) = self.recovery_kind(&out) else {
+                            guard.disarm();
                             return out;
                         };
+                        guard.set_recovery_kind(recovery_kind);
+                        drop(guard);
                         last_result = Some(out);
                         // Result was recoverable — launch a hedge immediately
                         // instead of waiting for the delay timer again.
-                        self.launch_hedge(futs, input, next_attempt, Duration::ZERO, Some(recovery_kind), &mut launch);
+                        self.launch_hedge(futs, input, next_attempt, Duration::ZERO, &mut launch);
                         attempt = next_attempt;
                     }
                     SelectOutcome::Result(None) => {
                         return last_result.expect("at least one attempt was launched");
                     }
                     SelectOutcome::DelayExpired => {
-                        self.launch_hedge(futs, input, next_attempt, delay, None, &mut launch);
+                        self.launch_hedge(futs, input, next_attempt, delay, &mut launch);
                         attempt = next_attempt;
                     }
                 }
             } else {
                 // All hedges launched — drain remaining futures, preserving
                 // any recoverable result collected during the delay loop.
-                while let Some(out) = futs.next().await {
-                    if self.recovery_kind(&out).is_none() {
+                while let Some((out, mut guard)) = futs.next().await {
+                    let Some(recovery_kind) = self.recovery_kind(&out) else {
+                        guard.disarm();
                         return out;
-                    }
+                    };
+                    guard.set_recovery_kind(recovery_kind);
+                    drop(guard);
                     last_result = Some(out);
                 }
                 return last_result.expect("at least one attempt was launched");
@@ -207,19 +248,18 @@ impl<In, Out> HedgingShared<In, Out> {
 
     fn launch_hedge<F>(
         &self,
-        futs: &FuturesUnordered<F>,
+        futs: &FuturesUnordered<GuardedFuture<F>>,
         input: &mut In,
         attempt: Attempt,
         hedge_delay: Duration,
-        recovery_kind: Option<RecoveryKind>,
         launch: &mut impl FnMut(In) -> F,
     ) {
         let args = CloneArgs { attempt };
 
         if let Some(mut cloned) = self.clone_input.call(input, args) {
             self.invoke_on_execute(&mut cloned, attempt, hedge_delay);
-            self.emit_telemetry(attempt, recovery_kind);
-            futs.push(launch(cloned));
+            let guard = self.create_guard(attempt, hedge_delay);
+            futs.push(GuardedFuture::new(launch(cloned), guard));
         }
     }
 
@@ -229,39 +269,14 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    #[cfg_attr(
-        not(any(feature = "logs", test)),
-        expect(unused_variables, clippy::unused_self, reason = "unused when logs feature not used")
-    )]
-    fn emit_telemetry(&self, attempt: Attempt, recovery_kind: Option<RecoveryKind>) {
-        #[cfg(any(feature = "logs", test))]
-        if self.telemetry.logs_enabled {
-            let recovery_kind_str = recovery_kind.as_ref().map(ToString::to_string).unwrap_or_default();
-            tracing::event!(
-                name: "seatbelt.hedge",
-                tracing::Level::INFO,
-                pipeline.name = %self.telemetry.pipeline_name,
-                strategy.name = %self.telemetry.strategy_name,
-                resilience.attempt.index = attempt.index(),
-                resilience.attempt.is_last = attempt.is_last(),
-                resilience.attempt.recovery.kind = %recovery_kind_str,
-            );
-        }
-
-        #[cfg(any(feature = "metrics", test))]
-        if self.telemetry.metrics_enabled() {
-            use super::telemetry::HEDGE_EVENT;
-            use crate::attempt::{ATTEMPT_INDEX, ATTEMPT_IS_LAST, ATTEMPT_RECOVERY_KIND};
-            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
-
-            self.telemetry.report_metrics(&[
-                opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
-                opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                opentelemetry::KeyValue::new(EVENT_NAME, HEDGE_EVENT),
-                opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
-                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind.as_ref().map(ToString::to_string).unwrap_or_default()),
-            ]);
+    fn create_guard(&self, attempt: Attempt, hedge_delay: Duration) -> TelemetryGuard {
+        TelemetryGuard {
+            attempt,
+            hedge_delay,
+            recovery_kind: std::borrow::Cow::Borrowed(super::telemetry::ABANDONED),
+            armed: true,
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
+            telemetry: self.telemetry.clone(),
         }
     }
 }
@@ -388,7 +403,8 @@ mod tests {
                 KeyValue::new("resilience.attempt.is_last", true),
                 KeyValue::new("resilience.attempt.recovery.kind", "retry"),
             ],
-            Some(6),
+            // Two events: attempt 0 (recoverable) + attempt 1 (recoverable), 6 attrs each
+            Some(12),
         );
     }
 
@@ -420,6 +436,7 @@ mod tests {
         log_capture.assert_contains("resilience.attempt.index");
         log_capture.assert_contains("resilience.attempt.is_last");
         log_capture.assert_contains("resilience.attempt.recovery.kind");
+        log_capture.assert_contains("resilience.hedge.delay");
     }
 
     #[test]
