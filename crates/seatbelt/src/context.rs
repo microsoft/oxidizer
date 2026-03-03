@@ -9,6 +9,8 @@ use thread_aware::{
 };
 use tick::Clock;
 
+use crate::TelemetryString;
+
 pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 
 /// Shared configuration and dependencies for a pipeline of resilience middleware.
@@ -19,7 +21,7 @@ pub(crate) const DEFAULT_CONTEXT_NAME: &str = "default";
 #[non_exhaustive]
 pub struct ResilienceContext<In, Out> {
     clock: Clock,
-    name: Cow<'static, str>,
+    name: TelemetryString,
     #[cfg(any(feature = "metrics", test))]
     meter: Option<opentelemetry::metrics::Meter>,
     logs_enabled: bool,
@@ -93,8 +95,8 @@ impl<In, Out> ResilienceContext<In, Out> {
             reason = "unused when logs nor metrics are used"
         )
     )]
-    #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
-    pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {
+    #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
+    pub(crate) fn create_telemetry(&self, strategy_name: TelemetryString) -> crate::utils::TelemetryHelper {
         crate::utils::TelemetryHelper {
             #[cfg(any(feature = "metrics", test))]
             event_reporter: self.meter.as_ref().map(crate::metrics::create_resilience_event_counter),
@@ -153,7 +155,7 @@ mod tests {
         assert!(matches!(telemetry.pipeline_name, Cow::Owned(_)));
     }
 
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn test_create_event_reporter_with_multiple_clones_accumulates_events() {
         let clock = tick::Clock::new_frozen();
@@ -183,7 +185,6 @@ mod tests {
         _ = ctx.relocated(affinites[0].into(), affinites[1]);
     }
 
-    #[cfg(not(miri))]
     fn test_meter_provider() -> (
         opentelemetry_sdk::metrics::SdkMeterProvider,
         opentelemetry_sdk::metrics::InMemoryMetricExporter,

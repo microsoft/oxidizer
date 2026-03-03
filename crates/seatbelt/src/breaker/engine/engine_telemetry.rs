@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
-
 use tick::Clock;
 
 #[cfg(any(feature = "metrics", feature = "logs", test))]
@@ -21,14 +19,14 @@ pub(crate) struct EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) telemetry: TelemetryHelper,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub(super) breaker_id: Cow<'static, str>,
+    pub(super) breaker_id: crate::TelemetryString,
     #[cfg(any(feature = "metrics", feature = "logs", test))]
     pub(super) clock: Clock,
 }
 
 impl<T> EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: Cow<'static, str>, clock: Clock) -> Self {
+    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: crate::TelemetryString, clock: Clock) -> Self {
         Self {
             inner,
             telemetry,
@@ -38,7 +36,7 @@ impl<T> EngineTelemetry<T> {
     }
 
     #[cfg(not(any(feature = "metrics", feature = "logs", test)))]
-    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: Cow<'static, str>, _clock: Clock) -> Self {
+    pub fn new(inner: T, _telemetry: TelemetryHelper, _breaker_id: crate::TelemetryString, _clock: Clock) -> Self {
         Self { inner }
     }
 }
@@ -181,7 +179,6 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[cfg(not(miri))]
 mod tests {
     use std::time::Instant;
 
@@ -193,6 +190,7 @@ mod tests {
     use testing_aids::MetricTester;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn enter_rejected_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Rejected,
@@ -214,6 +212,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn exit_probe_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Accepted {
@@ -238,6 +237,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn circuit_closed_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Accepted {
@@ -261,6 +261,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn circuit_opened_ensure_telemetry() {
         let (tester, telemetry_engine) = create_engine(EngineFake::new(
             EnterCircuitResult::Accepted {
