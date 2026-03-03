@@ -69,7 +69,6 @@ ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
-reqwest = { workspace = true, features = ["rustls-tls"] }
 rstest.workspace = true
 static_assertions.workspace = true
 tick = { workspace = true, features = ["test-util", "tokio"] }
@@ -110,10 +109,6 @@ required-features = ["retry", "timeout", "tower-service"]
 [[example]]
 name = "hedging"
 required-features = ["hedging"]
-
-[[example]]
-name = "reqwest"
-required-features = ["retry", "timeout"]
 
 [[example]]
 name = "breaker"
