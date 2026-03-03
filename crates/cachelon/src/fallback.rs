@@ -291,6 +291,7 @@ where
 ///
 /// Public API tests are in `tests/fallback.rs`.
 #[cfg(test)]
+#[cfg(feature = "memory")]
 mod tests {
     use super::*;
     use crate::Cache;

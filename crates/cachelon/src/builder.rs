@@ -584,6 +584,7 @@ mod tests {
         assert_eq!(name, "String");
     }
 
+    #[cfg(feature = "memory")]
     #[test]
     fn cache_builder_with_ttl() {
         let clock = Clock::new_frozen();
