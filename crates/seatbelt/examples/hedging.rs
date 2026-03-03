@@ -28,9 +28,9 @@ async fn main() {
     let op_clock = clock.clone();
 
     // Configure hedging: if the original request hasn't completed after 200ms,
-    // launch a hedge request. The first successful response wins.
+    // launch a hedging request. The first successful response wins.
     let stack = (
-        Hedging::layer("my_hedge", &context)
+        Hedging::layer("my_hedging", &context)
             .clone_input()
             .recovery_with(|_output: &String, _args| RecoveryInfo::never())
             .hedging_mode(HedgingMode::delay(Duration::from_millis(200)))
@@ -57,7 +57,7 @@ async fn main() {
 }
 
 /// Simulates a service where the first call is slow (500ms) and the second
-/// call (the hedge) is fast (50ms). The hedge completes before the original,
+/// call (the hedging attempt) is fast (50ms). The hedging attempt completes before the original,
 /// demonstrating how hedging reduces tail latency.
 async fn slow_then_fast_operation(input: String, clock: &Clock) -> String {
     let call = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -68,7 +68,7 @@ async fn slow_then_fast_operation(input: String, clock: &Clock) -> String {
         clock.delay(Duration::from_millis(500)).await;
         format!("{input} - slow response")
     } else {
-        // Hedge request: simulate a fast response
+        // Hedging request: simulate a fast response
         println!("[service] attempt {call}: fast path (50ms)");
         clock.delay(Duration::from_millis(50)).await;
         format!("{input} - fast response")

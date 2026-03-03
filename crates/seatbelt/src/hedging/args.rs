@@ -17,7 +17,7 @@ pub struct CloneArgs {
 impl CloneArgs {
     /// Returns the current attempt information.
     ///
-    /// Index 0 is the original request, 1 is the first hedge, etc.
+    /// Index 0 is the original request, 1 is the first hedging attempt, etc.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
@@ -52,7 +52,7 @@ pub struct OnExecuteArgs {
 impl OnExecuteArgs {
     /// Returns the current attempt information.
     ///
-    /// Attempt index 0 is the original request, 1 is the first hedge, etc.
+    /// Attempt index 0 is the original request, 1 is the first hedging attempt, etc.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
@@ -71,16 +71,16 @@ impl OnExecuteArgs {
 
 /// Arguments for the [`HedgingMode::dynamic`][super::HedgingMode::dynamic] callback function.
 ///
-/// Provides context for computing the delay before the next hedge.
+/// Provides context for computing the delay before the next hedging attempt.
 #[derive(Debug)]
 pub struct HedgingDelayArgs {
     pub(super) attempt: Attempt,
 }
 
 impl HedgingDelayArgs {
-    /// Returns the attempt information for the hedge about to be launched.
+    /// Returns the attempt information for the hedging attempt about to be launched.
     ///
-    /// Attempt index 1 is the first hedge, 2 is the second hedge, etc.
+    /// Attempt index 1 is the first hedging attempt, 2 is the second hedging attempt, etc.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt

@@ -13,9 +13,9 @@ use super::constants::DEFAULT_HEDGING_DELAY;
 ///
 /// `HedgingMode` controls the timing of additional hedged requests:
 ///
-/// - [`immediate()`][HedgingMode::immediate] launches all hedges at once
-/// - [`delay()`][HedgingMode::delay] waits a fixed duration between each hedge
-/// - [`dynamic()`][HedgingMode::dynamic] computes the delay per hedge via a callback
+/// - [`immediate()`][HedgingMode::immediate] launches all hedging attempts at once
+/// - [`delay()`][HedgingMode::delay] waits a fixed duration between each hedging attempt
+/// - [`dynamic()`][HedgingMode::dynamic] computes the delay per hedging attempt via a callback
 ///
 /// # Examples
 ///
@@ -26,7 +26,7 @@ use super::constants::DEFAULT_HEDGING_DELAY;
 /// // All requests launch simultaneously
 /// let mode = HedgingMode::immediate();
 ///
-/// // Wait 1 second between each hedge launch
+/// // Wait 1 second between each hedging attempt launch
 /// let mode = HedgingMode::delay(Duration::from_secs(1));
 ///
 /// // Compute delay dynamically
@@ -53,10 +53,10 @@ impl HedgingMode {
     /// successful result is returned.
     ///
     /// **Caution:** This mode multiplies the load on the downstream service by the total
-    /// number of attempts, original plus all hedges. Only use this when the downstream
+    /// number of attempts, original plus all hedging attempts. Only use this when the downstream
     /// service has sufficient capacity to absorb the additional requests. For most
     /// scenarios, [`delay`][HedgingMode::delay] is a safer default because it avoids
-    /// sending hedges when the original request completes quickly.
+    /// sending hedging attempts when the original request completes quickly.
     #[must_use]
     pub fn immediate() -> Self {
         Self {
@@ -68,7 +68,7 @@ impl HedgingMode {
     /// additional hedged request.
     ///
     /// The original request is always sent immediately. After `delay`, the first
-    /// hedge is launched. After another `delay`, the second hedge is launched, etc.
+    /// hedging attempt is launched. After another `delay`, the second hedging attempt is launched, etc.
     #[must_use]
     pub fn delay(delay: Duration) -> Self {
         Self {
@@ -76,10 +76,10 @@ impl HedgingMode {
         }
     }
 
-    /// Creates a hedging mode that computes the delay dynamically for each hedge.
+    /// Creates a hedging mode that computes the delay dynamically for each hedging attempt.
     ///
-    /// The `delay_fn` receives [`HedgingDelayArgs`] containing the hedge index
-    /// and should return the [`Duration`] to wait before launching that hedge.
+    /// The `delay_fn` receives [`HedgingDelayArgs`] containing the hedging attempt index
+    /// and should return the [`Duration`] to wait before launching that hedging attempt.
     #[must_use]
     pub fn dynamic(delay_fn: impl Fn(HedgingDelayArgs) -> Duration + Send + Sync + 'static) -> Self {
         Self {

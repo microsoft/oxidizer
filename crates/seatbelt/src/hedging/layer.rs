@@ -20,7 +20,7 @@ use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 /// type-state pattern to enforce that required properties are configured before the hedging
 /// middleware can be built:
 ///
-/// - [`clone_input`][HedgingLayer::clone_input]: Required to specify how to clone inputs for hedge attempts
+/// - [`clone_input`][HedgingLayer::clone_input]: Required to specify how to clone inputs for hedging attempts
 /// - [`recovery`][HedgingLayer::recovery]: Required to determine if an output is acceptable
 ///
 /// For comprehensive examples, see the [hedging module][crate::hedging] documentation.
@@ -66,7 +66,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// This specifies the maximum number of hedged requests in addition to the original call.
     /// For example, if `max_hedged_attempts` is 2, the operation will be attempted up to
-    /// 3 times total (1 original `+` 2 hedges).
+    /// 3 times total (1 original `+` 2 hedging attempts).
     ///
     /// **Default**: 1 hedged attempt (2 total)
     #[must_use]
@@ -77,8 +77,8 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
 
     /// Sets the hedging mode that controls timing of hedged requests.
     ///
-    /// - [`HedgingMode::immediate()`]: Launches all hedges at once
-    /// - [`HedgingMode::delay(duration)`][HedgingMode::delay]: Fixed delay between each hedge
+    /// - [`HedgingMode::immediate()`]: Launches all hedging attempts at once
+    /// - [`HedgingMode::delay(duration)`][HedgingMode::delay]: Fixed delay between each hedging attempt
     /// - [`HedgingMode::dynamic(fn)`][HedgingMode::dynamic]: Per-attempt delay via callback
     ///
     /// **Default**: [`HedgingMode::delay(2s)`][HedgingMode::delay]
@@ -93,7 +93,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// Called before each attempt to produce a fresh input value. The `clone_fn`
     /// receives a mutable reference to the input and [`CloneArgs`] containing
     /// context about the attempt. Return `Some(cloned_input)` to proceed, or `None`
-    /// to skip that hedge attempt.
+    /// to skip that hedging attempt.
     #[must_use]
     pub fn clone_input_with(
         mut self,
@@ -125,7 +125,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// the output and returning a [`RecoveryInfo`] classification:
     ///
     /// - [`RecoveryInfo::never()`]: The result is acceptable - return it immediately
-    /// - [`RecoveryInfo::retry()`]: The result is transient - continue waiting for hedges
+    /// - [`RecoveryInfo::retry()`]: The result is transient - continue waiting for hedging attempts
     /// - [`RecoveryInfo::unavailable()`]: The service is unavailable - by default returned
     ///   immediately, but treated as transient when [`handle_unavailable(true)`][HedgingLayer::handle_unavailable]
     ///   is configured
@@ -171,7 +171,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// recoverable conditions.
     ///
     /// When enabled, [`RecoveryInfo::unavailable()`] classifications are treated as
-    /// recoverable - the hedge will continue waiting for other in-flight requests.
+    /// recoverable - the hedging middleware will continue waiting for other in-flight requests.
     /// When disabled (default), unavailable responses are treated as acceptable results
     /// and returned immediately.
     ///

@@ -99,7 +99,7 @@ async fn immediate_mode_all_run_concurrently(#[case] use_tower: bool) {
     let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
     assert_eq!(result, Ok("success:test".to_string()));
-    // All 3 attempts (1 original + 2 hedges) should have been launched
+    // All 3 attempts (1 original + 2 hedging attempts) should have been launched
     assert_eq!(counter.load(Ordering::SeqCst), 3);
 }
 
@@ -139,7 +139,7 @@ async fn immediate_mode_returns_first_success(#[case] use_tower: bool) {
 #[case::layered(false)]
 #[case::tower(true)]
 #[tokio::test]
-async fn delay_mode_launches_hedge_after_timeout(#[case] use_tower: bool) {
+async fn delay_mode_launches_hedging_attempt_after_timeout(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
@@ -239,7 +239,7 @@ async fn on_execute_callback_invoked(#[case] use_tower: bool) {
     let mut service = stack.into_service();
     let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    // on_execute should be called for each attempt (1 original + 2 hedges)
+    // on_execute should be called for each attempt (1 original + 2 hedging attempts)
     assert_eq!(execute_calls.load(Ordering::SeqCst), 3);
 }
 
@@ -247,7 +247,7 @@ async fn on_execute_callback_invoked(#[case] use_tower: bool) {
 #[case::layered(false)]
 #[case::tower(true)]
 #[tokio::test]
-async fn no_hedges_configured_passes_through(#[case] use_tower: bool) {
+async fn no_hedging_configured_passes_through(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
@@ -345,7 +345,7 @@ async fn enable_if_skips_hedging(#[case] use_tower: bool) {
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .hedging_mode(HedgingMode::immediate())
             .max_hedged_attempts(2)
-            .enable_if(|input| input.contains("hedge")),
+            .enable_if(|input| input.contains("hedging")),
         Execute::new(move |v: String| {
             counter_clone.fetch_add(1, Ordering::SeqCst);
             async move { Ok::<_, String>(v) }
@@ -354,17 +354,17 @@ async fn enable_if_skips_hedging(#[case] use_tower: bool) {
 
     let mut service = stack.into_service();
 
-    // This should NOT be hedged (no "hedge" in input)
+    // This should NOT be hedged (no "hedging" in input)
     let result = execute_service(&mut service, "normal".to_string(), use_tower).await;
     assert_eq!(result, Ok("normal".to_string()));
-    assert_eq!(counter.load(Ordering::SeqCst), 1); // Only 1 call, no hedges
+    assert_eq!(counter.load(Ordering::SeqCst), 1); // Only 1 call, no hedging attempts
 }
 
 #[rstest]
 #[case::layered(false)]
 #[case::tower(true)]
 #[tokio::test]
-async fn clone_returning_none_skips_hedge(#[case] use_tower: bool) {
+async fn clone_returning_none_skips_hedging(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
@@ -373,7 +373,7 @@ async fn clone_returning_none_skips_hedge(#[case] use_tower: bool) {
     let stack = (
         Hedging::layer("test_hedging", &context)
             .clone_input_with(|input, args| {
-                // Only clone for the original request (attempt 0), refuse all hedges.
+                // Only clone for the original request (attempt 0), refuse all hedging attempts.
                 (args.attempt().index() == 0).then(|| input.clone())
             })
             .recovery_with(|result: &Result<String, String>, _| match result {
@@ -397,7 +397,7 @@ async fn clone_returning_none_skips_hedge(#[case] use_tower: bool) {
     let mut service = stack.into_service();
     let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    // Clone refused all hedges, so only the original (recoverable) result returns.
+    // Clone refused all hedging attempts, so only the original (recoverable) result returns.
     assert_eq!(result, Err("transient".to_string()));
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
@@ -447,9 +447,9 @@ async fn handle_unavailable_continues_hedging(#[case] use_tower: bool) {
 #[case::layered(false)]
 #[case::tower(true)]
 #[tokio::test]
-async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
-    // Scenario: the original request is slow and doesn't finish within the hedge delay.
-    // A hedge is launched and both return successful (non-recoverable) results, but the
+async fn slow_original_accepted_after_hedging_launched(#[case] use_tower: bool) {
+    // Scenario: the original request is slow and doesn't finish within the hedging delay.
+    // A hedging attempt is launched and both return successful (non-recoverable) results, but the
     // original finishes first and its result is accepted.
     use tokio::sync::Notify;
 
@@ -461,8 +461,8 @@ async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
     let original_go = Arc::new(Notify::new());
     let original_go_clone = Arc::clone(&original_go);
 
-    // The hedge waits for this signal (never sent) to simulate being slower.
-    let hedge_block = Arc::new(Notify::new());
+    // The hedging attempt waits for this signal (never sent) to simulate being slower.
+    let hedging_block = Arc::new(Notify::new());
 
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
@@ -472,11 +472,11 @@ async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            // Hedge fires after 100ms
+            // Hedging attempt fires after 100ms
             .hedging_mode(HedgingMode::delay(Duration::from_millis(100)))
             .max_hedged_attempts(1)
             .on_execute(move |_input, args: OnExecuteArgs| {
-                // When the hedge is about to launch, let the original complete.
+                // When the hedging attempt is about to launch, let the original complete.
                 if args.attempt().index() > 0 {
                     original_go_clone.notify_one();
                 }
@@ -484,16 +484,16 @@ async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
             let go = Arc::clone(&original_go);
-            let block = Arc::clone(&hedge_block);
+            let block = Arc::clone(&hedging_block);
             async move {
                 if count == 0 {
-                    // Original: wait until the hedge is launched, then succeed.
+                    // Original: wait until the hedging attempt is launched, then succeed.
                     go.notified().await;
                     Ok::<_, String>(format!("original:{v}"))
                 } else {
-                    // Hedge: also succeeds, but is slower than the original.
+                    // Hedging attempt: also succeeds, but is slower than the original.
                     block.notified().await;
-                    Ok(format!("hedge:{v}"))
+                    Ok(format!("hedging:{v}"))
                 }
             }
         }),
@@ -502,8 +502,8 @@ async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
     let mut service = stack.into_service();
     let result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    // The original request wins because it finishes before the hedge.
+    // The original request wins because it finishes before the hedging attempt.
     assert_eq!(result, Ok("original:test".to_string()));
-    // Both attempts were launched (original + 1 hedge).
+    // Both attempts were launched (original + 1 hedging attempt).
     assert_eq!(counter.load(Ordering::SeqCst), 2);
 }

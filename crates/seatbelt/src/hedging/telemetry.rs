@@ -7,9 +7,9 @@ use std::time::Duration;
 use super::Attempt;
 use crate::RecoveryKind;
 
-/// The name of the hedge event for telemetry reporting.
+/// The name of the hedging event for telemetry reporting.
 #[cfg(any(feature = "metrics", test))]
-pub(super) const HEDGE_EVENT: &str = "hedge";
+pub(super) const HEDGING_EVENT: &str = "hedging";
 
 /// Recovery kind value used for futures that were abandoned (dropped before completing).
 pub(super) const ABANDONED: &str = "abandoned";
@@ -25,7 +25,7 @@ pub(super) const ABANDONED: &str = "abandoned";
 )]
 pub(super) struct TelemetryGuard {
     pub(super) attempt: Attempt,
-    pub(super) hedge_delay: Duration,
+    pub(super) hedging_delay: Duration,
     pub(super) recovery_kind: Cow<'static, str>,
     pub(super) armed: bool,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -53,14 +53,14 @@ impl TelemetryGuard {
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
-                name: "seatbelt.hedge",
+                name: "seatbelt.hedging",
                 tracing::Level::INFO,
                 pipeline.name = %self.telemetry.pipeline_name,
                 strategy.name = %self.telemetry.strategy_name,
                 resilience.attempt.index = self.attempt.index(),
                 resilience.attempt.is_last = self.attempt.is_last(),
                 resilience.attempt.recovery.kind = %self.recovery_kind,
-                resilience.hedge.delay = self.hedge_delay.as_secs_f32(),
+                resilience.hedging.delay = self.hedging_delay.as_secs_f32(),
             );
         }
 
@@ -72,7 +72,7 @@ impl TelemetryGuard {
             self.telemetry.report_metrics(&[
                 opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
                 opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
-                opentelemetry::KeyValue::new(EVENT_NAME, HEDGE_EVENT),
+                opentelemetry::KeyValue::new(EVENT_NAME, HEDGING_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(self.attempt.index())),
                 opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, self.attempt.is_last()),
                 opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, self.recovery_kind.to_string()),
@@ -97,10 +97,10 @@ mod tests {
     use opentelemetry::KeyValue;
     use tick::Clock;
 
-    fn create_guard(attempt: Attempt, hedge_delay: Duration, telemetry: crate::utils::TelemetryHelper) -> TelemetryGuard {
+    fn create_guard(attempt: Attempt, hedging_delay: Duration, telemetry: crate::utils::TelemetryHelper) -> TelemetryGuard {
         TelemetryGuard {
             attempt,
-            hedge_delay,
+            hedging_delay,
             recovery_kind: Cow::Borrowed(ABANDONED),
             armed: true,
             telemetry,
@@ -122,7 +122,7 @@ mod tests {
             &[
                 KeyValue::new("resilience.pipeline.name", "test_pipeline"),
                 KeyValue::new("resilience.strategy.name", "test_hedging"),
-                KeyValue::new("resilience.event.name", "hedge"),
+                KeyValue::new("resilience.event.name", "hedging"),
                 KeyValue::new("resilience.attempt.index", 1i64),
                 KeyValue::new("resilience.attempt.is_last", true),
                 KeyValue::new("resilience.attempt.recovery.kind", "abandoned"),
@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn guard_emits_log_with_hedge_delay() {
+    fn guard_emits_log_with_hedging_delay() {
         use crate::testing::LogCapture;
         use tracing_subscriber::util::SubscriberInitExt;
 
@@ -177,7 +177,7 @@ mod tests {
         let guard = create_guard(Attempt::new(1, false), Duration::from_millis(250), telemetry);
         drop(guard);
 
-        log_capture.assert_contains("resilience.hedge.delay");
+        log_capture.assert_contains("resilience.hedging.delay");
         log_capture.assert_contains("resilience.attempt.recovery.kind");
         log_capture.assert_contains("log_pipeline");
         log_capture.assert_contains("log_hedging");

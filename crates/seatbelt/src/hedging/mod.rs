@@ -6,7 +6,7 @@
 //! This module provides hedging capabilities that launch additional concurrent requests
 //! to reduce the impact of slow responses. The primary types are [`Hedging`] and [`HedgingLayer`]:
 //!
-//! - [`Hedging`] is the middleware that wraps an inner service and launches parallel hedge requests
+//! - [`Hedging`] is the middleware that wraps an inner service and launches parallel hedging requests
 //! - [`HedgingLayer`] is used to configure and construct the hedging middleware
 //!
 //! # Quick Start
@@ -21,7 +21,7 @@
 //! let context = ResilienceContext::new(&clock).name("my_service");
 //!
 //! let stack = (
-//!     Hedging::layer("hedge", &context)
+//!     Hedging::layer("hedging", &context)
 //!         .clone_input()
 //!         .recovery_with(|result, _| match result {
 //!             Ok(_) => RecoveryInfo::never(),
@@ -44,8 +44,8 @@
 //! Hedging sends the original request immediately. Based on the configured [`HedgingMode`]:
 //!
 //! - **Immediate**: All hedged requests launch at once
-//! - **Delay**: Each hedge launches after a fixed delay if no acceptable result has arrived
-//! - **Dynamic**: The delay is computed per hedge via a user-provided callback
+//! - **Delay**: Each hedging attempt launches after a fixed delay if no acceptable result has arrived
+//! - **Dynamic**: The delay is computed per hedging attempt via a user-provided callback
 //!
 //! The first result classified as non-recoverable (via the recovery callback) is returned
 //! immediately. Any remaining in-flight requests are cancelled.
@@ -88,8 +88,8 @@
 //!
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
-//! | Max hedged attempts | `1` (2 total) | Additional hedge requests beyond the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
-//! | Hedging mode | `delay(2s)` | Wait 2 seconds before each hedge | [`hedging_mode`][HedgingLayer::hedging_mode] |
+//! | Max hedged attempts | `1` (2 total) | Additional hedging requests beyond the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
+//! | Hedging mode | `delay(2s)` | Wait 2 seconds before each hedging attempt | [`hedging_mode`][HedgingLayer::hedging_mode] |
 //! | Handle unavailable | `false` | Unavailable responses are returned immediately | [`handle_unavailable`][HedgingLayer::handle_unavailable] |
 //! | Enable condition | Always enabled | Hedging is applied to all requests | [`enable_if`][HedgingLayer::enable_if], [`enable_always`][HedgingLayer::enable_always], [`disable`][HedgingLayer::disable] |
 //!
@@ -112,14 +112,14 @@
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Hedging identifier from [`Hedging::layer`]
-//!   - `resilience.event.name`: Always `hedge`
-//!   - `resilience.attempt.index`: Attempt index (0 for original, 1 and more for hedges)
+//!   - `resilience.event.name`: Always `hedging`
+//!   - `resilience.attempt.index`: Attempt index (0 for original, 1 and more for hedging attempts)
 //!   - `resilience.attempt.is_last`: Whether this is the last attempt
 //!   - `resilience.attempt.recovery.kind`: The recovery classification (`retry`, `unavailable`, or `abandoned`)
 //!
 //! ## Logs
 //!
-//! Log events include all metric attributes plus `resilience.hedge.delay` (the delay
+//! Log events include all metric attributes plus `resilience.hedging.delay` (the delay
 //! in seconds waited before launching the attempt).
 //!
 //! # Examples
@@ -138,10 +138,10 @@
 //! let context = ResilienceContext::new(&clock).name("example");
 //!
 //! let stack = (
-//!     Hedging::layer("my_hedge", &context)
+//!     Hedging::layer("my_hedging", &context)
 //!         // Required: how to clone inputs for hedged attempts
 //!         .clone_input()
-//!         // Required: determine if we should keep waiting for hedges
+//!         // Required: determine if we should keep waiting for hedging attempts
 //!         .recovery_with(|output: &Result<String, String>, _args| match output {
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(msg) if msg.contains("transient") => RecoveryInfo::retry(),
@@ -161,7 +161,7 @@
 //! ## Advanced Usage
 //!
 //! This example demonstrates advanced usage of the hedging middleware, including custom
-//! hedging modes, on-hedge callbacks, and dynamic delays.
+//! hedging modes, on-hedging callbacks, and dynamic delays.
 //!
 //! ```rust
 //! # use std::time::Duration;
@@ -173,7 +173,7 @@
 //! let context = ResilienceContext::new(&clock);
 //!
 //! let stack = (
-//!     Hedging::layer("advanced_hedge", &context)
+//!     Hedging::layer("advanced_hedging", &context)
 //!         .clone_input()
 //!         .recovery_with(|output: &Result<String, String>, _args| match output {
 //!             Ok(_) => RecoveryInfo::never(),
