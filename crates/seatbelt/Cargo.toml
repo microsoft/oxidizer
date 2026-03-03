@@ -36,17 +36,19 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["timeout", "retry", "breaker", "fallback"]
+default = []
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
+hedging = ["dep:futures-util"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true, features = ["alloc"] }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
@@ -61,12 +63,13 @@ criterion.workspace = true
 fastrand.workspace = true
 futures = { workspace = true, features = ["executor"] }
 http.workspace = true
-layered = { workspace = true, features = ["tower-service"] }
+layered = { workspace = true, features = ["tower-service", "dynamic-service"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
+reqwest = { workspace = true, features = ["rustls-tls"] }
 rstest.workspace = true
 static_assertions.workspace = true
 tick = { workspace = true, features = ["test-util", "tokio"] }
@@ -105,6 +108,14 @@ name = "tower"
 required-features = ["retry", "timeout", "tower-service"]
 
 [[example]]
+name = "hedging"
+required-features = ["hedging"]
+
+[[example]]
+name = "reqwest"
+required-features = ["retry", "timeout"]
+
+[[example]]
 name = "breaker"
 required-features = ["breaker", "metrics"]
 
@@ -131,6 +142,11 @@ required-features = ["retry"]
 name = "breaker"
 harness = false
 required-features = ["breaker"]
+
+[[bench]]
+name = "hedging"
+harness = false
+required-features = ["hedging"]
 
 [lints]
 workspace = true

@@ -11,6 +11,7 @@
         feature = "timeout",
         feature = "breaker",
         feature = "fallback",
+        feature = "hedging",
         feature = "metrics",
         feature = "logs"
     )),
@@ -107,6 +108,7 @@
 //!
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
+//! - [`hedging`] - Middleware that reduces tail latency via additional concurrent execution.
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
 //!
@@ -169,6 +171,8 @@
 //! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
+//! - **`hedging`** - Enables the [`hedging`] middleware for reducing tail latency via additional
+//!   concurrent requests with configurable delay modes.
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a
 //!   user-defined alternative.
@@ -182,6 +186,11 @@ pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 
 mod context;
 pub use context::ResilienceContext;
+
+#[cfg(any(feature = "retry", feature = "hedging", test))]
+mod attempt;
+#[cfg(any(feature = "retry", feature = "hedging", test))]
+pub use attempt::Attempt;
 
 mod shared;
 pub use crate::shared::{NotSet, Set};
@@ -198,10 +207,20 @@ pub mod breaker;
 #[cfg(any(feature = "fallback", test))]
 pub mod fallback;
 
+#[cfg(any(feature = "hedging", test))]
+pub mod hedging;
+
 #[cfg(any(feature = "retry", feature = "breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
+#[cfg(any(
+    feature = "retry",
+    feature = "breaker",
+    feature = "timeout",
+    feature = "fallback",
+    feature = "hedging",
+    test
+))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]
