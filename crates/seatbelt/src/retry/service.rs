@@ -346,7 +346,6 @@ where
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(not(miri))] // Oxidizer runtime does not support Miri.
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;
@@ -359,6 +358,7 @@ mod tests {
     use crate::testing::{FailReadyService, MetricTester};
     use crate::{ResilienceContext, Set};
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
@@ -377,6 +377,7 @@ mod tests {
         assert!(retry.shared.enable_if.call(&"str".to_string()));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
@@ -407,6 +408,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn retry_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
@@ -445,6 +447,7 @@ mod tests {
             .max_delay(Duration::from_secs(9999)) // protect against infinite backoff
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn retry_future_debug_contains_struct_name() {
         let future = RetryFuture::<String> {
@@ -455,6 +458,7 @@ mod tests {
         assert!(debug_output.contains("RetryFuture"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn poll_ready_propagates_inner_error() {
         let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
