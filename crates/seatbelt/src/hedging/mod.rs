@@ -105,6 +105,7 @@
 //!   - `resilience.event.name`: Always `hedge`
 //!   - `resilience.attempt.index`: Attempt index (1-based for hedges)
 //!   - `resilience.attempt.is_last`: Whether this is the last hedge attempt
+//!   - `resilience.attempt.recovery.kind`: The recovery classification that triggered the hedge (empty when hedge is launched by delay expiration)
 //!
 //! # Examples
 //!
