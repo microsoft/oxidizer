@@ -109,37 +109,12 @@ use super::telemetry::TelemetryGuard;
 /// Wraps an inner future with a [`TelemetryGuard`] so that abandoned (dropped)
 /// futures still emit telemetry.
 ///
-/// When polled to completion the guard is returned alongside the output so the
+/// When the future completes the guard is returned alongside the output so the
 /// caller can classify the result. When the future is dropped before completing
 /// the guard's [`Drop`] impl reports the attempt as `"abandoned"`.
-struct GuardedFuture<F> {
-    inner: F,
-    guard: Option<TelemetryGuard>,
-}
-
-impl<F> GuardedFuture<F> {
-    fn new(inner: F, guard: TelemetryGuard) -> Self {
-        Self { inner, guard: Some(guard) }
-    }
-}
-
-impl<F: Future> Future for GuardedFuture<F> {
-    type Output = (F::Output, TelemetryGuard);
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        // SAFETY: `inner` is structurally pinned; `guard` is `Unpin` and we
-        // only access it via `Option::take` which does not move `inner`.
-        let this = unsafe { self.get_unchecked_mut() };
-        let inner = unsafe { std::pin::Pin::new_unchecked(&mut this.inner) };
-        match inner.poll(cx) {
-            std::task::Poll::Ready(out) => {
-                let guard = this.guard.take()
-                    .expect("GuardedFuture polled after completion");
-                std::task::Poll::Ready((out, guard))
-            }
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
+async fn guarded<F: Future>(inner: F, guard: TelemetryGuard) -> (F::Output, TelemetryGuard) {
+    let out = inner.await;
+    (out, guard)
 }
 
 impl<In, Out> HedgingShared<In, Out> {
@@ -164,9 +139,16 @@ impl<In, Out> HedgingShared<In, Out> {
         self.invoke_on_execute(&mut first_cloned, attempt, Duration::ZERO);
         let guard = self.create_guard(attempt, Duration::ZERO);
         let mut futs = FuturesUnordered::new();
-        futs.push(GuardedFuture::new(launch(first_cloned), guard));
+        futs.push(guarded(launch(first_cloned), guard));
 
-        self.run_delay_loop(&mut futs, &mut input, attempt, total_attempts, launch).await
+        self.run_delay_loop(
+            &mut futs,
+            &mut input,
+            attempt,
+            total_attempts,
+            |cloned, g| guarded(launch(cloned), g),
+        )
+        .await
     }
 
     fn recovery_kind(&self, out: &Out) -> Option<RecoveryKind> {
@@ -181,16 +163,16 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    async fn run_delay_loop<F>(
+    async fn run_delay_loop<G>(
         &self,
-        futs: &mut FuturesUnordered<GuardedFuture<F>>,
+        futs: &mut FuturesUnordered<G>,
         input: &mut In,
         mut attempt: Attempt,
         total_attempts: u32,
-        mut launch: impl FnMut(In) -> F,
+        mut guarded_launch: impl FnMut(In, TelemetryGuard) -> G,
     ) -> Out
     where
-        F: Future<Output = Out>,
+        G: Future<Output = (Out, TelemetryGuard)>,
     {
         let mut last_result: Option<Out> = None;
 
@@ -218,14 +200,14 @@ impl<In, Out> HedgingShared<In, Out> {
                         last_result = Some(out);
                         // Result was recoverable — launch a hedge immediately
                         // instead of waiting for the delay timer again.
-                        self.launch_hedge(futs, input, next_attempt, Duration::ZERO, &mut launch);
+                        self.launch_hedge(futs, input, next_attempt, Duration::ZERO, &mut guarded_launch);
                         attempt = next_attempt;
                     }
                     SelectOutcome::Result(None) => {
                         return last_result.expect("at least one attempt was launched");
                     }
                     SelectOutcome::DelayExpired => {
-                        self.launch_hedge(futs, input, next_attempt, delay, &mut launch);
+                        self.launch_hedge(futs, input, next_attempt, delay, &mut guarded_launch);
                         attempt = next_attempt;
                     }
                 }
@@ -246,20 +228,20 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
-    fn launch_hedge<F>(
+    fn launch_hedge<G>(
         &self,
-        futs: &FuturesUnordered<GuardedFuture<F>>,
+        futs: &FuturesUnordered<G>,
         input: &mut In,
         attempt: Attempt,
         hedge_delay: Duration,
-        launch: &mut impl FnMut(In) -> F,
+        guarded_launch: &mut impl FnMut(In, TelemetryGuard) -> G,
     ) {
         let args = CloneArgs { attempt };
 
         if let Some(mut cloned) = self.clone_input.call(input, args) {
             self.invoke_on_execute(&mut cloned, attempt, hedge_delay);
             let guard = self.create_guard(attempt, hedge_delay);
-            futs.push(GuardedFuture::new(launch(cloned), guard));
+            futs.push(guarded_launch(cloned, guard));
         }
     }
 
