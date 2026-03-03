@@ -487,4 +487,89 @@ mod tests {
             "hedging execute future is {size} bytes, which exceeds the {max_bytes}-byte threshold"
         );
     }
+
+    /// Verifies that:
+    /// - recoverable attempts emit telemetry with the actual recovery kind
+    /// - abandoned (dropped) attempts emit telemetry with recovery kind "abandoned"
+    /// - successful (non-recoverable) attempts do NOT emit telemetry
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn telemetry_reports_recoverable_and_abandoned_not_successful() {
+        use std::sync::atomic::AtomicU32;
+        use tokio::sync::Notify;
+
+        let tester = MetricTester::new();
+        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let context = ResilienceContext::<String, Result<String, String>>::new(clock)
+            .name("test_pipeline")
+            .use_metrics(tester.meter_provider());
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_clone = Arc::clone(&counter);
+
+        // Attempt 0 blocks forever (will be abandoned when a success arrives).
+        let block_forever = Arc::new(Notify::new());
+        let block_clone = Arc::clone(&block_forever);
+
+        let service = Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(_) => RecoveryInfo::retry(),
+            })
+            .max_hedged_attempts(2)
+            .hedging_mode(HedgingMode::immediate())
+            .layer(Execute::new(move |_v: String| {
+                let idx = counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let block = Arc::clone(&block_clone);
+                async move {
+                    match idx {
+                        // Attempt 0: blocks forever → will be abandoned
+                        0 => {
+                            block.notified().await;
+                            Ok::<_, String>("never_reached".into())
+                        }
+                        // Attempt 1: transient error → recoverable
+                        1 => Err("transient".into()),
+                        // Attempt 2: success → non-recoverable (accepted)
+                        _ => Ok("success".into()),
+                    }
+                }
+            }));
+
+        let result = service.execute("input".to_string()).await;
+        assert_eq!(result, Ok("success".to_string()));
+
+        let attributes = tester.collect_attributes();
+
+        // Expect exactly 2 metric events (6 attrs each = 12 total):
+        //   1. Attempt 1: recoverable with recovery kind "retry"
+        //   2. Attempt 0: abandoned with recovery kind "abandoned"
+        // Attempt 2 (success) must NOT produce telemetry.
+        assert_eq!(
+            attributes.len(),
+            12,
+            "expected 12 attributes (2 events × 6 attrs), got {}: {attributes:?}",
+            attributes.len()
+        );
+
+        // Verify the recoverable attempt is reported
+        assert!(
+            attributes.contains(&KeyValue::new("resilience.attempt.recovery.kind", "retry")),
+            "expected 'retry' recovery kind in attributes: {attributes:?}"
+        );
+
+        // Verify the abandoned attempt is reported
+        assert!(
+            attributes.contains(&KeyValue::new("resilience.attempt.recovery.kind", "abandoned")),
+            "expected 'abandoned' recovery kind in attributes: {attributes:?}"
+        );
+
+        // Verify that the successful attempt index (2) is NOT in the attributes,
+        // confirming no telemetry was emitted for the accepted result.
+        assert!(
+            !attributes.contains(&KeyValue::new("resilience.attempt.index", 2i64)),
+            "attempt index 2 (success) should not appear in telemetry: {attributes:?}"
+        );
+    }
 }
