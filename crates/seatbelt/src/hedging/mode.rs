@@ -4,10 +4,10 @@
 use std::fmt::{self, Debug};
 use std::time::Duration;
 
+use super::Attempt;
 use super::args::HedgingDelayArgs;
 use super::callbacks::DelayFn;
 use super::constants::DEFAULT_HEDGING_DELAY;
-use super::Attempt;
 
 /// Defines how hedged requests are scheduled relative to each other.
 ///

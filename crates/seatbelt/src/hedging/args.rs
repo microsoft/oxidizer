@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use tick::Clock;
 use super::Attempt;
+use tick::Clock;
 
 /// Arguments for the [`clone_input_with`][super::HedgingLayer::clone_input_with] callback function.
 ///

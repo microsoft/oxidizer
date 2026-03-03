@@ -4,8 +4,8 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use crate::RecoveryKind;
 use super::Attempt;
+use crate::RecoveryKind;
 
 /// The name of the hedge event for telemetry reporting.
 #[cfg(any(feature = "metrics", test))]
@@ -94,8 +94,8 @@ impl Drop for TelemetryGuard {
 mod tests {
     use super::*;
     use crate::testing::MetricTester;
-    use tick::Clock;
     use opentelemetry::KeyValue;
+    use tick::Clock;
 
     fn create_guard(attempt: Attempt, hedge_delay: Duration, telemetry: crate::utils::TelemetryHelper) -> TelemetryGuard {
         TelemetryGuard {
@@ -115,11 +115,7 @@ mod tests {
             .use_metrics(tester.meter_provider());
         let telemetry = context.create_telemetry("test_hedging".into());
 
-        let guard = create_guard(
-            Attempt::new(1, true),
-            Duration::from_millis(200),
-            telemetry,
-        );
+        let guard = create_guard(Attempt::new(1, true), Duration::from_millis(200), telemetry);
         drop(guard);
 
         tester.assert_attributes(
@@ -143,20 +139,11 @@ mod tests {
             .use_metrics(tester.meter_provider());
         let telemetry = context.create_telemetry("test_hedging".into());
 
-        let mut guard = create_guard(
-            Attempt::new(0, false),
-            Duration::ZERO,
-            telemetry,
-        );
+        let mut guard = create_guard(Attempt::new(0, false), Duration::ZERO, telemetry);
         guard.set_recovery_kind(RecoveryKind::Retry);
         drop(guard);
 
-        tester.assert_attributes(
-            &[
-                KeyValue::new("resilience.attempt.recovery.kind", "retry"),
-            ],
-            Some(6),
-        );
+        tester.assert_attributes(&[KeyValue::new("resilience.attempt.recovery.kind", "retry")], Some(6));
     }
 
     #[test]
@@ -167,11 +154,7 @@ mod tests {
             .use_metrics(tester.meter_provider());
         let telemetry = context.create_telemetry("test_hedging".into());
 
-        let mut guard = create_guard(
-            Attempt::new(0, false),
-            Duration::ZERO,
-            telemetry,
-        );
+        let mut guard = create_guard(Attempt::new(0, false), Duration::ZERO, telemetry);
         guard.disarm();
         drop(guard);
 
@@ -180,8 +163,8 @@ mod tests {
 
     #[test]
     fn guard_emits_log_with_hedge_delay() {
-        use tracing_subscriber::util::SubscriberInitExt;
         use crate::testing::LogCapture;
+        use tracing_subscriber::util::SubscriberInitExt;
 
         let log_capture = LogCapture::new();
         let _default = log_capture.subscriber().set_default();
@@ -191,11 +174,7 @@ mod tests {
             .use_logs();
         let telemetry = context.create_telemetry("log_hedging".into());
 
-        let guard = create_guard(
-            Attempt::new(1, false),
-            Duration::from_millis(250),
-            telemetry,
-        );
+        let guard = create_guard(Attempt::new(1, false), Duration::from_millis(250), telemetry);
         drop(guard);
 
         log_capture.assert_contains("resilience.hedge.delay");

@@ -14,12 +14,12 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use layered::Service;
 use tick::Clock;
 
+use super::Attempt;
 use super::args::{CloneArgs, OnExecuteArgs, RecoveryArgs};
 use super::callbacks::*;
 use super::mode::HedgingMode;
 use crate::utils::EnableIf;
 use crate::{NotSet, RecoveryKind};
-use super::Attempt;
 
 /// Applies hedging logic to service execution for tail-latency reduction.
 ///
@@ -141,13 +141,9 @@ impl<In, Out> HedgingShared<In, Out> {
         let mut futs = FuturesUnordered::new();
         futs.push(guarded(launch(first_cloned), guard));
 
-        self.run_delay_loop(
-            &mut futs,
-            &mut input,
-            attempt,
-            total_attempts,
-            |cloned, g| guarded(launch(cloned), g),
-        )
+        self.run_delay_loop(&mut futs, &mut input, attempt, total_attempts, |cloned, g| {
+            guarded(launch(cloned), g)
+        })
         .await
     }
 

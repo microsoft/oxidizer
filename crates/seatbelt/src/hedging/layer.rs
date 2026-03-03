@@ -162,10 +162,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// **Default**: None
     #[must_use]
-    pub fn on_execute(
-        mut self,
-        execute_fn: impl Fn(&mut In, OnExecuteArgs) + Send + Sync + 'static,
-    ) -> Self {
+    pub fn on_execute(mut self, execute_fn: impl Fn(&mut In, OnExecuteArgs) + Send + Sync + 'static) -> Self {
         self.on_execute = Some(OnExecute::new(execute_fn));
         self
     }
@@ -264,8 +261,8 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::testing::RecoverableType;
     use crate::hedging::Attempt;
+    use crate::testing::RecoverableType;
 
     #[test]
     fn new_creates_correct_initial_state() {

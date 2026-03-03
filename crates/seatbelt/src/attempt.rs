@@ -162,7 +162,6 @@ impl Display for Attempt {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_attributes() {
         assert_eq!(ATTEMPT_INDEX, "resilience.attempt.index");
