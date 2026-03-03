@@ -100,8 +100,8 @@
 //! guard that reports on drop.
 //!
 //! Telemetry is emitted when:
-//! - A result is **recoverable** — reported with the actual [`RecoveryKind`][crate::RecoveryKind]
-//! - A future is **abandoned** (dropped before completing) — reported with recovery kind `"abandoned"`
+//! - A result is **recoverable**: reported with the actual [`RecoveryKind`][crate::RecoveryKind]
+//! - A future is **abandoned** (dropped before completing): reported with recovery kind `"abandoned"`
 //!
 //! Telemetry is **not** emitted for non-recoverable (accepted) results.
 //!
@@ -113,7 +113,7 @@
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Hedging identifier from [`Hedging::layer`]
 //!   - `resilience.event.name`: Always `hedge`
-//!   - `resilience.attempt.index`: Attempt index (0 for original, 1+ for hedges)
+//!   - `resilience.attempt.index`: Attempt index (0 for original, 1 and more for hedges)
 //!   - `resilience.attempt.is_last`: Whether this is the last attempt
 //!   - `resilience.attempt.recovery.kind`: The recovery classification (`retry`, `unavailable`, or `abandoned`)
 //!
