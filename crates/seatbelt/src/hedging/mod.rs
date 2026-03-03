@@ -49,6 +49,8 @@
 //!
 //! The first result classified as non-recoverable (via the recovery callback) is returned
 //! immediately. Any remaining in-flight requests are cancelled.
+//! [`RecoveryKind::Unknown`][crate::RecoveryKind::Unknown] is treated as non-recoverable
+//! and accepted immediately.
 //!
 //! # When to Use Hedging
 //!

@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use layered::Layer;
 
@@ -32,7 +33,7 @@ use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
 #[derive(Debug)]
 pub struct HedgingLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
-    max_hedged_attempts: u32,
+    max_hedged_attempts: u8,
     hedging_mode: HedgingMode,
     clone_input: Option<CloneInput<In>>,
     should_recover: Option<ShouldRecover<Out>>,
@@ -70,7 +71,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// **Default**: 1 hedged attempt (2 total)
     #[must_use]
-    pub fn max_hedged_attempts(mut self, count: u32) -> Self {
+    pub fn max_hedged_attempts(mut self, count: u8) -> Self {
         self.max_hedged_attempts = count;
         self
     }
@@ -81,11 +82,25 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// - [`HedgingMode::delay(duration)`][HedgingMode::delay]: Fixed delay between each hedging attempt
     /// - [`HedgingMode::dynamic(fn)`][HedgingMode::dynamic]: Per-attempt delay via callback
     ///
+    /// For the common case of a fixed delay, the [`hedging_delay`][HedgingLayer::hedging_delay]
+    /// shorthand is also available.
+    ///
     /// **Default**: [`HedgingMode::delay(2s)`][HedgingMode::delay]
     #[must_use]
     pub fn hedging_mode(mut self, mode: HedgingMode) -> Self {
         self.hedging_mode = mode;
         self
+    }
+
+    /// Sets a fixed delay between hedging attempts.
+    ///
+    /// This is a convenience shorthand for
+    /// [`hedging_mode(HedgingMode::delay(delay))`][HedgingLayer::hedging_mode].
+    ///
+    /// **Default**: 2 seconds
+    #[must_use]
+    pub fn hedging_delay(self, delay: Duration) -> Self {
+        self.hedging_mode(HedgingMode::delay(delay))
     }
 
     /// Sets the input cloning function for hedged attempts.
@@ -94,6 +109,11 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// receives a mutable reference to the input and [`CloneArgs`] containing
     /// context about the attempt. Return `Some(cloned_input)` to proceed, or `None`
     /// to skip that hedging attempt.
+    ///
+    /// The mutable reference allows modifying the original input between hedging
+    /// attempts, for example to add tracking headers or annotate the request
+    /// with attempt metadata. On the final attempt the original input is consumed
+    /// directly, so mutations made during cloning are carried through.
     #[must_use]
     pub fn clone_input_with(
         mut self,
@@ -255,7 +275,6 @@ impl<In, Out, S> Layer<S> for HedgingLayer<In, Out, Set, Set> {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
-    use std::time::Duration;
 
     use layered::Execute;
     use tick::Clock;
@@ -312,6 +331,7 @@ mod tests {
             &"error message".to_string(),
             RecoveryArgs {
                 clock: context.get_clock(),
+                attempt: Attempt::default(),
             },
         );
         assert_eq!(result, RecoveryInfo::retry());
@@ -328,6 +348,7 @@ mod tests {
             &RecoverableType::from(RecoveryInfo::retry()),
             RecoveryArgs {
                 clock: context.get_clock(),
+                attempt: Attempt::default(),
             },
         );
         assert_eq!(result, RecoveryInfo::retry());
@@ -339,6 +360,13 @@ mod tests {
 
         assert_eq!(layer.max_hedged_attempts, 3);
         assert!(layer.hedging_mode.is_immediate());
+    }
+
+    #[test]
+    fn hedging_delay_sets_delay_mode() {
+        let layer = create_ready_layer().hedging_delay(Duration::from_millis(500));
+
+        assert!(!layer.hedging_mode.is_immediate());
     }
 
     #[test]

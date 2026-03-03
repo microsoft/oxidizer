@@ -43,7 +43,7 @@ pub struct Hedging<In, Out, S> {
 #[derive(Debug)]
 pub(crate) struct HedgingShared<In, Out> {
     pub(crate) clock: Clock,
-    pub(crate) max_hedged_attempts: u32,
+    pub(crate) max_hedged_attempts: u8,
     pub(crate) hedging_mode: HedgingMode,
     pub(crate) clone_input: CloneInput<In>,
     pub(crate) should_recover: ShouldRecover<Out>,
@@ -127,7 +127,7 @@ impl<In, Out> HedgingShared<In, Out> {
     where
         F: Future<Output = Out>,
     {
-        let total_attempts = self.max_hedged_attempts.saturating_add(1);
+        let total_attempts = u32::from(self.max_hedged_attempts) + 1;
         let attempt = Attempt::new(0, total_attempts == 1);
         let args = CloneArgs { attempt };
 
@@ -147,8 +147,22 @@ impl<In, Out> HedgingShared<In, Out> {
         .await
     }
 
-    fn recovery_kind(&self, out: &Out) -> Option<RecoveryKind> {
-        let recovery = self.should_recover.call(out, RecoveryArgs { clock: &self.clock });
+    /// Classifies a result as recoverable or non-recoverable.
+    ///
+    /// Returns `Some(kind)` for recoverable results (the hedging loop continues),
+    /// or `None` for non-recoverable results (accept and return immediately).
+    ///
+    /// [`RecoveryKind::Unknown`] is treated as non-recoverable: if the recovery
+    /// callback cannot classify a result, hedging accepts it rather than risking
+    /// waiting for attempts that may also fail classification.
+    fn recovery_kind(&self, out: &Out, attempt: Attempt) -> Option<RecoveryKind> {
+        let recovery = self.should_recover.call(
+            out,
+            RecoveryArgs {
+                clock: &self.clock,
+                attempt,
+            },
+        );
 
         match recovery.kind() {
             RecoveryKind::Unavailable if self.handle_unavailable => Some(RecoveryKind::Unavailable),
@@ -187,7 +201,7 @@ impl<In, Out> HedgingShared<In, Out> {
 
                 match outcome {
                     SelectOutcome::Result(Some((out, mut guard))) => {
-                        let Some(recovery_kind) = self.recovery_kind(&out) else {
+                        let Some(recovery_kind) = self.recovery_kind(&out, guard.attempt) else {
                             guard.disarm();
                             return out;
                         };
@@ -211,7 +225,7 @@ impl<In, Out> HedgingShared<In, Out> {
                 // All hedging attempts launched — drain remaining futures, preserving
                 // any recoverable result collected during the delay loop.
                 while let Some((out, mut guard)) = futs.next().await {
-                    let Some(recovery_kind) = self.recovery_kind(&out) else {
+                    let Some(recovery_kind) = self.recovery_kind(&out, guard.attempt) else {
                         guard.disarm();
                         return out;
                     };
@@ -248,14 +262,12 @@ impl<In, Out> HedgingShared<In, Out> {
     }
 
     fn create_guard(&self, attempt: Attempt, hedging_delay: Duration) -> TelemetryGuard {
-        TelemetryGuard {
+        TelemetryGuard::new(
             attempt,
             hedging_delay,
-            recovery_kind: std::borrow::Cow::Borrowed(super::telemetry::ABANDONED),
-            armed: true,
             #[cfg(any(feature = "logs", feature = "metrics", test))]
-            telemetry: self.telemetry.clone(),
-        }
+            self.telemetry.clone(),
+        )
     }
 }
 

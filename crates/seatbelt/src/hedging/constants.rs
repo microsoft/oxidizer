@@ -8,7 +8,7 @@ use std::time::Duration;
 /// One additional hedged attempt beyond the original request, resulting in 2 total
 /// concurrent attempts. This provides basic hedging benefits while
 /// limiting resource overhead.
-pub(super) const DEFAULT_MAX_HEDGED_ATTEMPTS: u32 = 1;
+pub(super) const DEFAULT_MAX_HEDGED_ATTEMPTS: u8 = 1;
 
 /// Default delay between launching hedged requests: 2 seconds.
 ///

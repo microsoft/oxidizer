@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::time::Duration;
 
 use super::Attempt;
@@ -12,7 +11,7 @@ use crate::RecoveryKind;
 pub(super) const HEDGING_EVENT: &str = "hedging";
 
 /// Recovery kind value used for futures that were abandoned (dropped before completing).
-pub(super) const ABANDONED: &str = "abandoned";
+const ABANDONED: &str = "abandoned";
 
 /// A guard that emits hedging telemetry when dropped.
 ///
@@ -26,16 +25,34 @@ pub(super) const ABANDONED: &str = "abandoned";
 pub(super) struct TelemetryGuard {
     pub(super) attempt: Attempt,
     pub(super) hedging_delay: Duration,
-    pub(super) recovery_kind: Cow<'static, str>,
+    /// `None` means abandoned (future was dropped before completing).
+    recovery_kind: Option<RecoveryKind>,
     pub(super) armed: bool,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub(super) telemetry: crate::utils::TelemetryHelper,
 }
 
 impl TelemetryGuard {
+    /// Creates a new armed guard that defaults to "abandoned" if dropped without
+    /// calling [`set_recovery_kind`][Self::set_recovery_kind].
+    pub(super) fn new(
+        attempt: Attempt,
+        hedging_delay: Duration,
+        #[cfg(any(feature = "logs", feature = "metrics", test))] telemetry: crate::utils::TelemetryHelper,
+    ) -> Self {
+        Self {
+            attempt,
+            hedging_delay,
+            recovery_kind: None,
+            armed: true,
+            #[cfg(any(feature = "logs", feature = "metrics", test))]
+            telemetry,
+        }
+    }
+
     /// Sets the recovery kind for a recoverable result.
     pub(super) fn set_recovery_kind(&mut self, kind: RecoveryKind) {
-        self.recovery_kind = Cow::Owned(kind.to_string());
+        self.recovery_kind = Some(kind);
     }
 
     /// Disarms the guard so no telemetry is emitted on drop.
@@ -45,11 +62,26 @@ impl TelemetryGuard {
         self.armed = false;
     }
 
+    /// Returns the string representation of the recovery kind for telemetry.
+    /// Conversion to string is deferred to emission time.
+    fn recovery_kind_str(&self) -> &'static str {
+        match self.recovery_kind {
+            None => ABANDONED,
+            Some(RecoveryKind::Retry) => "retry",
+            Some(RecoveryKind::Unavailable) => "unavailable",
+            // recovery_kind() only passes Retry/Unavailable, but handle
+            // future variants gracefully.
+            Some(_) => "unknown",
+        }
+    }
+
     #[cfg_attr(
         not(any(feature = "logs", feature = "metrics", test)),
         expect(clippy::unused_self, reason = "used when telemetry features are enabled")
     )]
     fn emit(&self) {
+        let recovery_kind_str = self.recovery_kind_str();
+
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
@@ -59,7 +91,7 @@ impl TelemetryGuard {
                 strategy.name = %self.telemetry.strategy_name,
                 resilience.attempt.index = self.attempt.index(),
                 resilience.attempt.is_last = self.attempt.is_last(),
-                resilience.attempt.recovery.kind = %self.recovery_kind,
+                resilience.attempt.recovery.kind = recovery_kind_str,
                 resilience.hedging.delay = self.hedging_delay.as_secs_f32(),
             );
         }
@@ -75,7 +107,7 @@ impl TelemetryGuard {
                 opentelemetry::KeyValue::new(EVENT_NAME, HEDGING_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(self.attempt.index())),
                 opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, self.attempt.is_last()),
-                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, self.recovery_kind.to_string()),
+                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind_str),
             ]);
         }
     }
@@ -98,13 +130,7 @@ mod tests {
     use tick::Clock;
 
     fn create_guard(attempt: Attempt, hedging_delay: Duration, telemetry: crate::utils::TelemetryHelper) -> TelemetryGuard {
-        TelemetryGuard {
-            attempt,
-            hedging_delay,
-            recovery_kind: Cow::Borrowed(ABANDONED),
-            armed: true,
-            telemetry,
-        }
+        TelemetryGuard::new(attempt, hedging_delay, telemetry)
     }
 
     #[cfg_attr(miri, ignore)]

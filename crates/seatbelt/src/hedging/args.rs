@@ -30,6 +30,7 @@ impl CloneArgs {
 #[derive(Debug)]
 pub struct RecoveryArgs<'a> {
     pub(super) clock: &'a Clock,
+    pub(super) attempt: Attempt,
 }
 
 impl RecoveryArgs<'_> {
@@ -37,6 +38,14 @@ impl RecoveryArgs<'_> {
     #[must_use]
     pub fn clock(&self) -> &Clock {
         self.clock
+    }
+
+    /// Returns the attempt that produced the result being classified.
+    ///
+    /// Index 0 is the original request, 1 is the first hedging attempt, etc.
+    #[must_use]
+    pub fn attempt(&self) -> Attempt {
+        self.attempt
     }
 }
 
@@ -104,8 +113,13 @@ mod tests {
     #[test]
     fn recovery_args() {
         let clock = Clock::new_frozen();
-        let args = RecoveryArgs { clock: &clock };
+        let args = RecoveryArgs {
+            clock: &clock,
+            attempt: Attempt::new(1, false),
+        };
         let _clock = args.clock();
+        assert_eq!(args.attempt().index(), 1);
+        assert!(!args.attempt().is_last());
     }
 
     #[test]
