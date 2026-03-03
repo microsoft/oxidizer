@@ -107,6 +107,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_on_drop_when_armed() {
         let tester = MetricTester::new();
@@ -131,6 +132,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_recovery_kind_when_set() {
         let tester = MetricTester::new();
@@ -146,6 +148,7 @@ mod tests {
         tester.assert_attributes(&[KeyValue::new("resilience.attempt.recovery.kind", "retry")], Some(6));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_does_not_emit_when_disarmed() {
         let tester = MetricTester::new();
@@ -161,6 +164,7 @@ mod tests {
         assert!(tester.collect_attributes().is_empty(), "expected no metrics when guard is disarmed");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_log_with_hedging_delay() {
         use crate::testing::LogCapture;

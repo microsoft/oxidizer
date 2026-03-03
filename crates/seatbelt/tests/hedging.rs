@@ -9,7 +9,7 @@
 
 use std::future::poll_fn;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
@@ -544,4 +544,147 @@ async fn non_cloneable_input_skips_hedging_and_invokes_on_execute(#[case] use_to
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     // on_execute must still be called exactly once for the original request.
     assert_eq!(execute_calls.load(Ordering::SeqCst), 1);
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn initial_attempt_is_last_when_no_hedging_attempts(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let observed_is_last = Arc::new(AtomicBool::new(false));
+    let observed_clone = Arc::clone(&observed_is_last);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::never())
+            .max_hedged_attempts(0)
+            .on_execute(move |_input, args: OnExecuteArgs| {
+                observed_clone.store(args.attempt().is_last(), Ordering::SeqCst);
+            }),
+        Execute::new(|v: String| async move { Ok::<_, String>(v) }),
+    );
+
+    let mut service = stack.into_service();
+    let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    assert!(
+        observed_is_last.load(Ordering::SeqCst),
+        "initial attempt must have is_last == true when max_hedged_attempts == 0"
+    );
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn unavailable_returned_immediately_when_handle_unavailable_is_false(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(_) => RecoveryInfo::unavailable(),
+            })
+            .hedging_mode(HedgingMode::immediate())
+            .max_hedged_attempts(2)
+            .handle_unavailable(false),
+        Execute::new(move |v: String| {
+            let count = counter_clone.fetch_add(1, Ordering::SeqCst);
+            async move {
+                match count {
+                    // Attempt 0: returns an error classified as Unavailable.
+                    // With handle_unavailable=false this must be accepted immediately.
+                    0 => Err::<String, String>("unavailable_error".into()),
+                    // Attempt 1+: would succeed if reached.
+                    _ => Ok(format!("success:{v}")),
+                }
+            }
+        }),
+    );
+
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    // The unavailable error must be returned immediately (not recovered).
+    assert_eq!(result, Err("unavailable_error".to_string()));
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn launch_hedging_attempt_actually_launches_attempts(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = Arc::clone(&counter);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|result: &Result<String, String>, _| match result {
+                Ok(_) => RecoveryInfo::never(),
+                Err(_) => RecoveryInfo::retry(),
+            })
+            .hedging_mode(HedgingMode::immediate())
+            .max_hedged_attempts(1),
+        Execute::new(move |v: String| {
+            let count = counter_clone.fetch_add(1, Ordering::SeqCst);
+            async move {
+                match count {
+                    // Original attempt fails with a recoverable error.
+                    0 => Err::<String, String>("transient".into()),
+                    // Hedging attempt succeeds.
+                    _ => Ok(format!("hedged:{v}")),
+                }
+            }
+        }),
+    );
+
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    // If launch_hedging_attempt is a no-op, only the original attempt runs and we
+    // get the transient error back. With a real launch, the hedging attempt succeeds.
+    assert_eq!(result, Ok("hedged:test".to_string()));
+    assert!(counter.load(Ordering::SeqCst) >= 2, "at least 2 attempts must have been launched");
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn invoke_on_execute_actually_calls_callback(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let execute_calls = Arc::new(AtomicU32::new(0));
+    let execute_calls_clone = Arc::clone(&execute_calls);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::never())
+            .max_hedged_attempts(0)
+            .on_execute(move |_input, _: OnExecuteArgs| {
+                execute_calls_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        Execute::new(|v: String| async move { Ok::<_, String>(v) }),
+    );
+
+    let mut service = stack.into_service();
+    let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    assert_eq!(
+        execute_calls.load(Ordering::SeqCst),
+        1,
+        "on_execute callback must be invoked at least once"
+    );
 }
