@@ -10,3 +10,16 @@ crate::utils::define_fn_wrapper!(CloneInput<In>(Fn(&mut In, CloneArgs) -> Option
 crate::utils::define_fn_wrapper!(ShouldRecover<Out>(Fn(&Out, RecoveryArgs) -> RecoveryInfo));
 crate::utils::define_fn_wrapper!(OnExecute<In>(Fn(&mut In, OnExecuteArgs)));
 crate::utils::define_fn_wrapper!(DelayFn(Fn(HedgingDelayArgs) -> Duration));
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delay_fn_debug() {
+        let delay_fn = DelayFn::new(|_| Duration::from_secs(1));
+        let debug_str = format!("{delay_fn:?}");
+        assert_eq!(debug_str, "DelayFn");
+    }
+}
