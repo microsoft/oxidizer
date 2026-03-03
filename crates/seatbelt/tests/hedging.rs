@@ -3,7 +3,7 @@
 
 #![allow(dead_code, reason = "This is a test module")]
 #![allow(missing_docs, reason = "This is a test module")]
-#![cfg(feature = "hedging")]
+#![cfg(all(feature = "hedging", feature = "tower-service"))]
 
 //! Integration tests for hedging middleware using only public API.
 
@@ -506,4 +506,42 @@ async fn slow_original_accepted_after_hedging_launched(#[case] use_tower: bool) 
     assert_eq!(result, Ok("original:test".to_string()));
     // Both attempts were launched (original + 1 hedging attempt).
     assert_eq!(counter.load(Ordering::SeqCst), 2);
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn non_cloneable_input_skips_hedging_and_invokes_on_execute(#[case] use_tower: bool) {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = Arc::clone(&counter);
+    let execute_calls = Arc::new(AtomicU32::new(0));
+    let execute_calls_clone = Arc::clone(&execute_calls);
+
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input_with(|_input, _args| None::<String>)
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
+            .hedging_mode(HedgingMode::immediate())
+            .max_hedged_attempts(2)
+            .on_execute(move |_input, _: OnExecuteArgs| {
+                execute_calls_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        Execute::new(move |v: String| {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+            async move { Ok::<_, String>(v) }
+        }),
+    );
+
+    let mut service = stack.into_service();
+    let result = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    // The original request should succeed without hedging.
+    assert_eq!(result, Ok("test".to_string()));
+    // Only 1 execution: no hedging attempts because clone returned None.
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    // on_execute must still be called exactly once for the original request.
+    assert_eq!(execute_calls.load(Ordering::SeqCst), 1);
 }

@@ -165,6 +165,7 @@ mod tests {
     use std::fmt::Debug;
 
     define_fn_wrapper!(InOut<In, Out>(Fn(&In) -> Out));
+    define_fn_wrapper!(NoGeneric(Fn(&str) -> String));
 
     #[test]
     fn static_assertions() {
@@ -190,5 +191,16 @@ mod tests {
         let debug_str = format!("{wrapper:?}");
 
         assert_eq!(debug_str, "InOut");
+    }
+
+    #[test]
+    fn debug_non_generic_ok() {
+        let wrapper = NoGeneric::new(|input: &str| input.to_owned());
+
+        assert_eq!(wrapper.call("hello"), "hello");
+
+        let debug_str = format!("{wrapper:?}");
+
+        assert_eq!(debug_str, "NoGeneric");
     }
 }
