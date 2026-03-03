@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::args::HedgingDelayArgs;
 use super::callbacks::DelayFn;
 use super::constants::DEFAULT_HEDGING_DELAY;
-use crate::Attempt;
+use super::Attempt;
 
 /// Defines how hedged requests are scheduled relative to each other.
 ///

@@ -17,9 +17,9 @@ use tick::Clock;
 use super::args::{CloneArgs, OnHedgeArgs, RecoveryArgs};
 use super::callbacks::*;
 use super::mode::HedgingMode;
-use crate::Attempt;
 use crate::utils::EnableIf;
 use crate::{NotSet, RecoveryKind};
+use super::Attempt;
 
 /// Applies hedging logic to service execution for tail-latency reduction.
 ///
