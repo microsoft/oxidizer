@@ -29,9 +29,9 @@ async fn main() {
             .clone_input()
             .recovery_with(|_output: &String, _args| RecoveryInfo::never())
             .hedging_mode(HedgingMode::delay(Duration::from_millis(200)))
-            .on_hedge(|args| {
+            .on_execute(|_input, args| {
                 println!(
-                    "[hedge] launching attempt {} (last: {})",
+                    "[execute] launching attempt {} (last: {})",
                     args.attempt().index(),
                     args.attempt().is_last()
                 );

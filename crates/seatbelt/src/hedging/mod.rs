@@ -168,9 +168,9 @@
 //!         .hedging_mode(HedgingMode::dynamic(|args| {
 //!             Duration::from_millis(100 * u64::from(args.attempt().index()))
 //!         }))
-//!         // Callback called just before each hedge is launched
-//!         .on_hedge(|args| {
-//!             println!("launching hedge attempt: {}", args.attempt());
+//!         // Callback called just before each execute operation
+//!         .on_execute(|_input, args| {
+//!             println!("launching attempt: {}", args.attempt());
 //!         }),
 //!     Execute::new(execute_unreliable_operation),
 //! );
@@ -193,7 +193,7 @@ mod service;
 mod telemetry;
 
 pub use crate::attempt::Attempt;
-pub use args::{CloneArgs, HedgingDelayArgs, OnHedgeArgs, RecoveryArgs};
+pub use args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
 pub use layer::HedgingLayer;
 pub use mode::HedgingMode;
 pub use service::Hedging;

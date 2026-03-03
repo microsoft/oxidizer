@@ -40,31 +40,32 @@ impl RecoveryArgs<'_> {
     }
 }
 
-/// Arguments for the [`on_hedge`][super::HedgingLayer::on_hedge] callback function.
+/// Arguments for the [`on_execute`][super::HedgingLayer::on_execute] callback function.
 ///
-/// Provides context when a new hedged request is about to be launched.
+/// Provides context when a request (original or hedged) is about to be executed.
 #[derive(Debug)]
-pub struct OnHedgeArgs {
+pub struct OnExecuteArgs {
     pub(super) attempt: Attempt,
-    pub(super) hedge_delay: Duration,
+    pub(super) delay: Duration,
 }
 
-impl OnHedgeArgs {
+impl OnExecuteArgs {
     /// Returns the current attempt information.
     ///
-    /// Attempt index 1 is the first hedge (the second overall request), etc.
+    /// Attempt index 0 is the original request, 1 is the first hedge, etc.
     #[must_use]
     pub fn attempt(&self) -> Attempt {
         self.attempt
     }
 
-    /// Returns the delay that was waited before this hedge was launched.
+    /// Returns the delay that was waited before this attempt was launched.
     ///
+    /// For the original request (attempt 0) this is always [`Duration::ZERO`].
     /// For [`HedgingMode::immediate`][super::HedgingMode::immediate], this is always
     /// [`Duration::ZERO`].
     #[must_use]
-    pub fn hedge_delay(&self) -> Duration {
-        self.hedge_delay
+    pub fn delay(&self) -> Duration {
+        self.delay
     }
 }
 
@@ -108,13 +109,13 @@ mod tests {
     }
 
     #[test]
-    fn on_hedge_args() {
-        let args = OnHedgeArgs {
+    fn on_execute_args() {
+        let args = OnExecuteArgs {
             attempt: Attempt::new(1, false),
-            hedge_delay: Duration::from_millis(200),
+            delay: Duration::from_millis(200),
         };
         assert_eq!(args.attempt().index(), 1);
-        assert_eq!(args.hedge_delay(), Duration::from_millis(200));
+        assert_eq!(args.delay(), Duration::from_millis(200));
     }
 
     #[test]

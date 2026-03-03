@@ -36,7 +36,7 @@ pub struct HedgingLayer<In, Out, S1 = Set, S2 = Set> {
     hedging_mode: HedgingMode,
     clone_input: Option<CloneInput<In>>,
     should_recover: Option<ShouldRecover<Out>>,
-    on_hedge: Option<OnHedge>,
+    on_execute: Option<OnExecute<In>>,
     handle_unavailable: bool,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
@@ -52,7 +52,7 @@ impl<In, Out> HedgingLayer<In, Out, NotSet, NotSet> {
             hedging_mode: HedgingMode::default(),
             clone_input: None,
             should_recover: None,
-            on_hedge: None,
+            on_execute: None,
             handle_unavailable: false,
             enable_if: EnableIf::always(),
             telemetry: context.create_telemetry(name),
@@ -154,15 +154,19 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         self.recovery_with(|out, _args| out.recovery())
     }
 
-    /// Configures a callback invoked when a new hedged request is about to be launched.
+    /// Configures a callback invoked before each execute operation (original and hedged).
     ///
-    /// This callback is useful for logging, metrics, or other observability purposes.
-    /// It does not affect hedging behavior - it is purely for observation.
+    /// The callback receives a mutable reference to the input and [`OnExecuteArgs`] containing
+    /// attempt and delay information. This is useful for logging, metrics, input mutation,
+    /// or other observability purposes.
     ///
     /// **Default**: None
     #[must_use]
-    pub fn on_hedge(mut self, hedge_fn: impl Fn(OnHedgeArgs) + Send + Sync + 'static) -> Self {
-        self.on_hedge = Some(OnHedge::new(hedge_fn));
+    pub fn on_execute(
+        mut self,
+        execute_fn: impl Fn(&mut In, OnExecuteArgs) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_execute = Some(OnExecute::new(execute_fn));
         self
     }
 
@@ -217,7 +221,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
             hedging_mode: self.hedging_mode,
             clone_input: self.clone_input,
             should_recover: self.should_recover,
-            on_hedge: self.on_hedge,
+            on_execute: self.on_execute,
             handle_unavailable: self.handle_unavailable,
             enable_if: self.enable_if,
             telemetry: self.telemetry,
@@ -236,7 +240,7 @@ impl<In, Out, S> Layer<S> for HedgingLayer<In, Out, Set, Set> {
             hedging_mode: self.hedging_mode.clone(),
             clone_input: self.clone_input.clone().expect("clone_input must be set in Ready state"),
             should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
-            on_hedge: self.on_hedge.clone(),
+            on_execute: self.on_execute.clone(),
             handle_unavailable: self.handle_unavailable,
             enable_if: self.enable_if.clone(),
             #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -273,7 +277,7 @@ mod tests {
         assert!(!layer.handle_unavailable);
         assert!(layer.clone_input.is_none());
         assert!(layer.should_recover.is_none());
-        assert!(layer.on_hedge.is_none());
+        assert!(layer.on_execute.is_none());
         assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_hedging");
         assert!(layer.enable_if.call(&"test_input".to_string()));
     }
@@ -341,21 +345,24 @@ mod tests {
     }
 
     #[test]
-    fn on_hedge_works() {
+    fn on_execute_works() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicU32, Ordering};
 
         let called = Arc::new(AtomicU32::new(0));
         let called_clone = Arc::clone(&called);
 
-        let layer = create_ready_layer().on_hedge(move |_args| {
+        let layer = create_ready_layer().on_execute(move |_input, _args| {
             called_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        layer.on_hedge.unwrap().call(OnHedgeArgs {
-            attempt: Attempt::new(1, false),
-            hedge_delay: Duration::from_secs(2),
-        });
+        layer.on_execute.unwrap().call(
+            &mut "test".to_string(),
+            OnExecuteArgs {
+                attempt: Attempt::new(1, false),
+                delay: Duration::from_secs(2),
+            },
+        );
         assert_eq!(called.load(Ordering::SeqCst), 1);
     }
 

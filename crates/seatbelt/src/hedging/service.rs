@@ -14,7 +14,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use layered::Service;
 use tick::Clock;
 
-use super::args::{CloneArgs, OnHedgeArgs, RecoveryArgs};
+use super::args::{CloneArgs, OnExecuteArgs, RecoveryArgs};
 use super::callbacks::*;
 use super::mode::HedgingMode;
 use crate::utils::EnableIf;
@@ -47,7 +47,7 @@ pub(crate) struct HedgingShared<In, Out> {
     pub(crate) hedging_mode: HedgingMode,
     pub(crate) clone_input: CloneInput<In>,
     pub(crate) should_recover: ShouldRecover<Out>,
-    pub(crate) on_hedge: Option<OnHedge>,
+    pub(crate) on_execute: Option<OnExecute<In>>,
     pub(crate) handle_unavailable: bool,
     pub(crate) enable_if: EnableIf<In>,
     #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -121,10 +121,11 @@ impl<In, Out> HedgingShared<In, Out> {
 
         let attempt = Attempt::new(0, total_attempts == 1);
         let args = CloneArgs { attempt };
-        let Some(first_cloned) = self.clone_input.call(&mut input, args) else {
+        let Some(mut first_cloned) = self.clone_input.call(&mut input, args) else {
             return launch(input).await;
         };
 
+        self.invoke_on_execute(&mut first_cloned, attempt, Duration::ZERO);
         let mut futs = FuturesUnordered::new();
         futs.push(launch(first_cloned));
         self.run_delay_loop(&mut futs, &mut input, attempt, total_attempts, launch).await
@@ -211,16 +212,16 @@ impl<In, Out> HedgingShared<In, Out> {
     ) {
         let args = CloneArgs { attempt };
 
-        if let Some(cloned) = self.clone_input.call(input, args) {
-            self.invoke_on_hedge(attempt, hedge_delay);
+        if let Some(mut cloned) = self.clone_input.call(input, args) {
+            self.invoke_on_execute(&mut cloned, attempt, hedge_delay);
             self.emit_telemetry(attempt);
             futs.push(launch(cloned));
         }
     }
 
-    fn invoke_on_hedge(&self, attempt: Attempt, hedge_delay: Duration) {
-        if let Some(on_hedge) = &self.on_hedge {
-            on_hedge.call(OnHedgeArgs { attempt, hedge_delay });
+    fn invoke_on_execute(&self, input: &mut In, attempt: Attempt, delay: Duration) {
+        if let Some(on_execute) = &self.on_execute {
+            on_execute.call(input, OnExecuteArgs { attempt, delay });
         }
     }
 
@@ -350,7 +351,7 @@ mod tests {
         assert_eq!(hedging.shared.max_hedged_attempts, 1);
         assert!(!hedging.shared.hedging_mode.is_immediate());
         assert!(!hedging.shared.handle_unavailable);
-        assert!(hedging.shared.on_hedge.is_none());
+        assert!(hedging.shared.on_execute.is_none());
         assert!(hedging.shared.enable_if.call(&"str".to_string()));
     }
 

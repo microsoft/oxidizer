@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
 use rstest::rstest;
-use seatbelt::hedging::{Hedging, HedgingMode, OnHedgeArgs};
+use seatbelt::hedging::{Hedging, HedgingMode, OnExecuteArgs};
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::{Clock, ClockControl};
 use tower_service::Service as TowerService;
@@ -218,10 +218,10 @@ async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
 #[case::layered(false)]
 #[case::tower(true)]
 #[tokio::test]
-async fn on_hedge_callback_invoked(#[case] use_tower: bool) {
+async fn on_execute_callback_invoked(#[case] use_tower: bool) {
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
-    let hedge_calls = Arc::new(AtomicU32::new(0));
-    let hedge_calls_clone = Arc::clone(&hedge_calls);
+    let execute_calls = Arc::new(AtomicU32::new(0));
+    let execute_calls_clone = Arc::clone(&execute_calls);
 
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
@@ -230,8 +230,8 @@ async fn on_hedge_callback_invoked(#[case] use_tower: bool) {
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
             .hedging_mode(HedgingMode::immediate())
             .max_hedged_attempts(2)
-            .on_hedge(move |_: OnHedgeArgs| {
-                hedge_calls_clone.fetch_add(1, Ordering::SeqCst);
+            .on_execute(move |_input, _: OnExecuteArgs| {
+                execute_calls_clone.fetch_add(1, Ordering::SeqCst);
             }),
         Execute::new(|v: String| async move { Ok::<_, String>(v) }),
     );
@@ -239,8 +239,8 @@ async fn on_hedge_callback_invoked(#[case] use_tower: bool) {
     let mut service = stack.into_service();
     let _result = execute_service(&mut service, "test".to_string(), use_tower).await;
 
-    // on_hedge should be called once for each hedge (2 hedges)
-    assert_eq!(hedge_calls.load(Ordering::SeqCst), 2);
+    // on_execute should be called for each attempt (1 original + 2 hedges)
+    assert_eq!(execute_calls.load(Ordering::SeqCst), 3);
 }
 
 #[rstest]
@@ -475,9 +475,11 @@ async fn slow_original_accepted_after_hedge_launched(#[case] use_tower: bool) {
             // Hedge fires after 100ms
             .hedging_mode(HedgingMode::delay(Duration::from_millis(100)))
             .max_hedged_attempts(1)
-            .on_hedge(move |_: OnHedgeArgs| {
+            .on_execute(move |_input, args: OnExecuteArgs| {
                 // When the hedge is about to launch, let the original complete.
-                original_go_clone.notify_one();
+                if args.attempt().index() > 0 {
+                    original_go_clone.notify_one();
+                }
             }),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
