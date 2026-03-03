@@ -10,9 +10,6 @@ use crate::RecoveryKind;
 #[cfg(any(feature = "metrics", test))]
 pub(super) const HEDGING_EVENT: &str = "hedging";
 
-/// Recovery kind value used for futures that were abandoned (dropped before completing).
-const ABANDONED: &str = "abandoned";
-
 /// A guard that emits hedging telemetry when dropped.
 ///
 /// - Abandoned futures (dropped before completing): reports with recovery kind `"abandoned"`
@@ -62,11 +59,10 @@ impl TelemetryGuard {
         self.armed = false;
     }
 
-    /// Returns the string representation of the recovery kind for telemetry.
-    /// Conversion to string is deferred to emission time.
+    #[cfg(any(feature = "logs", feature = "metrics", test))]
     fn recovery_kind_str(&self) -> &'static str {
         match self.recovery_kind {
-            None => ABANDONED,
+            None => "abandoned",
             Some(RecoveryKind::Retry) => "retry",
             Some(RecoveryKind::Unavailable) => "unavailable",
             // recovery_kind() only passes Retry/Unavailable, but handle
@@ -80,8 +76,6 @@ impl TelemetryGuard {
         expect(clippy::unused_self, reason = "used when telemetry features are enabled")
     )]
     fn emit(&self) {
-        let recovery_kind_str = self.recovery_kind_str();
-
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
@@ -91,7 +85,7 @@ impl TelemetryGuard {
                 strategy.name = %self.telemetry.strategy_name,
                 resilience.attempt.index = self.attempt.index(),
                 resilience.attempt.is_last = self.attempt.is_last(),
-                resilience.attempt.recovery.kind = recovery_kind_str,
+                resilience.attempt.recovery.kind = self.recovery_kind_str(),
                 resilience.hedging.delay = self.hedging_delay.as_secs_f32(),
             );
         }
@@ -107,7 +101,7 @@ impl TelemetryGuard {
                 opentelemetry::KeyValue::new(EVENT_NAME, HEDGING_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(self.attempt.index())),
                 opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, self.attempt.is_last()),
-                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind_str),
+                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, self.recovery_kind_str()),
             ]);
         }
     }
