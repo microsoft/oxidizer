@@ -132,7 +132,7 @@ impl Attempt {
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
-    #[cfg(any(feature = "retry", test))]
+    #[cfg(any(feature = "retry", feature = "hedging", test))]
     pub(crate) fn increment(self, max_attempts: u32) -> Option<Self> {
         let next = self.index.saturating_add(1);
 

@@ -54,14 +54,7 @@ impl<In, Out> ResilienceContext<In, Out> {
 
     /// Get the configured clock for timing operations.
     #[must_use]
-    #[cfg(any(
-        feature = "retry",
-        feature = "breaker",
-        feature = "timeout",
-        feature = "fallback",
-        feature = "hedging",
-        test
-    ))]
+    #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "hedging", test))]
     pub(crate) fn get_clock(&self) -> &Clock {
         &self.clock
     }
