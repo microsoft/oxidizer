@@ -165,9 +165,7 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn to_clock(&self) -> Clock {
-        Clock {
-            state: ClockState::ClockControl(self.clone()),
-        }
+        Clock::new(ClockState::ClockControl(self.clone()))
     }
 
     /// Sets the duration by which the clock will auto-advance when accessing the current time.

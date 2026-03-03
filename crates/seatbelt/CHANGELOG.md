@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-02-27
+
+- ✨ Features
+
+  - ResilienceContext is now ThreadAware
+
 ## [0.3.0] - 2026-02-17
 
 - ✨ Features

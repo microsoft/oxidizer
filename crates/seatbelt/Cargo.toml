@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.3.0"
+version = "0.3.1"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -27,16 +27,20 @@ allowed_external_types = [
     "tick::clock::Clock",
     "tower_layer::Layer",
     "tower_service::Service",
+    "thread_aware::core::ThreadAware",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
 ]
 
 [package.metadata.docs.rs]
 all-features = true
 
 [features]
-default = ["timeout", "retry", "breaker"]
+default = ["timeout", "retry", "breaker", "fallback"]
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
+fallback = []
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 tower-service = ["dep:tower-service"]
@@ -46,6 +50,7 @@ fastrand = { workspace = true, optional = true }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
+thread_aware = { workspace = true }
 tick = { workspace = true }
 tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
@@ -102,6 +107,10 @@ required-features = ["retry", "timeout", "tower-service"]
 [[example]]
 name = "breaker"
 required-features = ["breaker", "metrics"]
+
+[[example]]
+name = "fallback"
+required-features = ["fallback"]
 
 [[bench]]
 name = "observability"
