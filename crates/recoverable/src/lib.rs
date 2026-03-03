@@ -471,14 +471,31 @@ impl Display for RecoveryInfo {
     }
 }
 
+impl RecoveryKind {
+    /// Returns a static string representation of this recovery kind.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use recoverable::RecoveryKind;
+    ///
+    /// assert_eq!(RecoveryKind::Retry.as_str(), "retry");
+    /// assert_eq!(RecoveryKind::Never.as_str(), "never");
+    /// ```
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Never => "never",
+            Self::Retry => "retry",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
 impl Display for RecoveryKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Unknown => write!(f, "unknown"),
-            Self::Never => write!(f, "never"),
-            Self::Retry => write!(f, "retry"),
-            Self::Unavailable => write!(f, "unavailable"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -520,6 +537,14 @@ mod tests {
             RecoveryInfo::unavailable().delay(Duration::from_secs(300)).to_string(),
             "unavailable (delay 300s)"
         );
+    }
+
+    #[test]
+    fn recovery_kind_as_str() {
+        assert_eq!(RecoveryKind::Unknown.as_str(), "unknown");
+        assert_eq!(RecoveryKind::Never.as_str(), "never");
+        assert_eq!(RecoveryKind::Retry.as_str(), "retry");
+        assert_eq!(RecoveryKind::Unavailable.as_str(), "unavailable");
     }
 
     #[test]
