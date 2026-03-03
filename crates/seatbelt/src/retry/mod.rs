@@ -89,13 +89,16 @@
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted for each attempt that should be retried (including the final retry attempt)
+//! - **When**: Emitted once per attempt when the recovery classifier indicates the result is
+//!   recoverable, including the final attempt when maximum retries are exhausted
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
-//!   - `resilience.strategy.name`: Timeout identifier from [`Retry::layer`]
+//!   - `resilience.strategy.name`: Retry identifier from [`Retry::layer`]
 //!   - `resilience.event.name`: Always `retry`
 //!   - `resilience.attempt.index`: Attempt index (0-based)
 //!   - `resilience.attempt.is_last`: Boolean indicating if this is the last retry attempt
+//!   - `resilience.attempt.recovery.kind`: The [`RecoveryKind`][crate::RecoveryKind] that triggered
+//!     the retry (e.g., `retry` or `unavailable`)
 //!
 //! # Examples
 //!
@@ -189,7 +192,6 @@
 //! ```
 
 mod args;
-mod attempt;
 mod backoff;
 mod callbacks;
 mod constants;
@@ -198,8 +200,8 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
+pub use crate::attempt::Attempt;
 pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
-pub use attempt::Attempt;
 pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};
