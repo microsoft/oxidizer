@@ -13,9 +13,9 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
-ohno = { workspace = true, features = ["app-err"] }
 
 duct = { workspace = true }
+ohno = { workspace = true, features = ["app-err"] }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["std"] }
 

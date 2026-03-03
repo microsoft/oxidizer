@@ -1,0 +1,9 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_errors.rs
+expression: "expand_thunk_error!(attr_args, item)"
+---
+impl Dummy {
+    ::core::compile_error! {
+        "expected `fn`"
+    }
+}

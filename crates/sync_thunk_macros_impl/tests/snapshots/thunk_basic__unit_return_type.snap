@@ -1,0 +1,63 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+assertion_line: 138
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    #[inline]
+    #[doc(hidden)]
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        clippy::needless_pass_by_value,
+        clippy::use_self,
+        clippy::unused_self,
+        unused_variables,
+    )]
+    fn __fire_and_forget_inner(&self) {}
+    #[doc(hidden)]
+    #[allow(clippy::use_self)]
+    fn __fire_and_forget_shim(ptr: *mut ()) {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __fire_and_forget_RawTask {
+            self_ptr: *const (),
+        }
+        let state = unsafe {
+            &*ptr.cast::<::sync_thunk::StackState<(), __fire_and_forget_RawTask>>()
+        };
+        let task = unsafe { state.take_task() }
+            .expect("thunk task was set before dispatch");
+        let self_ref = unsafe { &*task.self_ptr.cast::<Self>() };
+        let panic_result = ::std::panic::catch_unwind(
+            ::std::panic::AssertUnwindSafe(|| { self_ref.__fire_and_forget_inner() }),
+        );
+        match panic_result {
+            Ok(result) => {
+                unsafe { state.complete(result) };
+            }
+            Err(_) => {
+                state.mark_panicked();
+            }
+        }
+        state.wake();
+    }
+    async fn fire_and_forget(&self) -> () {
+        #[allow(non_camel_case_types, dead_code)]
+        struct __fire_and_forget_RawTask {
+            self_ptr: *const (),
+        }
+        unsafe impl Send for __fire_and_forget_RawTask {}
+        let state = ::sync_thunk::StackState::<(), __fire_and_forget_RawTask>::new();
+        let raw_task = __fire_and_forget_RawTask {
+            self_ptr: self as *const Self as *const (),
+        };
+        unsafe {
+            state.set_task(raw_task);
+        }
+        let work_item = ::sync_thunk::WorkItem::new(
+            state.as_mut_ptr().cast::<()>(),
+            Self::__fire_and_forget_shim,
+        );
+        self.thunker.send(work_item);
+        ::sync_thunk::ThunkFuture::new(&state).await
+    }
+}
