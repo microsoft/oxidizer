@@ -150,13 +150,13 @@ impl<In, Out> RetryShared<In, Out> {
         }
 
         let Some(next_attempt) = attempt.increment(self.max_attempts) else {
-            self.emit_telemetry(attempt, Duration::ZERO);
+            self.emit_telemetry(attempt, Duration::ZERO, recovery.kind());
             return ControlFlow::Break(out);
         };
 
         let retry_delay = compute_retry_delay(&recovery, delays);
 
-        self.emit_telemetry(attempt, retry_delay);
+        self.emit_telemetry(attempt, retry_delay, recovery.kind());
 
         if let Some(input) = self.try_restore_input(original_input.as_ref(), &mut out, attempt, &recovery) {
             original_input = Some(input);
@@ -219,7 +219,7 @@ impl<In, Out> RetryShared<In, Out> {
         not(any(feature = "logs", test)),
         expect(unused_variables, clippy::unused_self, reason = "unused when logs feature not used")
     )]
-    fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
+    fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration, recovery_kind: RecoveryKind) {
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
@@ -230,20 +230,22 @@ impl<In, Out> RetryShared<In, Out> {
                 resilience.attempt.index = attempt.index(),
                 resilience.attempt.is_last = attempt.is_last(),
                 resilience.retry.delay = retry_delay.as_secs_f32(),
+                resilience.attempt.recovery.kind = %recovery_kind,
             );
         }
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
-            use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
-            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+            use super::telemetry::RETRY_EVENT;
+            use crate::utils::{ATTEMPT_INDEX, ATTEMPT_IS_LAST, ATTEMPT_RECOVERY_KIND, EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
             self.telemetry.report_metrics(&[
                 opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
                 opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                 opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
+                opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
+                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind.to_string()),
             ]);
         }
     }
@@ -397,11 +399,12 @@ mod tests {
                 KeyValue::new("resilience.attempt.index", 1),
                 KeyValue::new("resilience.attempt.is_last", false),
                 KeyValue::new("resilience.attempt.is_last", true),
+                KeyValue::new("resilience.attempt.recovery.kind", "retry"),
                 KeyValue::new("resilience.pipeline.name", "test_pipeline"),
                 KeyValue::new("resilience.strategy.name", "test_retry"),
                 KeyValue::new("resilience.event.name", "retry"),
             ],
-            Some(15),
+            Some(18),
         );
     }
 
@@ -431,6 +434,7 @@ mod tests {
         log_capture.assert_contains("log_test_retry");
         log_capture.assert_contains("resilience.attempt.index");
         log_capture.assert_contains("resilience.retry.delay");
+        log_capture.assert_contains("resilience.attempt.recovery.kind");
     }
 
     fn create_ready_retry_layer_core(
