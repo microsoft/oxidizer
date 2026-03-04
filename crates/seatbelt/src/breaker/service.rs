@@ -13,7 +13,7 @@ use layered::Service;
 use tick::Clock;
 
 use super::*;
-use crate::NotSet;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
 /// Applies circuit breaker logic to prevent cascading failures.
@@ -250,7 +250,8 @@ mod tests {
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
     use crate::testing::FailReadyService;
-    use crate::{RecoveryInfo, ResilienceContext, Set};
+    use crate::typestates::Set;
+    use crate::{RecoveryInfo, ResilienceContext};
 
     #[cfg_attr(miri, ignore)]
     #[test]

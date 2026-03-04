@@ -11,9 +11,10 @@ use std::task::{Context, Poll};
 
 use layered::Service;
 
+use crate::ResilienceContext;
 use crate::fallback::*;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{NotSet, ResilienceContext};
 
 /// Provides a replacement output when the inner service output is not considered valid.
 ///

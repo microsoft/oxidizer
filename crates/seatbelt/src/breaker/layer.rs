@@ -10,8 +10,9 @@ use layered::Layer;
 use super::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
 use super::*;
 use crate::breaker::engine::probing::ProbesOptions;
+use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, TelemetryString};
+use crate::{Recovery, RecoveryInfo, ResilienceContext, TelemetryString};
 
 /// Builder for configuring circuit breaker resilience middleware.
 ///
