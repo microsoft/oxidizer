@@ -10,8 +10,9 @@ use layered::Layer;
 use crate::retry::backoff::BackoffOptions;
 use crate::retry::constants::DEFAULT_RETRY_ATTEMPTS;
 use crate::retry::*;
+use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set, TelemetryString};
+use crate::{Recovery, RecoveryInfo, ResilienceContext, TelemetryString};
 
 /// Builder for configuring retry resilience middleware.
 ///
