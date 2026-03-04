@@ -20,7 +20,7 @@
 //! - [`Uri`] - Flexible URI type with endpoint and path/query components
 //! - [`BaseUri`] - Lightweight type representing scheme and authority (no path/query)
 //! - [`TemplatedPathAndQuery`] - RFC 6570 Level 3 compliant URI templating
-//! - [`UriSafe`] and [`UriSafeString`] - Trait and its implementation for String, marking type as safe for URI components
+//! - [`UriSafe`] and [`UriSafeString`] - Generic newtype wrapper proving a value is safe for URI components
 //!   by not containing any reserved characters
 //!
 //! # Basic Usage
@@ -71,7 +71,7 @@
 //!
 //! # URI Safety Guarantees
 //!
-//! The crate provides [`UriSafe`] trait implementations for types that are guaranteed
+//! The [`UriSafe<T>`](UriSafe) newtype wraps values that are guaranteed
 //! to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
 //!
 //! ```rust
@@ -143,7 +143,7 @@
 //! - Query parameters: `{?var}`
 //! - Query continuation: `{&var}`
 //!
-//! Template variables must implement [`UriSafe`] (except for fragment and reserved expansions)
+//! Template variables must implement [`UriParam`](uri_param::UriParam) (except for fragment and reserved expansions)
 //! to ensure the resulting URI is valid.
 //!
 //! # Integration with HTTP Ecosystem
@@ -158,14 +158,14 @@ mod error;
 mod macros;
 mod templated;
 pub mod uri;
-mod uri_fragment;
+mod uri_param;
 mod uri_safe;
 
 pub use base_uri::{BasePath, BaseUri, Origin};
 pub use error::ValidationError;
-pub use macros::{UriFragment, UriUnsafeFragment, templated};
+pub use macros::{UriParam, UriUnsafeParam, templated};
 pub use templated::TemplatedPathAndQuery;
 #[doc(inline)]
 pub use uri::{DATA_CLASS_UNKNOWN_URI, Uri};
-pub use uri_fragment::{UriFragment, UriUnsafeFragment};
+pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};

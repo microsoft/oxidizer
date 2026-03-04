@@ -17,7 +17,7 @@ mod enum_template;
 pub(crate) mod error;
 mod struct_template;
 pub(crate) mod template_parser;
-mod uri_fragment;
+mod uri_param;
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -25,7 +25,7 @@ use syn::{Attribute, DeriveInput, Field, parse_quote, parse2};
 
 use crate::enum_template::enum_template;
 use crate::struct_template::struct_template;
-use crate::uri_fragment::{uri_fragment_impl, uri_unsafe_fragment_impl};
+use crate::uri_param::{uri_param_impl, uri_unsafe_param_impl};
 
 macro_rules! bail {
     ($span:ident, $msg:expr) => {
@@ -169,23 +169,23 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
-pub fn uri_fragment_derive_impl(input: TokenStream) -> TokenStream {
+pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
         Err(err) => return err.to_compile_error(),
     };
 
-    uri_fragment_impl(input)
+    uri_param_impl(input)
 }
 
 #[must_use]
-pub fn uri_unsafe_fragment_derive_impl(input: TokenStream) -> TokenStream {
+pub fn uri_unsafe_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
         Err(err) => return err.to_compile_error(),
     };
 
-    uri_unsafe_fragment_impl(input)
+    uri_unsafe_param_impl(input)
 }
 
 #[cfg(not(miri))] // Insta can't work with Miri
@@ -202,13 +202,13 @@ mod tests {
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
-    fn pretty_parse_uri_fragment(input: TokenStream) -> String {
-        let output = uri_unsafe_fragment_derive_impl(input);
+    fn pretty_parse_uri_unsafe_param(input: TokenStream) -> String {
+        let output = uri_unsafe_param_derive_impl(input);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
-    fn pretty_parse_uri_safe_fragment(input: TokenStream) -> String {
-        let output = uri_fragment_derive_impl(input);
+    fn pretty_parse_uri_param(input: TokenStream) -> String {
+        let output = uri_param_derive_impl(input);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
@@ -243,15 +243,12 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriFragment;
-                use ::templated_uri::UriUnsafeFragment;
+                use ::templated_uri::UriParam;
+                use ::templated_uri::UriUnsafeParam;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::templated_uri::UriSafe = &param;
-                let param3: &dyn ::templated_uri::UriSafe = &param3;
-                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -334,15 +331,12 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriFragment;
-                use ::templated_uri::UriUnsafeFragment;
+                use ::templated_uri::UriParam;
+                use ::templated_uri::UriUnsafeParam;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::templated_uri::UriSafe = &param;
-                let param3: &dyn ::templated_uri::UriSafe = &param3;
-                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -419,15 +413,12 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriFragment;
-                use ::templated_uri::UriUnsafeFragment;
+                use ::templated_uri::UriParam;
+                use ::templated_uri::UriUnsafeParam;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::templated_uri::UriSafe = &param;
-                let param3: &dyn ::templated_uri::UriSafe = &param3;
-                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -504,15 +495,12 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriFragment;
-                use ::templated_uri::UriUnsafeFragment;
+                use ::templated_uri::UriParam;
+                use ::templated_uri::UriUnsafeParam;
                 let param = self.param.as_uri_safe();
                 let param2 = self.param2.as_display();
                 let param3 = self.param3.as_uri_safe();
                 let param4 = self.param4.as_uri_safe();
-                let param: &dyn ::templated_uri::UriSafe = &param;
-                let param3: &dyn ::templated_uri::UriSafe = &param3;
-                let param4: &dyn ::templated_uri::UriSafe = &param4;
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -778,14 +766,14 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_fragment_impl() {
+    fn test_uri_unsafe_param_impl() {
         let input = quote! {
             struct MyFragment(String);
         };
 
-        let output_pretty = pretty_parse_uri_fragment(input);
+        let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriUnsafeFragment for MyFragment {
+        impl ::templated_uri::UriUnsafeParam for MyFragment {
             fn as_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
@@ -794,14 +782,14 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_fragment_with_custom_type() {
+    fn test_uri_unsafe_param_with_custom_type() {
         let input = quote! {
             struct CustomFragment(UriSafeString);
         };
 
-        let output_pretty = pretty_parse_uri_fragment(input);
+        let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriUnsafeFragment for CustomFragment {
+        impl ::templated_uri::UriUnsafeParam for CustomFragment {
             fn as_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
@@ -810,63 +798,63 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_fragment_named_fields_error() {
+    fn test_uri_unsafe_param_named_fields_error() {
         let input = quote! {
             struct InvalidFragment {
                 value: String
             }
         };
 
-        let output_pretty = pretty_parse_uri_fragment(input);
+        let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeFragment can only be derived for tuple structs (newtype pattern)"
+            "UriUnsafeParam can only be derived for tuple structs (newtype pattern)"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_fragment_multiple_fields_error() {
+    fn test_uri_unsafe_param_multiple_fields_error() {
         let input = quote! {
             struct TooManyFields(String, String);
         };
 
-        let output_pretty = pretty_parse_uri_fragment(input);
+        let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeFragment requires exactly one field, found 2"
+            "UriUnsafeParam requires exactly one field, found 2"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_fragment_enum_error() {
+    fn test_uri_unsafe_param_enum_error() {
         let input = quote! {
             enum FragmentEnum {
                 Variant(String)
             }
         };
 
-        let output_pretty = pretty_parse_uri_fragment(input);
+        let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeFragment cannot be derived for enums"
+            "UriUnsafeParam cannot be derived for enums"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_fragment_union_error() {
+    fn test_uri_unsafe_param_union_error() {
         let input = quote! {
             union UnsafeFragmentUnion {
                 value: u32
             }
         };
 
-        let output_pretty = pretty_parse_uri_fragment(input);
+        let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeFragment cannot be derived for unions"
+            "UriUnsafeParam cannot be derived for unions"
         }
         "#);
     }
@@ -907,93 +895,93 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_safe_fragment_impl() {
+    fn test_uri_param_impl() {
         let input = quote! {
             struct SafeFragment(String);
         };
 
-        let output_pretty = pretty_parse_uri_safe_fragment(input);
+        let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriFragment for SafeFragment {
-            fn as_uri_safe(&self) -> impl ::templated_uri::UriSafe {
-                &self.0
+        impl ::templated_uri::UriParam for SafeFragment {
+            fn as_uri_safe(&self) -> ::templated_uri::UriSafe<impl ::std::fmt::Display> {
+                self.0.as_uri_safe()
             }
         }
         ");
     }
 
     #[test]
-    fn test_uri_safe_fragment_named_fields_error() {
+    fn test_uri_param_named_fields_error() {
         let input = quote! {
             struct InvalidSafeFragment {
                 value: String
             }
         };
 
-        let output_pretty = pretty_parse_uri_safe_fragment(input);
+        let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriFragment can only be derived for tuple structs (newtype pattern)"
+            "UriParam can only be derived for tuple structs (newtype pattern)"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_safe_fragment_enum_error() {
+    fn test_uri_param_enum_error() {
         let input = quote! {
             enum SafeFragmentEnum {
                 Variant(String)
             }
         };
 
-        let output_pretty = pretty_parse_uri_safe_fragment(input);
+        let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriFragment cannot be derived for enums"
+            "UriParam cannot be derived for enums"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_safe_fragment_union_error() {
+    fn test_uri_param_union_error() {
         let input = quote! {
             union SafeFragmentUnion {
                 value: u32
             }
         };
 
-        let output_pretty = pretty_parse_uri_safe_fragment(input);
+        let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriFragment cannot be derived for unions"
+            "UriParam cannot be derived for unions"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_safe_fragment_multiple_fields_error() {
+    fn test_uri_param_multiple_fields_error() {
         let input = quote! {
             struct TooManySafeFields(String, String);
         };
 
-        let output_pretty = pretty_parse_uri_safe_fragment(input);
+        let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriFragment requires exactly one field, found 2"
+            "UriParam requires exactly one field, found 2"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_safe_fragment_zero_fields_error() {
+    fn test_uri_param_zero_fields_error() {
         let input = quote! {
             struct NoFields();
         };
 
-        let output_pretty = pretty_parse_uri_safe_fragment(input);
+        let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriFragment requires exactly one field, found 0"
+            "UriParam requires exactly one field, found 0"
         }
         "#);
     }
@@ -1055,14 +1043,14 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_unsafe_fragment_derive_impl_parse_error() {
+    fn test_uri_unsafe_param_derive_impl_parse_error() {
         // Test error handling when input cannot be parsed as DeriveInput
         // Pass invalid tokens that cannot be parsed as a struct/enum/union
         let input = quote! {
             fn not_a_struct() {}
         };
 
-        let output = uri_unsafe_fragment_derive_impl(input);
+        let output = uri_unsafe_param_derive_impl(input);
         let output_str = output.to_string();
 
         // Should produce a compile error
@@ -1073,14 +1061,14 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_fragment_derive_impl_parse_error() {
+    fn test_uri_param_derive_impl_parse_error() {
         // Test error handling when input cannot be parsed as DeriveInput
         // Pass invalid tokens that cannot be parsed as a struct/enum/union
         let input = quote! {
             fn not_a_struct() {}
         };
 
-        let output = uri_fragment_derive_impl(input);
+        let output = uri_param_derive_impl(input);
         let output_str = output.to_string();
 
         // Should produce a compile error

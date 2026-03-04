@@ -1,0 +1,7 @@
+error[E0599]: no method named `as_uri_safe` found for struct `String` in the current scope
+ --> tests/ui/string_in_restricted_position.rs:9:1
+  |
+9 | #[templated(template = "/users/{user_id}", unredacted)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `String`
+  |
+  = note: this error originates in the attribute macro `templated` (in Nightly builds, run with -Z macro-backtrace for more info)

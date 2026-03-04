@@ -4,7 +4,7 @@
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, Uri, UriFragment, UriSafeString};
+use templated_uri::{BaseUri, Uri, UriParam, UriSafeString};
 use templated_uri_macros::templated;
 
 // Example taxonomy for demonstration purposes
@@ -17,11 +17,11 @@ enum ExampleTaxonomy {
 }
 
 #[classified(ExampleTaxonomy::Oii)]
-#[derive(UriFragment)]
+#[derive(UriParam)]
 struct OrgId(UriSafeString);
 
 #[classified(ExampleTaxonomy::Eupi)]
-#[derive(UriFragment)]
+#[derive(UriParam)]
 struct UserId(u32);
 
 #[templated(template = "/{org_id}/user/{user_id}/{item}/")]

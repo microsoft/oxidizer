@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Derives the `UriFragment` trait for newtype wrappers around URI-safe types.
+/// Derives the `UriParam` trait for newtype wrappers around URI-safe types.
 ///
-/// This derive macro implements `UriFragment` for tuple structs with exactly one field.
+/// This derive macro implements `UriParam` for tuple structs with exactly one field.
 /// The implementation calls `as_uri_safe()` on the inner type, making it suitable for
 /// use in URI templates with standard `{param}` (percent-encoded) placeholders.
 ///
@@ -15,16 +15,16 @@
 /// # Example
 ///
 /// ```
-/// # use templated_uri::{UriFragment, UriSafeString};
-/// #[derive(UriFragment)]
+/// # use templated_uri::{UriParam, UriSafeString};
+/// #[derive(UriParam)]
 /// struct UserId(UriSafeString);
 /// ```
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
-pub use templated_uri_macros::UriFragment;
-/// Derives the `UriUnsafeFragment` trait for newtype wrappers with unrestricted characters.
+pub use templated_uri_macros::UriParam;
+/// Derives the `UriUnsafeParam` trait for newtype wrappers with unrestricted characters.
 ///
-/// This derive macro implements `UriUnsafeFragment` for tuple structs with exactly one field.
+/// This derive macro implements `UriUnsafeParam` for tuple structs with exactly one field.
 /// The implementation calls `as_display()` on the inner type, making it suitable for use in
 /// URI templates with unrestricted `{+param}` placeholders that allow reserved characters.
 ///
@@ -37,9 +37,9 @@ pub use templated_uri_macros::UriFragment;
 ///
 /// ```
 /// # use std::fmt::Display;
-/// use templated_uri::UriUnsafeFragment;
+/// use templated_uri::UriUnsafeParam;
 ///
-/// #[derive(UriUnsafeFragment)]
+/// #[derive(UriUnsafeParam)]
 /// struct PathSegment(String);
 ///
 /// impl Display for PathSegment {
@@ -51,7 +51,7 @@ pub use templated_uri_macros::UriFragment;
 ///
 /// This allows `PathSegment` to be used in URI templates with `{+param}` syntax where
 /// reserved characters like `/` should be preserved rather than percent-encoded.
-pub use templated_uri_macros::UriUnsafeFragment;
+pub use templated_uri_macros::UriUnsafeParam;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:

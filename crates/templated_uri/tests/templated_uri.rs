@@ -8,7 +8,7 @@ use std::fmt::Display;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, Sensitive, classified, taxonomy};
 use templated_uri::uri::DATA_CLASS_UNKNOWN_URI;
-use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriFragment, UriSafeString, UriUnsafeFragment};
+use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriParam, UriSafeString, UriUnsafeParam};
 use templated_uri_macros::templated;
 use uuid::Uuid;
 
@@ -24,15 +24,15 @@ enum TestTaxonomy {
 }
 
 #[classified(TestTaxonomy::Oii)]
-#[derive(Clone, UriFragment)]
+#[derive(Clone, UriParam)]
 struct OrgId(UriSafeString);
 
 #[classified(TestTaxonomy::Eupi)]
-#[derive(Clone, UriFragment)]
+#[derive(Clone, UriParam)]
 struct UserId(UriSafeString);
 
 #[classified(TestTaxonomy::Public)]
-#[derive(Clone, UriUnsafeFragment)]
+#[derive(Clone, UriUnsafeParam)]
 struct PathFragment(String);
 
 #[templated(template = "/{+param}{/param2,param3}{?q1,q2}", unredacted)]
@@ -178,7 +178,7 @@ impl Display for Action {
     }
 }
 
-impl UriUnsafeFragment for Action {
+impl UriUnsafeParam for Action {
     fn as_display(&self) -> impl Display {
         self
     }
