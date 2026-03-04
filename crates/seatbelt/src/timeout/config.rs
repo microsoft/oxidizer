@@ -39,6 +39,7 @@ impl Default for TimeoutConfig {
 mod tests {
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn default_snapshot() {
         let config = TimeoutConfig::default();

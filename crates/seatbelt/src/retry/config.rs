@@ -61,6 +61,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn default_snapshot() {
         let config = RetryConfig::default();
         insta::assert_json_snapshot!(config);

@@ -734,6 +734,7 @@ mod tests {
         assert_eq!(restore.call(&mut Ok("success".into()), args()), None);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn config_applies_all_settings() {
         let config = RetryConfig {

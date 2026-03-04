@@ -60,6 +60,7 @@ impl Default for BreakerConfig {
 mod tests {
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn default_snapshot() {
         let config = BreakerConfig::default();

@@ -371,6 +371,7 @@ mod tests {
         let _layered = create_ready_layer().layer(Execute::new(|input: String| async move { input }));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn config_applies_all_settings() {
         let config = TimeoutConfig {

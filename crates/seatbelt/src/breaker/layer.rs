@@ -651,6 +651,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn config_applies_all_settings() {
         let config = BreakerConfig {
