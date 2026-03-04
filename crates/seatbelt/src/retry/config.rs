@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::retry::backoff::Backoff;
+use crate::retry::Backoff;
 use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY_ATTEMPTS, DEFAULT_USE_JITTER};
 
 /// Configuration for the retry middleware.
