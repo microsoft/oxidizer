@@ -1,6 +1,5 @@
 ---
 source: crates/seatbelt/src/retry/layer.rs
-assertion_line: 749
 expression: layer
 ---
 RetryLayer {
@@ -35,7 +34,7 @@ RetryLayer {
         ShouldRecover,
     ),
     on_retry: None,
-    enable_if: EnableIf,
+    enable_if: Disabled,
     telemetry: TelemetryHelper {
         pipeline_name: "test_pipeline",
         strategy_name: "test",

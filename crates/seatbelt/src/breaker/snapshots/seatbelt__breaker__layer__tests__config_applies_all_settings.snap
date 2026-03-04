@@ -1,6 +1,5 @@
 ---
 source: crates/seatbelt/src/breaker/layer.rs
-assertion_line: 666
 expression: layer
 ---
 BreakerLayer {
@@ -28,7 +27,7 @@ BreakerLayer {
     on_closed: None,
     on_probing: None,
     breaker_id: None,
-    enable_if: EnableIf,
+    enable_if: Disabled,
     telemetry: TelemetryHelper {
         pipeline_name: "test_pipeline",
         strategy_name: "test",

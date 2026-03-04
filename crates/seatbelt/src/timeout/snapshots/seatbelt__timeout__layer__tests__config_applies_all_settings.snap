@@ -1,6 +1,5 @@
 ---
 source: crates/seatbelt/src/timeout/layer.rs
-assertion_line: 385
 expression: layer
 ---
 TimeoutLayer {
@@ -25,7 +24,7 @@ TimeoutLayer {
         TimeoutOutput,
     ),
     on_timeout: None,
-    enable_if: EnableIf,
+    enable_if: Disabled,
     telemetry: TelemetryHelper {
         pipeline_name: "test_pipeline",
         strategy_name: "test",

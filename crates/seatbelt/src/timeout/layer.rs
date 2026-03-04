@@ -44,7 +44,7 @@ impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
             timeout: None,
             timeout_output: None,
             on_timeout: None,
-            enable_if: EnableIf::always(),
+            enable_if: EnableIf::default(),
             telemetry: context.create_telemetry(name),
             context: context.clone(),
             timeout_override: None,
@@ -87,9 +87,7 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// (e.g., configuration files) without calling individual builder methods.
     #[must_use]
     pub fn config(self, config: &TimeoutConfig) -> TimeoutLayer<In, Out, Set, S2> {
-        let layer = self.timeout(config.timeout);
-
-        if config.enabled { layer.enable_always() } else { layer.disable() }
+        self.timeout(config.timeout).enable(config.enabled)
     }
 
     /// Sets the timeout result factory function.
@@ -151,7 +149,17 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// **Default**: Always enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
-        self.enable_if = EnableIf::new(is_enabled);
+        self.enable_if = EnableIf::custom(is_enabled);
+        self
+    }
+
+    /// Enables or disables the timeout middleware.
+    ///
+    /// When disabled, requests pass through without timeout protection.
+    /// This call replaces any previous condition.
+    #[must_use]
+    fn enable(mut self, enabled: bool) -> Self {
+        self.enable_if = EnableIf::new(enabled);
         self
     }
 
@@ -162,9 +170,8 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This is the default behavior - timeout is enabled by default.
     #[must_use]
-    pub fn enable_always(mut self) -> Self {
-        self.enable_if = EnableIf::always();
-        self
+    pub fn enable_always(self) -> Self {
+        self.enable(true)
     }
 
     /// Disables the timeout middleware completely.
@@ -174,9 +181,8 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This overrides the default enabled behavior.
     #[must_use]
-    pub fn disable(mut self) -> Self {
-        self.enable_if = EnableIf::never();
-        self
+    pub fn disable(self) -> Self {
+        self.enable(false)
     }
 }
 
@@ -377,7 +383,7 @@ mod tests {
     #[test]
     fn config_applies_all_settings() {
         let config = TimeoutConfig {
-            enabled: true,
+            enabled: false,
             timeout: Duration::from_secs(45),
         };
 

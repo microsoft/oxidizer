@@ -52,7 +52,7 @@ impl<In, Out> RetryLayer<In, Out, NotSet, NotSet> {
             clone_input: None,
             should_recover: None,
             on_retry: None,
-            enable_if: EnableIf::always(),
+            enable_if: EnableIf::default(),
             telemetry: context.create_telemetry(name),
             restore_input: None,
             handle_unavailable: false,
@@ -135,16 +135,13 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// (e.g., configuration files) without calling individual builder methods.
     #[must_use]
     pub fn config(self, config: &RetryConfig) -> Self {
-        let layer = self
-            .backoff(config.backoff_type)
+        self.backoff(config.backoff_type)
             .base_delay(config.base_delay)
             .use_jitter(config.use_jitter)
             .max_retry_attempts(config.max_retry_attempts)
-            .max_delay_optional(config.max_delay);
-
-        if config.enabled { layer.enable_always() } else { layer.disable() }
+            .max_delay_optional(config.max_delay)
+            .enable(config.enabled)
     }
-
     fn max_delay_optional(mut self, max_delay: Option<Duration>) -> Self {
         self.backoff.max_delay = max_delay;
         self
@@ -247,7 +244,17 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// **Default**: Always enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
-        self.enable_if = EnableIf::new(is_enabled);
+        self.enable_if = EnableIf::custom(is_enabled);
+        self
+    }
+
+    /// Enables or disables the retry middleware.
+    ///
+    /// When disabled, requests pass through without retry protection.
+    /// This call replaces any previous condition.
+    #[must_use]
+    fn enable(mut self, enabled: bool) -> Self {
+        self.enable_if = EnableIf::new(enabled);
         self
     }
 
@@ -258,9 +265,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This is the default behavior - retry is enabled by default.
     #[must_use]
-    pub fn enable_always(mut self) -> Self {
-        self.enable_if = EnableIf::always();
-        self
+    pub fn enable_always(self) -> Self {
+        self.enable(true)
     }
 
     /// Disables the retry middleware completely.
@@ -270,9 +276,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This overrides the default enabled behavior.
     #[must_use]
-    pub fn disable(mut self) -> Self {
-        self.enable_if = EnableIf::never();
-        self
+    pub fn disable(self) -> Self {
+        self.enable(false)
     }
 
     /// Configures whether the retry middleware should attempt to recover from unavailable services.
@@ -741,7 +746,7 @@ mod tests {
     #[test]
     fn config_applies_all_settings() {
         let config = RetryConfig {
-            enabled: true,
+            enabled: false,
             backoff_type: Backoff::Linear,
             base_delay: Duration::from_secs(2),
             max_delay: Some(Duration::from_secs(60)),
