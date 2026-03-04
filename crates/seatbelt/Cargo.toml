@@ -118,6 +118,10 @@ name = "breaker"
 required-features = ["breaker", "metrics"]
 
 [[example]]
+name = "config"
+required-features = ["retry", "breaker", "timeout", "serde"]
+
+[[example]]
 name = "fallback"
 required-features = ["fallback"]
 

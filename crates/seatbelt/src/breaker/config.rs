@@ -80,4 +80,34 @@ mod tests {
         let config = BreakerConfig::default();
         insta::assert_json_snapshot!(config);
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn quick_half_open_mode_snapshot() {
+        let config = BreakerConfig {
+            half_open_mode: HalfOpenMode::quick(),
+            ..BreakerConfig::default()
+        };
+        insta::assert_json_snapshot!(config);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn progressive_no_duration_half_open_mode_snapshot() {
+        let config = BreakerConfig {
+            half_open_mode: HalfOpenMode::progressive(None),
+            ..BreakerConfig::default()
+        };
+        insta::assert_json_snapshot!(config);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn progressive_with_duration_half_open_mode_snapshot() {
+        let config = BreakerConfig {
+            half_open_mode: HalfOpenMode::progressive(Duration::from_secs(45)),
+            ..BreakerConfig::default()
+        };
+        insta::assert_json_snapshot!(config);
+    }
 }
