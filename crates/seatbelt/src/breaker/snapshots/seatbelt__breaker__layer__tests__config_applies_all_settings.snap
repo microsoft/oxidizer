@@ -41,5 +41,5 @@ BreakerLayer {
     half_open_mode: HalfOpenMode {
         inner: Quick,
     },
-    _state: PhantomData<fn(alloc::string::String, seatbelt::shared::Set, seatbelt::shared::Set) -> alloc::string::String>,
+    _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::Set) -> alloc::string::String>,
 }
