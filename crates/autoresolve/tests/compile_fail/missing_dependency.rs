@@ -26,6 +26,6 @@ fn main() {
     // Only provide Builtins, not Telemetry — this should fail to compile because
     // Telemetry is not resolvable from the base type.
     let builtins = Builtins;
-    let mut resolver = autoresolve::resolver!(builtins: Builtins);
+    let mut resolver = autoresolve::resolver!(Base, builtins: Builtins);
     let _client = resolver.get::<Client>();
 }

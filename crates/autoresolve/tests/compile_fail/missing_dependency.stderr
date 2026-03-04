@@ -1,4 +1,4 @@
-error[E0277]: the trait bound `Telemetry: ResolveFrom<__AutoresolveBase>` is not satisfied
+error[E0277]: the trait bound `Telemetry: ResolveFrom<Base>` is not satisfied
   --> tests/compile_fail/missing_dependency.rs:30:34
    |
 30 |     let _client = resolver.get::<Client>();
@@ -6,7 +6,7 @@ error[E0277]: the trait bound `Telemetry: ResolveFrom<__AutoresolveBase>` is not
    |                            |
    |                            required by a bound introduced by this call
    |
-help: the trait `ResolveFrom<__AutoresolveBase>` is not implemented for `Telemetry`
+help: the trait `ResolveFrom<Base>` is not implemented for `Telemetry`
   --> tests/compile_fail/missing_dependency.rs:7:1
    |
  7 | struct Telemetry;
@@ -15,11 +15,11 @@ help: the following other types implement trait `ResolveFrom<T>`
   --> tests/compile_fail/missing_dependency.rs:15:1
    |
 15 | #[resolvable]
-   | ^^^^^^^^^^^^^ `Client`
+   | ^^^^^^^^^^^^^ `Client` implements `ResolveFrom<__AutoresolveBase>`
 ...
-29 |     let mut resolver = autoresolve::resolver!(builtins: Builtins);
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Builtins`
-note: required for `Client` to implement `ResolveFrom<__AutoresolveBase>`
+29 |     let mut resolver = autoresolve::resolver!(Base, builtins: Builtins);
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Builtins` implements `ResolveFrom<Base>`
+note: required for `Client` to implement `ResolveFrom<Base>`
   --> tests/compile_fail/missing_dependency.rs:15:1
    |
 15 | #[resolvable]

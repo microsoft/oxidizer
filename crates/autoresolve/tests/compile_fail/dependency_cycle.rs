@@ -34,7 +34,7 @@ impl Beta {
 }
 
 fn main() {
-    let base = Base;
-    let mut resolver = autoresolve::resolver!(base: Base);
+    let base_val = Base;
+    let mut resolver = autoresolve::resolver!(ResolverBase, base_val: Base);
     let _alpha = resolver.get::<Alpha>();
 }

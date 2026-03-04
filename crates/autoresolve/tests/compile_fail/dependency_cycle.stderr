@@ -1,10 +1,10 @@
-error[E0275]: overflow evaluating the requirement `Beta: ResolveFrom<__AutoresolveBase>`
+error[E0275]: overflow evaluating the requirement `Beta: ResolveFrom<ResolverBase>`
   --> tests/compile_fail/dependency_cycle.rs:39:27
    |
 39 |     let _alpha = resolver.get::<Alpha>();
    |                           ^^^
    |
-note: required for `Alpha` to implement `ResolveFrom<__AutoresolveBase>`
+note: required for `Alpha` to implement `ResolveFrom<ResolverBase>`
   --> tests/compile_fail/dependency_cycle.rs:13:1
    |
 13 | #[resolvable]

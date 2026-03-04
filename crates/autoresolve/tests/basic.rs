@@ -88,7 +88,7 @@ impl MyService {
 fn test_autoresolve() {
     let builtins = Builtins;
 
-    let mut resolver = autoresolve::resolver!(builtins: Builtins);
+    let mut resolver = autoresolve::resolver!(Base, builtins: Builtins);
 
     let service = resolver.get::<MyService>();
 

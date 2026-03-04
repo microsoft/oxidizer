@@ -106,7 +106,7 @@ fn test_combined() {
     let telemetry = Telemetry;
     let request = Request;
 
-    let mut resolver = autoresolve::resolver!(
+    let mut resolver = autoresolve::resolver!(Base,
         builtins: Builtins,
         telemetry: Telemetry,
         request: Request,
