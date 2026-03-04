@@ -151,10 +151,10 @@ mod tests {
     }
 
     #[test]
-    fn default_is_delay_2s() {
+    fn default_is_delay_500ms() {
         let mode = HedgingMode::default();
         assert!(!mode.is_immediate());
-        assert_eq!(mode.delay_for(attempt(1)), Duration::from_secs(2));
+        assert_eq!(mode.delay_for(attempt(1)), Duration::from_millis(500));
     }
 
     #[test]

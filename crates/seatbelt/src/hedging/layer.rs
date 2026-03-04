@@ -86,7 +86,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// For the common case of a fixed delay, the [`hedging_delay`][HedgingLayer::hedging_delay]
     /// shorthand is also available.
     ///
-    /// **Default**: [`HedgingMode::delay(2s)`][HedgingMode::delay]
+    /// **Default**: [`HedgingMode::delay(500ms)`][HedgingMode::delay]
     #[must_use]
     pub fn hedging_mode(mut self, mode: HedgingMode) -> Self {
         self.hedging_mode = mode;
@@ -98,7 +98,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// This is a convenience shorthand for
     /// [`hedging_mode(HedgingMode::delay(delay))`][HedgingLayer::hedging_mode].
     ///
-    /// **Default**: 2 seconds
+    /// **Default**: 500 milliseconds
     #[must_use]
     pub fn hedging_delay(self, delay: Duration) -> Self {
         self.hedging_mode(HedgingMode::delay(delay))

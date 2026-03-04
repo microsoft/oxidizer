@@ -91,7 +91,7 @@
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
 //! | Max hedged attempts | `1` (2 total) | Additional hedging requests beyond the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
-//! | Hedging mode | `delay(2s)` | Wait 2 seconds before each hedging attempt | [`hedging_mode`][HedgingLayer::hedging_mode] |
+//! | Hedging mode | `delay(500ms)` | Wait 500 milliseconds before each hedging attempt | [`hedging_mode`][HedgingLayer::hedging_mode] |
 //! | Handle unavailable | `false` | Unavailable responses are returned immediately | [`handle_unavailable`][HedgingLayer::handle_unavailable] |
 //! | Enable condition | Always enabled | Hedging is applied to all requests | [`enable_if`][HedgingLayer::enable_if], [`enable_always`][HedgingLayer::enable_always], [`disable`][HedgingLayer::disable] |
 //!

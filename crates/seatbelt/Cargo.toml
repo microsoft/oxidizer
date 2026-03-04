@@ -142,7 +142,7 @@ required-features = ["breaker"]
 [[bench]]
 name = "hedging"
 harness = false
-required-features = ["hedging", "logs"]
+required-features = ["hedging"]
 
 [lints]
 workspace = true
