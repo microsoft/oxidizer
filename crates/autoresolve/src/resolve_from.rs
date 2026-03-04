@@ -17,3 +17,13 @@ where
         value.clone()
     }
 }
+
+pub trait ResolveFrom2<T1, T2>: Send + Sync + 'static {
+    type Inputs1: ResolutionDeps<T1>;
+    type Inputs2: ResolutionDeps<T2>;
+
+    fn new(
+        inputs1: <Self::Inputs1 as ResolutionDeps<T1>>::Resolved<'_>,
+        inputs2: <Self::Inputs2 as ResolutionDeps<T2>>::Resolved<'_>,
+    ) -> Self;
+}
