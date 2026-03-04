@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
 use seatbelt::hedging::Hedging;
-use seatbelt::hedging::HedgingMode;
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
@@ -32,8 +31,9 @@ async fn main() {
     let stack = (
         Hedging::layer("my_hedging", &context)
             .clone_input()
+            .max_hedged_attempts(4)
             .recovery_with(|_output: &String, _args| RecoveryInfo::never())
-            .hedging_mode(HedgingMode::delay(Duration::from_millis(200)))
+            .hedging_delay(Duration::from_millis(200))
             .on_execute(|_input, args| {
                 println!(
                     "[execute] launching attempt {} (last: {})",
@@ -62,7 +62,7 @@ async fn main() {
 async fn slow_then_fast_operation(input: String, clock: &Clock) -> String {
     let call = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
 
-    if call == 0 {
+    if call < 2 {
         // Original request: simulate a slow response
         println!("[service] attempt 0: slow path (500ms)");
         clock.delay(Duration::from_millis(500)).await;
