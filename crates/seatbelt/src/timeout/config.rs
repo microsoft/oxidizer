@@ -12,7 +12,7 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Configuration for the timeout middleware.
 ///
 /// This struct provides a serialization-friendly way to configure the timeout middleware
-/// from external sources such as configuration files. Use [`TimeoutLayer::config`] to apply
+/// from external sources such as configuration files. Use [`TimeoutLayer::config`][crate::timeout::TimeoutLayer::config] to apply
 /// the configuration to a timeout layer.
 ///
 /// # Defaults

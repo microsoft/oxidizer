@@ -9,7 +9,7 @@ use crate::breaker::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOL
 /// Configuration for the circuit breaker middleware.
 ///
 /// This struct provides a serialization-friendly way to configure the circuit breaker middleware
-/// from external sources such as configuration files. Use [`BreakerLayer::config`] to apply
+/// from external sources such as configuration files. Use [`BreakerLayer::config`][crate::breaker::BreakerLayer::config] to apply
 /// the configuration to a breaker layer.
 ///
 /// # Defaults

@@ -9,7 +9,7 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 /// Configuration for the retry middleware.
 ///
 /// This struct provides a serialization-friendly way to configure the retry middleware
-/// from external sources such as configuration files. Use [`RetryLayer::config`] to apply
+/// from external sources such as configuration files. Use [`RetryLayer::config`][crate::retry::RetryLayer::config] to apply
 /// the configuration to a retry layer.
 ///
 /// # Defaults
