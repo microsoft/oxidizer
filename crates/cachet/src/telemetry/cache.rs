@@ -5,7 +5,6 @@
 
 use std::time::Duration;
 
-#[cfg(any(feature = "logs", test))]
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::{
     KeyValue,
