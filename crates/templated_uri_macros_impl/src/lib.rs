@@ -282,7 +282,9 @@ mod tests {
                     engine,
                     f,
                 )?;
+                ::std::write!(f, "/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
+                ::std::write!(f, "/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
                 ::std::result::Result::Ok(())
             }
@@ -366,7 +368,9 @@ mod tests {
                 ::std::write!(f, "{}", self.param)?;
                 ::std::write!(f, "{}", "/")?;
                 ::std::write!(f, "{}", self.param2)?;
+                ::std::write!(f, "/")?;
                 ::std::write!(f, "{}", self.param3)?;
+                ::std::write!(f, "/")?;
                 ::std::write!(f, "{}", self.param4)?;
                 ::std::result::Result::Ok(())
             }
@@ -448,7 +452,9 @@ mod tests {
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
                 ::std::write!(f, "{}", "/")?;
                 ::std::write!(f, "{}", self.param2)?;
+                ::std::write!(f, "/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
+                ::std::write!(f, "/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
                 ::std::result::Result::Ok(())
             }
@@ -530,7 +536,9 @@ mod tests {
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
                 ::std::write!(f, "{}", "/")?;
                 ::std::write!(f, "{}", self.param2)?;
+                ::std::write!(f, "/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
+                ::std::write!(f, "/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
                 ::std::result::Result::Ok(())
             }
