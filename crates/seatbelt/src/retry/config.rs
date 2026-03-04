@@ -36,9 +36,17 @@ pub struct RetryConfig {
     pub backoff_type: Backoff,
 
     /// The base delay used for backoff calculations.
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
+    )]
     pub base_delay: Duration,
 
     /// The maximum allowed delay between retries. `None` means no limit.
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::optional")
+    )]
     pub max_delay: Option<Duration>,
 
     /// Whether to add jitter to delay calculations.

@@ -5,10 +5,7 @@ expression: config
 {
   "enabled": true,
   "backoff_type": "Exponential",
-  "base_delay": {
-    "secs": 0,
-    "nanos": 10000000
-  },
+  "base_delay": "10ms",
   "max_delay": null,
   "use_jitter": true,
   "max_retry_attempts": 3

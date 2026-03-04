@@ -6,14 +6,8 @@ expression: config
   "enabled": true,
   "failure_threshold": 0.1,
   "min_throughput": 100,
-  "sampling_duration": {
-    "secs": 30,
-    "nanos": 0
-  },
-  "break_duration": {
-    "secs": 5,
-    "nanos": 0
-  },
+  "sampling_duration": "30s",
+  "break_duration": "5s",
   "half_open_mode": {
     "Progressive": null
   }

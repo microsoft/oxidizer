@@ -43,13 +43,14 @@ timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
-serde = ["dep:serde"]
+serde = ["dep:serde", "dep:jiff"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
+jiff = { workspace = true, features = ["std", "serde"], optional = true }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
@@ -74,6 +75,7 @@ opentelemetry-stdout = { workspace = true, default-features = false, features = 
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
 rstest.workspace = true
 serde = { workspace = true, features = ["std", "derive"] }
+jiff = { workspace = true, default-features = true, features = ["serde"] }
 serde_json = { workspace = true }
 static_assertions.workspace = true
 tick = { workspace = true, features = ["test-util", "tokio"] }

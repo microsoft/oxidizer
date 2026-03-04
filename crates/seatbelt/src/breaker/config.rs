@@ -39,9 +39,17 @@ pub struct BreakerConfig {
     pub min_throughput: u32,
 
     /// The time window for calculating failure rates.
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
+    )]
     pub sampling_duration: Duration,
 
     /// The duration the circuit remains open before transitioning to half-open.
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
+    )]
     pub break_duration: Duration,
 
     /// The behavior of the circuit breaker when transitioning from half-open to closed state.

@@ -4,8 +4,5 @@ expression: config
 ---
 {
   "enabled": true,
-  "timeout": {
-    "secs": 30,
-    "nanos": 0
-  }
+  "timeout": "30s"
 }

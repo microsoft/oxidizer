@@ -30,6 +30,10 @@ pub struct TimeoutConfig {
     pub enabled: bool,
 
     /// The timeout duration for operations.
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
+    )]
     pub timeout: Duration,
 }
 
