@@ -14,8 +14,9 @@ use layered::Service;
 use tick::Clock;
 
 use super::*;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{NotSet, RecoveryInfo, RecoveryKind};
+use crate::{RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
 ///
@@ -356,8 +357,9 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
+    use crate::ResilienceContext;
     use crate::testing::{FailReadyService, MetricTester};
-    use crate::{ResilienceContext, Set};
+    use crate::typestates::Set;
 
     #[cfg_attr(miri, ignore)]
     #[test]
