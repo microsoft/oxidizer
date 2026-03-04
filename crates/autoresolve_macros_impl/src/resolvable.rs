@@ -262,4 +262,72 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("inherent impl blocks"));
     }
+
+    #[test]
+    fn error_generic_impl() {
+        let input = quote! {
+            impl<T> Foo<T> {
+                fn new() -> Self {
+                    unimplemented!()
+                }
+            }
+        };
+        let result = resolvable(TokenStream::new(), input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("does not support generic impl blocks"));
+    }
+
+    #[test]
+    fn error_self_receiver() {
+        let input = quote! {
+            impl Foo {
+                fn new(&self) -> Self {
+                    self.clone()
+                }
+            }
+        };
+        let result = resolvable(TokenStream::new(), input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must not have a self receiver"));
+    }
+
+    #[test]
+    fn error_wrong_return_type() {
+        let input = quote! {
+            impl Foo {
+                fn new() -> Bar {
+                    Bar
+                }
+            }
+        };
+        let result = resolvable(TokenStream::new(), input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must return `Self`"));
+    }
+
+    #[test]
+    fn error_no_return_type() {
+        let input = quote! {
+            impl Foo {
+                fn new() {}
+            }
+        };
+        let result = resolvable(TokenStream::new(), input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must have a return type of `Self`"));
+    }
+
+    #[test]
+    fn error_mut_ref_param() {
+        let input = quote! {
+            impl Foo {
+                fn new(x: &mut Bar) -> Self {
+                    Self { x: x.clone() }
+                }
+            }
+        };
+        let result = resolvable(TokenStream::new(), input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not &mut"));
+    }
 }

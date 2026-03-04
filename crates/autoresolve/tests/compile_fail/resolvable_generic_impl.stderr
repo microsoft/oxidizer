@@ -1,0 +1,5 @@
+error: #[resolvable] does not support generic impl blocks
+ --> tests/compile_fail/resolvable_generic_impl.rs:8:5
+  |
+8 | impl<T> Foo<T> {
+  |     ^^^

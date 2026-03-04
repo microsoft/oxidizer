@@ -1,0 +1,9 @@
+error: #[resolvable] requires a `fn new(...)` method in the impl block
+  --> tests/compile_fail/resolvable_missing_new.rs:6:1
+   |
+ 6 | / impl Foo {
+ 7 | |     fn build() -> Self {
+ 8 | |         Self
+ 9 | |     }
+10 | | }
+   | |_^

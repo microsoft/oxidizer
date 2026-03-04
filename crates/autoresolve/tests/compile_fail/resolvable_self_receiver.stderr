@@ -1,0 +1,5 @@
+error: #[resolvable] `fn new()` must not have a self receiver
+ --> tests/compile_fail/resolvable_self_receiver.rs:8:5
+  |
+8 |     fn new(&self) -> Self {
+  |     ^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: #[resolvable] `fn new()` parameters must be shared references (&Type), not &mut
+  --> tests/compile_fail/resolvable_mut_ref_param.rs:12:17
+   |
+12 |     fn new(bar: &mut Bar) -> Self {
+   |                 ^

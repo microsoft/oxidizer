@@ -1,0 +1,5 @@
+error: #[resolvable] `fn new()` must have a return type of `Self`
+ --> tests/compile_fail/resolvable_no_return.rs:7:5
+  |
+7 |     fn new() {}
+  |     ^^^^^^^^

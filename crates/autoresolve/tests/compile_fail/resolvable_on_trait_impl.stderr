@@ -1,0 +1,9 @@
+error: #[resolvable] can only be applied to inherent impl blocks, not trait impls
+  --> tests/compile_fail/resolvable_on_trait_impl.rs:10:1
+   |
+10 | / impl SomeTrait for Foo {
+11 | |     fn new() -> Self {
+12 | |         Foo
+13 | |     }
+14 | | }
+   | |_^

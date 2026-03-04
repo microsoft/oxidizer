@@ -224,6 +224,7 @@ name = "autoresolve"
 version = "0.1.0"
 dependencies = [
  "autoresolve_macros",
+ "trybuild",
  "type-map",
 ]
 

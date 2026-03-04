@@ -1,0 +1,22 @@
+error[E0275]: overflow evaluating the requirement `Beta: ResolveFrom<__AutoresolveBase>`
+  --> tests/compile_fail/dependency_cycle.rs:39:27
+   |
+39 |     let _alpha = resolver.get::<Alpha>();
+   |                           ^^^
+   |
+note: required for `Alpha` to implement `ResolveFrom<__AutoresolveBase>`
+  --> tests/compile_fail/dependency_cycle.rs:13:1
+   |
+13 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+14 | impl Alpha {
+   |      ^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)

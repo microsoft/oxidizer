@@ -1,0 +1,5 @@
+error: #[resolvable] `fn new()` must return `Self`
+ --> tests/compile_fail/resolvable_wrong_return.rs:8:17
+  |
+8 |     fn new() -> Bar {
+  |                 ^^^

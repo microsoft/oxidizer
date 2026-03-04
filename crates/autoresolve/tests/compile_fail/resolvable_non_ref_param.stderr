@@ -1,0 +1,5 @@
+error: #[resolvable] `fn new()` parameters must be shared references (&Type)
+  --> tests/compile_fail/resolvable_non_ref_param.rs:12:17
+   |
+12 |     fn new(bar: Bar) -> Self {
+   |                 ^^^
