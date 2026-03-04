@@ -115,9 +115,13 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     }
 
     // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `UriSafe`).
-    let unrestricted_params: HashSet<_> = template_params.iter().filter(|&p| p.allows_restricted).map(|p| p.name).collect();
+    let unrestricted_params: HashSet<String> = template_params
+        .iter()
+        .filter(|p| p.allows_restricted)
+        .map(|p| p.name.to_owned())
+        .collect();
 
-    let is_restricted = |p: &Ident| !unrestricted_params.contains(p.to_string().as_str());
+    let is_restricted = |p: &Ident| !unrestricted_params.contains(&p.to_string());
 
     let collect_params: Vec<_> = struct_fields
         .iter()
@@ -214,31 +218,43 @@ fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], 
                 vec![quote! { ::std::write!(f, "{}", #content)?; }]
             }
             TemplatePart::ParamGroup(group) => {
-                // For each parameter in the group
-                group
-                    .param_names()
-                    .iter()
-                    .map(|param_name| {
-                        let field = field_map.get(*param_name).expect("Field should exist (validated earlier)");
-                        let field_ident = field.ident.as_ref().expect("struct fields must be named");
-                        let field_type = &field.ty;
+                let prefix = group.prefix().unwrap_or_default();
+                let separator = group.separator();
+                let is_kv = group.is_kv();
+                let param_names = group.param_names();
 
-                        // Check if this specific field is marked as unredacted
-                        let field_unredacted = field_opts_map.get(*param_name).is_some_and(|opts| opts.unredacted);
+                let mut stmts = Vec::new();
+                for (i, param_name) in param_names.iter().enumerate() {
+                    // Emit prefix (first param) or separator (subsequent params)
+                    let delim = if i == 0 { prefix } else { separator };
+                    if !delim.is_empty() {
+                        stmts.push(quote! { ::std::write!(f, #delim)?; });
+                    }
 
-                        if unredacted || field_unredacted {
-                            // Unredacted: write directly without redaction
-                            quote! {
-                                ::std::write!(f, "{}", self.#field_ident)?;
-                            }
-                        } else {
-                            // Classified (default): use RedactedDisplay for all fields
-                            quote! {
-                                <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, engine, f)?;
-                            }
-                        }
-                    })
-                    .collect()
+                    // Emit key= for KV expansions (e.g. ?key=value, ;key=value)
+                    if is_kv {
+                        let key = *param_name;
+                        stmts.push(quote! { ::std::write!(f, "{}=", #key)?; });
+                    }
+
+                    let field = field_map.get(*param_name).expect("Field should exist (validated earlier)");
+                    let field_ident = field.ident.as_ref().expect("struct fields must be named");
+                    let field_type = &field.ty;
+
+                    // Check if this specific field is marked as unredacted
+                    let field_unredacted = field_opts_map.get(*param_name).is_some_and(|opts| opts.unredacted);
+
+                    if unredacted || field_unredacted {
+                        stmts.push(quote! {
+                            ::std::write!(f, "{}", self.#field_ident)?;
+                        });
+                    } else {
+                        stmts.push(quote! {
+                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, engine, f)?;
+                        });
+                    }
+                }
+                stmts
             }
         })
         .collect();

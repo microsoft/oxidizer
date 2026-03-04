@@ -133,6 +133,21 @@ impl<'a> ParamGroup<'a> {
         &self.param_names
     }
 
+    /// Returns the prefix for this parameter group (e.g. `?`, `&`, `/`).
+    pub(crate) fn prefix(&self) -> Option<&'static str> {
+        self.param_kind.prefix()
+    }
+
+    /// Returns the separator between parameters (e.g. `&`, `/`, `,`).
+    pub(crate) fn separator(&self) -> &'static str {
+        self.param_kind.separator()
+    }
+
+    /// Returns whether this group uses key-value format (e.g. `?key=value`).
+    pub(crate) fn is_kv(&self) -> bool {
+        self.param_kind.is_kv()
+    }
+
     /// Returns the raw template string for this parameter group.
     fn raw_template(&self) -> String {
         let params: Vec<String> = self
@@ -254,13 +269,13 @@ mod test {
     fn test_param_group_parser() {
         let input = "{+param1,param2}";
         let parsed = ParamGroup::parser().parse(input).unwrap();
-        assert_eq!(parsed.param_names, vec!["param1".to_string(), "param2".to_string()]);
+        assert_eq!(parsed.param_names, vec!["param1", "param2"]);
         assert_eq!(parsed.param_kind, ParamKind::Unfiltered);
         assert_eq!(parsed.raw_template(), "{param1},{param2}");
 
         let input = "{param1,param2}";
         let parsed = ParamGroup::parser().parse(input).unwrap();
-        assert_eq!(parsed.param_names, vec!["param1".to_string(), "param2".to_string()]);
+        assert_eq!(parsed.param_names, vec!["param1", "param2"]);
         assert_eq!(parsed.param_kind, ParamKind::Simple);
         assert_eq!(parsed.raw_template(), "{param1},{param2}");
 

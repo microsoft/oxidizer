@@ -10,7 +10,7 @@
 /// # Requirements
 ///
 /// - Must be a tuple struct (newtype pattern) with exactly one field
-/// - The inner type must implement `ToString`
+/// - The inner type must implement [`UriParam`]
 ///
 /// # Example
 ///
@@ -31,7 +31,7 @@ pub use templated_uri_macros::UriParam;
 /// # Requirements
 ///
 /// - Must be a tuple struct (newtype pattern) with exactly one field
-/// - The inner type must implement `ToString`
+/// - The inner type must implement [`Display`](std::fmt::Display)
 ///
 /// # Example
 ///
