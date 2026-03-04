@@ -250,11 +250,10 @@ mod tests {
         let io_err = io::Error::new(ErrorKind::PermissionDenied, "access denied");
         let error = Error::from_source(io_err);
 
-        // Pattern matching on extracted error
-        match error.source_as::<io::Error>().map(io::Error::kind) {
-            Some(ErrorKind::PermissionDenied) => {} // expected
-            other => panic!("expected PermissionDenied, got {other:?}"),
-        }
+        assert_eq!(
+            error.source_as::<io::Error>().map(io::Error::kind),
+            Some(ErrorKind::PermissionDenied)
+        );
     }
 
     #[test]
