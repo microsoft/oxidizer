@@ -8,8 +8,9 @@ use std::time::Duration;
 use layered::Layer;
 
 use crate::timeout::*;
+use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, ResilienceContext, Set, TelemetryString};
+use crate::{ResilienceContext, TelemetryString};
 
 /// Builder for configuring timeout resilience middleware.
 ///
