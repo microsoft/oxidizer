@@ -297,14 +297,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "cachelon"
+name = "cachet"
 version = "0.1.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
- "cachelon_memory",
- "cachelon_service",
- "cachelon_tier",
+ "cachet_memory",
+ "cachet_service",
+ "cachet_tier",
  "criterion",
  "dynosaur",
  "futures",
@@ -326,26 +326,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "cachelon_memory"
+name = "cachet_memory"
 version = "0.1.0"
 dependencies = [
- "cachelon_tier",
+ "cachet_tier",
  "futures",
  "moka",
  "thread_aware",
 ]
 
 [[package]]
-name = "cachelon_service"
+name = "cachet_service"
 version = "0.1.0"
 dependencies = [
- "cachelon_tier",
+ "cachet_tier",
  "layered",
  "tokio",
 ]
 
 [[package]]
-name = "cachelon_tier"
+name = "cachet_tier"
 version = "0.1.0"
 dependencies = [
  "dynosaur",

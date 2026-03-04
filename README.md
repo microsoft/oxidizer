@@ -32,7 +32,7 @@ These are the primary crates built out of this repo:
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`data_privacy_macros`](./crates/data_privacy_macros/README.md) - Macros for the `data_privacy` crate.
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/README.md) - Macros for the `data_privacy` crate.
-- [`cachelon`](./crates/echelon/README.md) - A composable, customizable multi-tier caching library with rich feature support.
+- [`cachet`](./crates/cachet/README.md) - A composable, customizable multi-tier caching library with rich feature support.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
