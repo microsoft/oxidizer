@@ -234,17 +234,11 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn new_needs_timeout_output() {
-        let context = create_test_context();
-        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new("test_timeout".into(), &context);
-
-        assert!(layer.timeout.is_none());
-        assert!(layer.timeout_output.is_none());
-        assert!(layer.on_timeout.is_none());
-        assert!(layer.timeout_override.is_none());
-        assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_timeout");
-        assert!(layer.enable_if.call(&"test_input".to_string()));
+        let layer = create_ready_layer();
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[test]

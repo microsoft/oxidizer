@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 mod define_fn_wrapper;
+use std::sync::Arc;
+
 pub(crate) use define_fn_wrapper::define_fn_wrapper;
 
 #[cfg(any(feature = "metrics", test))]
@@ -55,7 +57,7 @@ impl<In> Clone for EnableIf<In> {
         match self {
             Self::Enabled => Self::Enabled,
             Self::Disabled => Self::Disabled,
-            Self::Custom(predicate) => Self::Custom(predicate.clone()),
+            Self::Custom(predicate) => Self::Custom(Arc::clone(predicate)),
         }
     }
 }

@@ -1,0 +1,45 @@
+---
+source: crates/seatbelt/src/retry/service.rs
+expression: layer
+---
+RetryLayer {
+    context: ResilienceContext {
+        clock: Clock {
+            kind: "controlled",
+            timers: 0,
+            alive: true,
+            affinity: None,
+            ..
+        },
+        name: "test_pipeline",
+        meter: None,
+        logs_enabled: false,
+        _in: PhantomData<fn() -> alloc::string::String>,
+        _out: PhantomData<fn() -> alloc::string::String>,
+    },
+    max_attempts: 4,
+    backoff: BackoffOptions {
+        backoff_type: Exponential,
+        base_delay: 10ms,
+        max_delay: None,
+        use_jitter: true,
+        rnd: Real,
+    },
+    clone_input: Some(
+        CloneInput,
+    ),
+    should_recover: Some(
+        ShouldRecover,
+    ),
+    on_retry: None,
+    enable_if: Enabled,
+    telemetry: TelemetryHelper {
+        pipeline_name: "test_pipeline",
+        strategy_name: "test_retry",
+        event_reporter: None,
+        logs_enabled: false,
+    },
+    restore_input: None,
+    handle_unavailable: false,
+    _state: PhantomData<fn(alloc::string::String, seatbelt::shared::Set, seatbelt::shared::Set) -> alloc::string::String>,
+}
