@@ -652,6 +652,21 @@ mod tests {
     }
 
     #[test]
+    fn config_applies_all_settings() {
+        let config = BreakerConfig {
+            failure_threshold: 0.25,
+            min_throughput: 50,
+            sampling_duration: Duration::from_secs(60),
+            break_duration: Duration::from_secs(15),
+            half_open_mode: HalfOpenMode::quick(),
+        };
+
+        let layer = create_ready_layer().config(&config);
+
+        insta::assert_debug_snapshot!(layer);
+    }
+
+    #[test]
     fn static_assertions() {
         static_assertions::assert_impl_all!(BreakerLayer<String, String, Set, Set>: Layer<String>);
         static_assertions::assert_not_impl_all!(BreakerLayer<String, String, Set, NotSet>: Layer<String>);

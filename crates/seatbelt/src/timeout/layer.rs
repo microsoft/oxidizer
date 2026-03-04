@@ -372,6 +372,20 @@ mod tests {
     }
 
     #[test]
+    fn config_applies_all_settings() {
+        let config = TimeoutConfig {
+            timeout: Duration::from_secs(45),
+        };
+
+        let context = create_test_context();
+        let layer = TimeoutLayer::new("test".into(), &context)
+            .timeout_output(|_args| "timeout".to_string())
+            .config(&config);
+
+        insta::assert_debug_snapshot!(layer);
+    }
+
+    #[test]
     fn static_assertions() {
         static_assertions::assert_impl_all!(TimeoutLayer<String, String, Set, Set>: Layer<String>);
         static_assertions::assert_not_impl_all!(TimeoutLayer<String, String, Set, NotSet>: Layer<String>);

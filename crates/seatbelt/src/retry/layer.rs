@@ -735,6 +735,21 @@ mod tests {
     }
 
     #[test]
+    fn config_applies_all_settings() {
+        let config = RetryConfig {
+            backoff_type: Backoff::Linear,
+            base_delay: Duration::from_secs(2),
+            max_delay: Some(Duration::from_secs(60)),
+            use_jitter: false,
+            max_retry_attempts: 7,
+        };
+
+        let layer = create_ready_layer().config(&config);
+
+        insta::assert_debug_snapshot!(layer);
+    }
+
+    #[test]
     fn static_assertions() {
         static_assertions::assert_impl_all!(RetryLayer<String, String, Set, Set>: Layer<String>);
         static_assertions::assert_not_impl_all!(RetryLayer<String, String, Set, NotSet>: Layer<String>);

@@ -1,0 +1,37 @@
+---
+source: crates/seatbelt/src/timeout/layer.rs
+assertion_line: 385
+expression: layer
+---
+TimeoutLayer {
+    context: ResilienceContext {
+        clock: Clock {
+            kind: "controlled",
+            timers: 0,
+            alive: true,
+            affinity: None,
+            ..
+        },
+        name: "test_pipeline",
+        meter: None,
+        logs_enabled: false,
+        _in: PhantomData<fn() -> alloc::string::String>,
+        _out: PhantomData<fn() -> alloc::string::String>,
+    },
+    timeout: Some(
+        45s,
+    ),
+    timeout_output: Some(
+        TimeoutOutput,
+    ),
+    on_timeout: None,
+    enable_if: EnableIf,
+    telemetry: TelemetryHelper {
+        pipeline_name: "test_pipeline",
+        strategy_name: "test",
+        event_reporter: None,
+        logs_enabled: false,
+    },
+    timeout_override: None,
+    _state: PhantomData<fn(alloc::string::String, seatbelt::shared::Set, seatbelt::shared::Set) -> alloc::string::String>,
+}
