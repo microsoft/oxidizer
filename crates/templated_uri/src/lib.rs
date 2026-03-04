@@ -48,7 +48,8 @@
 //!
 //! For dynamic URIs with variable components, use the templating system:
 //!
-//! ```rust
+#![cfg_attr(feature = "uuid", doc = "```rust")]
+#![cfg_attr(not(feature = "uuid"), doc = "```rust,ignore")]
 //! use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
 //! use uuid::Uuid;
 //!
@@ -90,7 +91,7 @@
 //! assert!(unsafe_string.is_err());
 //! ```
 //!
-//! Built-in safe types include numeric types (`u32`, `u64`, etc.), [`Uuid`](uuid::Uuid),
+//! Built-in safe types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
 //! IP addresses, and validated [`UriSafeString`] instances.
 //!
 //! # Telemetry Labels
@@ -143,7 +144,7 @@
 //! - Query parameters: `{?var}`
 //! - Query continuation: `{&var}`
 //!
-//! Template variables must implement [`UriParam`](uri_param::UriParam) (except for fragment and reserved expansions)
+//! Template variables must implement [`UriParam`] (except for fragment and reserved expansions)
 //! to ensure the resulting URI is valid.
 //!
 //! # Integration with HTTP Ecosystem

@@ -10,7 +10,6 @@ use data_privacy::{RedactedToString, RedactionEngine, Sensitive, classified, tax
 use templated_uri::uri::DATA_CLASS_UNKNOWN_URI;
 use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriParam, UriSafeString, UriUnsafeParam};
 use templated_uri_macros::templated;
-use uuid::Uuid;
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
 #[taxonomy(test_taxonomy)]
@@ -124,16 +123,20 @@ fn user_info_uri() {
     );
 }
 
+#[cfg(feature = "uuid")]
 static_assertions::assert_impl_all!(ClassifiedUserInfo: Into<Uri>);
 
+#[cfg(feature = "uuid")]
 #[templated(template = "/users/{user_id}/info")]
 #[derive(Clone)]
 struct ClassifiedUserInfo {
-    user_id: Sensitive<Uuid>,
+    user_id: Sensitive<uuid::Uuid>,
 }
 
+#[cfg(feature = "uuid")]
 #[test]
 fn test_uri_taxonomy() {
+    use uuid::Uuid;
     let user_info = ClassifiedUserInfo {
         user_id: Sensitive::new(
             Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap(),

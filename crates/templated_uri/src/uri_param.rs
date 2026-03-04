@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
 
 use data_privacy::Sensitive;
+#[cfg(feature = "uuid")]
 use uuid::Uuid;
 
 use crate::{UriSafe, UriSafeString};
@@ -63,6 +64,7 @@ impl_uri_param!(NonZeroU64);
 impl_uri_param!(NonZeroU128);
 impl_uri_param!(NonZeroUsize);
 impl_uri_param!(IpAddr);
+#[cfg(feature = "uuid")]
 impl_uri_param!(Uuid);
 
 impl<T> UriUnsafeParam for Sensitive<T>

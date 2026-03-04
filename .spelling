@@ -1,4 +1,4 @@
-307
+310
 →
 0.X.Y
 100k
@@ -302,8 +302,12 @@ unregisters
 unsized
 untrusted
 Uri
+UriParam
 URI
 URIs
+UriSafe
+UriSafeString
+UriUnsafeParam
 URL
 URLs
 UTC
