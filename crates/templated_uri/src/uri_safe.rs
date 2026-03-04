@@ -9,13 +9,15 @@ use std::net::IpAddr;
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
 
 use pct_str::{PctString, UriReserved};
+#[cfg(feature = "uuid")]
 use uuid::Uuid;
 
 /// A wrapper that proves the inner value is safe for use in URI templates.
 ///
-/// Safety is enforced via constructors — only types whose [`Display`] output
+/// Safety is enforced via constructors - only types whose [`Display`] output
 /// contains no RFC 6570 reserved characters can be wrapped. For inherently-safe
-/// types (integers, [`Uuid`], [`IpAddr`]) an infallible [`From`] impl is provided.
+/// types (integers, [`IpAddr`]) an infallible [`From`] impl is provided.
+/// With the `uuid` feature (enabled by default), `Uuid` is also supported.
 /// For strings, use the encoding/validating constructors on [`UriSafe<Cow<'static, str>>`]
 /// (aliased as [`UriSafeString`]).
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -58,9 +60,11 @@ impl_uri_safe_from!(
     NonZeroU64,
     NonZeroU128,
     NonZeroUsize,
-    IpAddr,
-    Uuid
+    IpAddr
 );
+
+#[cfg(feature = "uuid")]
+impl_uri_safe_from!(Uuid);
 
 /// A URI-safe string whose content is guaranteed to contain only characters
 /// valid in URI templates as defined by RFC 6570.

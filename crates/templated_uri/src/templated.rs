@@ -23,24 +23,22 @@ use crate::{Uri, ValidationError};
 ///
 /// ```
 /// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
-/// use uuid::Uuid;
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
 /// struct UserPath {
-///     org_id: Uuid,           // Uuid implements `UriSafe` by default
-///     user_id: UriSafeString, // String wrapper that ensures URI safety
+///     org_id: UriSafeString,
+///     user_id: UriSafeString,
 /// }
 ///
-/// let org_id = Uuid::new_v4();
 /// let user_path = UserPath {
-///     org_id,
+///     org_id: UriSafeString::from_static("acme"),
 ///     user_id: UriSafeString::from_static("john_doe"),
 /// };
 ///
 /// assert_eq!(
 ///     user_path.to_uri_string(),
-///     format!("/{org_id}/user/john_doe/")
+///     "/acme/user/john_doe/"
 /// );
 /// ```
 ///
@@ -50,38 +48,34 @@ use crate::{Uri, ValidationError};
 ///
 /// ```
 /// #![allow(non_upper_case_globals)]
-/// # use std::str::FromStr;
 /// # const Pii: DataClass = DataClass::new("templated_uri", "pii");
 /// use data_privacy::{
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
 /// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
-/// use uuid::Uuid;
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
 /// struct UserPath {
 ///     #[unredacted]
-///     org_id: Uuid,
+///     org_id: UriSafeString,
 ///     user_id: Sensitive<UriSafeString>,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: Uuid::from_str("e2a8cdb5-300f-4f83-aa10-f08756578f9b")
-///         .unwrap()
-///         .into(),
-///     user_id: Sensitive::new(UriSafeString::from_static("john_doe").into(), Pii),
+///     org_id: UriSafeString::from_static("acme"),
+///     user_id: Sensitive::new(UriSafeString::from_static("john_doe"), Pii),
 /// };
 /// assert_eq!(
 ///     user_path.to_uri_string(),
-///     "/e2a8cdb5-300f-4f83-aa10-f08756578f9b/user/john_doe/"
+///     "/acme/user/john_doe/"
 /// );
 ///
 /// let redaction_engine = RedactionEngine::builder().build();
 ///
 /// assert_eq!(
 ///     user_path.to_redacted_string(&redaction_engine),
-///     "/e2a8cdb5-300f-4f83-aa10-f08756578f9b/user/*/"
+///     "/acme/user/*/"
 /// )
 /// ```
 pub trait TemplatedPathAndQuery: RedactedDisplay + Debug + Sync + Send

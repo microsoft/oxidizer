@@ -56,30 +56,29 @@ assert_eq!(
 
 For dynamic URIs with variable components, use the templating system:
 
-```rust
 use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
 use uuid::Uuid;
 
-#[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
-#[derive(Clone)]
+\#[templated(template = “/users/{user_id}/posts/{post_id}”, unredacted)][__link5]
+\#[derive(Clone)][__link6]
 struct UserPostPath {
-    user_id: Uuid,
-    post_id: UriSafeString,
+user_id: Uuid,
+post_id: UriSafeString,
 }
 
 let path = UserPostPath {
-    user_id: Uuid::new_v4(),
-    post_id: UriSafeString::encode("my-post"),
+user_id: Uuid::new_v4(),
+post_id: UriSafeString::encode(“my-post”),
 };
 
 let uri = Uri::default()
-    .base_uri(BaseUri::from_uri_static("https://api.example.com"))
-    .path_and_query(path);
-```
+.base_uri(BaseUri::from_uri_static(“https://api.example.com”))
+.path_and_query(path);
 
-## URI Safety Guarantees
+```rust
 
-The [`UriSafe<T>`][__link5] newtype wraps values that are guaranteed
+
+The [`UriSafe<T>`](UriSafe) newtype wraps values that are guaranteed
 to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
 
 ```rust
@@ -98,7 +97,7 @@ let unsafe_string = UriSafeString::try_new("hello world?foo=bar");
 assert!(unsafe_string.is_err());
 ```
 
-Built-in safe types include numeric types (`u32`, `u64`, etc.), [`Uuid`][__link6],
+Built-in safe types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
 IP addresses, and validated [`UriSafeString`][__link7] instances.
 
 ## Telemetry Labels
@@ -167,7 +166,7 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyIYR0qqo_1mG5IQHm7rOYD0GzNmvQG0zghQG17KjLqy4MYrYWSEgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4wgml1cmlfcGFyYW32gmR1dWlkZjEuMjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGwz4Kq8yuQ7NG4O57Qx7OBesG5HTv4FdGO-vG-fX42VoGL85YWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
  [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/
@@ -178,8 +177,8 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link2]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=TemplatedPathAndQuery
  [__link3]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
  [__link4]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
- [__link5]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
- [__link6]: https://docs.rs/uuid/1.21.0/uuid/?search=Uuid
+ [__link5]: templated(template = "/users/{user_id}/posts/{post_id}", unredacted)
+ [__link6]: derive(Clone)
  [__link7]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
  [__link8]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link9]: https://docs.rs/uri_param/latest/uri_param/?search=UriParam
+ [__link9]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriParam
