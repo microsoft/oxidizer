@@ -36,7 +36,7 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["timeout", "retry", "breaker", "fallback"]
+default = []
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
