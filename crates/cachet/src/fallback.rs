@@ -239,7 +239,7 @@ where
             // Check if background refresh is needed
             if let Some(refresh) = &self.inner.refresh
                 && let Some(cached_at) = value.cached_at()
-                && refresh.should_refresh(cached_at)
+                && refresh.should_refresh(cached_at, self.inner.clock.system_time())
             {
                 self.do_refresh(key);
             }

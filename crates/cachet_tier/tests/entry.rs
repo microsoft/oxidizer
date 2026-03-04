@@ -3,9 +3,10 @@
 
 //! Integration tests for `CacheEntry`.
 
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use cachet_tier::CacheEntry;
+use tick::Clock;
 
 #[test]
 fn new_creates_entry_without_timestamp() {
@@ -26,7 +27,7 @@ fn expires_after_creates_entry_with_ttl() {
 
 #[test]
 fn expires_at_creates_entry_with_ttl_and_timestamp() {
-    let now = SystemTime::now();
+    let now = Clock::new_frozen().system_time();
     let ttl = Duration::from_secs(300);
     let entry = CacheEntry::expires_at("value", ttl, now);
     assert_eq!(*entry.value(), "value");
@@ -73,7 +74,7 @@ fn clone_creates_identical_copy() {
 
 #[test]
 fn ensure_cached_at_sets_timestamp_when_none() {
-    let now = SystemTime::now();
+    let now = Clock::new_frozen().system_time();
     let mut entry = CacheEntry::new(42);
     assert!(entry.cached_at().is_none());
 
@@ -83,7 +84,7 @@ fn ensure_cached_at_sets_timestamp_when_none() {
 
 #[test]
 fn ensure_cached_at_preserves_existing_timestamp() {
-    let original = SystemTime::now();
+    let original = Clock::new_frozen().system_time();
     let later = original + Duration::from_secs(100);
     let mut entry = CacheEntry::expires_at(42, Duration::from_secs(60), original);
     assert_eq!(entry.cached_at(), Some(original));

@@ -434,7 +434,8 @@ async fn fallback_builder_time_to_refresh_does_not_panic() -> TestResult {
 #[tokio::test]
 async fn do_refresh_updates_primary_from_fallback() -> TestResult {
     // Verifies do_refresh actually fetches from fallback and promotes to primary
-    let clock = Clock::new_frozen();
+    let control = tick::ClockControl::new();
+    let clock = control.to_clock();
     let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
     fallback_storage.insert(&"key".to_string(), CacheEntry::new(99)).await?;
 
@@ -458,8 +459,8 @@ async fn do_refresh_updates_primary_from_fallback() -> TestResult {
 
     let key = "key".to_string();
 
-    // Sleep so the ttr duration elapses
-    std::thread::sleep(Duration::from_millis(5));
+    // Advance the clock so the ttr duration elapses
+    control.advance(Duration::from_millis(5));
 
     // get triggers background refresh (primary has stale 42, fallback has fresh 99)
     let result = cache.get(&key).await?;
@@ -480,7 +481,8 @@ async fn do_refresh_deduplicates_in_flight() -> TestResult {
     // Exercises do_refresh deduplication: second call with same key is a no-op
     use cachet::refresh::TimeToRefresh;
 
-    let clock = Clock::new_frozen();
+    let control = tick::ClockControl::new();
+    let clock = control.to_clock();
     let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
     fallback_storage.insert(&"key".to_string(), CacheEntry::new(99)).await?;
 
@@ -497,8 +499,8 @@ async fn do_refresh_deduplicates_in_flight() -> TestResult {
     let key = "key".to_string();
     cache.insert(&key, CacheEntry::new(42)).await?;
 
-    // Sleep so the ttr duration elapses
-    std::thread::sleep(Duration::from_millis(5));
+    // Advance the clock so the ttr duration elapses
+    control.advance(Duration::from_millis(5));
 
     // get triggers background refresh
     let result = cache.get(&key).await?;

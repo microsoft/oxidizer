@@ -72,8 +72,8 @@ where
         }
     }
 
-    pub(crate) fn should_refresh(&self, cached_at: SystemTime) -> bool {
-        match cached_at.elapsed() {
+    pub(crate) fn should_refresh(&self, cached_at: SystemTime, now: SystemTime) -> bool {
+        match now.duration_since(cached_at) {
             Ok(elapsed) => elapsed >= self.duration,
             Err(_) => true, // If the system time went backwards, consider it stale
         }
@@ -175,6 +175,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tick::Clock;
 
     fn create_refresh() -> TimeToRefresh<String> {
         TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio())
@@ -190,10 +191,11 @@ mod tests {
     #[test]
     fn time_to_refresh_should_refresh_false_when_recent() {
         let refresh = create_refresh();
+        let clock = Clock::new_frozen();
 
-        // An instant from now should not need refresh yet
-        let cached_at = SystemTime::now();
-        assert!(!refresh.should_refresh(cached_at));
+        // An entry cached at the current time should not need refresh yet
+        let now = clock.system_time();
+        assert!(!refresh.should_refresh(now, now));
     }
 
     #[test]
@@ -245,27 +247,27 @@ mod tests {
     #[test]
     fn time_to_refresh_should_refresh_true_when_clock_goes_backward() {
         let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio());
+        let clock = Clock::new_frozen();
 
-        // cached_at in the future causes elapsed() to return Err
-        let cached_at = SystemTime::now() + Duration::from_secs(3600);
+        // cached_at in the future relative to now causes duration_since to return Err
+        let now = clock.system_time();
+        let cached_at = now + Duration::from_secs(3600);
         assert!(
-            refresh.should_refresh(cached_at),
+            refresh.should_refresh(cached_at, now),
             "should return true when system time goes backward"
         );
     }
 
     #[test]
     fn time_to_refresh_should_refresh_true_after_duration() {
-        // Set a very short refresh duration for testing
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
+        let clock = Clock::new_frozen();
 
-        // Create an instant and wait slightly
-        let cached_at = SystemTime::now();
-        // Use a small spin to allow some time to pass
-        std::thread::sleep(Duration::from_millis(1));
+        // cached_at is 61 seconds before now, exceeding the 60s refresh duration
+        let now = clock.system_time();
+        let cached_at = now - Duration::from_secs(61);
 
-        // Now it should need refresh
-        assert!(refresh.should_refresh(cached_at));
+        assert!(refresh.should_refresh(cached_at, now));
     }
 
     #[test]

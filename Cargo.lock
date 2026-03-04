@@ -352,6 +352,7 @@ dependencies = [
  "ohno",
  "parking_lot",
  "recoverable",
+ "tick",
  "tokio",
 ]
 
