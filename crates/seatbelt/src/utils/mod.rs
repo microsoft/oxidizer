@@ -28,7 +28,7 @@ pub(crate) enum EnableIf<In> {
     /// The middleware is always disabled.
     Disabled,
     /// The middleware is conditionally enabled based on a predicate.
-    Custom(std::sync::Arc<dyn Fn(&In) -> bool + Send + Sync>),
+    Custom(Arc<dyn Fn(&In) -> bool + Send + Sync>),
 }
 
 impl<In> EnableIf<In> {
@@ -39,10 +39,11 @@ impl<In> EnableIf<In> {
 
     /// Creates a new `EnableIf` with a custom predicate.
     pub fn custom(predicate: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
-        Self::Custom(std::sync::Arc::new(predicate))
+        Self::Custom(Arc::new(predicate))
     }
 
     /// Evaluates whether the middleware is enabled for the given input.
+    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     pub fn call(&self, input: &In) -> bool {
         match self {
             Self::Enabled => true,
