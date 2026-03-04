@@ -302,6 +302,7 @@ mod tests {
 
     /// Tests that promotion from fallback to primary works correctly.
     /// This test accesses internal state to verify promotion behavior.
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachelon_promotes_from_fallback_to_primary() {
         block_on(async {
@@ -341,6 +342,7 @@ mod tests {
 
     /// Tests that Never promotion policy prevents promotion to primary.
     /// This test accesses internal state to verify no promotion occurs.
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachelon_never_policy_does_not_promote() {
         block_on(async {
@@ -375,6 +377,7 @@ mod tests {
     }
 
     /// Tests that `FallbackCacheInner` Debug output is correct.
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachelon_inner_debug() {
         let clock = Clock::new_frozen();
@@ -390,6 +393,7 @@ mod tests {
 
     /// Tests that conditional promotion policy only promotes matching entries.
     /// This test accesses internal state to verify selective promotion.
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachelon_when_policy_conditional_promotion() {
         block_on(async {

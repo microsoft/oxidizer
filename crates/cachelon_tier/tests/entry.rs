@@ -72,6 +72,28 @@ fn clone_creates_identical_copy() {
 }
 
 #[test]
+fn ensure_cached_at_sets_timestamp_when_none() {
+    let now = SystemTime::now();
+    let mut entry = CacheEntry::new(42);
+    assert!(entry.cached_at().is_none());
+
+    entry.ensure_cached_at(now);
+    assert_eq!(entry.cached_at(), Some(now));
+}
+
+#[test]
+fn ensure_cached_at_preserves_existing_timestamp() {
+    let original = SystemTime::now();
+    let later = original + Duration::from_secs(100);
+    let mut entry = CacheEntry::expires_at(42, Duration::from_secs(60), original);
+    assert_eq!(entry.cached_at(), Some(original));
+
+    // Should NOT overwrite the existing timestamp
+    entry.ensure_cached_at(later);
+    assert_eq!(entry.cached_at(), Some(original));
+}
+
+#[test]
 fn debug_includes_value() {
     let entry = CacheEntry::new(42);
     let debug_str = format!("{entry:?}");

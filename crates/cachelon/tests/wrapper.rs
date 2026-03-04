@@ -99,18 +99,17 @@ fn wrapper_clear() -> TestResult {
 }
 
 #[test]
-fn wrapper_len_returns_some() -> TestResult {
+fn wrapper_len_returns_correct_count() -> TestResult {
     block_on(async {
+        // Use MockCache for immediate consistency of len()
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
 
         assert_eq!(cache.len(), Some(0));
 
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-        // After insert, len() returns Some value
-        // Note: exact count may be eventually consistent with moka cache
-        assert!(cache.len().is_some());
+        assert_eq!(cache.len(), Some(1));
         Ok(())
     })
 }

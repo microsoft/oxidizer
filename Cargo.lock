@@ -307,7 +307,6 @@ dependencies = [
  "cachelon_tier",
  "criterion",
  "dynosaur",
- "fundle",
  "futures",
  "layered",
  "ohno",

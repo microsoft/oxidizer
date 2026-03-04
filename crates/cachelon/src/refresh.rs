@@ -243,6 +243,18 @@ mod tests {
     }
 
     #[test]
+    fn time_to_refresh_should_refresh_true_when_clock_goes_backward() {
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio());
+
+        // cached_at in the future causes elapsed() to return Err
+        let cached_at = SystemTime::now() + Duration::from_secs(3600);
+        assert!(
+            refresh.should_refresh(cached_at),
+            "should return true when system time goes backward"
+        );
+    }
+
+    #[test]
     fn time_to_refresh_should_refresh_true_after_duration() {
         // Set a very short refresh duration for testing
         let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
@@ -304,9 +316,10 @@ mod tests {
 mod fetch_and_promote_tests {
     use super::*;
     use crate::fallback::FallbackPromotionPolicy;
-    use crate::telemetry::TelemetryConfig;
+    use crate::telemetry::{TelemetryConfig, attributes};
     use cachelon_memory::InMemoryCache;
     use cachelon_tier::testing::MockCache;
+    use testing_aids::MetricTester;
     use tick::Clock;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
@@ -319,18 +332,25 @@ mod fetch_and_promote_tests {
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
-    fn fallback_miss_returns_none() {
+    fn fallback_miss_records_refresh_miss_telemetry() {
         block_on(async {
+            let tester = MetricTester::new();
+            let clock = Clock::new_frozen();
+            let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
             let primary = InMemoryCache::<String, i32>::new();
             let fallback = InMemoryCache::<String, i32>::new();
-            let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+            let fc = FallbackCache::new("test", primary, fallback, FallbackPromotionPolicy::always(), clock, None, telemetry);
 
             // Fallback is empty → handle_fallback_miss Ok(None) branch
             fc.inner.fetch_and_promote("missing".to_string()).await;
+
+            tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_ACTIVITY_NAME, "cache.refresh_miss")]);
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_error() {
         block_on(async {
@@ -344,6 +364,7 @@ mod fetch_and_promote_tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn hit_no_promote() {
         block_on(async {
@@ -361,6 +382,7 @@ mod fetch_and_promote_tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn hit_with_promote() {
         block_on(async {
@@ -380,6 +402,7 @@ mod fetch_and_promote_tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn promote_error() {
         block_on(async {

@@ -170,4 +170,57 @@ mod tests {
         let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
         assert_eq!(adapter.len(), None);
     }
+
+    #[test]
+    fn adapter_inner_returns_reference() {
+        let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
+        let _inner: &MockService = adapter.inner();
+    }
+
+    // Service that returns wrong response types to exercise error branches
+    #[derive(Debug, Clone)]
+    struct WrongResponseService;
+
+    impl Service<CacheOperation<String, i32>> for WrongResponseService {
+        type Out = Result<CacheResponse<i32>, Error>;
+
+        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
+            match input {
+                // Returns Clear response for Insert requests (wrong type)
+                CacheOperation::Insert(_) => Ok(CacheResponse::Clear()),
+                // Returns Insert response for Get/Invalidate requests (wrong type)
+                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert()),
+                // Returns Get response for Clear requests (wrong type)
+                CacheOperation::Clear => Ok(CacheResponse::Get(None)),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_get_wrong_response_returns_none() {
+        let adapter = ServiceAdapter::new(WrongResponseService);
+        let result = adapter.get(&"key".to_string()).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn adapter_insert_wrong_response_returns_error() {
+        let adapter = ServiceAdapter::new(WrongResponseService);
+        let result = adapter.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn adapter_invalidate_wrong_response_returns_error() {
+        let adapter = ServiceAdapter::new(WrongResponseService);
+        let result = adapter.invalidate(&"key".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn adapter_clear_wrong_response_returns_error() {
+        let adapter = ServiceAdapter::new(WrongResponseService);
+        let result = adapter.clear().await;
+        assert!(result.is_err());
+    }
 }

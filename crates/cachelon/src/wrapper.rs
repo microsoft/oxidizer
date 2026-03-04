@@ -198,6 +198,7 @@ mod tests {
     use crate::telemetry::TelemetryConfig;
     use cachelon_memory::InMemoryCache;
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn wrapper_is_expired_with_no_ttl_returns_false() {
         let clock = Clock::new_frozen();
@@ -210,6 +211,7 @@ mod tests {
         assert!(!wrapper.is_expired(&entry));
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn wrapper_is_expired_with_ttl_without_cached_at_returns_true() {
         let clock = Clock::new_frozen();
@@ -222,6 +224,7 @@ mod tests {
         assert!(wrapper.is_expired(&entry));
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn wrapper_entry_ttl_takes_precedence_over_tier_ttl() {
         let clock = Clock::new_frozen();
@@ -242,6 +245,7 @@ mod tests {
         assert!(!wrapper.is_expired(&entry));
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn wrapper_is_expired_when_system_time_goes_backward() {
         let clock = Clock::new_frozen();
@@ -253,5 +257,19 @@ mod tests {
         // Entry with cached_at in the future simulates clock going backward
         let entry = CacheEntry::expires_at(42, Duration::from_secs(60), clock.system_time() + Duration::from_secs(3600));
         assert!(wrapper.is_expired(&entry));
+    }
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[test]
+    fn wrapper_is_not_expired_when_elapsed_equals_ttl() {
+        let clock = Clock::new_frozen();
+        let inner = InMemoryCache::<String, i32>::new();
+        let telemetry = TelemetryConfig::new().build();
+        let ttl = Duration::from_secs(60);
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock.clone(), Some(ttl), telemetry);
+
+        // Entry cached exactly TTL ago → elapsed == ttl → should NOT be expired (uses >)
+        let entry = CacheEntry::expires_at(42, ttl, clock.system_time() - ttl);
+        assert!(!wrapper.is_expired(&entry));
     }
 }

@@ -153,9 +153,16 @@ fn clear_returns_ok() {
 }
 
 #[test]
-fn len_returns_some() {
-    // Note: moka uses eventual consistency for entry counts,
-    // so we only verify that len() returns Some(_)
+fn len_returns_some_zero_for_empty_cache() {
+    let cache = InMemoryCache::<String, i32>::new();
+    assert_eq!(cache.len(), Some(0));
+}
+
+#[test]
+fn len_returns_some_not_none() {
+    // Moka's entry_count() is eventually consistent, so we can't assert exact
+    // counts immediately after insert. But we can verify that len() returns
+    // Some (not None), which catches the mutation `len -> None`.
     let cache = InMemoryCache::<String, i32>::new();
     assert!(cache.len().is_some());
 }

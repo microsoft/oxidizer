@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 #[cfg(any(feature = "logs", test))]
-use opentelemetry::logs::Severity;
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::{
     KeyValue,
@@ -104,17 +103,6 @@ impl CacheActivity {
             Self::Error => "cache.error",
         }
     }
-
-    #[cfg(any(feature = "logs", test))]
-    pub fn severity(self) -> Severity {
-        match self {
-            Self::Hit | Self::Miss | Self::RefreshHit | Self::Ok => Severity::Debug,
-            Self::Expired | Self::RefreshMiss | Self::Inserted | Self::Invalidated | Self::Fallback | Self::FallbackPromotion => {
-                Severity::Info
-            }
-            Self::Error => Severity::Error,
-        }
-    }
 }
 
 impl CacheTelemetry {
@@ -185,11 +173,17 @@ impl CacheTelemetry {
             };
         }
 
-        match event.severity() {
-            Severity::Error => emit_event!(error),
-            Severity::Info => emit_event!(info),
-            Severity::Debug => emit_event!(debug),
-            _ => {}
+        match event {
+            CacheActivity::Error => emit_event!(error),
+            CacheActivity::Expired
+            | CacheActivity::RefreshMiss
+            | CacheActivity::Inserted
+            | CacheActivity::Invalidated
+            | CacheActivity::Fallback
+            | CacheActivity::FallbackPromotion => emit_event!(info),
+            CacheActivity::Hit | CacheActivity::Miss | CacheActivity::RefreshHit | CacheActivity::Ok => {
+                emit_event!(debug);
+            }
         }
     }
 }
@@ -221,29 +215,6 @@ mod tests {
         assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
         assert_eq!(CacheActivity::FallbackPromotion.as_str(), "cache.fallback_promotion");
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
-    }
-
-    #[test]
-    fn cache_activity_severity_debug() {
-        assert_eq!(CacheActivity::Hit.severity(), Severity::Debug);
-        assert_eq!(CacheActivity::Miss.severity(), Severity::Debug);
-        assert_eq!(CacheActivity::RefreshHit.severity(), Severity::Debug);
-        assert_eq!(CacheActivity::Ok.severity(), Severity::Debug);
-    }
-
-    #[test]
-    fn cache_activity_severity_info() {
-        assert_eq!(CacheActivity::Expired.severity(), Severity::Info);
-        assert_eq!(CacheActivity::RefreshMiss.severity(), Severity::Info);
-        assert_eq!(CacheActivity::Inserted.severity(), Severity::Info);
-        assert_eq!(CacheActivity::Invalidated.severity(), Severity::Info);
-        assert_eq!(CacheActivity::Fallback.severity(), Severity::Info);
-        assert_eq!(CacheActivity::FallbackPromotion.severity(), Severity::Info);
-    }
-
-    #[test]
-    fn cache_activity_severity_error() {
-        assert_eq!(CacheActivity::Error.severity(), Severity::Error);
     }
 
     #[test]

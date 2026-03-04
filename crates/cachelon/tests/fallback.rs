@@ -111,25 +111,23 @@ fn fallback_cache_clear() -> TestResult {
 }
 
 #[test]
-fn fallback_cache_len_returns_some() -> TestResult {
+fn fallback_cache_len_returns_correct_count() -> TestResult {
     block_on(async {
+        // Use MockCache for immediate consistency of len()
         let clock = Clock::new_frozen();
 
-        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+        let fallback = Cache::builder(clock.clone()).storage(MockCache::<String, i32>::new());
 
-        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
+        let cache = Cache::builder(clock)
+            .storage(MockCache::<String, i32>::new())
+            .fallback(fallback)
+            .build();
 
-        // Empty cache should have len 0
         assert_eq!(cache.len(), Some(0));
 
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-        // After insert, len returns Some (exact value may be eventually consistent with moka)
-        assert!(cache.len().is_some());
-
-        // Verify the entry is actually accessible
-        let entry = cache.get(&"key".to_string()).await?.expect("entry should exist");
-        assert_eq!(*entry.value(), 42);
+        assert_eq!(cache.len(), Some(1));
         Ok(())
     })
 }
@@ -364,33 +362,42 @@ fn fallback_builder_stampede_protection() -> TestResult {
 }
 
 #[test]
-fn fallback_builder_use_logs() -> TestResult {
+fn fallback_builder_use_logs_emits_logs() -> TestResult {
     block_on(async {
+        let capture = testing_aids::LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        // This exercises the use_logs path on FallbackBuilder
         let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).use_logs().build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        let entry = cache.get(&key).await?.expect("entry should exist");
-        assert_eq!(*entry.value(), 42);
+        cache.get(&key).await?.expect("entry should exist");
+
+        // Verify logs were actually emitted
+        capture.assert_contains("cache.inserted");
         Ok(())
     })
 }
 
 #[test]
-fn cache_builder_use_logs() -> TestResult {
+fn cache_builder_use_logs_emits_logs() -> TestResult {
     block_on(async {
-        // Exercises CacheBuilder::use_logs path
+        let capture = testing_aids::LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().use_logs().build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
-        let entry = cache.get(&key).await?.expect("entry should exist");
-        assert_eq!(*entry.value(), 42);
+        cache.get(&key).await?.expect("entry should exist");
+
+        // Verify logs were actually emitted (catches with_logs mutation to false)
+        capture.assert_contains("cache.inserted");
+        capture.assert_contains("cache.hit");
         Ok(())
     })
 }
@@ -421,6 +428,50 @@ async fn fallback_builder_time_to_refresh_does_not_panic() -> TestResult {
     cache.insert(&key, CacheEntry::new(42)).await?;
     let entry = cache.get(&key).await?.expect("entry should exist");
     assert_eq!(*entry.value(), 42);
+    Ok(())
+}
+
+#[tokio::test]
+async fn do_refresh_updates_primary_from_fallback() -> TestResult {
+    // Verifies do_refresh actually fetches from fallback and promotes to primary
+    let clock = Clock::new_frozen();
+    let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+    fallback_storage.insert(&"key".to_string(), CacheEntry::new(99)).await?;
+
+    let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+    let primary_check = primary_storage.clone();
+
+    // Insert a stale entry directly into primary with cached_at set so TTR check triggers.
+    // Must set cached_at because CacheWrapper checks value.cached_at() for refresh eligibility.
+    let mut stale_entry = CacheEntry::new(42);
+    stale_entry.ensure_cached_at(clock.system_time());
+    primary_storage.insert(&"key".to_string(), stale_entry).await?;
+
+    let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
+
+    let cache = Cache::builder::<String, i32>(clock)
+        .storage(primary_storage)
+        .fallback(fallback)
+        .time_to_refresh(ttr)
+        .build();
+
+    let key = "key".to_string();
+
+    // Sleep so the ttr duration elapses
+    std::thread::sleep(Duration::from_millis(5));
+
+    // get triggers background refresh (primary has stale 42, fallback has fresh 99)
+    let result = cache.get(&key).await?;
+    assert!(result.is_some());
+
+    // Wait for background refresh to complete
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Primary should now have the refreshed value from fallback
+    let refreshed = primary_check.get(&key).await?;
+    assert!(refreshed.is_some());
+    assert_eq!(*refreshed.unwrap().value(), 99);
     Ok(())
 }
 
@@ -588,4 +639,31 @@ fn fallback_clear_primary_error_propagation() {
         let result = cache.clear().await;
         assert!(result.is_err(), "primary clear error should propagate");
     });
+}
+
+#[test]
+fn nested_fallback_three_tier_chain() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        // Build a 3-tier cache: L1 (primary) -> L2 (fallback) -> L3 (fallback-of-fallback)
+        // This exercises FallbackBuilder::fallback() (line 425) by calling .fallback()
+        // on the FallbackBuilder returned by the first .fallback() call.
+        let l3 = Cache::builder::<String, i32>(clock.clone()).memory();
+        let l1_with_l2 = Cache::builder::<String, i32>(clock.clone())
+            .memory()
+            .fallback(Cache::builder::<String, i32>(clock).memory());
+        // This calls FallbackBuilder.fallback() — NOT CacheBuilder.fallback()
+        let cache = l1_with_l2.fallback(l3).build();
+
+        // Insert and retrieve through the 3-tier hierarchy
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+        let entry = cache.get(&"key".to_string()).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+
+        // Clear and verify
+        cache.clear().await?;
+        assert!(cache.get(&"key".to_string()).await?.is_none());
+        Ok(())
+    })
 }

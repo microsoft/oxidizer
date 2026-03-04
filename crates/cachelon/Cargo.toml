@@ -43,14 +43,11 @@ metrics = ["dep:opentelemetry"]
 service = ["dep:cachelon_service", "dep:layered"]
 
 [dependencies]
-alloc_tracker = { workspace = true }
 anyspawn = { workspace = true, features = ["tokio"] }
 cachelon_memory = { path = "../cachelon_memory", optional = true }
 cachelon_service = { path = "../cachelon_service", optional = true }
 cachelon_tier = { path = "../cachelon_tier" }
-criterion = { workspace = true }
 dynosaur = { workspace = true, optional = true }
-fundle = { workspace = true, optional = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
@@ -66,9 +63,10 @@ tracing = { workspace = true, optional = true }
 uniflight = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 cachelon_tier = { path = "../cachelon_tier", features = ["test-util"] }
+criterion = { workspace = true }
 dynosaur = { workspace = true }
-fundle = { workspace = true }
 opentelemetry = { workspace = true, features = [
     "metrics",
     "logs",

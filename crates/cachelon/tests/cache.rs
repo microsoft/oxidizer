@@ -6,6 +6,7 @@
 #![cfg(feature = "memory")]
 
 use cachelon::{Cache, CacheEntry, Error};
+use cachelon_tier::testing::MockCache;
 use tick::Clock;
 
 type TestResult = Result<(), Error>;
@@ -142,19 +143,17 @@ fn clear_removes_all_entries() -> TestResult {
 }
 
 #[test]
-fn len_returns_some() -> TestResult {
+fn len_returns_correct_count() -> TestResult {
     block_on(async {
+        // Use MockCache (HashMap-backed) for immediate consistency of len()
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
 
-        // Empty cache returns Some(0)
         assert_eq!(cache.len(), Some(0));
 
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-        // After insert, len() returns Some value
-        // Note: exact count may be eventually consistent with moka cache
-        assert!(cache.len().is_some());
+        assert_eq!(cache.len(), Some(1));
         Ok(())
     })
 }
@@ -229,18 +228,17 @@ fn stampede_protection_returns_cached() -> TestResult {
 }
 
 #[test]
-fn is_empty_returns_some() -> TestResult {
+fn is_empty_returns_correct_value() -> TestResult {
     block_on(async {
+        // Use MockCache for immediate consistency
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
+        let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
 
         assert_eq!(cache.is_empty(), Some(true));
 
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
-        // After insert, is_empty returns Some(false) or Some(true) depending on eventual consistency,
-        // but the important thing is it returns Some, not None
-        assert!(cache.is_empty().is_some());
+        assert_eq!(cache.is_empty(), Some(false));
         Ok(())
     })
 }
@@ -594,6 +592,149 @@ fn cache_debug_with_stampede_protection() {
     let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
     let debug_str = format!("{cache:?}");
     assert!(debug_str.contains("Mergers"), "got: {debug_str}");
+}
+
+// =============================================================================
+// Service feature tests
+// =============================================================================
+
+#[cfg(feature = "service")]
+mod service_tests {
+    use super::*;
+    use cachelon::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
+    use layered::Service;
+
+    /// Simple in-memory service implementing Service<CacheOperation>
+    #[derive(Clone)]
+    struct InMemoryService {
+        data: std::sync::Arc<parking_lot::Mutex<std::collections::HashMap<String, CacheEntry<i32>>>>,
+    }
+
+    impl InMemoryService {
+        fn new() -> Self {
+            Self {
+                data: std::sync::Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
+            }
+        }
+    }
+
+    impl Service<CacheOperation<String, i32>> for InMemoryService {
+        type Out = Result<CacheResponse<i32>, Error>;
+
+        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
+            match input {
+                CacheOperation::Get(req) => Ok(CacheResponse::Get(self.data.lock().get(&req.key).cloned())),
+                CacheOperation::Insert(req) => {
+                    self.data.lock().insert(req.key, req.entry);
+                    Ok(CacheResponse::Insert())
+                }
+                CacheOperation::Invalidate(req) => {
+                    self.data.lock().remove(&req.key);
+                    Ok(CacheResponse::Invalidate())
+                }
+                CacheOperation::Clear => {
+                    self.data.lock().clear();
+                    Ok(CacheResponse::Clear())
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cache_builder_service_creates_cache() -> TestResult {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock).service(InMemoryService::new()).build();
+            assert!(!cache.name().is_empty());
+
+            // Verify the cache works end-to-end through the service layer
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+            let entry = cache.get(&"key".to_string()).await?.expect("entry should exist");
+            assert_eq!(*entry.value(), 42);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cache_service_get() -> TestResult {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock).memory().build();
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+            let response = cache.execute(CacheOperation::Get(GetRequest::new("key".to_string()))).await?;
+            match response {
+                CacheResponse::Get(Some(entry)) => assert_eq!(*entry.value(), 42),
+                other => panic!("expected Get(Some), got {other:?}"),
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cache_service_get_miss() -> TestResult {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+            let response = cache.execute(CacheOperation::Get(GetRequest::new("missing".to_string()))).await?;
+            match response {
+                CacheResponse::Get(None) => {}
+                other => panic!("expected Get(None), got {other:?}"),
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cache_service_insert() -> TestResult {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+            let response = cache
+                .execute(CacheOperation::Insert(InsertRequest::new("key".to_string(), CacheEntry::new(42))))
+                .await?;
+            assert!(matches!(response, CacheResponse::Insert()));
+
+            // Verify the value was inserted
+            let entry = cache.get(&"key".to_string()).await?.unwrap();
+            assert_eq!(*entry.value(), 42);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cache_service_invalidate() -> TestResult {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock).memory().build();
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+            let response = cache
+                .execute(CacheOperation::Invalidate(InvalidateRequest::new("key".to_string())))
+                .await?;
+            assert!(matches!(response, CacheResponse::Invalidate()));
+
+            assert!(cache.get(&"key".to_string()).await?.is_none());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn cache_service_clear() -> TestResult {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock).memory().build();
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+            let response = cache.execute(CacheOperation::Clear).await?;
+            assert!(matches!(response, CacheResponse::Clear()));
+
+            assert!(cache.get(&"key".to_string()).await?.is_none());
+            Ok(())
+        })
+    }
 }
 
 #[cfg(feature = "metrics")]

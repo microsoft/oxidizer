@@ -256,4 +256,16 @@ mod tests {
             other => panic!("expected PermissionDenied, got {other:?}"),
         }
     }
+
+    #[test]
+    fn with_recovery_attaches_recovery_info() {
+        let error = Error::from_message("temporary failure").with_recovery(RecoveryInfo::retry());
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+    }
+
+    #[test]
+    fn recovery_returns_never_by_default() {
+        let error = Error::from_message("permanent failure");
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+    }
 }

@@ -89,4 +89,42 @@ mod tests {
             assert_eq!(timed.duration, Duration::from_millis(100));
         });
     }
+
+    #[test]
+    fn clock_ext_timed_async_handles_pending() {
+        use std::pin::Pin;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::task::{Context, Poll};
+
+        /// A future that returns Pending on the first poll, then Ready on the second.
+        struct YieldOnce {
+            yielded: Arc<AtomicBool>,
+        }
+
+        impl std::future::Future for YieldOnce {
+            type Output = i32;
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<i32> {
+                if self.yielded.swap(true, Ordering::SeqCst) {
+                    Poll::Ready(99)
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            }
+        }
+
+        block_on(async {
+            let control = tick::ClockControl::new();
+            let clock = control.to_clock();
+
+            let timed = clock
+                .timed_async(YieldOnce {
+                    yielded: Arc::new(AtomicBool::new(false)),
+                })
+                .await;
+
+            assert_eq!(timed.result, 99);
+        });
+    }
 }
