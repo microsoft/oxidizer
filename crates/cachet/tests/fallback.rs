@@ -518,10 +518,7 @@ fn do_refresh_without_time_to_refresh_is_noop() -> TestResult {
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
         // Build WITHOUT time_to_refresh — inner.refresh is None
-        let cache = Cache::builder::<String, i32>(clock)
-            .memory()
-            .fallback(fallback)
-            .build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         // Calling do_refresh should silently return (exercise the else branch)
         cache.inner().do_refresh(&"key".to_string());
