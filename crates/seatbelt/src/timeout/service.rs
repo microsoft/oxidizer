@@ -13,9 +13,10 @@ use std::time::Duration;
 use layered::Service;
 use tick::{Clock, FutureExt};
 
+use crate::ResilienceContext;
 use crate::timeout::*;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{NotSet, ResilienceContext};
 
 /// Applies a timeout to service execution for canceling long-running operations.
 ///
