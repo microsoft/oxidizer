@@ -1983,6 +1983,7 @@ dependencies = [
  "static_assertions",
  "templated_uri_macros",
  "tokio",
+ "trybuild",
  "uuid",
 ]
 

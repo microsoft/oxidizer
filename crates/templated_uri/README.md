@@ -27,7 +27,7 @@ The crate centers around several key abstractions:
 * [`Uri`][__link0] - Flexible URI type with endpoint and path/query components
 * [`BaseUri`][__link1] - Lightweight type representing scheme and authority (no path/query)
 * [`TemplatedPathAndQuery`][__link2] - RFC 6570 Level 3 compliant URI templating
-* [`UriSafe`][__link3] and [`UriSafeString`][__link4] - Trait and its implementation for String, marking type as safe for URI components
+* [`UriSafe`][__link3] and [`UriSafeString`][__link4] - Generic newtype wrapper proving a value is safe for URI components
   by not containing any reserved characters
 
 ## Basic Usage
@@ -79,7 +79,7 @@ let uri = Uri::default()
 
 ## URI Safety Guarantees
 
-The crate provides [`UriSafe`][__link5] trait implementations for types that are guaranteed
+The [`UriSafe<T>`][__link5] newtype wraps values that are guaranteed
 to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
 
 ```rust
@@ -151,7 +151,7 @@ Level 3 URI Template specification. Supported expansions include:
 * Query parameters: `{?var}`
 * Query continuation: `{&var}`
 
-Template variables must implement [`UriSafe`][__link9] (except for fragment and reserved expansions)
+Template variables must implement [`UriParam`][__link9] (except for fragment and reserved expansions)
 to ensure the resulting URI is valid.
 
 ## Integration with HTTP Ecosystem
@@ -167,7 +167,7 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8C1eJC5uO8HGzmvsGWS5o9MG-OHjAOP2NBSG3YPWB4tuNjfYWSDgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4wgmR1dWlkZjEuMjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyIYR0qqo_1mG5IQHm7rOYD0GzNmvQG0zghQG17KjLqy4MYrYWSEgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4wgml1cmlfcGFyYW32gmR1dWlkZjEuMjEuMA
  [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/
@@ -182,4 +182,4 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link6]: https://docs.rs/uuid/1.21.0/uuid/?search=Uuid
  [__link7]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
  [__link8]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link9]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
+ [__link9]: https://docs.rs/uri_param/latest/uri_param/?search=UriParam

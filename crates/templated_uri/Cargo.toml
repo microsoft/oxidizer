@@ -32,8 +32,8 @@ allowed_external_types = [
     "http::uri::scheme::Scheme",
     "http::uri::Uri",
     "templated_uri_macros::templated",
-    "templated_uri_macros::UriFragment",
-    "templated_uri_macros::UriUnsafeFragment",
+    "templated_uri_macros::UriParam",
+    "templated_uri_macros::UriUnsafeParam",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
 ]
@@ -53,6 +53,7 @@ uuid.workspace = true
 mutants.workspace = true
 static_assertions.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trybuild.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [lints]

@@ -68,7 +68,6 @@ impl Fields {
     }
 }
 
-#[expect(clippy::too_many_lines, reason = "Macro code")]
 // #[proc_macro_derive(TemplatedPathAndQuery, attributes(templated, unredacted))]
 pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> TokenStream {
     // Parse the derive input using the Opts struct with custom parsing
@@ -135,20 +134,6 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         })
         .collect();
 
-    // Generate the parameters that need to be treated as `UriSafe`. Cast them to `&dyn UriSafe` to ensure they can be used in the template.
-    // Only cast if the parameter is restricted (normal fragment, no +) AND it calls .as_uri_safe()
-    let params_uri_safe: Vec<_> = struct_fields
-        .iter()
-        .filter(|&f| {
-            let ident = f.ident.as_ref().expect("struct fields must be named");
-            is_restricted(ident)
-        })
-        .map(|f| {
-            let ident = f.ident.as_ref().expect("struct fields must be named");
-            quote! { let #ident: &dyn ::templated_uri::UriSafe = &#ident; }
-        })
-        .collect();
-
     let redacted_display = construct_redacted_display(&template, &struct_fields, &fields, unredacted);
 
     let label_impl = label.as_ref().map_or_else(
@@ -171,10 +156,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
 
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriFragment;
-                use ::templated_uri::UriUnsafeFragment;
+                use ::templated_uri::UriParam;
+                use ::templated_uri::UriUnsafeParam;
                 #(#collect_params)*
-                #(#params_uri_safe)*
 
                 ::std::format!(#format_template)
             }

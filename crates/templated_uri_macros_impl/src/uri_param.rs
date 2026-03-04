@@ -7,9 +7,9 @@ use syn::{Data, DeriveInput, Fields};
 
 use crate::bail;
 
-/// Generates the `UriFragment` trait implementation for a newtype struct.
+/// Generates the `UriParam` trait implementation for a newtype struct.
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
-pub(crate) fn uri_fragment_impl(input: DeriveInput) -> TokenStream {
+pub(crate) fn uri_param_impl(input: DeriveInput) -> TokenStream {
     let ident = &input.ident;
 
     // Only support tuple structs (newtype pattern)
@@ -17,35 +17,35 @@ pub(crate) fn uri_fragment_impl(input: DeriveInput) -> TokenStream {
         Data::Struct(ref data) => match data.fields {
             Fields::Unnamed(ref fields) => fields,
             _ => {
-                bail!(input, "UriFragment can only be derived for tuple structs (newtype pattern)");
+                bail!(input, "UriParam can only be derived for tuple structs (newtype pattern)");
             }
         },
         Data::Enum(_) => {
-            bail!(input, "UriFragment cannot be derived for enums");
+            bail!(input, "UriParam cannot be derived for enums");
         }
         Data::Union(_) => {
-            bail!(input, "UriFragment cannot be derived for unions");
+            bail!(input, "UriParam cannot be derived for unions");
         }
     };
 
     // Ensure exactly one field
     let field_count = fields.unnamed.len();
     if field_count != 1 {
-        bail!(fields, "UriFragment requires exactly one field, found {}", field_count);
+        bail!(fields, "UriParam requires exactly one field, found {}", field_count);
     }
 
     // Generate the implementation
     quote! {
-        impl ::templated_uri::UriFragment for #ident {
-            fn as_uri_safe(&self) -> impl ::templated_uri::UriSafe {
-                &self.0
+        impl ::templated_uri::UriParam for #ident {
+            fn as_uri_safe(&self) -> ::templated_uri::UriSafe<impl ::std::fmt::Display> {
+                self.0.as_uri_safe()
             }
         }
     }
 }
 
-/// Generates the `UriFragment` trait implementation for a newtype struct.
-pub(crate) fn uri_unsafe_fragment_impl(input: DeriveInput) -> TokenStream {
+/// Generates the `UriUnsafeParam` trait implementation for a newtype struct.
+pub(crate) fn uri_unsafe_param_impl(input: DeriveInput) -> TokenStream {
     let ident = &input.ident;
 
     // Only support tuple structs (newtype pattern)
@@ -53,26 +53,26 @@ pub(crate) fn uri_unsafe_fragment_impl(input: DeriveInput) -> TokenStream {
         Data::Struct(ref data) => match data.fields {
             Fields::Unnamed(ref fields) => fields,
             _ => {
-                bail!(input, "UriUnsafeFragment can only be derived for tuple structs (newtype pattern)");
+                bail!(input, "UriUnsafeParam can only be derived for tuple structs (newtype pattern)");
             }
         },
         Data::Enum(_) => {
-            bail!(input, "UriUnsafeFragment cannot be derived for enums");
+            bail!(input, "UriUnsafeParam cannot be derived for enums");
         }
         Data::Union(_) => {
-            bail!(input, "UriUnsafeFragment cannot be derived for unions");
+            bail!(input, "UriUnsafeParam cannot be derived for unions");
         }
     };
 
     // Ensure exactly one field
     let field_count = fields.unnamed.len();
     if field_count != 1 {
-        bail!(fields, "UriUnsafeFragment requires exactly one field, found {}", field_count);
+        bail!(fields, "UriUnsafeParam requires exactly one field, found {}", field_count);
     }
 
     // Generate the implementation
     quote! {
-        impl ::templated_uri::UriUnsafeFragment for #ident {
+        impl ::templated_uri::UriUnsafeParam for #ident {
             fn as_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }

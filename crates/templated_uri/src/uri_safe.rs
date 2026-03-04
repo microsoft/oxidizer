@@ -1,61 +1,73 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use pct_str::{PctString, UriReserved};
 use std::borrow::{Borrow, Cow};
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display};
 use std::net::IpAddr;
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
+
+use pct_str::{PctString, UriReserved};
 use uuid::Uuid;
 
-mod private {
-    use data_privacy::Sensitive;
+/// A wrapper that proves the inner value is safe for use in URI templates.
+///
+/// Safety is enforced via constructors — only types whose [`Display`] output
+/// contains no RFC 6570 reserved characters can be wrapped. For inherently-safe
+/// types (integers, [`Uuid`], [`IpAddr`]) an infallible [`From`] impl is provided.
+/// For strings, use the encoding/validating constructors on [`UriSafe<Cow<'static, str>>`]
+/// (aliased as [`UriSafeString`]).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct UriSafe<T>(T);
 
-    use super::{IpAddr, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize, UriSafeString, Uuid};
-
-    #[expect(unnameable_types, reason = "intentional, sealed trait pattern")]
-    pub trait Sealed {}
-
-    impl Sealed for UriSafeString {}
-    impl Sealed for usize {}
-    impl Sealed for u8 {}
-    impl Sealed for u16 {}
-    impl Sealed for u32 {}
-    impl Sealed for u64 {}
-    impl Sealed for u128 {}
-    impl Sealed for NonZeroU8 {}
-    impl Sealed for NonZeroU16 {}
-    impl Sealed for NonZeroU32 {}
-    impl Sealed for NonZeroU64 {}
-    impl Sealed for NonZeroU128 {}
-    impl Sealed for NonZeroUsize {}
-    impl Sealed for IpAddr {}
-    impl Sealed for Uuid {}
-    impl<T> Sealed for Sensitive<T> where T: Sealed {}
-    impl<T> Sealed for &T where T: Sealed + ?Sized {}
+impl<T: Display> Display for UriSafe<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
-/// Marks types that, when [`Display`ed](std::fmt::Display), are valid for URI use.
-pub trait UriSafe: private::Sealed + Display + Debug {}
+impl<T: Debug> Debug for UriSafe<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
-impl UriSafe for UriSafeString {}
-impl UriSafe for usize {}
-impl UriSafe for u8 {}
-impl UriSafe for u16 {}
-impl UriSafe for u32 {}
-impl UriSafe for u64 {}
-impl UriSafe for u128 {}
-impl UriSafe for NonZeroU8 {}
-impl UriSafe for NonZeroU16 {}
-impl UriSafe for NonZeroU32 {}
-impl UriSafe for NonZeroU64 {}
-impl UriSafe for NonZeroU128 {}
-impl UriSafe for NonZeroUsize {}
-impl UriSafe for IpAddr {}
-impl UriSafe for Uuid {}
-impl<T> UriSafe for &T where T: UriSafe + ?Sized {}
+macro_rules! impl_uri_safe_from {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for UriSafe<$t> {
+                fn from(value: $t) -> Self {
+                    Self(value)
+                }
+            }
+        )*
+    };
+}
+
+impl_uri_safe_from!(
+    usize,
+    u8,
+    u16,
+    u32,
+    u64,
+    u128,
+    NonZeroU8,
+    NonZeroU16,
+    NonZeroU32,
+    NonZeroU64,
+    NonZeroU128,
+    NonZeroUsize,
+    IpAddr,
+    Uuid
+);
+
+/// A URI-safe string whose content is guaranteed to contain only characters
+/// valid in URI templates as defined by RFC 6570.
+///
+/// This is a type alias for `UriSafe<Cow<'static, str>>`. Use its constructors
+/// (`encode`, `try_new`, `from_static`) to create instances.
+pub type UriSafeString = UriSafe<Cow<'static, str>>;
 
 /// Error returned when a string contains characters that are not safe for URI templates.
 #[derive(Debug)]
@@ -78,13 +90,6 @@ impl fmt::Display for UriSafeError {
 
 impl Error for UriSafeError {}
 
-/// A wrapper around String that guarantees the inner value is safe to use in URI templates.
-///
-/// According to RFC 6570, certain characters are reserved and must be percent-encoded.
-/// This type ensures its content doesn't contain those reserved characters.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UriSafeString(Cow<'static, str>);
-
 impl UriSafeString {
     /// Creates a `UriSafeString` by percent-encoding any reserved or unsafe characters.
     ///
@@ -102,7 +107,6 @@ impl UriSafeString {
     /// let escaped_safe = UriSafeString::encode("{hello}");
     /// assert_eq!(escaped_safe.as_str(), "%7Bhello%7D");
     /// ```
-    ///
     pub fn encode(s: impl AsRef<str>) -> Self {
         let s = s.as_ref();
         let encoded = PctString::encode(s.chars(), UriReserved::Any);
@@ -279,12 +283,6 @@ impl<'a> From<&'a str> for UriSafeString {
 impl AsRef<str> for UriSafeString {
     fn as_ref(&self) -> &str {
         self.as_str()
-    }
-}
-
-impl fmt::Display for UriSafeString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
     }
 }
 
