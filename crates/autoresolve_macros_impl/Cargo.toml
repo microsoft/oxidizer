@@ -1,0 +1,32 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "autoresolve_macros_impl"
+description = "Macros for the autoresolve crate."
+version = "0.1.0"
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["proc_macro2::*", "syn::error::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full", "extra-traits", "printing"] }
+
+[dev-dependencies]
+insta.workspace = true
+mutants.workspace = true
+prettyplease.workspace = true
+
+[lints]
+workspace = true

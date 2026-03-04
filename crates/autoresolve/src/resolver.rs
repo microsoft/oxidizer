@@ -20,6 +20,17 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         }
     }
 
+    pub fn new_empty() -> Self {
+        Resolver {
+            types: TypeMap::new(),
+            base: PhantomData,
+        }
+    }
+
+    pub fn insert<V: Send + Sync + 'static>(&mut self, value: V) {
+        self.types.insert(value);
+    }
+
     pub fn ensure<O>(&mut self) -> &O
     where
         O: ResolveFrom<T>,

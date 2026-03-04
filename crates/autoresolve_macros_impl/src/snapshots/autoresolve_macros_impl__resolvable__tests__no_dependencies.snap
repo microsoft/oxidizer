@@ -1,0 +1,23 @@
+---
+source: crates/autoresolve_macros_impl/src/resolvable.rs
+expression: pretty_print(result)
+---
+impl Leaf {
+    fn new() -> Self {
+        Self
+    }
+}
+impl<__AutoresolveBase> ::autoresolve::ResolveFrom<__AutoresolveBase> for Leaf
+where
+    __AutoresolveBase: Send + Sync + 'static,
+{
+    type Inputs = ::autoresolve::ResolutionDepsEnd;
+    fn new(
+        inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<
+            __AutoresolveBase,
+        >>::Resolved<'_>,
+    ) -> Self {
+        let ::autoresolve::ResolutionDepsEnd = inputs;
+        Leaf::new()
+    }
+}

@@ -1,4 +1,6 @@
-use autoresolve::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode, ResolveFrom, Resolver};
+#![allow(dead_code)] // Test structs exist to exercise the DI graph, not all fields are read.
+
+use autoresolve_macros::resolvable;
 
 #[derive(Clone)]
 struct Builtins;
@@ -14,6 +16,7 @@ struct Validator {
     builtins: Builtins,
 }
 
+#[resolvable]
 impl Validator {
     fn new(builtins: &Builtins) -> Self {
         Self {
@@ -26,15 +29,6 @@ impl Validator {
     }
 }
 
-impl ResolveFrom<Builtins> for Validator {
-    type Inputs = ResolutionDepsNode<Builtins, ResolutionDepsEnd>;
-
-    fn new(input: <Self::Inputs as ResolutionDeps<Builtins>>::Resolved<'_>) -> Self {
-        let ResolutionDepsNode(builtins, _) = input;
-        Self::new(builtins)
-    }
-}
-
 #[derive(Clone)]
 struct Telemetry;
 
@@ -43,20 +37,12 @@ struct SdkProvider {
     telemetry: Telemetry,
 }
 
+#[resolvable]
 impl SdkProvider {
     fn new(telemetry: &Telemetry) -> Self {
         Self {
             telemetry: telemetry.clone(),
         }
-    }
-}
-
-impl ResolveFrom<Telemetry> for SdkProvider {
-    type Inputs = ResolutionDepsNode<Telemetry, ResolutionDepsEnd>;
-
-    fn new(input: <Self::Inputs as ResolutionDeps<Telemetry>>::Resolved<'_>) -> Self {
-        let ResolutionDepsNode(telemetry, _) = input;
-        Self::new(telemetry)
     }
 }
 
@@ -67,6 +53,7 @@ struct Client {
     telemetry: Telemetry,
 }
 
+#[resolvable]
 impl Client {
     fn new(validator: &Validator, builtins: &Builtins, telemetry: &Telemetry) -> Self {
         Self {
@@ -89,18 +76,10 @@ struct CorrelationVector {
     request: Request,
 }
 
+#[resolvable]
 impl CorrelationVector {
     fn new(request: &Request) -> Self {
         Self { request: request.clone() }
-    }
-}
-
-impl ResolveFrom<Request> for CorrelationVector {
-    type Inputs = ResolutionDepsNode<Request, ResolutionDepsEnd>;
-
-    fn new(input: <Self::Inputs as ResolutionDeps<Request>>::Resolved<'_>) -> Self {
-        let ResolutionDepsNode(request, _) = input;
-        Self::new(request)
     }
 }
 
@@ -110,6 +89,7 @@ struct OutboundClient {
     builtins: Builtins,
 }
 
+#[resolvable]
 impl OutboundClient {
     fn new(correlation_vector: &CorrelationVector, client: &Client, builtins: &Builtins) -> Self {
         Self {
@@ -118,4 +98,22 @@ impl OutboundClient {
             builtins: builtins.clone(),
         }
     }
+}
+
+#[test]
+fn test_combined() {
+    let builtins = Builtins;
+    let telemetry = Telemetry;
+    let request = Request;
+
+    let mut resolver = autoresolve::resolver!(
+        builtins: Builtins,
+        telemetry: Telemetry,
+        request: Request,
+    );
+
+    let outbound = resolver.get::<OutboundClient>();
+    // Verify the object was constructed — Client depends on Validator + Builtins + Telemetry,
+    // OutboundClient depends on CorrelationVector + Client + Builtins.
+    assert_eq!(outbound.client.number(), 42 + 42);
 }

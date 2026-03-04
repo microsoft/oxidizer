@@ -1,0 +1,27 @@
+---
+source: crates/autoresolve_macros_impl/src/resolvable.rs
+expression: pretty_print(result)
+---
+impl Validator {
+    fn new(builtins: &Builtins) -> Self {
+        Self { builtins: builtins.clone() }
+    }
+}
+impl<__AutoresolveBase> ::autoresolve::ResolveFrom<__AutoresolveBase> for Validator
+where
+    __AutoresolveBase: Send + Sync + 'static,
+    Builtins: ::autoresolve::ResolveFrom<__AutoresolveBase>,
+{
+    type Inputs = ::autoresolve::ResolutionDepsNode<
+        Builtins,
+        ::autoresolve::ResolutionDepsEnd,
+    >;
+    fn new(
+        inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<
+            __AutoresolveBase,
+        >>::Resolved<'_>,
+    ) -> Self {
+        let ::autoresolve::ResolutionDepsNode(dep_0, ::autoresolve::ResolutionDepsEnd) = inputs;
+        Validator::new(dep_0)
+    }
+}

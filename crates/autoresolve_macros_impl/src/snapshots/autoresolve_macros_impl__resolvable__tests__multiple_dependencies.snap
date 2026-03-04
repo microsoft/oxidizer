@@ -1,0 +1,51 @@
+---
+source: crates/autoresolve_macros_impl/src/resolvable.rs
+expression: pretty_print(result)
+---
+impl Client {
+    fn new(validator: &Validator, builtins: &Builtins, telemetry: &Telemetry) -> Self {
+        Self {
+            validator: validator.clone(),
+            builtins: builtins.clone(),
+            telemetry: telemetry.clone(),
+        }
+    }
+    fn number(&self) -> i32 {
+        42
+    }
+}
+impl<__AutoresolveBase> ::autoresolve::ResolveFrom<__AutoresolveBase> for Client
+where
+    __AutoresolveBase: Send + Sync + 'static,
+    Validator: ::autoresolve::ResolveFrom<__AutoresolveBase>,
+    Builtins: ::autoresolve::ResolveFrom<__AutoresolveBase>,
+    Telemetry: ::autoresolve::ResolveFrom<__AutoresolveBase>,
+{
+    type Inputs = ::autoresolve::ResolutionDepsNode<
+        Validator,
+        ::autoresolve::ResolutionDepsNode<
+            Builtins,
+            ::autoresolve::ResolutionDepsNode<
+                Telemetry,
+                ::autoresolve::ResolutionDepsEnd,
+            >,
+        >,
+    >;
+    fn new(
+        inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<
+            __AutoresolveBase,
+        >>::Resolved<'_>,
+    ) -> Self {
+        let ::autoresolve::ResolutionDepsNode(
+            dep_0,
+            ::autoresolve::ResolutionDepsNode(
+                dep_1,
+                ::autoresolve::ResolutionDepsNode(
+                    dep_2,
+                    ::autoresolve::ResolutionDepsEnd,
+                ),
+            ),
+        ) = inputs;
+        Client::new(dep_0, dep_1, dep_2)
+    }
+}

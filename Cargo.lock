@@ -223,7 +223,28 @@ dependencies = [
 name = "autoresolve"
 version = "0.1.0"
 dependencies = [
+ "autoresolve_macros",
  "type-map",
+]
+
+[[package]]
+name = "autoresolve_macros"
+version = "0.1.0"
+dependencies = [
+ "autoresolve_macros_impl",
+ "mutants",
+]
+
+[[package]]
+name = "autoresolve_macros_impl"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "mutants",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
