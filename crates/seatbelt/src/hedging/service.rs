@@ -12,14 +12,15 @@ use std::time::Duration;
 use futures_util::future::{Either, select};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use layered::Service;
+use recoverable::RecoveryKind;
 use tick::Clock;
 
 use super::Attempt;
 use super::args::{CloneArgs, OnExecuteArgs, RecoveryArgs};
 use super::callbacks::*;
 use super::mode::HedgingMode;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{NotSet, RecoveryKind};
 
 /// Applies hedging logic to service execution for tail-latency reduction.
 ///

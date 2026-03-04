@@ -12,8 +12,9 @@ use crate::hedging::callbacks::*;
 use crate::hedging::constants::DEFAULT_MAX_HEDGED_ATTEMPTS;
 use crate::hedging::mode::HedgingMode;
 use crate::hedging::service::{Hedging, HedgingShared};
+use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, Recovery, RecoveryInfo, ResilienceContext, Set};
+use crate::{Recovery, RecoveryInfo, ResilienceContext};
 
 /// Builder for configuring hedging resilience middleware.
 ///
