@@ -560,7 +560,7 @@ fn try_get_or_insert_with_storage_error_propagates() {
         let result: Result<CacheEntry<i32>, Error> = cache
             .try_get_or_insert(&"key".to_string(), || async { Ok::<_, std::io::Error>(42) })
             .await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
@@ -576,15 +576,15 @@ fn optionally_get_or_insert_with_storage_error_propagates() {
 
         let result: Result<Option<CacheEntry<i32>>, Error> =
             cache.optionally_get_or_insert(&"key".to_string(), || async { Some(42) }).await;
-        assert!(result.is_err());
-    })
+        result.unwrap_err();
+    });
 }
 
 #[test]
 fn cache_debug_output() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().build();
-    let debug_str = format!("{:?}", cache);
+    let debug_str = format!("{cache:?}");
     assert!(debug_str.contains("Cache"), "got: {debug_str}");
 }
 
@@ -592,7 +592,7 @@ fn cache_debug_output() {
 fn cache_debug_with_stampede_protection() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
-    let debug_str = format!("{:?}", cache);
+    let debug_str = format!("{cache:?}");
     assert!(debug_str.contains("Mergers"), "got: {debug_str}");
 }
 

@@ -444,9 +444,9 @@ mod tests {
         let never = FallbackPromotionPolicy::<i32>::never();
         let when = FallbackPromotionPolicy::<i32>::when(|_| true);
 
-        let always_str = format!("{:?}", always);
-        let never_str = format!("{:?}", never);
-        let when_str = format!("{:?}", when);
+        let always_str = format!("{always:?}");
+        let never_str = format!("{never:?}");
+        let when_str = format!("{when:?}");
 
         assert!(always_str.contains("Always"), "got: {always_str}");
         assert!(never_str.contains("Never"), "got: {never_str}");

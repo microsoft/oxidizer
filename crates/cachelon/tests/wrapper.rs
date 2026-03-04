@@ -177,7 +177,7 @@ fn wrapper_get_error_is_recorded() {
         let cache = Cache::builder(clock).storage(mock).build();
 
         let result = cache.get(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 

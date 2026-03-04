@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn time_to_refresh_debug() {
         let refresh = create_refresh();
-        let debug_str = format!("{:?}", refresh);
+        let debug_str = format!("{refresh:?}");
         assert!(debug_str.contains("TimeToRefresh"), "got: {debug_str}");
         assert!(debug_str.contains("duration"), "got: {debug_str}");
     }

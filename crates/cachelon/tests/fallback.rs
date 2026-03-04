@@ -398,7 +398,7 @@ fn cache_builder_use_logs() -> TestResult {
 #[test]
 fn cache_builder_clock_returns_clock() {
     let clock = Clock::new_frozen();
-    let builder = Cache::builder::<String, i32>(clock.clone()).memory();
+    let builder = Cache::builder::<String, i32>(clock).memory();
     // clock() method on CacheBuilder
     let _ = builder.clock();
 }
