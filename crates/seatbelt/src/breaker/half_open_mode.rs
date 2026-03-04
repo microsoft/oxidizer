@@ -16,17 +16,6 @@ use crate::breaker::engine::probing::ProbesOptions;
 ///
 /// - [`HalfOpenMode::quick`]: Allows a single probe to determine if the service has recovered.
 /// - [`HalfOpenMode::progressive`]: Gradually increases the percentage of probes over multiple stages (default).
-///
-/// # Serialization
-///
-/// When the `serde` feature is enabled, `HalfOpenMode` serializes to and from JSON as follows:
-///
-/// - `"Quick"` — corresponds to [`HalfOpenMode::quick`].
-/// - `{"Progressive": null}` — corresponds to [`HalfOpenMode::progressive`] with no custom stage
-///   duration (uses [`break_duration`][crate::breaker::BreakerLayer::break_duration] as default).
-/// - `{"Progressive": "5s"}` — corresponds to [`HalfOpenMode::progressive`] with a custom stage
-///   duration expressed in [jiff's friendly format](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html)
-///   (e.g. `5s`, `1m30s`, `2m`).
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]
