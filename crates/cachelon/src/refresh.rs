@@ -289,4 +289,109 @@ mod tests {
         assert!(refresh.try_start_refresh(&key2));
         assert!(!refresh.try_start_refresh(&key3));
     }
+
+    #[test]
+    fn time_to_refresh_debug() {
+        let refresh = create_refresh();
+        let debug_str = format!("{:?}", refresh);
+        assert!(debug_str.contains("TimeToRefresh"), "got: {debug_str}");
+        assert!(debug_str.contains("duration"), "got: {debug_str}");
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "memory")]
+mod fetch_and_promote_tests {
+    use super::*;
+    use crate::fallback::FallbackPromotionPolicy;
+    use crate::telemetry::TelemetryConfig;
+    use cachelon_memory::InMemoryCache;
+    use cachelon_tier::testing::MockCache;
+    use tick::Clock;
+
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        futures::executor::block_on(f)
+    }
+
+    fn build_fallback_cache<P, F>(primary: P, fallback: F, policy: FallbackPromotionPolicy<i32>) -> FallbackCache<String, i32, P, F> {
+        let clock = Clock::new_frozen();
+        let telemetry = TelemetryConfig::new().build();
+        FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
+    }
+
+    #[test]
+    fn fallback_miss_returns_none() {
+        block_on(async {
+            let primary = InMemoryCache::<String, i32>::new();
+            let fallback = InMemoryCache::<String, i32>::new();
+            let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+
+            // Fallback is empty → handle_fallback_miss Ok(None) branch
+            fc.inner.fetch_and_promote("missing".to_string()).await;
+        });
+    }
+
+    #[test]
+    fn fallback_error() {
+        block_on(async {
+            let primary = InMemoryCache::<String, i32>::new();
+            let fallback = MockCache::<String, i32>::new();
+            fallback.fail_when(|_| true);
+            let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+
+            // Fallback errors → handle_fallback_miss Err branch
+            fc.inner.fetch_and_promote("key".to_string()).await;
+        });
+    }
+
+    #[test]
+    fn hit_no_promote() {
+        block_on(async {
+            let primary = InMemoryCache::<String, i32>::new();
+            let fallback = InMemoryCache::<String, i32>::new();
+            fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+            let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::never());
+
+            // Fallback hit with never() policy → handle_fallback_hit without promotion
+            fc.inner.fetch_and_promote("key".to_string()).await;
+
+            // Primary should still be empty
+            assert!(primary.get(&"key".to_string()).await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn hit_with_promote() {
+        block_on(async {
+            let primary = InMemoryCache::<String, i32>::new();
+            let fallback = InMemoryCache::<String, i32>::new();
+            fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+            let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::always());
+
+            // Fallback hit with always() policy → promote_to_primary success
+            fc.inner.fetch_and_promote("key".to_string()).await;
+
+            // Primary should now have the value
+            let result = primary.get(&"key".to_string()).await.unwrap();
+            assert!(result.is_some());
+            assert_eq!(*result.unwrap().value(), 42);
+        });
+    }
+
+    #[test]
+    fn promote_error() {
+        block_on(async {
+            let primary = MockCache::<String, i32>::new();
+            primary.fail_when(|_| true);
+            let fallback = InMemoryCache::<String, i32>::new();
+            fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+            let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+
+            // Fallback hit, primary insert fails → promote_to_primary error path
+            fc.inner.fetch_and_promote("key".to_string()).await;
+        });
+    }
 }

@@ -437,4 +437,19 @@ mod tests {
             assert!(negative.is_none());
         });
     }
+
+    #[test]
+    fn policy_type_debug_formatting() {
+        let always = FallbackPromotionPolicy::<i32>::always();
+        let never = FallbackPromotionPolicy::<i32>::never();
+        let when = FallbackPromotionPolicy::<i32>::when(|_| true);
+
+        let always_str = format!("{:?}", always);
+        let never_str = format!("{:?}", never);
+        let when_str = format!("{:?}", when);
+
+        assert!(always_str.contains("Always"), "got: {always_str}");
+        assert!(never_str.contains("Never"), "got: {never_str}");
+        assert!(when_str.contains("WhenBoxed"), "got: {when_str}");
+    }
 }

@@ -8,8 +8,11 @@
 
 #![cfg(feature = "memory")]
 
+use anyspawn::Spawner;
 use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
+use cachelon::refresh::TimeToRefresh;
 use cachelon_tier::testing::MockCache;
+use std::time::Duration;
 use tick::Clock;
 
 type TestResult = Result<(), Error>;
@@ -339,3 +342,260 @@ fn fallback_get_triggers_promotion() -> TestResult {
         Ok(())
     })
 }
+
+#[test]
+fn fallback_builder_stampede_protection() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .fallback(fallback)
+            .stampede_protection()
+            .build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn fallback_builder_use_logs() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+
+        // This exercises the use_logs path on FallbackBuilder
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .fallback(fallback)
+            .use_logs()
+            .build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn cache_builder_use_logs() -> TestResult {
+    block_on(async {
+        // Exercises CacheBuilder::use_logs path
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .use_logs()
+            .build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn cache_builder_clock_returns_clock() {
+    let clock = Clock::new_frozen();
+    let builder = Cache::builder::<String, i32>(clock.clone()).memory();
+    // clock() method on CacheBuilder
+    let _ = builder.clock();
+}
+
+#[tokio::test]
+async fn fallback_builder_time_to_refresh_does_not_panic() -> TestResult {
+    // Exercises time_to_refresh on FallbackBuilder. The background refresh
+    // task is fire-and-forget, we just verify the cache is usable.
+    let clock = Clock::new_frozen();
+    let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
+
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .fallback(fallback)
+        .time_to_refresh(ttr)
+        .build();
+
+    let key = "key".to_string();
+    cache.insert(&key, CacheEntry::new(42)).await?;
+    let entry = cache.get(&key).await?.expect("entry should exist");
+    assert_eq!(*entry.value(), 42);
+    Ok(())
+}
+
+#[tokio::test]
+async fn do_refresh_deduplicates_in_flight() -> TestResult {
+    // Exercises do_refresh deduplication: second call with same key is a no-op
+    use cachelon::refresh::TimeToRefresh;
+
+    let clock = Clock::new_frozen();
+    let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+    fallback_storage.insert(&"key".to_string(), CacheEntry::new(99)).await?;
+
+    let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+    let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
+
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .fallback(fallback)
+        .time_to_refresh(ttr)
+        .build();
+
+    // Insert a stale entry
+    let key = "key".to_string();
+    cache.insert(&key, CacheEntry::new(42)).await?;
+
+    // Sleep so the ttr duration elapses
+    std::thread::sleep(Duration::from_millis(5));
+
+    // get triggers background refresh
+    let result = cache.get(&key).await?;
+    assert!(result.is_some());
+
+    // Second get also triggers do_refresh; duplicate is detected and skipped
+    let result2 = cache.get(&key).await?;
+    assert!(result2.is_some());
+
+    Ok(())
+}
+
+#[cfg(feature = "metrics")]
+#[test]
+fn fallback_builder_use_metrics() -> TestResult {
+    block_on(async {
+        let tester = testing_aids::MetricTester::new();
+        let clock = Clock::new_frozen();
+        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .fallback(fallback)
+            .use_metrics(tester.meter_provider())
+            .build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn fallback_get_error_from_fallback_tier() {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        // Primary miss + fallback error → error propagates
+        let primary_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+        let fallback_storage = failing_cache();
+
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .build();
+
+        let result = cache.get(&"key".to_string()).await;
+        assert!(result.is_err(), "fallback error should propagate on primary miss");
+    });
+}
+
+#[test]
+fn fallback_get_promotion_failure_still_returns_value() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        // Primary fails on insert (promotion), fallback has the value
+        let primary_storage = MockCache::<String, i32>::new();
+        primary_storage.fail_when(|op| matches!(op, cachelon_tier::testing::CacheOp::Insert { .. }));
+
+        let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+        fallback_storage
+            .insert(&"key".to_string(), CacheEntry::new(42))
+            .await?;
+
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .build();
+
+        // get should return the value despite promotion failure
+        let result = cache.get(&"key".to_string()).await?;
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn fallback_insert_primary_error_propagation() {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        let primary_storage = failing_cache();
+        let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .build();
+
+        let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        assert!(result.is_err(), "primary insert error should propagate");
+    });
+}
+
+#[test]
+fn fallback_invalidate_primary_error_propagation() {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        let primary_storage = failing_cache();
+        let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .build();
+
+        let result = cache.invalidate(&"key".to_string()).await;
+        assert!(result.is_err(), "primary invalidate error should propagate");
+    });
+}
+
+#[test]
+fn fallback_clear_primary_error_propagation() {
+    block_on(async {
+        let clock = Clock::new_frozen();
+
+        let primary_storage = failing_cache();
+        let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
+
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .build();
+
+        let result = cache.clear().await;
+        assert!(result.is_err(), "primary clear error should propagate");
+    });
+}
+

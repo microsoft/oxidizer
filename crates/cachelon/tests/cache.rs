@@ -228,6 +228,163 @@ fn stampede_protection_returns_cached() -> TestResult {
     })
 }
 
+#[test]
+fn is_empty_returns_some() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        assert_eq!(cache.is_empty(), Some(true));
+
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+        // After insert, is_empty returns Some(false) or Some(true) depending on eventual consistency,
+        // but the important thing is it returns Some, not None
+        assert!(cache.is_empty().is_some());
+        Ok(())
+    })
+}
+
+#[test]
+fn stampede_protection_invalidate() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        assert!(cache.get(&key).await?.is_some());
+
+        cache.invalidate(&key).await?;
+        assert!(cache.get(&key).await?.is_none());
+        Ok(())
+    })
+}
+
+#[test]
+fn stampede_protection_get_or_insert() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+
+        let entry = cache.get_or_insert(&key, || async { 42 }).await?;
+        assert_eq!(*entry.value(), 42);
+
+        // Second call returns cached value
+        let entry = cache.get_or_insert(&key, || async { 100 }).await?;
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn stampede_protection_try_get_or_insert_success() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+
+        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(42) }).await?;
+        assert_eq!(*entry.value(), 42);
+
+        // Cached on second call
+        let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await?;
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn stampede_protection_try_get_or_insert_error() {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+
+        let result: Result<CacheEntry<i32>, Error> = cache
+            .try_get_or_insert(&key, || async { Err(Error::from_message("test error")) })
+            .await;
+
+        result.expect_err("factory error should propagate through stampede protection");
+    });
+}
+
+#[test]
+fn stampede_protection_optionally_get_or_insert_some() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+
+        let entry = cache.optionally_get_or_insert(&key, || async { Some(42) }).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
+
+        // Cached on second call
+        let entry = cache.optionally_get_or_insert(&key, || async { Some(100) }).await?;
+        assert_eq!(*entry.unwrap().value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn stampede_protection_optionally_get_or_insert_none() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+
+        // None result is not cached
+        let result = cache.optionally_get_or_insert(&key, || async { None::<i32> }).await?;
+        assert!(result.is_none());
+
+        // Not cached, so second call still invokes factory
+        let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await?;
+        assert_eq!(*result.unwrap().value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn optionally_get_or_insert_none_not_cached() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        let key = "key".to_string();
+
+        // None result is not cached
+        let result = cache.optionally_get_or_insert(&key, || async { None::<i32> }).await?;
+        assert!(result.is_none());
+
+        // Not cached, so second call still invokes factory
+        let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await?;
+        assert_eq!(*result.unwrap().value(), 42);
+        Ok(())
+    })
+}
+
+#[test]
+fn optionally_get_or_insert_hit_returns_cached() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(99)).await?;
+
+        // Should return cached value without calling factory
+        let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await?;
+        assert_eq!(*result.unwrap().value(), 99);
+        Ok(())
+    })
+}
+
 // =============================================================================
 // Thread Safety Tests (per O-ABSTRACTIONS-SEND-SYNC guideline)
 // =============================================================================
@@ -350,3 +507,115 @@ fn stampede_protection_converts_panic_to_error() {
         );
     });
 }
+
+#[test]
+fn into_dynamic_with_stampede_protection() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+
+        // into_dynamic must preserve the Mergers when stampede_protection was enabled
+        let dynamic = cache.into_dynamic();
+
+        let entry = dynamic.get(&"key".to_string()).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+
+        // get_or_insert through dynamic cache with stampede protection
+        let entry2 = dynamic.get_or_insert(&"new".to_string(), || async { 77 }).await?;
+        assert_eq!(*entry2.value(), 77);
+
+        Ok(())
+    })
+}
+
+#[test]
+fn stampede_protection_invalidate_removes_entry() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        assert!(cache.get(&key).await?.is_some());
+
+        cache.invalidate(&key).await?;
+        assert!(cache.get(&key).await?.is_none());
+        Ok(())
+    })
+}
+
+#[test]
+fn try_get_or_insert_with_storage_error_propagates() {
+    block_on(async {
+        use cachelon_tier::testing::{CacheOp, MockCache};
+
+        let clock = Clock::new_frozen();
+        let mock = MockCache::<String, i32>::new();
+        // Fail on get so do_try_get_or_insert's inner get fails
+        mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
+        let cache = Cache::builder(clock).storage(mock).build();
+
+        let result: Result<CacheEntry<i32>, Error> = cache
+            .try_get_or_insert(&"key".to_string(), || async { Ok::<_, std::io::Error>(42) })
+            .await;
+        assert!(result.is_err());
+    });
+}
+
+#[test]
+fn optionally_get_or_insert_with_storage_error_propagates() {
+    block_on(async {
+        use cachelon_tier::testing::{CacheOp, MockCache};
+
+        let clock = Clock::new_frozen();
+        let mock = MockCache::<String, i32>::new();
+        mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
+        let cache = Cache::builder(clock).storage(mock).build();
+
+        let result: Result<Option<CacheEntry<i32>>, Error> = cache
+            .optionally_get_or_insert(&"key".to_string(), || async { Some(42) })
+            .await;
+        assert!(result.is_err());
+    })
+}
+
+#[test]
+fn cache_debug_output() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+    let debug_str = format!("{:?}", cache);
+    assert!(debug_str.contains("Cache"), "got: {debug_str}");
+}
+
+#[test]
+fn cache_debug_with_stampede_protection() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .stampede_protection()
+        .build();
+    let debug_str = format!("{:?}", cache);
+    assert!(debug_str.contains("Mergers"), "got: {debug_str}");
+}
+
+#[cfg(feature = "metrics")]
+#[test]
+fn cache_builder_use_metrics() -> TestResult {
+    block_on(async {
+        let tester = testing_aids::MetricTester::new();
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .use_metrics(tester.meter_provider())
+            .build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+

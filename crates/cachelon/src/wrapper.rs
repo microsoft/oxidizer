@@ -241,4 +241,17 @@ mod tests {
         // Entry TTL is longer than tier TTL, so entry should not be expired
         assert!(!wrapper.is_expired(&entry));
     }
+
+    #[test]
+    fn wrapper_is_expired_when_system_time_goes_backward() {
+        let clock = Clock::new_frozen();
+        let inner = InMemoryCache::<String, i32>::new();
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> =
+            CacheWrapper::new("test", inner, clock.clone(), Some(Duration::from_secs(60)), telemetry);
+
+        // Entry with cached_at in the future simulates clock going backward
+        let entry = CacheEntry::expires_at(42, Duration::from_secs(60), clock.system_time() + Duration::from_secs(3600));
+        assert!(wrapper.is_expired(&entry));
+    }
 }
