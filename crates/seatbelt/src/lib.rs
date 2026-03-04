@@ -186,7 +186,6 @@ pub use context::ResilienceContext;
 #[cfg(any(feature = "retry", test))]
 pub(crate) mod attempt;
 
-/// Typestate markers for builder patterns.
 pub mod typestates;
 
 #[cfg(any(feature = "timeout", test))]
