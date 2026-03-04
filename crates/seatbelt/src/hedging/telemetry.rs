@@ -61,14 +61,7 @@ impl TelemetryGuard {
 
     #[cfg(any(feature = "logs", feature = "metrics", test))]
     fn recovery_kind_str(&self) -> &'static str {
-        match self.recovery_kind {
-            None => "abandoned",
-            Some(RecoveryKind::Retry) => "retry",
-            Some(RecoveryKind::Unavailable) => "unavailable",
-            // recovery_kind() only passes Retry/Unavailable, but handle
-            // future variants gracefully.
-            Some(_) => "unknown",
-        }
+        self.recovery_kind.map_or("abandoned", RecoveryKind::as_str)
     }
 
     #[cfg_attr(

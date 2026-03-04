@@ -127,7 +127,7 @@ impl<In, Out> HedgingShared<In, Out> {
     where
         F: Future<Output = Out>,
     {
-        let total_attempts = u32::from(self.max_hedged_attempts) + 1;
+        let total_attempts = u32::from(self.max_hedged_attempts).saturating_add(1);
         let attempt = Attempt::new(0, total_attempts == 1);
         let args = CloneArgs { attempt };
 
@@ -238,6 +238,7 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn launch_hedging_attempt<G>(
         &self,
         futs: &FuturesUnordered<G>,
@@ -255,6 +256,7 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
+    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn invoke_on_execute(&self, input: &mut In, attempt: Attempt, delay: Duration) {
         if let Some(on_execute) = &self.on_execute {
             on_execute.call(input, OnExecuteArgs { attempt, delay });
