@@ -1,4 +1,17 @@
-# cachet ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![cachet on crates.io](https://img.shields.io/crates/v/cachet)](https://crates.io/crates/cachet) [![cachet on docs.rs](https://docs.rs/cachet/badge.svg)](https://docs.rs/cachet) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer/tree/main/crates/cachet) ![Rust Version: 1.88.0](https://img.shields.io/badge/rustc-1.88.0-orange.svg)
+<div align="center">
+ <img src="./logo.png" alt="Cachet Logo" width="96">
+
+# Cachet
+
+[![crate.io](https://img.shields.io/crates/v/cachet.svg)](https://crates.io/crates/cachet)
+[![docs.rs](https://docs.rs/cachet/badge.svg)](https://docs.rs/cachet)
+[![MSRV](https://img.shields.io/crates/msrv/cachet)](https://crates.io/crates/cachet)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+
+</div>
 
 Flexible multi-tier caching with telemetry and TTL support.
 
@@ -72,3 +85,10 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 `cache.activity`, `cache.duration_ns`.
 
 **Levels:** DEBUG (hit/miss/ok), INFO (expired/inserted/invalidated/refresh), ERROR (error)
+
+
+<hr/>
+<sub>
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
+</sub>
+

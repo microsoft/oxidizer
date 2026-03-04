@@ -1,4 +1,17 @@
-# cachet_memory ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![cachet_memory on crates.io](https://img.shields.io/crates/v/cachet_memory)](https://crates.io/crates/cachet_memory) [![cachet_memory on docs.rs](https://docs.rs/cachet_memory/badge.svg)](https://docs.rs/cachet_memory) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory) ![Rust Version: 1.88.0](https://img.shields.io/badge/rustc-1.88.0-orange.svg)
+<div align="center">
+ <img src="./logo.png" alt="Cachet Memory Logo" width="96">
+
+# Cachet Memory
+
+[![crate.io](https://img.shields.io/crates/v/cachet_memory.svg)](https://crates.io/crates/cachet_memory)
+[![docs.rs](https://docs.rs/cachet_memory/badge.svg)](https://docs.rs/cachet_memory)
+[![MSRV](https://img.shields.io/crates/msrv/cachet_memory)](https://crates.io/crates/cachet_memory)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+
+</div>
 
 High-performance in-memory cache backed by moka.
 
@@ -31,6 +44,11 @@ assert_eq!(*value.unwrap().value(), 42);
 * **Zero external types**: Builder API avoids exposing moka in your public API
 
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEG0LgX5aG1DAPG_3kRJmS0DdtG3eE7ZfO6e51G5nT_6-TpW8FYWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
+<hr/>
+<sub>
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
+</sub>
+
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0LgX5aG1DAPG_3kRJmS0DdtG3eE7ZfO6e51G5nT_6-TpW8FYWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
  [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=tier::InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=builder::InMemoryCacheBuilder

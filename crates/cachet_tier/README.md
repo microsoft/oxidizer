@@ -1,4 +1,17 @@
-# cachet_tier ![License: MIT](https://img.shields.io/badge/license-MIT-blue) [![cachet_tier on crates.io](https://img.shields.io/crates/v/cachet_tier)](https://crates.io/crates/cachet_tier) [![cachet_tier on docs.rs](https://docs.rs/cachet_tier/badge.svg)](https://docs.rs/cachet_tier) [![Source Code Repository](https://img.shields.io/badge/Code-On%20GitHub-blue?logo=GitHub)](https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier) ![Rust Version: 1.88.0](https://img.shields.io/badge/rustc-1.88.0-orange.svg)
+<div align="center">
+ <img src="./logo.png" alt="Cachet Tier Logo" width="96">
+
+# Cachet Tier
+
+[![crate.io](https://img.shields.io/crates/v/cachet_tier.svg)](https://crates.io/crates/cachet_tier)
+[![docs.rs](https://docs.rs/cachet_tier/badge.svg)](https://docs.rs/cachet_tier)
+[![MSRV](https://img.shields.io/crates/msrv/cachet_tier)](https://crates.io/crates/cachet_tier)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+
+</div>
 
 Core cache tier abstractions for building cache backends.
 
@@ -56,7 +69,12 @@ in a type-erased container. This is useful for multi-tier caches with heterogene
 storage backends.
 
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG_W_Gn_kaocAGwCcVPfenh7eGy6gYLEwyIe4G6-xw_FwcbpjYXKEG9x_W0gtWIXGG8Hn-Rfz85pbG019zTmIL6Q_G2OZScM_g-oTYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
+<hr/>
+<sub>
+This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
+</sub>
+
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9x_W0gtWIXGG8Hn-Rfz85pbG019zTmIL6Q_G2OZScM_g-oTYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error
