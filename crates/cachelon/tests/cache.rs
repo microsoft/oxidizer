@@ -574,9 +574,8 @@ fn optionally_get_or_insert_with_storage_error_propagates() {
         mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
         let cache = Cache::builder(clock).storage(mock).build();
 
-        let result: Result<Option<CacheEntry<i32>>, Error> = cache
-            .optionally_get_or_insert(&"key".to_string(), || async { Some(42) })
-            .await;
+        let result: Result<Option<CacheEntry<i32>>, Error> =
+            cache.optionally_get_or_insert(&"key".to_string(), || async { Some(42) }).await;
         assert!(result.is_err());
     })
 }
@@ -592,10 +591,7 @@ fn cache_debug_output() {
 #[test]
 fn cache_debug_with_stampede_protection() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock)
-        .memory()
-        .stampede_protection()
-        .build();
+    let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
     let debug_str = format!("{:?}", cache);
     assert!(debug_str.contains("Mergers"), "got: {debug_str}");
 }
@@ -618,4 +614,3 @@ fn cache_builder_use_metrics() -> TestResult {
         Ok(())
     })
 }
-

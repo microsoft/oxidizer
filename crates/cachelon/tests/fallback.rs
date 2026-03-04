@@ -9,8 +9,8 @@
 #![cfg(feature = "memory")]
 
 use anyspawn::Spawner;
-use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use cachelon::refresh::TimeToRefresh;
+use cachelon::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use cachelon_tier::testing::MockCache;
 use std::time::Duration;
 use tick::Clock;
@@ -370,11 +370,7 @@ fn fallback_builder_use_logs() -> TestResult {
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
         // This exercises the use_logs path on FallbackBuilder
-        let cache = Cache::builder::<String, i32>(clock)
-            .memory()
-            .fallback(fallback)
-            .use_logs()
-            .build();
+        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).use_logs().build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
@@ -389,10 +385,7 @@ fn cache_builder_use_logs() -> TestResult {
     block_on(async {
         // Exercises CacheBuilder::use_logs path
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock)
-            .memory()
-            .use_logs()
-            .build();
+        let cache = Cache::builder::<String, i32>(clock).memory().use_logs().build();
 
         let key = "key".to_string();
         cache.insert(&key, CacheEntry::new(42)).await?;
@@ -520,9 +513,7 @@ fn fallback_get_promotion_failure_still_returns_value() -> TestResult {
         primary_storage.fail_when(|op| matches!(op, cachelon_tier::testing::CacheOp::Insert { .. }));
 
         let fallback_storage = cachelon_memory::InMemoryCache::<String, i32>::new();
-        fallback_storage
-            .insert(&"key".to_string(), CacheEntry::new(42))
-            .await?;
+        fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -598,4 +589,3 @@ fn fallback_clear_primary_error_propagation() {
         assert!(result.is_err(), "primary clear error should propagate");
     });
 }
-

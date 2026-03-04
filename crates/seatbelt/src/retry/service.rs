@@ -357,9 +357,10 @@ mod tests {
 
     use super::*;
     use crate::ResilienceContext;
-    use crate::testing::{FailReadyService, MetricTester};
+    use crate::testing::FailReadyService;
     use crate::typestates::Set;
     use layered::Layer;
+    use testing_aids::MetricTester;
 
     #[cfg_attr(miri, ignore)]
     #[test]
