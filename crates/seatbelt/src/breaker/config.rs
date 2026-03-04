@@ -18,6 +18,7 @@ use crate::breaker::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOL
 ///
 /// | Field | Default |
 /// |-------|---------|
+/// | `enabled` | `true` |
 /// | `failure_threshold` | `0.1` (10%) |
 /// | `min_throughput` | `100` |
 /// | `sampling_duration` | 30 seconds |
@@ -27,6 +28,10 @@ use crate::breaker::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOL
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct BreakerConfig {
+    /// Whether the circuit breaker middleware is enabled. When `false`, the middleware
+    /// is bypassed and requests pass through directly to the inner service.
+    pub enabled: bool,
+
     /// The failure threshold (0.0 to 1.0) at which the circuit opens.
     pub failure_threshold: f32,
 
@@ -46,6 +51,7 @@ pub struct BreakerConfig {
 impl Default for BreakerConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             failure_threshold: DEFAULT_FAILURE_THRESHOLD,
             min_throughput: DEFAULT_MIN_THROUGHPUT,
             sampling_duration: DEFAULT_SAMPLING_DURATION,

@@ -18,6 +18,7 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 ///
 /// | Field | Default |
 /// |-------|---------|
+/// | `enabled` | `true` |
 /// | `backoff_type` | [`Backoff::Exponential`] |
 /// | `base_delay` | 10 milliseconds |
 /// | `max_delay` | `None` |
@@ -27,6 +28,10 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct RetryConfig {
+    /// Whether the retry middleware is enabled. When `false`, the middleware
+    /// is bypassed and requests pass through directly to the inner service.
+    pub enabled: bool,
+
     /// The backoff strategy to use for retry delays.
     pub backoff_type: Backoff,
 
@@ -46,6 +51,7 @@ pub struct RetryConfig {
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             backoff_type: DEFAULT_BACKOFF,
             base_delay: DEFAULT_BASE_DELAY,
             max_delay: None,

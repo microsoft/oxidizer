@@ -19,18 +19,26 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// | Field | Default |
 /// |-------|---------|
+/// | `enabled` | `true` |
 /// | `timeout` | 30 seconds |
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct TimeoutConfig {
+    /// Whether the timeout middleware is enabled. When `false`, the middleware
+    /// is bypassed and requests pass through directly to the inner service.
+    pub enabled: bool,
+
     /// The timeout duration for operations.
     pub timeout: Duration,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
-        Self { timeout: DEFAULT_TIMEOUT }
+        Self {
+            enabled: true,
+            timeout: DEFAULT_TIMEOUT,
+        }
     }
 }
 

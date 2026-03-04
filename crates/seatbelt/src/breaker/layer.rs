@@ -206,11 +206,14 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// (e.g., configuration files) without calling individual builder methods.
     #[must_use]
     pub fn config(self, config: &BreakerConfig) -> Self {
-        self.failure_threshold(config.failure_threshold)
+        let layer = self
+            .failure_threshold(config.failure_threshold)
             .min_throughput(config.min_throughput)
             .sampling_duration(config.sampling_duration)
             .break_duration(config.break_duration)
-            .half_open_mode(config.half_open_mode.clone())
+            .half_open_mode(config.half_open_mode.clone());
+
+        if config.enabled { layer.enable_always() } else { layer.disable() }
     }
 
     /// Sets the callback to be invoked when the circuit breaker opens.
@@ -655,6 +658,7 @@ mod tests {
     #[test]
     fn config_applies_all_settings() {
         let config = BreakerConfig {
+            enabled: true,
             failure_threshold: 0.25,
             min_throughput: 50,
             sampling_duration: Duration::from_secs(60),

@@ -87,7 +87,9 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// (e.g., configuration files) without calling individual builder methods.
     #[must_use]
     pub fn config(self, config: &TimeoutConfig) -> TimeoutLayer<In, Out, Set, S2> {
-        self.timeout(config.timeout)
+        let layer = self.timeout(config.timeout);
+
+        if config.enabled { layer.enable_always() } else { layer.disable() }
     }
 
     /// Sets the timeout result factory function.
@@ -375,6 +377,7 @@ mod tests {
     #[test]
     fn config_applies_all_settings() {
         let config = TimeoutConfig {
+            enabled: true,
             timeout: Duration::from_secs(45),
         };
 

@@ -1,9 +1,9 @@
 ---
 source: crates/seatbelt/src/breaker/config.rs
-assertion_line: 69
 expression: config
 ---
 {
+  "enabled": true,
   "failure_threshold": 0.1,
   "min_throughput": 100,
   "sampling_duration": {

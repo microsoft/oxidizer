@@ -1,9 +1,9 @@
 ---
 source: crates/seatbelt/src/retry/config.rs
-assertion_line: 66
 expression: config
 ---
 {
+  "enabled": true,
   "backoff_type": "Exponential",
   "base_delay": {
     "secs": 0,

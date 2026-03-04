@@ -135,11 +135,14 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// (e.g., configuration files) without calling individual builder methods.
     #[must_use]
     pub fn config(self, config: &RetryConfig) -> Self {
-        self.backoff(config.backoff_type)
+        let layer = self
+            .backoff(config.backoff_type)
             .base_delay(config.base_delay)
             .use_jitter(config.use_jitter)
             .max_retry_attempts(config.max_retry_attempts)
-            .max_delay_optional(config.max_delay)
+            .max_delay_optional(config.max_delay);
+
+        if config.enabled { layer.enable_always() } else { layer.disable() }
     }
 
     fn max_delay_optional(mut self, max_delay: Option<Duration>) -> Self {
@@ -738,6 +741,7 @@ mod tests {
     #[test]
     fn config_applies_all_settings() {
         let config = RetryConfig {
+            enabled: true,
             backoff_type: Backoff::Linear,
             base_delay: Duration::from_secs(2),
             max_delay: Some(Duration::from_secs(60)),
