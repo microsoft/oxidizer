@@ -17,6 +17,8 @@ use crate::breaker::engine::probing::ProbesOptions;
 /// - [`HalfOpenMode::quick`]: Allows a single probe to determine if the service has recovered.
 /// - [`HalfOpenMode::progressive`]: Gradually increases the percentage of probes over multiple stages (default).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(feature = "serde", test), serde(transparent))]
 pub struct HalfOpenMode {
     inner: Mode,
 }
@@ -68,6 +70,7 @@ impl HalfOpenMode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 enum Mode {
     Quick,
     Progressive(Option<Duration>),

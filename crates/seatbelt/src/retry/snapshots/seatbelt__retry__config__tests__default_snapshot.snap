@@ -1,0 +1,15 @@
+---
+source: crates/seatbelt/src/retry/config.rs
+assertion_line: 66
+expression: config
+---
+{
+  "backoff_type": "Exponential",
+  "base_delay": {
+    "secs": 0,
+    "nanos": 10000000
+  },
+  "max_delay": null,
+  "use_jitter": true,
+  "max_retry_attempts": 3
+}

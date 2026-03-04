@@ -81,6 +81,15 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
         self.into_state::<Set, S2>()
     }
 
+    /// Applies all settings from a [`TimeoutConfig`] to this layer.
+    ///
+    /// This is a convenience method for applying configuration loaded from external sources
+    /// (e.g., configuration files) without calling individual builder methods.
+    #[must_use]
+    pub fn config(self, config: &TimeoutConfig) -> TimeoutLayer<In, Out, Set, S2> {
+        self.timeout(config.timeout)
+    }
+
     /// Sets the timeout result factory function.
     ///
     /// This function is called when a timeout occurs to create the output value

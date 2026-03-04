@@ -129,6 +129,24 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
         self
     }
 
+    /// Applies all settings from a [`RetryConfig`] to this layer.
+    ///
+    /// This is a convenience method for applying configuration loaded from external sources
+    /// (e.g., configuration files) without calling individual builder methods.
+    #[must_use]
+    pub fn config(self, config: &RetryConfig) -> Self {
+        self.backoff(config.backoff_type)
+            .base_delay(config.base_delay)
+            .use_jitter(config.use_jitter)
+            .max_retry_attempts(config.max_retry_attempts)
+            .max_delay_optional(config.max_delay)
+    }
+
+    fn max_delay_optional(mut self, max_delay: Option<Duration>) -> Self {
+        self.backoff.max_delay = max_delay;
+        self
+    }
+
     /// Sets the input cloning function.
     ///
     /// Called before each retry attempt to produce a fresh input value, since

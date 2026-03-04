@@ -200,6 +200,19 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
         self
     }
 
+    /// Applies all settings from a [`BreakerConfig`] to this layer.
+    ///
+    /// This is a convenience method for applying configuration loaded from external sources
+    /// (e.g., configuration files) without calling individual builder methods.
+    #[must_use]
+    pub fn config(self, config: &BreakerConfig) -> Self {
+        self.failure_threshold(config.failure_threshold)
+            .min_throughput(config.min_throughput)
+            .sampling_duration(config.sampling_duration)
+            .break_duration(config.break_duration)
+            .half_open_mode(config.half_open_mode.clone())
+    }
+
     /// Sets the callback to be invoked when the circuit breaker opens.
     ///
     /// This `callback` is called whenever the circuit breaker transitions from

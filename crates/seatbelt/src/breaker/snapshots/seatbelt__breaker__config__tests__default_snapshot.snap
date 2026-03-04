@@ -1,0 +1,20 @@
+---
+source: crates/seatbelt/src/breaker/config.rs
+assertion_line: 69
+expression: config
+---
+{
+  "failure_threshold": 0.1,
+  "min_throughput": 100,
+  "sampling_duration": {
+    "secs": 30,
+    "nanos": 0
+  },
+  "break_duration": {
+    "secs": 5,
+    "nanos": 0
+  },
+  "half_open_mode": {
+    "Progressive": null
+  }
+}

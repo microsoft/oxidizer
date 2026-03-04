@@ -1,0 +1,11 @@
+---
+source: crates/seatbelt/src/timeout/config.rs
+assertion_line: 50
+expression: config
+---
+{
+  "timeout": {
+    "secs": 30,
+    "nanos": 0
+  }
+}
