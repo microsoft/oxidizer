@@ -150,7 +150,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     ///
     /// The circuit breaker will open when the failure rate exceeds the `threshold`
     /// over the sampling duration. The value should be between 0.0 and 1.0, where
-    /// 0.1 represents a `10%` failure threshold. Values greater than 1.0 will be clamped to 1.0.
+    /// 0.1 represents a `10%` failure threshold. Values outside this range are clamped.
     ///
     /// **Default**: 0.1 (`10%` failure rate)
     #[must_use]
