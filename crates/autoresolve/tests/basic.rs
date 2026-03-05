@@ -1,67 +1,85 @@
-use autoresolve_macros::resolvable;
+use autoresolve_macros::{composite, resolvable};
 
 #[derive(Clone)]
-struct Builtins;
+struct Scheduler;
 
-impl Builtins {
+impl Scheduler {
     fn number(&self) -> i32 {
         42
     }
 }
 
 #[derive(Clone)]
+struct Clock;
+
+impl Clock {
+    fn number(&self) -> i32 {
+        42
+    }
+}
+
+#[derive(Clone)]
+#[composite]
+struct Builtins {
+    scheduler: Scheduler,
+    clock: Clock,
+}
+
+#[derive(Clone)]
 struct Validator {
-    builtins: Builtins,
+    scheduler: Scheduler,
 }
 
 #[resolvable]
 impl Validator {
-    fn new(builtins: &Builtins) -> Self {
+    fn new(scheduler: &Scheduler) -> Self {
         Self {
-            builtins: builtins.clone(),
+            scheduler: scheduler.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.builtins.number()
+        self.scheduler.number()
     }
 }
 
 #[derive(Clone)]
 struct Client {
     validator: Validator,
-    builtins: Builtins,
+    clock: Clock,
 }
 
 #[resolvable]
 impl Client {
-    fn new(validator: &Validator, builtins: &Builtins) -> Self {
+    fn new(validator: &Validator, clock: &Clock) -> Self {
         Self {
             validator: validator.clone(),
-            builtins: builtins.clone(),
+            clock: clock.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.validator.number() + self.builtins.number()
+        self.validator.number() + self.clock.number()
     }
 }
 
 #[derive(Clone)]
 struct Config {
-    builtins: Builtins,
+    clock: Clock,
+    scheduler: Scheduler,
 }
 
 #[resolvable]
 impl Config {
-    fn new(builtins: &Builtins) -> Self {
+    fn new(clock: &Clock, scheduler: &Scheduler) -> Self {
         Self {
-            builtins: builtins.clone(),
+            clock: clock.clone(),
+            scheduler: scheduler.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.builtins.number() * 2
+        self.clock.number() * 2
     }
 }
 
@@ -86,11 +104,15 @@ impl MyService {
 
 #[test]
 fn test_autoresolve() {
-    let builtins = Builtins;
+    let builtins = Builtins {
+        scheduler: Scheduler,
+        clock: Clock,
+    };
 
-    let mut resolver = autoresolve::resolver!(Base, builtins: Builtins);
+    let mut resolver = autoresolve::resolver!(MyBase, ..builtins: Builtins);
 
     let service = resolver.get::<MyService>();
 
-    assert_eq!(service.number(), 42 + 42 + 42 + 42);
+    // Validator(42) + Clock(42) + Clock(42)*2 = 42 + 42 + 84 = 168
+    assert_eq!(service.number(), 42 + 42 + 42 * 2);
 }

@@ -1,0 +1,31 @@
+---
+source: crates/autoresolve_macros_impl/src/composite.rs
+expression: pretty_print(result)
+---
+struct Builtins {
+    scheduler: Scheduler,
+    clock: Clock,
+}
+impl ::autoresolve::CompositePart<0usize> for Builtins {
+    type Part = Scheduler;
+}
+impl ::autoresolve::CompositePart<1usize> for Builtins {
+    type Part = Clock;
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! Builtins {
+    (@ impls $base:ident, $self_ty:ty) => {
+        impl ::autoresolve::ResolveFrom < $base > for < $self_ty as
+        ::autoresolve::CompositePart < 0usize >> ::Part { type Inputs =
+        ::autoresolve::ResolutionDepsEnd; fn new(_ : ::autoresolve::ResolutionDepsEnd) ->
+        Self { unreachable!("composite parts are pre-inserted into the resolver") } }
+        impl ::autoresolve::ResolveFrom < $base > for < $self_ty as
+        ::autoresolve::CompositePart < 1usize >> ::Part { type Inputs =
+        ::autoresolve::ResolutionDepsEnd; fn new(_ : ::autoresolve::ResolutionDepsEnd) ->
+        Self { unreachable!("composite parts are pre-inserted into the resolver") } }
+    };
+    (@ insert $resolver:ident, $name:ident) => {
+        $resolver .insert($name .scheduler); $resolver .insert($name .clock);
+    };
+}

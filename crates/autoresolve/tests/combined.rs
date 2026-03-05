@@ -1,31 +1,41 @@
 #![allow(dead_code)] // Test structs exist to exercise the DI graph, not all fields are read.
 
-use autoresolve_macros::resolvable;
+use autoresolve_macros::{composite, resolvable};
 
 #[derive(Clone)]
-struct Builtins;
+struct AppConfig;
 
-impl Builtins {
+impl AppConfig {
     fn number(&self) -> i32 {
         42
     }
 }
 
 #[derive(Clone)]
+struct Logger;
+
+#[derive(Clone)]
+#[composite]
+struct Builtins {
+    app_config: AppConfig,
+    logger: Logger,
+}
+
+#[derive(Clone)]
 struct Validator {
-    builtins: Builtins,
+    app_config: AppConfig,
 }
 
 #[resolvable]
 impl Validator {
-    fn new(builtins: &Builtins) -> Self {
+    fn new(app_config: &AppConfig) -> Self {
         Self {
-            builtins: builtins.clone(),
+            app_config: app_config.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.builtins.number()
+        self.app_config.number()
     }
 }
 
@@ -49,22 +59,22 @@ impl SdkProvider {
 #[derive(Clone)]
 struct Client {
     validator: Validator,
-    builtins: Builtins,
+    app_config: AppConfig,
     telemetry: Telemetry,
 }
 
 #[resolvable]
 impl Client {
-    fn new(validator: &Validator, builtins: &Builtins, telemetry: &Telemetry) -> Self {
+    fn new(validator: &Validator, app_config: &AppConfig, telemetry: &Telemetry) -> Self {
         Self {
             validator: validator.clone(),
-            builtins: builtins.clone(),
+            app_config: app_config.clone(),
             telemetry: telemetry.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.validator.number() + self.builtins.number()
+        self.validator.number() + self.app_config.number()
     }
 }
 
@@ -86,34 +96,37 @@ impl CorrelationVector {
 struct OutboundClient {
     correlation_vector: CorrelationVector,
     client: Client,
-    builtins: Builtins,
+    logger: Logger,
 }
 
 #[resolvable]
 impl OutboundClient {
-    fn new(correlation_vector: &CorrelationVector, client: &Client, builtins: &Builtins) -> Self {
+    fn new(correlation_vector: &CorrelationVector, client: &Client, logger: &Logger) -> Self {
         Self {
             correlation_vector: correlation_vector.clone(),
             client: client.clone(),
-            builtins: builtins.clone(),
+            logger: logger.clone(),
         }
     }
 }
 
 #[test]
 fn test_combined() {
-    let builtins = Builtins;
+    let builtins = Builtins {
+        app_config: AppConfig,
+        logger: Logger,
+    };
     let telemetry = Telemetry;
     let request = Request;
 
     let mut resolver = autoresolve::resolver!(Base,
-        builtins: Builtins,
+        ..builtins: Builtins,
         telemetry: Telemetry,
         request: Request,
     );
 
     let outbound = resolver.get::<OutboundClient>();
-    // Verify the object was constructed — Client depends on Validator + Builtins + Telemetry,
-    // OutboundClient depends on CorrelationVector + Client + Builtins.
+    // Verify the object was constructed — Client depends on Validator + AppConfig + Telemetry,
+    // OutboundClient depends on CorrelationVector + Client + Logger.
     assert_eq!(outbound.client.number(), 42 + 42);
 }
