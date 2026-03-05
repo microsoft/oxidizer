@@ -13,9 +13,10 @@ use std::time::Duration;
 use layered::Service;
 use tick::{Clock, FutureExt};
 
+use crate::ResilienceContext;
 use crate::timeout::*;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{NotSet, ResilienceContext};
 
 /// Applies a timeout to service execution for canceling long-running operations.
 ///
@@ -230,7 +231,6 @@ impl<In, Out> TimeoutShared<In, Out> {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(not(miri))] // tokio runtime does not support Miri.
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;
@@ -241,6 +241,7 @@ mod tests {
     use super::*;
     use crate::testing::FailReadyService;
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn timeout_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
@@ -278,6 +279,7 @@ mod tests {
         log_capture.assert_contains("timeout.ms=100");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn timeout_emits_metrics() {
         use opentelemetry::KeyValue;
@@ -320,6 +322,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn timeout_future_debug_contains_struct_name() {
         let future = TimeoutFuture::<String> {
@@ -330,6 +333,7 @@ mod tests {
         assert!(debug_output.contains("TimeoutFuture"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn poll_ready_propagates_inner_error() {
         let context = crate::ResilienceContext::<String, Result<String, String>>::new(tick::Clock::new_frozen()).name("test");

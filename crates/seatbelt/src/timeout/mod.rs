@@ -78,7 +78,7 @@
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when a timeout occurs
+//! - **When**: Emitted when the inner service does not complete within the configured timeout duration
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Timeout identifier from [`Timeout::layer`]
@@ -173,6 +173,7 @@
 //! ```
 mod args;
 mod callbacks;
+mod config;
 mod layer;
 mod service;
 
@@ -181,6 +182,7 @@ mod telemetry;
 
 pub use args::{OnTimeoutArgs, TimeoutOutputArgs, TimeoutOverrideArgs};
 pub(crate) use callbacks::{OnTimeout, TimeoutOutput, TimeoutOverride};
+pub use config::TimeoutConfig;
 pub use layer::TimeoutLayer;
 pub use service::Timeout;
 #[cfg(feature = "tower-service")]

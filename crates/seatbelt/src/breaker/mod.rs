@@ -160,7 +160,8 @@
 //! ## Metrics
 //!
 //! - **Metric**: `resilience.event` (counter)
-//! - **When**: Emitted when circuit state transitions occur and when inputs are rejected
+//! - **When**: Emitted when the circuit state transitions (opened, closed) or when an
+//!   input is rejected or allowed to enter when the circuit is in open state.
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Circuit breaker identifier from [`Breaker::layer`]
@@ -282,11 +283,13 @@
 
 mod args;
 mod callbacks;
+mod config;
 mod layer;
 mod service;
 #[doc(inline)]
 pub use args::{OnClosedArgs, OnOpenedArgs, OnProbingArgs, RecoveryArgs, RejectedInputArgs};
 pub(super) use callbacks::*;
+pub use config::BreakerConfig;
 #[doc(inline)]
 pub use layer::BreakerLayer;
 #[doc(inline)]

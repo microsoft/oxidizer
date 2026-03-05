@@ -8,8 +8,9 @@ use std::time::Duration;
 use layered::Layer;
 
 use crate::timeout::*;
+use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{NotSet, ResilienceContext, Set, TelemetryString};
+use crate::{ResilienceContext, TelemetryString};
 
 /// Builder for configuring timeout resilience middleware.
 ///
@@ -44,7 +45,7 @@ impl<In, Out> TimeoutLayer<In, Out, NotSet, NotSet> {
             timeout: None,
             timeout_output: None,
             on_timeout: None,
-            enable_if: EnableIf::always(),
+            enable_if: EnableIf::default(),
             telemetry: context.create_telemetry(name),
             context: context.clone(),
             timeout_override: None,
@@ -79,6 +80,15 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     pub fn timeout(mut self, timeout: Duration) -> TimeoutLayer<In, Out, Set, S2> {
         self.timeout = Some(timeout);
         self.into_state::<Set, S2>()
+    }
+
+    /// Applies all settings from a [`TimeoutConfig`] to this layer.
+    ///
+    /// This is a convenience method for applying configuration loaded from external sources
+    /// (e.g., configuration files) without calling individual builder methods.
+    #[must_use]
+    pub fn config(self, config: &TimeoutConfig) -> TimeoutLayer<In, Out, Set, S2> {
+        self.timeout(config.timeout).enable(config.enabled)
     }
 
     /// Sets the timeout result factory function.
@@ -140,7 +150,17 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     /// **Default**: Always enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
-        self.enable_if = EnableIf::new(is_enabled);
+        self.enable_if = EnableIf::custom(is_enabled);
+        self
+    }
+
+    /// Enables or disables the timeout middleware.
+    ///
+    /// When disabled, requests pass through without timeout protection.
+    /// This call replaces any previous condition.
+    #[must_use]
+    fn enable(mut self, enabled: bool) -> Self {
+        self.enable_if = EnableIf::new(enabled);
         self
     }
 
@@ -151,9 +171,8 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This is the default behavior - timeout is enabled by default.
     #[must_use]
-    pub fn enable_always(mut self) -> Self {
-        self.enable_if = EnableIf::always();
-        self
+    pub fn enable_always(self) -> Self {
+        self.enable(true)
     }
 
     /// Disables the timeout middleware completely.
@@ -163,9 +182,8 @@ impl<In, Out, S1, S2> TimeoutLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This overrides the default enabled behavior.
     #[must_use]
-    pub fn disable(mut self) -> Self {
-        self.enable_if = EnableIf::never();
-        self
+    pub fn disable(self) -> Self {
+        self.enable(false)
     }
 }
 
@@ -217,17 +235,11 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn new_needs_timeout_output() {
-        let context = create_test_context();
-        let layer: TimeoutLayer<_, _, NotSet, NotSet> = TimeoutLayer::new("test_timeout".into(), &context);
-
-        assert!(layer.timeout.is_none());
-        assert!(layer.timeout_output.is_none());
-        assert!(layer.on_timeout.is_none());
-        assert!(layer.timeout_override.is_none());
-        assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_timeout");
-        assert!(layer.enable_if.call(&"test_input".to_string()));
+        let layer = create_ready_layer();
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[test]
@@ -360,6 +372,22 @@ mod tests {
     #[test]
     fn layer_ok() {
         let _layered = create_ready_layer().layer(Execute::new(|input: String| async move { input }));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn config_applies_all_settings() {
+        let config = TimeoutConfig {
+            enabled: false,
+            timeout: Duration::from_secs(45),
+        };
+
+        let context = create_test_context();
+        let layer = TimeoutLayer::new("test".into(), &context)
+            .timeout_output(|_args| "timeout".to_string())
+            .config(&config);
+
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[test]

@@ -13,7 +13,7 @@ use layered::Service;
 use tick::Clock;
 
 use super::*;
-use crate::NotSet;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
 /// Applies circuit breaker logic to prevent cascading failures.
@@ -239,7 +239,6 @@ impl<In, Out> BreakerShared<In, Out> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[cfg(not(miri))]
 mod tests {
     use std::future::poll_fn;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -251,8 +250,10 @@ mod tests {
     use super::*;
     use crate::breaker::constants::DEFAULT_BREAK_DURATION;
     use crate::testing::FailReadyService;
-    use crate::{RecoveryInfo, ResilienceContext, Set};
+    use crate::typestates::Set;
+    use crate::{RecoveryInfo, ResilienceContext};
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
@@ -261,11 +262,10 @@ mod tests {
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input(|_, _| "rejected".to_string());
 
-        let breaker = layer.layer(Execute::new(|v: String| async move { v }));
-
-        assert!(breaker.shared.enable_if.call(&"str".to_string()));
+        insta::assert_debug_snapshot!(layer);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn before_execute_accepted() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -287,6 +287,7 @@ mod tests {
         assert_eq!(result, ("test".to_string(), ExecutionMode::Normal));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn before_execute_accepted_with_probing() {
         let probing_called = Arc::new(AtomicBool::new(false));
@@ -315,6 +316,7 @@ mod tests {
         assert!(probing_called_clone.load(std::sync::atomic::Ordering::SeqCst));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn before_execute_rejected() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -331,6 +333,7 @@ mod tests {
         assert_eq!(result, "rejected");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_unchanged() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -351,6 +354,7 @@ mod tests {
             .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_reopened() {
         let service = create_ready_breaker_layer(&Clock::new_frozen())
@@ -371,6 +375,7 @@ mod tests {
             .after_execute(&engine, &"success".to_string(), ExecutionMode::Normal, &BreakerId::default());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_opened() {
         let opened_called = Arc::new(AtomicBool::new(false));
@@ -397,6 +402,7 @@ mod tests {
         assert!(opened_called_clone.load(Ordering::SeqCst));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn after_execute_closed() {
         let closed_called = Arc::new(AtomicBool::new(false));
@@ -426,6 +432,7 @@ mod tests {
         assert!(closed_called_clone.load(Ordering::SeqCst));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn breaker_emits_logs() {
         use tracing_subscriber::util::SubscriberInitExt;
@@ -491,6 +498,7 @@ mod tests {
             .rejected_input(|_, _| "circuit is open".to_string())
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn breaker_future_debug_contains_type_name() {
         let future = BreakerFuture::<String> {
@@ -502,6 +510,7 @@ mod tests {
         assert!(debug_output.contains("BreakerFuture"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn poll_ready_propagates_inner_error() {
         let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");

@@ -14,8 +14,9 @@ use layered::Service;
 use tick::Clock;
 
 use super::*;
+use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{NotSet, RecoveryInfo, RecoveryKind};
+use crate::{RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
 ///
@@ -150,13 +151,13 @@ impl<In, Out> RetryShared<In, Out> {
         }
 
         let Some(next_attempt) = attempt.increment(self.max_attempts) else {
-            self.emit_telemetry(attempt, Duration::ZERO);
+            self.emit_telemetry(attempt, Duration::ZERO, recovery.kind());
             return ControlFlow::Break(out);
         };
 
         let retry_delay = compute_retry_delay(&recovery, delays);
 
-        self.emit_telemetry(attempt, retry_delay);
+        self.emit_telemetry(attempt, retry_delay, recovery.kind());
 
         if let Some(input) = self.try_restore_input(original_input.as_ref(), &mut out, attempt, &recovery) {
             original_input = Some(input);
@@ -219,7 +220,7 @@ impl<In, Out> RetryShared<In, Out> {
         not(any(feature = "logs", test)),
         expect(unused_variables, clippy::unused_self, reason = "unused when logs feature not used")
     )]
-    fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration) {
+    fn emit_telemetry(&self, attempt: Attempt, retry_delay: Duration, recovery_kind: RecoveryKind) {
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
@@ -230,20 +231,22 @@ impl<In, Out> RetryShared<In, Out> {
                 resilience.attempt.index = attempt.index(),
                 resilience.attempt.is_last = attempt.is_last(),
                 resilience.retry.delay = retry_delay.as_secs_f32(),
+                resilience.attempt.recovery.kind = %recovery_kind,
             );
         }
 
         #[cfg(any(feature = "metrics", test))]
         if self.telemetry.metrics_enabled() {
-            use super::telemetry::{ATTEMPT_INDEX, ATTEMPT_NUMBER_IS_LAST, RETRY_EVENT};
-            use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+            use super::telemetry::RETRY_EVENT;
+            use crate::utils::{ATTEMPT_INDEX, ATTEMPT_IS_LAST, ATTEMPT_RECOVERY_KIND, EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
 
             self.telemetry.report_metrics(&[
                 opentelemetry::KeyValue::new(PIPELINE_NAME, self.telemetry.pipeline_name.clone()),
                 opentelemetry::KeyValue::new(STRATEGY_NAME, self.telemetry.strategy_name.clone()),
                 opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
-                opentelemetry::KeyValue::new(ATTEMPT_NUMBER_IS_LAST, attempt.is_last()),
+                opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
+                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind.to_string()),
             ]);
         }
     }
@@ -344,7 +347,6 @@ where
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(not(miri))] // Oxidizer runtime does not support Miri.
 #[cfg(test)]
 mod tests {
     use std::future::poll_fn;
@@ -354,27 +356,21 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
+    use crate::ResilienceContext;
     use crate::testing::{FailReadyService, MetricTester};
-    use crate::{ResilienceContext, Set};
+    use crate::typestates::Set;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn layer_ensure_defaults() {
         let context = ResilienceContext::<String, String>::new(Clock::new_frozen()).name("test_pipeline");
         let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &context);
         let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
-        let retry = layer.layer(Execute::new(|v: String| async move { v }));
-
-        assert_eq!(retry.shared.telemetry.pipeline_name.to_string(), "test_pipeline");
-        assert_eq!(retry.shared.telemetry.strategy_name.to_string(), "test_retry");
-        assert_eq!(retry.shared.max_attempts, 4);
-        assert_eq!(retry.shared.backoff.0.base_delay, Duration::from_millis(10));
-        assert_eq!(retry.shared.backoff.0.backoff_type, Backoff::Exponential);
-        assert!(retry.shared.backoff.0.use_jitter);
-        assert!(retry.shared.on_retry.is_none());
-        assert!(retry.shared.enable_if.call(&"str".to_string()));
+        insta::assert_debug_snapshot!(layer);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
@@ -396,14 +392,16 @@ mod tests {
                 KeyValue::new("resilience.attempt.index", 1),
                 KeyValue::new("resilience.attempt.is_last", false),
                 KeyValue::new("resilience.attempt.is_last", true),
+                KeyValue::new("resilience.attempt.recovery.kind", "retry"),
                 KeyValue::new("resilience.pipeline.name", "test_pipeline"),
                 KeyValue::new("resilience.strategy.name", "test_retry"),
                 KeyValue::new("resilience.event.name", "retry"),
             ],
-            Some(15),
+            Some(18),
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn retry_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
@@ -429,6 +427,7 @@ mod tests {
         log_capture.assert_contains("log_test_retry");
         log_capture.assert_contains("resilience.attempt.index");
         log_capture.assert_contains("resilience.retry.delay");
+        log_capture.assert_contains("resilience.attempt.recovery.kind");
     }
 
     fn create_ready_retry_layer_core(
@@ -441,6 +440,7 @@ mod tests {
             .max_delay(Duration::from_secs(9999)) // protect against infinite backoff
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn retry_future_debug_contains_struct_name() {
         let future = RetryFuture::<String> {
@@ -451,6 +451,7 @@ mod tests {
         assert!(debug_output.contains("RetryFuture"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn poll_ready_propagates_inner_error() {
         let context = ResilienceContext::<String, Result<String, String>>::new(Clock::new_frozen()).name("test");
