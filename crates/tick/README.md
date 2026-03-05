@@ -227,7 +227,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGz7KKTW0dfOsG9isIGaAJFgLG46I588nbhKOGwWGOQ6clON2YWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCZHRpY2tlMC4yLjE
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzMlfWB9hdkfGwdyjWN2zh_xG4wVy-B70uSjG_8Zj381ny-7YWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCZHRpY2tlMC4yLjE
  [__link0]: https://docs.rs/tick/0.2.1/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.2.1/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.2.1/tick/?search=FutureExt
