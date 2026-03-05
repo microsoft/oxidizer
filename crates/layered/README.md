@@ -121,12 +121,12 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9cd3_rKpXlxG3cPQgH_Ia06Gylje5wjfL8MG8IUl5cvZMADYWSBgmdsYXllcmVkZTAuMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9cd3_rKpXlxG3cPQgH_Ia06Gylje5wjfL8MG8IUl5cvZMADYWSEgm5EeW5hbWljU2VydmljZfaCaUludGVyY2VwdPaCZ2xheWVyZWRlMC4zLjCCZXRvd2VyZTAuNS4z
  [__link0]: https://docs.rs/layered/0.3.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
- [__link10]: https://docs.rs/layered/0.3.0/layered/?search=Intercept
- [__link11]: https://docs.rs/layered/0.3.0/layered/?search=DynamicService
- [__link12]: https://docs.rs/layered/0.3.0/layered/tower/index.html
+ [__link10]: https://crates.io/crates/Intercept
+ [__link11]: https://crates.io/crates/DynamicService
+ [__link12]: https://crates.io/crates/tower/0.5.3
  [__link2]: https://docs.rs/layered/0.3.0/layered/?search=Service
  [__link3]: https://docs.rs/layered/0.3.0/layered/?search=Execute
  [__link4]: https://docs.rs/layered/0.3.0/layered/?search=Service
