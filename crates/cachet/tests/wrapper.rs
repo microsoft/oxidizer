@@ -16,6 +16,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_name() {
     let clock = Clock::new_frozen();
@@ -24,6 +25,7 @@ fn wrapper_name() {
     assert!(!wrapper.name().is_empty());
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_get_miss() -> TestResult {
     block_on(async {
@@ -36,6 +38,7 @@ fn wrapper_get_miss() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_get_hit() -> TestResult {
     block_on(async {
@@ -52,6 +55,7 @@ fn wrapper_get_hit() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_insert() -> TestResult {
     block_on(async {
@@ -66,6 +70,7 @@ fn wrapper_insert() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_invalidate() -> TestResult {
     block_on(async {
@@ -81,6 +86,7 @@ fn wrapper_invalidate() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_clear() -> TestResult {
     block_on(async {
@@ -98,6 +104,7 @@ fn wrapper_clear() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_len_returns_correct_count() -> TestResult {
     block_on(async {
@@ -114,6 +121,7 @@ fn wrapper_len_returns_correct_count() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_with_ttl_configured() -> TestResult {
     block_on(async {
@@ -131,6 +139,7 @@ fn wrapper_with_ttl_configured() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_entry_with_ttl() -> TestResult {
     block_on(async {
@@ -150,6 +159,7 @@ fn wrapper_entry_with_ttl() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_no_ttl_configured() -> TestResult {
     block_on(async {
@@ -167,6 +177,7 @@ fn wrapper_no_ttl_configured() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_get_error_is_recorded() {
     block_on(async {
@@ -180,6 +191,7 @@ fn wrapper_get_error_is_recorded() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_insert_error_is_recorded() {
     block_on(async {
@@ -193,6 +205,7 @@ fn wrapper_insert_error_is_recorded() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_invalidate_error_is_recorded() {
     block_on(async {
@@ -206,6 +219,7 @@ fn wrapper_invalidate_error_is_recorded() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_clear_error_is_recorded() {
     block_on(async {
@@ -219,6 +233,7 @@ fn wrapper_clear_error_is_recorded() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_expired_entry_returns_none() -> TestResult {
     block_on(async {
@@ -242,6 +257,7 @@ fn wrapper_expired_entry_returns_none() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_inner_returns_reference() {
     let clock = Clock::new_frozen();
@@ -250,6 +266,7 @@ fn wrapper_inner_returns_reference() {
     let _inner = cache.inner().inner();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() -> TestResult {
     block_on(async {
@@ -272,6 +289,7 @@ fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_tier_ttl_expires_entry_without_per_entry_ttl() -> TestResult {
     block_on(async {

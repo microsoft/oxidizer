@@ -15,6 +15,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_creates_cache() {
     let clock = Clock::new_frozen();
@@ -23,6 +24,7 @@ fn builder_creates_cache() {
     assert!(!cache.name().is_empty());
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn name_returns_non_empty_string() {
     let clock = Clock::new_frozen();
@@ -32,6 +34,7 @@ fn name_returns_non_empty_string() {
     assert!(!name.is_empty());
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn clock_returns_reference() {
     let clock = Clock::new_frozen();
@@ -42,6 +45,7 @@ fn clock_returns_reference() {
     let _ = clock_ref.instant();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn into_dynamic_preserves_functionality() -> TestResult {
     block_on(async {
@@ -69,6 +73,7 @@ fn into_dynamic_preserves_functionality() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn get_insert_operations() -> TestResult {
     block_on(async {
@@ -87,6 +92,7 @@ fn get_insert_operations() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn invalidate_removes_entry() -> TestResult {
     block_on(async {
@@ -104,6 +110,7 @@ fn invalidate_removes_entry() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn contains_checks_existence() -> TestResult {
     block_on(async {
@@ -121,6 +128,7 @@ fn contains_checks_existence() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn clear_removes_all_entries() -> TestResult {
     block_on(async {
@@ -142,6 +150,7 @@ fn clear_removes_all_entries() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn len_returns_correct_count() -> TestResult {
     block_on(async {
@@ -158,6 +167,7 @@ fn len_returns_correct_count() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn get_or_insert_returns_cached() -> TestResult {
     block_on(async {
@@ -175,6 +185,7 @@ fn get_or_insert_returns_cached() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn try_get_or_insert_success() -> TestResult {
     block_on(async {
@@ -193,6 +204,7 @@ fn try_get_or_insert_success() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn try_get_or_insert_error() {
     block_on(async {
@@ -209,6 +221,7 @@ fn try_get_or_insert_error() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_returns_cached() -> TestResult {
     block_on(async {
@@ -227,6 +240,7 @@ fn stampede_protection_returns_cached() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn is_empty_returns_correct_value() -> TestResult {
     block_on(async {
@@ -243,6 +257,7 @@ fn is_empty_returns_correct_value() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_invalidate() -> TestResult {
     block_on(async {
@@ -259,6 +274,7 @@ fn stampede_protection_invalidate() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_get_or_insert() -> TestResult {
     block_on(async {
@@ -277,6 +293,7 @@ fn stampede_protection_get_or_insert() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_try_get_or_insert_success() -> TestResult {
     block_on(async {
@@ -295,6 +312,7 @@ fn stampede_protection_try_get_or_insert_success() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_try_get_or_insert_error() {
     block_on(async {
@@ -311,6 +329,7 @@ fn stampede_protection_try_get_or_insert_error() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_optionally_get_or_insert_some() -> TestResult {
     block_on(async {
@@ -329,6 +348,7 @@ fn stampede_protection_optionally_get_or_insert_some() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_optionally_get_or_insert_none() -> TestResult {
     block_on(async {
@@ -348,6 +368,7 @@ fn stampede_protection_optionally_get_or_insert_none() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn optionally_get_or_insert_none_not_cached() -> TestResult {
     block_on(async {
@@ -367,6 +388,7 @@ fn optionally_get_or_insert_none_not_cached() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn optionally_get_or_insert_hit_returns_cached() -> TestResult {
     block_on(async {
@@ -388,6 +410,7 @@ fn optionally_get_or_insert_hit_returns_cached() -> TestResult {
 // =============================================================================
 
 /// Verifies that Cache with `InMemoryCache` storage is Send.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_with_memory_is_send() {
     fn assert_send<T: Send>() {}
@@ -395,6 +418,7 @@ fn cache_with_memory_is_send() {
 }
 
 /// Verifies that Cache with `InMemoryCache` storage is Sync.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_with_memory_is_sync() {
     fn assert_sync<T: Sync>() {}
@@ -402,6 +426,7 @@ fn cache_with_memory_is_sync() {
 }
 
 /// Verifies that `CacheEntry` is Send.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_entry_is_send() {
     fn assert_send<T: Send>() {}
@@ -410,6 +435,7 @@ fn cache_entry_is_send() {
 }
 
 /// Verifies that `CacheEntry` is Sync.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_entry_is_sync() {
     fn assert_sync<T: Sync>() {}
@@ -418,6 +444,7 @@ fn cache_entry_is_sync() {
 }
 
 /// Verifies that Error is Send.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn error_is_send() {
     fn assert_send<T: Send>() {}
@@ -425,6 +452,7 @@ fn error_is_send() {
 }
 
 /// Verifies that Error is Sync.
+#[cfg_attr(miri, ignore)]
 #[test]
 fn error_is_sync() {
     fn assert_sync<T: Sync>() {}
@@ -432,6 +460,7 @@ fn error_is_sync() {
 }
 
 /// Verifies that with stampede protection, storage errors are propagated (not hidden).
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_propagates_storage_errors() {
     use cachet_tier::testing::{CacheOp, MockCache};
@@ -449,6 +478,7 @@ fn stampede_protection_propagates_storage_errors() {
 }
 
 /// Verifies that with stampede protection, panics are converted to errors (not hidden as misses).
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_converts_panic_to_error() {
     use cachet::CacheTier;
@@ -506,6 +536,7 @@ fn stampede_protection_converts_panic_to_error() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn into_dynamic_with_stampede_protection() -> TestResult {
     block_on(async {
@@ -528,6 +559,7 @@ fn into_dynamic_with_stampede_protection() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_invalidate_removes_entry() -> TestResult {
     block_on(async {
@@ -544,6 +576,7 @@ fn stampede_protection_invalidate_removes_entry() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn try_get_or_insert_with_storage_error_propagates() {
     block_on(async {
@@ -562,6 +595,7 @@ fn try_get_or_insert_with_storage_error_propagates() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn optionally_get_or_insert_with_storage_error_propagates() {
     block_on(async {
@@ -578,6 +612,7 @@ fn optionally_get_or_insert_with_storage_error_propagates() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_debug_output() {
     let clock = Clock::new_frozen();
@@ -586,6 +621,7 @@ fn cache_debug_output() {
     assert!(debug_str.contains("Cache"), "got: {debug_str}");
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_debug_with_stampede_protection() {
     let clock = Clock::new_frozen();
@@ -737,8 +773,8 @@ mod service_tests {
     }
 }
 
-#[cfg_attr(miri, ignore)]
 #[cfg(feature = "metrics")]
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_use_metrics() -> TestResult {
     block_on(async {

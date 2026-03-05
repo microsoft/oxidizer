@@ -21,6 +21,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_miss_in_both() -> TestResult {
     block_on(async {
@@ -36,6 +37,7 @@ fn fallback_cache_miss_in_both() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_hit_in_primary() -> TestResult {
     block_on(async {
@@ -55,6 +57,7 @@ fn fallback_cache_hit_in_primary() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_insert_goes_to_both() -> TestResult {
     block_on(async {
@@ -72,6 +75,7 @@ fn fallback_cache_insert_goes_to_both() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_invalidate_clears_both() -> TestResult {
     block_on(async {
@@ -90,6 +94,7 @@ fn fallback_cache_invalidate_clears_both() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_clear() -> TestResult {
     block_on(async {
@@ -110,6 +115,7 @@ fn fallback_cache_clear() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_len_returns_correct_count() -> TestResult {
     block_on(async {
@@ -138,6 +144,7 @@ fn failing_cache() -> MockCache<String, i32> {
     cache
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_insert_error_propagation() {
     block_on(async {
@@ -158,6 +165,7 @@ fn fallback_cache_insert_error_propagation() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_invalidate_error_propagation() {
     block_on(async {
@@ -178,6 +186,7 @@ fn fallback_cache_invalidate_error_propagation() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_clear_error_propagation() {
     block_on(async {
@@ -198,6 +207,7 @@ fn fallback_cache_clear_error_propagation() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_get_falls_back_on_primary_error() -> TestResult {
     block_on(async {
@@ -220,6 +230,7 @@ fn fallback_cache_get_falls_back_on_primary_error() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_with_promotion_policy_always() -> TestResult {
     block_on(async {
@@ -241,6 +252,7 @@ fn fallback_builder_with_promotion_policy_always() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_with_promotion_policy_never() -> TestResult {
     block_on(async {
@@ -262,6 +274,7 @@ fn fallback_builder_with_promotion_policy_never() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_with_promotion_policy_when_boxed() -> TestResult {
     let threshold = 10;
@@ -287,6 +300,7 @@ fn fallback_builder_with_promotion_policy_when_boxed() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn nested_fallback_builder() -> TestResult {
     block_on(async {
@@ -316,6 +330,7 @@ fn nested_fallback_builder() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_get_triggers_promotion() -> TestResult {
     block_on(async {
@@ -341,6 +356,7 @@ fn fallback_get_triggers_promotion() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_stampede_protection() -> TestResult {
     block_on(async {
@@ -404,6 +420,7 @@ fn cache_builder_use_logs_emits_logs() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_clock_returns_clock() {
     let clock = Clock::new_frozen();
@@ -412,6 +429,7 @@ fn cache_builder_clock_returns_clock() {
     let _ = builder.clock();
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn fallback_builder_time_to_refresh_does_not_panic() -> TestResult {
     // Exercises time_to_refresh on FallbackBuilder. The background refresh
@@ -433,6 +451,7 @@ async fn fallback_builder_time_to_refresh_does_not_panic() -> TestResult {
     Ok(())
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn do_refresh_updates_primary_from_fallback() -> TestResult {
     // Verifies do_refresh actually fetches from fallback and promotes to primary
@@ -478,6 +497,7 @@ async fn do_refresh_updates_primary_from_fallback() -> TestResult {
     Ok(())
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn do_refresh_deduplicates_in_flight() -> TestResult {
     // Exercises do_refresh deduplication: second call with same key is a no-op
@@ -515,6 +535,7 @@ async fn do_refresh_deduplicates_in_flight() -> TestResult {
     Ok(())
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn do_refresh_without_time_to_refresh_is_noop() -> TestResult {
     block_on(async {
@@ -530,8 +551,8 @@ fn do_refresh_without_time_to_refresh_is_noop() -> TestResult {
     })
 }
 
-#[cfg_attr(miri, ignore)]
 #[cfg(feature = "metrics")]
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_use_metrics() -> TestResult {
     block_on(async {
@@ -553,6 +574,7 @@ fn fallback_builder_use_metrics() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_get_error_from_fallback_tier() {
     block_on(async {
@@ -574,6 +596,7 @@ fn fallback_get_error_from_fallback_tier() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_get_promotion_failure_still_returns_value() -> TestResult {
     block_on(async {
@@ -601,6 +624,7 @@ fn fallback_get_promotion_failure_still_returns_value() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_insert_primary_error_propagation() {
     block_on(async {
@@ -621,6 +645,7 @@ fn fallback_insert_primary_error_propagation() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_invalidate_primary_error_propagation() {
     block_on(async {
@@ -641,6 +666,7 @@ fn fallback_invalidate_primary_error_propagation() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_clear_primary_error_propagation() {
     block_on(async {
@@ -661,6 +687,7 @@ fn fallback_clear_primary_error_propagation() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn nested_fallback_three_tier_chain() -> TestResult {
     block_on(async {

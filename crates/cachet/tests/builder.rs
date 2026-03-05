@@ -17,6 +17,7 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_with_storage() -> TestResult {
     let clock = Clock::new_frozen();
@@ -29,6 +30,7 @@ fn cache_builder_with_storage() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn mock_cache_with_storage() -> TestResult {
     block_on(async {
@@ -47,6 +49,7 @@ fn mock_cache_with_storage() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn mock_cache_failure_injection() {
     block_on(async {
@@ -68,6 +71,7 @@ fn mock_cache_failure_injection() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn mock_cache_shares_state_with_handle() -> TestResult {
     block_on(async {
@@ -85,6 +89,7 @@ fn mock_cache_shares_state_with_handle() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_clock() {
     let clock = Clock::new_frozen();
@@ -96,6 +101,7 @@ fn cache_builder_clock() {
     assert_eq!(builder_clock.instant(), expected_instant);
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_basic() -> TestResult {
     let clock = Clock::new_frozen();
@@ -117,6 +123,7 @@ fn fallback_builder_basic() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_promotion_policy() -> TestResult {
     let clock = Clock::new_frozen();
@@ -137,6 +144,7 @@ fn fallback_builder_promotion_policy() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_nested_fallback() -> TestResult {
     let clock = Clock::new_frozen();

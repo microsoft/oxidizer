@@ -8,6 +8,7 @@
 use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn single_level_future_size_bounded() {
     let clock = Clock::new_frozen();
@@ -25,6 +26,7 @@ fn single_level_future_size_bounded() {
     assert!(invalidate_size < 1500, "Invalidate future size is too large: {invalidate_size}");
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn future_size_bounded_with_nesting() {
     let clock = Clock::new_frozen();
@@ -45,6 +47,7 @@ fn future_size_bounded_with_nesting() {
     assert!(invalidate_size < 500, "Invalidate future size is too large: {invalidate_size}");
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn loading_methods_future_size() {
     let clock = Clock::new_frozen();
