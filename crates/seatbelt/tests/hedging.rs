@@ -191,9 +191,7 @@ async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_delay_with(|_input, args| {
-                Duration::from_millis(100 * u64::from(args.attempt().index()))
-            })
+            .hedging_delay_with(|_input, args| Duration::from_millis(100 * u64::from(args.attempt().index())))
             .max_hedged_attempts(2),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);

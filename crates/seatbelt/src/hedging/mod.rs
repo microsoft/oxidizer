@@ -206,6 +206,7 @@
 
 mod args;
 mod callbacks;
+mod config;
 mod constants;
 mod layer;
 mod service;
@@ -213,6 +214,7 @@ mod telemetry;
 
 pub use crate::attempt::Attempt;
 pub use args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
+pub use config::HedgingConfig;
 pub use layer::HedgingLayer;
 pub use service::Hedging;
 #[cfg(feature = "tower-service")]

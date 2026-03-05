@@ -9,8 +9,9 @@ use layered::Layer;
 
 use crate::hedging::args::*;
 use crate::hedging::callbacks::*;
-use crate::hedging::constants::DEFAULT_MAX_HEDGED_ATTEMPTS;
+use crate::hedging::config::HedgingConfig;
 use crate::hedging::constants::DEFAULT_HEDGING_DELAY;
+use crate::hedging::constants::DEFAULT_MAX_HEDGED_ATTEMPTS;
 use crate::hedging::service::{Hedging, HedgingShared};
 use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
@@ -117,11 +118,24 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     ///
     /// **Default**: 500 milliseconds (fixed)
     #[must_use]
-    pub fn hedging_delay_with(
-        mut self,
-        delay_fn: impl Fn(&In, HedgingDelayArgs) -> Duration + Send + Sync + 'static,
-    ) -> Self {
+    pub fn hedging_delay_with(mut self, delay_fn: impl Fn(&In, HedgingDelayArgs) -> Duration + Send + Sync + 'static) -> Self {
         self.delay_fn = DelayFn::new(delay_fn);
+        self
+    }
+
+    /// Applies all settings from a [`HedgingConfig`] to this layer.
+    ///
+    /// This is a convenience method for applying configuration loaded from external sources
+    /// (e.g., configuration files) without calling individual builder methods.
+    #[must_use]
+    pub fn config(self, config: &HedgingConfig) -> Self {
+        self.hedging_delay(config.hedging_delay)
+            .max_hedged_attempts(config.max_hedged_attempts)
+            .enable(config.enabled)
+    }
+
+    fn enable(mut self, enabled: bool) -> Self {
+        self.enable_if = EnableIf::new(enabled);
         self
     }
 
@@ -382,9 +396,7 @@ mod tests {
 
     #[test]
     fn configuration_methods_work() {
-        let layer = create_ready_layer()
-            .max_hedged_attempts(3)
-            .hedging_delay(Duration::ZERO);
+        let layer = create_ready_layer().max_hedged_attempts(3).hedging_delay(Duration::ZERO);
 
         assert_eq!(layer.max_hedged_attempts, 3);
         let args = HedgingDelayArgs {
@@ -446,6 +458,28 @@ mod tests {
 
         let layer = layer.handle_unavailable(true);
         assert!(layer.handle_unavailable);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn config_applies_all_settings() {
+        let config = HedgingConfig {
+            enabled: false,
+            hedging_delay: Duration::from_secs(2),
+            max_hedged_attempts: 4,
+        };
+
+        let layer = create_ready_layer().config(&config);
+
+        insta::assert_debug_snapshot!(layer);
+
+        let delay = layer.delay_fn.call(
+            &String::default(),
+            HedgingDelayArgs {
+                attempt: Attempt::default(),
+            },
+        );
+        assert_eq!(delay, Duration::from_secs(2));
     }
 
     #[test]
