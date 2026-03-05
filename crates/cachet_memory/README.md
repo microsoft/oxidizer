@@ -49,6 +49,6 @@ assert_eq!(*value.unwrap().value(), 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0LgX5aG1DAPG_3kRJmS0DdtG3eE7ZfO6e51G5nT_6-TpW8FYWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5zMv3XdUFuTG_OQY7JdqLyMG0q43IO-DcL3G5BBDqihT_Z0YWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
  [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=tier::InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=builder::InMemoryCacheBuilder
