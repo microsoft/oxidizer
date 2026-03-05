@@ -155,6 +155,8 @@ This crate provides several optional features that can be enabled in your `Cargo
   user-defined alternative.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
+* **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
+  configuration types.
 * **`tower-service`** - Enables [`tower_service::Service`][__link18] trait implementations for all
   resilience middleware.
 
@@ -164,7 +166,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2z5VruRfVJ9GxS9tKHwaOhIG2FlEmCbtZD-GzMHPl3pphReYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzRovKhKct9gG-lDZcao4MaxG0vZFGxWCphfG2ZI-noryWXJYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/hedging/index.html

@@ -69,9 +69,9 @@ fastrand.workspace = true
 futures = { workspace = true, features = ["executor"] }
 futures-util = { workspace = true, features = ["alloc"] }
 http.workspace = true
-layered = { workspace = true, features = ["tower-service", "dynamic-service"] }
 insta = { workspace = true, features = ["json"] }
 jiff = { workspace = true, default-features = true, features = ["serde"] }
+layered = { workspace = true, features = ["tower-service", "dynamic-service"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
