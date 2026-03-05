@@ -1,0 +1,24 @@
+{
+    "retry": {
+        "enabled": true,
+        "backoff_type": "Exponential",
+        "base_delay": "100ms",
+        "max_delay": "5s",
+        "use_jitter": true,
+        "max_retry_attempts": 5
+    },
+    "breaker": {
+        "enabled": true,
+        "failure_threshold": 0.2,
+        "min_throughput": 10,
+        "sampling_duration": "30s",
+        "break_duration": "5s",
+        "half_open_mode": {
+            "Progressive": null
+        }
+    },
+    "timeout": {
+        "enabled": true,
+        "timeout": "2s"
+    }
+}

@@ -59,7 +59,7 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
             on_closed: None,
             on_probing: None,
             breaker_id: None,
-            enable_if: EnableIf::always(),
+            enable_if: EnableIf::default(),
             telemetry: context.create_telemetry(name),
             failure_threshold: DEFAULT_FAILURE_THRESHOLD,
             min_throughput: DEFAULT_MIN_THROUGHPUT,
@@ -201,6 +201,20 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
         self
     }
 
+    /// Applies all settings from a [`BreakerConfig`] to this layer.
+    ///
+    /// This is a convenience method for applying configuration loaded from external sources
+    /// (e.g., configuration files) without calling individual builder methods.
+    #[must_use]
+    pub fn config(self, config: &BreakerConfig) -> Self {
+        self.failure_threshold(config.failure_threshold)
+            .min_throughput(config.min_throughput)
+            .sampling_duration(config.sampling_duration)
+            .break_duration(config.break_duration)
+            .half_open_mode(config.half_open_mode.clone())
+            .enable(config.enabled)
+    }
+
     /// Sets the callback to be invoked when the circuit breaker opens.
     ///
     /// This `callback` is called whenever the circuit breaker transitions from
@@ -310,7 +324,17 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// **Default**: Always enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
-        self.enable_if = EnableIf::new(is_enabled);
+        self.enable_if = EnableIf::custom(is_enabled);
+        self
+    }
+
+    /// Enables or disables the circuit breaker middleware.
+    ///
+    /// When disabled, inputs pass through without circuit breaker protection.
+    /// This call replaces any previous condition.
+    #[must_use]
+    fn enable(mut self, enabled: bool) -> Self {
+        self.enable_if = EnableIf::new(enabled);
         self
     }
 
@@ -321,9 +345,8 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This is the default behavior - circuit breaker is enabled by default.
     #[must_use]
-    pub fn enable_always(mut self) -> Self {
-        self.enable_if = EnableIf::always();
-        self
+    pub fn enable_always(self) -> Self {
+        self.enable(true)
     }
 
     /// Disables the circuit breaker middleware completely.
@@ -333,9 +356,8 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     ///
     /// **Note**: This overrides the default enabled behavior.
     #[must_use]
-    pub fn disable(mut self) -> Self {
-        self.enable_if = EnableIf::never();
-        self
+    pub fn disable(self) -> Self {
+        self.enable(false)
     }
 }
 
@@ -637,6 +659,23 @@ mod tests {
             }
             ProbeOptions::SingleProbe { .. } => panic!("Expected HealthProbe"),
         }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn config_applies_all_settings() {
+        let config = BreakerConfig {
+            enabled: false,
+            failure_threshold: 0.25,
+            min_throughput: 50,
+            sampling_duration: Duration::from_secs(60),
+            break_duration: Duration::from_secs(15),
+            half_open_mode: HalfOpenMode::quick(),
+        };
+
+        let layer = create_ready_layer().config(&config);
+
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[test]

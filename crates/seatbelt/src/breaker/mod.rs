@@ -283,11 +283,13 @@
 
 mod args;
 mod callbacks;
+mod config;
 mod layer;
 mod service;
 #[doc(inline)]
 pub use args::{OnClosedArgs, OnOpenedArgs, OnProbingArgs, RecoveryArgs, RejectedInputArgs};
 pub(super) use callbacks::*;
+pub use config::BreakerConfig;
 #[doc(inline)]
 pub use layer::BreakerLayer;
 #[doc(inline)]

@@ -194,6 +194,7 @@
 mod args;
 mod backoff;
 mod callbacks;
+mod config;
 mod constants;
 mod layer;
 mod service;
@@ -205,6 +206,7 @@ pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};
+pub use config::RetryConfig;
 pub use layer::RetryLayer;
 pub use service::Retry;
 #[cfg(feature = "tower-service")]
