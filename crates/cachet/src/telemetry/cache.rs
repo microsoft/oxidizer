@@ -216,6 +216,7 @@ mod tests {
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn metrics_record_emits_correct_attributes() {
         let tester = MetricTester::new();
@@ -230,6 +231,7 @@ mod tests {
         ]);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn metrics_record_size_emits_cache_name() {
         let tester = MetricTester::new();

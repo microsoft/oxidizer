@@ -530,6 +530,7 @@ fn do_refresh_without_time_to_refresh_is_noop() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[cfg(feature = "metrics")]
 #[test]
 fn fallback_builder_use_metrics() -> TestResult {

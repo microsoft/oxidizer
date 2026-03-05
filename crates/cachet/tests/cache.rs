@@ -737,6 +737,7 @@ mod service_tests {
     }
 }
 
+#[cfg_attr(miri, ignore)]
 #[cfg(feature = "metrics")]
 #[test]
 fn cache_builder_use_metrics() -> TestResult {
