@@ -240,6 +240,7 @@ mod tests {
         tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_NAME, "size_test_cache")]);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn logs_emit_contains_all_fields_and_values() {
         let capture = LogCapture::new();
@@ -266,6 +267,7 @@ mod tests {
         capture.assert_contains("12345");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn logs_emit_at_correct_severity_levels() {
         // Error level - should always be captured
@@ -287,6 +289,7 @@ mod tests {
         capture.assert_contains("DEBUG");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn telemetry_disabled_emits_nothing() {
         // No meter, no logs - telemetry still gets created but does nothing

@@ -361,6 +361,7 @@ fn fallback_builder_stampede_protection() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_use_logs_emits_logs() -> TestResult {
     block_on(async {
@@ -382,6 +383,7 @@ fn fallback_builder_use_logs_emits_logs() -> TestResult {
     })
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_use_logs_emits_logs() -> TestResult {
     block_on(async {
