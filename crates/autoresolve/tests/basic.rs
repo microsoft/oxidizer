@@ -1,7 +1,7 @@
 use autoresolve_macros::{composite, resolvable};
 
 #[derive(Clone)]
-struct Scheduler;
+pub struct Scheduler;
 
 impl Scheduler {
     fn number(&self) -> i32 {
@@ -10,7 +10,7 @@ impl Scheduler {
 }
 
 #[derive(Clone)]
-struct Clock;
+pub struct Clock;
 
 impl Clock {
     fn number(&self) -> i32 {
@@ -18,12 +18,16 @@ impl Clock {
     }
 }
 
-#[derive(Clone)]
-#[composite]
-struct Builtins {
-    scheduler: Scheduler,
-    clock: Clock,
+#[composite(builtins)]
+mod builtins {
+    #[derive(Clone)]
+    pub struct Builtins {
+        pub scheduler: super::Scheduler,
+        pub clock: super::Clock,
+    }
 }
+
+use builtins::Builtins;
 
 #[derive(Clone)]
 struct Validator {

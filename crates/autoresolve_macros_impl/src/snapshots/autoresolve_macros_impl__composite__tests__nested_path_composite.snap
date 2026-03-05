@@ -23,12 +23,14 @@ mod builtins {
     #[macro_export]
     macro_rules! Builtins {
         (@ impls $base:ident) => {
-            impl ::autoresolve::ResolveFrom < $base > for $crate::builtins::__Part0 {
-            type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            impl ::autoresolve::ResolveFrom < $base > for
+            $crate::nested::deep::builtins::__Part0 { type Inputs =
+            ::autoresolve::ResolutionDepsEnd; fn new(_ :
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("composite parts are pre-inserted into the resolver") } } impl
-            ::autoresolve::ResolveFrom < $base > for $crate::builtins::__Part1 { type
-            Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            ::autoresolve::ResolveFrom < $base > for
+            $crate::nested::deep::builtins::__Part1 { type Inputs =
+            ::autoresolve::ResolutionDepsEnd; fn new(_ :
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("composite parts are pre-inserted into the resolver") } }
         };
@@ -38,6 +40,6 @@ mod builtins {
     }
 }
 const _: fn() = || {
-    _ = std::mem::size_of::<crate::builtins::__Part0>();
-    _ = std::mem::size_of::<crate::builtins::__Part1>();
+    _ = std::mem::size_of::<crate::nested::deep::builtins::__Part0>();
+    _ = std::mem::size_of::<crate::nested::deep::builtins::__Part1>();
 };

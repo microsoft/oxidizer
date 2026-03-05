@@ -2,22 +2,30 @@
 source: crates/autoresolve_macros_impl/src/composite.rs
 expression: pretty_print(result)
 ---
-struct Wrapper {
-    inner: Inner,
+mod wrapper {
+    struct Wrapper {
+        inner: Inner,
+    }
+    impl ::autoresolve::CompositePart<0usize> for Wrapper {
+        type Part = Inner;
+    }
+    #[doc(hidden)]
+    pub use Inner as __Part0;
+    pub use Inner as Inner;
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! Wrapper {
+        (@ impls $base:ident) => {
+            impl ::autoresolve::ResolveFrom < $base > for $crate::wrapper::__Part0 { type
+            Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            ::autoresolve::ResolutionDepsEnd) -> Self {
+            unreachable!("composite parts are pre-inserted into the resolver") } }
+        };
+        (@ insert $resolver:ident, $name:ident) => {
+            $resolver .insert($name .inner);
+        };
+    }
 }
-impl ::autoresolve::CompositePart<0usize> for Wrapper {
-    type Part = Inner;
-}
-#[doc(hidden)]
-#[macro_export]
-macro_rules! Wrapper {
-    (@ impls $base:ident, $self_ty:ty) => {
-        impl ::autoresolve::ResolveFrom < $base > for < $self_ty as
-        ::autoresolve::CompositePart < 0usize >> ::Part { type Inputs =
-        ::autoresolve::ResolutionDepsEnd; fn new(_ : ::autoresolve::ResolutionDepsEnd) ->
-        Self { unreachable!("composite parts are pre-inserted into the resolver") } }
-    };
-    (@ insert $resolver:ident, $name:ident) => {
-        $resolver .insert($name .inner);
-    };
-}
+const _: fn() = || {
+    _ = std::mem::size_of::<crate::wrapper::__Part0>();
+};
