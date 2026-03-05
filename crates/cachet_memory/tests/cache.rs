@@ -11,24 +11,28 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn new_creates_unbounded_cache() {
     let cache = InMemoryCache::<String, i32>::new();
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn with_capacity_creates_bounded_cache() {
     let cache = InMemoryCache::<String, i32>::with_capacity(100);
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn default_creates_unbounded_cache() {
     let cache = InMemoryCache::<String, i32>::default();
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn get_returns_none_for_missing_key() {
     block_on(async {
@@ -38,6 +42,7 @@ fn get_returns_none_for_missing_key() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn insert_and_get_returns_value() {
     block_on(async {
@@ -53,6 +58,7 @@ fn insert_and_get_returns_value() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn insert_overwrites_existing_value() {
     block_on(async {
@@ -69,6 +75,7 @@ fn insert_overwrites_existing_value() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn get_returns_ok() {
     block_on(async {
@@ -85,6 +92,7 @@ fn get_returns_ok() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn insert_returns_ok() {
     block_on(async {
@@ -94,6 +102,7 @@ fn insert_returns_ok() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn invalidate_removes_entry() {
     block_on(async {
@@ -107,6 +116,7 @@ fn invalidate_removes_entry() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn invalidate_nonexistent_key_succeeds() {
     block_on(async {
@@ -115,6 +125,7 @@ fn invalidate_nonexistent_key_succeeds() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn invalidate_returns_ok() {
     block_on(async {
@@ -126,6 +137,7 @@ fn invalidate_returns_ok() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn clear_removes_all_entries() {
     block_on(async {
@@ -142,6 +154,7 @@ fn clear_removes_all_entries() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn clear_returns_ok() {
     block_on(async {
@@ -152,12 +165,14 @@ fn clear_returns_ok() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn len_returns_some_zero_for_empty_cache() {
     let cache = InMemoryCache::<String, i32>::new();
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn len_returns_some_not_none() {
     // Moka's entry_count() is eventually consistent, so we can't assert exact
@@ -167,6 +182,7 @@ fn len_returns_some_not_none() {
     assert!(cache.len().is_some());
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn clone_shares_underlying_cache() {
     block_on(async {
@@ -186,22 +202,26 @@ fn clone_shares_underlying_cache() {
 
 // Builder tests
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_default_creates_unbounded_cache() {
     let cache = InMemoryCacheBuilder::<String, i32>::default().build();
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_max_capacity_sets_limit() {
     let _cache = InMemoryCacheBuilder::<String, i32>::new().max_capacity(100).build();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_initial_capacity_preallocates() {
     let _cache = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(50).build();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_time_to_live_sets_ttl() {
     let _cache = InMemoryCacheBuilder::<String, i32>::new()
@@ -209,6 +229,7 @@ fn builder_time_to_live_sets_ttl() {
         .build();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_time_to_idle_sets_tti() {
     let _cache = InMemoryCacheBuilder::<String, i32>::new()
@@ -216,11 +237,13 @@ fn builder_time_to_idle_sets_tti() {
         .build();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_name_sets_cache_name() {
     let _cache = InMemoryCacheBuilder::<String, i32>::new().name("test-cache").build();
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn builder_all_options_combined() {
     let cache = InMemoryCacheBuilder::<String, i32>::new()
