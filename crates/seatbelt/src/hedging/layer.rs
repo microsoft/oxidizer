@@ -87,17 +87,17 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// The delay value controls how aggressively hedging requests are launched:
     ///
     /// - **[`Duration::ZERO`]**: All hedging attempts launch simultaneously alongside
-    ///   the original request. This maximises the chance of a fast response but multiplies
+    ///   the original request. This maximizes the chance of a fast response but multiplies
     ///   load on the downstream service by the total number of attempts. Only use when
     ///   the downstream service has sufficient spare capacity.
     ///
-    /// - **Short to moderate delay** (e.g. 200 ms – 2 s): The typical configuration.
+    /// - **Short to moderate delay** (e.g. 200 ms - 2 s): The typical configuration.
     ///   Gives the original request a head-start before launching additional attempts,
     ///   which limits extra load while still cutting tail latency.
     ///
     /// - **[`Duration::MAX`]**: The delay will never expire, so hedging attempts are
     ///   only launched when the original (or an earlier hedge) completes with a
-    ///   recoverable result. This makes hedging behave like sequential retry — at most
+    ///   recoverable result. This makes hedging behave like sequential retry - at most
     ///   one request is in flight at a time.
     ///
     /// For per-attempt delays that depend on the input or attempt index, see
