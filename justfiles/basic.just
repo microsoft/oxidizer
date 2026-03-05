@@ -99,11 +99,11 @@ miri-example EXAMPLE_NAME:
 
 # Update README.md files for all packages.
 readme:
-    cargo workspaces exec --ignore-private cargo doc2readme --expand-macros --lib --template ../README.j2
+    cargo workspaces exec --ignore-private cargo doc2readme --expand-macros --all-features --lib --template ../README.j2
 
 # Check that README.md files for all packages are up to date.
 readme-check:
-    cargo workspaces exec --ignore-private cargo doc2readme --expand-macros --check --lib --template ../README.j2
+    cargo workspaces exec --ignore-private cargo doc2readme --expand-macros --all-features --check --lib --template ../README.j2
 
 # Runs unit and integration tests.
 [script]
