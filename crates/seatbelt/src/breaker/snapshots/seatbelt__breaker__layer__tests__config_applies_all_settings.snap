@@ -1,0 +1,45 @@
+---
+source: crates/seatbelt/src/breaker/layer.rs
+expression: layer
+---
+BreakerLayer {
+    context: ResilienceContext {
+        clock: Clock {
+            kind: "controlled",
+            timers: 0,
+            alive: true,
+            affinity: None,
+            ..
+        },
+        name: "test_pipeline",
+        meter: None,
+        logs_enabled: false,
+        _in: PhantomData<fn() -> alloc::string::String>,
+        _out: PhantomData<fn() -> alloc::string::String>,
+    },
+    recovery: Some(
+        ShouldRecover,
+    ),
+    rejected_input: Some(
+        RejectedInput,
+    ),
+    on_opened: None,
+    on_closed: None,
+    on_probing: None,
+    breaker_id: None,
+    enable_if: Disabled,
+    telemetry: TelemetryHelper {
+        pipeline_name: "test_pipeline",
+        strategy_name: "test",
+        event_reporter: None,
+        logs_enabled: false,
+    },
+    failure_threshold: 0.25,
+    min_throughput: 50,
+    sampling_duration: 60s,
+    break_duration: 15s,
+    half_open_mode: HalfOpenMode {
+        inner: Quick,
+    },
+    _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::Set) -> alloc::string::String>,
+}

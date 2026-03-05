@@ -56,7 +56,7 @@ impl<In, Out> HedgingLayer<In, Out, NotSet, NotSet> {
             should_recover: None,
             on_execute: None,
             handle_unavailable: false,
-            enable_if: EnableIf::always(),
+            enable_if: EnableIf::default(),
             telemetry: context.create_telemetry(name),
             _state: PhantomData,
         }
@@ -231,7 +231,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// **Default**: Always enabled
     #[must_use]
     pub fn enable_if(mut self, is_enabled: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
-        self.enable_if = EnableIf::new(is_enabled);
+        self.enable_if = EnableIf::custom(is_enabled);
         self
     }
 
@@ -240,7 +240,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// **Note**: This is the default behavior.
     #[must_use]
     pub fn enable_always(mut self) -> Self {
-        self.enable_if = EnableIf::always();
+        self.enable_if = EnableIf::new(true);
         self
     }
 
@@ -249,7 +249,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     /// All requests will pass through without hedging.
     #[must_use]
     pub fn disable(mut self) -> Self {
-        self.enable_if = EnableIf::never();
+        self.enable_if = EnableIf::new(false);
         self
     }
 

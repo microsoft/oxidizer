@@ -262,9 +262,7 @@ mod tests {
             .recovery_with(|_, _| RecoveryInfo::never())
             .rejected_input(|_, _| "rejected".to_string());
 
-        let breaker = layer.layer(Execute::new(|v: String| async move { v }));
-
-        assert!(breaker.shared.enable_if.call(&"str".to_string()));
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[cfg_attr(miri, ignore)]

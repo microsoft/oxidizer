@@ -178,6 +178,8 @@
 //!   user-defined alternative.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
+//! - **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
+//!   configuration types.
 //! - **`tower-service`** - Enables [`tower_service::Service`] trait implementations for all
 //!   resilience middleware.
 
