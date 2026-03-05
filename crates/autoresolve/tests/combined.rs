@@ -3,39 +3,39 @@
 use autoresolve_macros::{composite, resolvable};
 
 #[derive(Clone)]
-struct AppConfig;
+struct Scheduler;
 
-impl AppConfig {
+impl Scheduler {
     fn number(&self) -> i32 {
         42
     }
 }
 
 #[derive(Clone)]
-struct Logger;
+struct Clock;
 
 #[derive(Clone)]
 #[composite]
 struct Builtins {
-    app_config: AppConfig,
-    logger: Logger,
+    scheduler: Scheduler,
+    clock: Clock,
 }
 
 #[derive(Clone)]
 struct Validator {
-    app_config: AppConfig,
+    scheduler: Scheduler,
 }
 
 #[resolvable]
 impl Validator {
-    fn new(app_config: &AppConfig) -> Self {
+    fn new(scheduler: &Scheduler) -> Self {
         Self {
-            app_config: app_config.clone(),
+            scheduler: scheduler.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.app_config.number()
+        self.scheduler.number()
     }
 }
 
@@ -59,22 +59,22 @@ impl SdkProvider {
 #[derive(Clone)]
 struct Client {
     validator: Validator,
-    app_config: AppConfig,
+    scheduler: Scheduler,
     telemetry: Telemetry,
 }
 
 #[resolvable]
 impl Client {
-    fn new(validator: &Validator, app_config: &AppConfig, telemetry: &Telemetry) -> Self {
+    fn new(validator: &Validator, scheduler: &Scheduler, telemetry: &Telemetry) -> Self {
         Self {
             validator: validator.clone(),
-            app_config: app_config.clone(),
+            scheduler: scheduler.clone(),
             telemetry: telemetry.clone(),
         }
     }
 
     fn number(&self) -> i32 {
-        self.validator.number() + self.app_config.number()
+        self.validator.number() + self.scheduler.number()
     }
 }
 
@@ -96,16 +96,16 @@ impl CorrelationVector {
 struct OutboundClient {
     correlation_vector: CorrelationVector,
     client: Client,
-    logger: Logger,
+    clock: Clock,
 }
 
 #[resolvable]
 impl OutboundClient {
-    fn new(correlation_vector: &CorrelationVector, client: &Client, logger: &Logger) -> Self {
+    fn new(correlation_vector: &CorrelationVector, client: &Client, clock: &Clock) -> Self {
         Self {
             correlation_vector: correlation_vector.clone(),
             client: client.clone(),
-            logger: logger.clone(),
+            clock: clock.clone(),
         }
     }
 }
@@ -113,8 +113,8 @@ impl OutboundClient {
 #[test]
 fn test_combined() {
     let builtins = Builtins {
-        app_config: AppConfig,
-        logger: Logger,
+        scheduler: Scheduler,
+        clock: Clock,
     };
     let telemetry = Telemetry;
     let request = Request;
@@ -126,7 +126,7 @@ fn test_combined() {
     );
 
     let outbound = resolver.get::<OutboundClient>();
-    // Verify the object was constructed — Client depends on Validator + AppConfig + Telemetry,
-    // OutboundClient depends on CorrelationVector + Client + Logger.
+    // Verify the object was constructed — Client depends on Validator + Scheduler + Telemetry,
+    // OutboundClient depends on CorrelationVector + Client + Clock.
     assert_eq!(outbound.client.number(), 42 + 42);
 }
