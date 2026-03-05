@@ -48,20 +48,18 @@
 //!
 //! For dynamic URIs with variable components, use the templating system:
 //!
-#![cfg_attr(feature = "uuid", doc = "```rust")]
-#![cfg_attr(not(feature = "uuid"), doc = "```rust,ignore")]
+//! ```rust
 //! use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
-//! use uuid::Uuid;
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
 //! struct UserPostPath {
-//!     user_id: Uuid,
+//!     user_id: u32,
 //!     post_id: UriSafeString,
 //! }
 //!
 //! let path = UserPostPath {
-//!     user_id: Uuid::new_v4(),
+//!     user_id: 42,
 //!     post_id: UriSafeString::encode("my-post"),
 //! };
 //!

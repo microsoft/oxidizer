@@ -5,8 +5,11 @@
 
 use std::fmt::Display;
 
+#[cfg(feature = "uuid")]
+use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
-use data_privacy::{RedactedToString, RedactionEngine, Sensitive, classified, taxonomy};
+use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
+#[cfg(feature = "uuid")]
 use templated_uri::uri::DATA_CLASS_UNKNOWN_URI;
 use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriParam, UriSafeString, UriUnsafeParam};
 use templated_uri_macros::templated;
