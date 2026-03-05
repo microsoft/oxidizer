@@ -16,9 +16,8 @@ use recoverable::RecoveryKind;
 use tick::Clock;
 
 use super::Attempt;
-use super::args::{CloneArgs, OnExecuteArgs, RecoveryArgs};
+use super::args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
 use super::callbacks::*;
-use super::mode::HedgingMode;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 
@@ -45,7 +44,7 @@ pub struct Hedging<In, Out, S> {
 pub(crate) struct HedgingShared<In, Out> {
     pub(crate) clock: Clock,
     pub(crate) max_hedged_attempts: u8,
-    pub(crate) hedging_mode: HedgingMode,
+    pub(crate) delay_fn: DelayFn<In>,
     pub(crate) clone_input: CloneInput<In>,
     pub(crate) should_recover: ShouldRecover<Out>,
     pub(crate) on_execute: Option<OnExecute<In>>,
@@ -189,7 +188,7 @@ impl<In, Out> HedgingShared<In, Out> {
 
         loop {
             if let Some(next_attempt) = attempt.increment(total_attempts) {
-                let delay = self.hedging_mode.delay_for(next_attempt);
+                let delay = self.delay_fn.call(input, HedgingDelayArgs { attempt: next_attempt });
 
                 let outcome = {
                     let next = std::pin::pin!(futs.next());
@@ -364,7 +363,6 @@ mod tests {
         assert_eq!(hedging.shared.telemetry.pipeline_name.to_string(), "test_pipeline");
         assert_eq!(hedging.shared.telemetry.strategy_name.to_string(), "test_hedging");
         assert_eq!(hedging.shared.max_hedged_attempts, 1);
-        assert!(!hedging.shared.hedging_mode.is_immediate());
         assert!(!hedging.shared.handle_unavailable);
         assert!(hedging.shared.on_execute.is_none());
         assert!(hedging.shared.enable_if.call(&"str".to_string()));
@@ -382,7 +380,7 @@ mod tests {
             .clone_input()
             .recovery_with(|_input, _args| RecoveryInfo::retry())
             .max_hedged_attempts(1)
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .layer(Execute::new(|v: String| async move { v }));
 
         let _result = service.execute("test".to_string()).await;
@@ -418,7 +416,7 @@ mod tests {
             .clone_input()
             .recovery_with(|_, _| RecoveryInfo::retry())
             .max_hedged_attempts(1)
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .layer(Execute::new(|v: String| async move { v }));
 
         let _ = service.execute("test".to_string()).await;
@@ -511,7 +509,7 @@ mod tests {
                 Err(_) => RecoveryInfo::retry(),
             })
             .max_hedged_attempts(2)
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .layer(Execute::new(move |_v: String| {
                 let idx = counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let block = Arc::clone(&block_clone);

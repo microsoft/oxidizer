@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use layered::{Execute, Service, Stack};
 use rstest::rstest;
-use seatbelt::hedging::{Hedging, HedgingMode, OnExecuteArgs};
+use seatbelt::hedging::{Hedging, OnExecuteArgs};
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::{Clock, ClockControl};
 use tower_service::Service as TowerService;
@@ -81,7 +81,7 @@ async fn immediate_mode_all_run_concurrently(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -120,7 +120,7 @@ async fn immediate_mode_returns_first_success(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2),
         Execute::new(move |v: String| {
             counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -152,7 +152,7 @@ async fn delay_mode_launches_hedging_attempt_after_timeout(#[case] use_tower: bo
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::delay(Duration::from_secs(1)))
+            .hedging_delay(Duration::from_secs(1))
             .max_hedged_attempts(1),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -191,9 +191,9 @@ async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::dynamic(|args| {
+            .hedging_delay_with(|_input, args| {
                 Duration::from_millis(100 * u64::from(args.attempt().index()))
-            }))
+            })
             .max_hedged_attempts(2),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -228,7 +228,7 @@ async fn on_execute_callback_invoked(#[case] use_tower: bool) {
         Hedging::layer("test_hedging", &context)
             .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2)
             .on_execute(move |_input, _: OnExecuteArgs| {
                 execute_calls_clone.fetch_add(1, Ordering::SeqCst);
@@ -283,7 +283,7 @@ async fn all_fail_returns_last_result(#[case] use_tower: bool) {
         Hedging::layer("test_hedging", &context)
             .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2),
         Execute::new(|_v: String| async move { Err::<String, String>("always_fail".to_string()) }),
     );
@@ -311,7 +311,7 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(1),
         Execute::new(move |v: String| {
             call_count_clone.fetch_add(1, Ordering::SeqCst);
@@ -343,7 +343,7 @@ async fn enable_if_skips_hedging(#[case] use_tower: bool) {
         Hedging::layer("test_hedging", &context)
             .clone_input()
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2)
             .enable_if(|input| input.contains("hedging")),
         Execute::new(move |v: String| {
@@ -380,7 +380,7 @@ async fn clone_returning_none_skips_hedging(#[case] use_tower: bool) {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::delay(Duration::from_millis(10)))
+            .hedging_delay(Duration::from_millis(10))
             .max_hedged_attempts(2),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -420,7 +420,7 @@ async fn handle_unavailable_continues_hedging(#[case] use_tower: bool) {
                 Err(e) if e == "unavailable" => RecoveryInfo::unavailable(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2)
             .handle_unavailable(true),
         Execute::new(move |v: String| {
@@ -473,7 +473,7 @@ async fn slow_original_accepted_after_hedging_launched(#[case] use_tower: bool) 
                 Err(_) => RecoveryInfo::retry(),
             })
             // Hedging attempt fires after 100ms
-            .hedging_mode(HedgingMode::delay(Duration::from_millis(100)))
+            .hedging_delay(Duration::from_millis(100))
             .max_hedged_attempts(1)
             .on_execute(move |_input, args: OnExecuteArgs| {
                 // When the hedging attempt is about to launch, let the original complete.
@@ -524,7 +524,7 @@ async fn non_cloneable_input_skips_hedging_and_invokes_on_execute(#[case] use_to
         Hedging::layer("test_hedging", &context)
             .clone_input_with(|_input, _args| None::<String>)
             .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::retry())
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2)
             .on_execute(move |_input, _: OnExecuteArgs| {
                 execute_calls_clone.fetch_add(1, Ordering::SeqCst);
@@ -593,7 +593,7 @@ async fn unavailable_returned_immediately_when_handle_unavailable_is_false(#[cas
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::unavailable(),
             })
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(2)
             .handle_unavailable(false),
         Execute::new(move |v: String| {
@@ -634,7 +634,7 @@ async fn launch_hedging_attempt_actually_launches_attempts(#[case] use_tower: bo
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),
             })
-            .hedging_mode(HedgingMode::immediate())
+            .hedging_delay(Duration::ZERO)
             .max_hedged_attempts(1),
         Execute::new(move |v: String| {
             let count = counter_clone.fetch_add(1, Ordering::SeqCst);

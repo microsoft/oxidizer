@@ -15,7 +15,7 @@
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::hedging::{Hedging, HedgingMode};
+//! # use seatbelt::hedging::Hedging;
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let context = ResilienceContext::new(&clock).name("my_service");
@@ -27,7 +27,7 @@
 //!             Ok(_) => RecoveryInfo::never(),
 //!             Err(_) => RecoveryInfo::retry(),
 //!         })
-//!         .hedging_mode(HedgingMode::delay(Duration::from_secs(1))),
+//!         .hedging_delay(Duration::from_secs(1)),
 //!     Execute::new(my_operation),
 //! );
 //!
@@ -41,11 +41,14 @@
 //!
 //! # How It Works
 //!
-//! Hedging sends the original request immediately. Based on the configured [`HedgingMode`]:
+//! Hedging sends the original request immediately. Based on the configured delay:
 //!
-//! - **Immediate**: All hedged requests launch at once
-//! - **Delay**: Each hedging attempt launches after a fixed delay if no acceptable result has arrived
-//! - **Dynamic**: The delay is computed per hedging attempt via a user-provided callback
+//! - **Zero delay**: All hedged requests launch at once (via `hedging_delay(Duration::ZERO)`)
+//! - **Fixed delay**: Each hedging attempt launches after a fixed delay if no acceptable result
+//!   has arrived (via [`hedging_delay`][HedgingLayer::hedging_delay])
+//! - **Dynamic delay**: The delay is computed per hedging attempt via a user-provided callback
+//!   that also receives a reference to the input (via
+//!   [`hedging_delay_with`][HedgingLayer::hedging_delay_with])
 //!
 //! The first result classified as non-recoverable (via the recovery callback) is returned
 //! immediately. Any remaining in-flight requests are cancelled.
@@ -91,7 +94,7 @@
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
 //! | Max hedged attempts | `1` (2 total) | Additional hedging requests beyond the original | [`max_hedged_attempts`][HedgingLayer::max_hedged_attempts] |
-//! | Hedging mode | `delay(500ms)` | Wait 500 milliseconds before each hedging attempt | [`hedging_mode`][HedgingLayer::hedging_mode] |
+//! | Hedging delay | `500ms` | Wait 500 milliseconds before each hedging attempt | [`hedging_delay`][HedgingLayer::hedging_delay], [`hedging_delay_with`][HedgingLayer::hedging_delay_with] |
 //! | Handle unavailable | `false` | Unavailable responses are returned immediately | [`handle_unavailable`][HedgingLayer::handle_unavailable] |
 //! | Enable condition | Always enabled | Hedging is applied to all requests | [`enable_if`][HedgingLayer::enable_if], [`enable_always`][HedgingLayer::enable_always], [`disable`][HedgingLayer::disable] |
 //!
@@ -134,7 +137,7 @@
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Service, Stack};
-//! # use seatbelt::hedging::{Hedging, HedgingMode};
+//! # use seatbelt::hedging::Hedging;
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! let context = ResilienceContext::new(&clock).name("example");
@@ -162,14 +165,14 @@
 //!
 //! ## Advanced Usage
 //!
-//! This example demonstrates advanced usage of the hedging middleware, including custom
-//! hedging modes, on-hedging callbacks, and dynamic delays.
+//! This example demonstrates advanced usage of the hedging middleware, including dynamic
+//! delays and on-execute callbacks.
 //!
 //! ```rust
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! # use layered::{Execute, Stack, Service};
-//! # use seatbelt::hedging::{Hedging, HedgingMode};
+//! # use seatbelt::hedging::Hedging;
 //! # use seatbelt::{RecoveryInfo, ResilienceContext};
 //! # async fn example(clock: Clock) -> Result<(), String> {
 //! let context = ResilienceContext::new(&clock);
@@ -183,9 +186,9 @@
 //!         })
 //!         // Optional configuration
 //!         .max_hedged_attempts(3)
-//!         .hedging_mode(HedgingMode::dynamic(|args| {
+//!         .hedging_delay_with(|_input, args| {
 //!             Duration::from_millis(100 * u64::from(args.attempt().index()))
-//!         }))
+//!         })
 //!         // Callback called just before each execute operation
 //!         .on_execute(|_input, args| {
 //!             println!("launching attempt: {}", args.attempt());
@@ -205,14 +208,12 @@ mod args;
 mod callbacks;
 mod constants;
 mod layer;
-mod mode;
 mod service;
 mod telemetry;
 
 pub use crate::attempt::Attempt;
 pub use args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
 pub use layer::HedgingLayer;
-pub use mode::HedgingMode;
 pub use service::Hedging;
 #[cfg(feature = "tower-service")]
 pub use service::HedgingFuture;

@@ -69,8 +69,7 @@ impl OnExecuteArgs {
 
     /// Returns the delay that was waited before this attempt was launched.
     ///
-    /// For the original request (attempt 0) this is always [`Duration::ZERO`].
-    /// For [`HedgingMode::immediate`][super::HedgingMode::immediate], this is always
+    /// For the original request (attempt 0) or when a zero delay is configured, this is
     /// [`Duration::ZERO`].
     #[must_use]
     pub fn delay(&self) -> Duration {
@@ -78,7 +77,7 @@ impl OnExecuteArgs {
     }
 }
 
-/// Arguments for the [`HedgingMode::dynamic`][super::HedgingMode::dynamic] callback function.
+/// Arguments for the [`hedging_delay_with`][super::HedgingLayer::hedging_delay_with] callback function.
 ///
 /// Provides context for computing the delay before the next hedging attempt.
 #[derive(Debug)]

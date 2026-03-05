@@ -10,7 +10,7 @@ use layered::Layer;
 use crate::hedging::args::*;
 use crate::hedging::callbacks::*;
 use crate::hedging::constants::DEFAULT_MAX_HEDGED_ATTEMPTS;
-use crate::hedging::mode::HedgingMode;
+use crate::hedging::constants::DEFAULT_HEDGING_DELAY;
 use crate::hedging::service::{Hedging, HedgingShared};
 use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
@@ -35,7 +35,7 @@ use crate::{Recovery, RecoveryInfo, ResilienceContext};
 pub struct HedgingLayer<In, Out, S1 = Set, S2 = Set> {
     context: ResilienceContext<In, Out>,
     max_hedged_attempts: u8,
-    hedging_mode: HedgingMode,
+    delay_fn: DelayFn<In>,
     clone_input: Option<CloneInput<In>>,
     should_recover: Option<ShouldRecover<Out>>,
     on_execute: Option<OnExecute<In>>,
@@ -51,7 +51,7 @@ impl<In, Out> HedgingLayer<In, Out, NotSet, NotSet> {
         Self {
             context: context.clone(),
             max_hedged_attempts: DEFAULT_MAX_HEDGED_ATTEMPTS,
-            hedging_mode: HedgingMode::default(),
+            delay_fn: DelayFn::new(|_input, _args| DEFAULT_HEDGING_DELAY),
             clone_input: None,
             should_recover: None,
             on_execute: None,
@@ -77,31 +77,38 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         self
     }
 
-    /// Sets the hedging mode that controls timing of hedged requests.
-    ///
-    /// - [`HedgingMode::immediate()`]: Launches all hedging attempts at once
-    /// - [`HedgingMode::delay(duration)`][HedgingMode::delay]: Fixed delay between each hedging attempt
-    /// - [`HedgingMode::dynamic(fn)`][HedgingMode::dynamic]: Per-attempt delay via callback
-    ///
-    /// For the common case of a fixed delay, the [`hedging_delay`][HedgingLayer::hedging_delay]
-    /// shorthand is also available.
-    ///
-    /// **Default**: [`HedgingMode::delay(500ms)`][HedgingMode::delay]
-    #[must_use]
-    pub fn hedging_mode(mut self, mode: HedgingMode) -> Self {
-        self.hedging_mode = mode;
-        self
-    }
-
     /// Sets a fixed delay between hedging attempts.
     ///
-    /// This is a convenience shorthand for
-    /// [`hedging_mode(HedgingMode::delay(delay))`][HedgingLayer::hedging_mode].
+    /// The original request is always sent immediately. After `delay`, the first
+    /// hedging attempt is launched. After another `delay`, the second hedging attempt
+    /// is launched, and so on.
+    ///
+    /// To launch all hedging attempts simultaneously, use `hedging_delay(Duration::ZERO)`.
+    ///
+    /// For per-attempt delays that depend on the input or attempt index, see
+    /// [`hedging_delay_with`][HedgingLayer::hedging_delay_with].
     ///
     /// **Default**: 500 milliseconds
     #[must_use]
-    pub fn hedging_delay(self, delay: Duration) -> Self {
-        self.hedging_mode(HedgingMode::delay(delay))
+    pub fn hedging_delay(mut self, delay: Duration) -> Self {
+        self.delay_fn = DelayFn::new(move |_input, _args| delay);
+        self
+    }
+
+    /// Sets a dynamic delay function that computes the delay for each hedging attempt.
+    ///
+    /// The `delay_fn` receives a reference to the current input and [`HedgingDelayArgs`]
+    /// containing the hedging attempt index, and should return the [`Duration`] to wait
+    /// before launching that hedging attempt.
+    ///
+    /// **Default**: 500 milliseconds (fixed)
+    #[must_use]
+    pub fn hedging_delay_with(
+        mut self,
+        delay_fn: impl Fn(&In, HedgingDelayArgs) -> Duration + Send + Sync + 'static,
+    ) -> Self {
+        self.delay_fn = DelayFn::new(delay_fn);
+        self
     }
 
     /// Sets the input cloning function for hedged attempts.
@@ -236,7 +243,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
         HedgingLayer {
             context: self.context,
             max_hedged_attempts: self.max_hedged_attempts,
-            hedging_mode: self.hedging_mode,
+            delay_fn: self.delay_fn,
             clone_input: self.clone_input,
             should_recover: self.should_recover,
             on_execute: self.on_execute,
@@ -255,7 +262,7 @@ impl<In, Out, S> Layer<S> for HedgingLayer<In, Out, Set, Set> {
         let shared = HedgingShared {
             clock: self.context.get_clock().clone(),
             max_hedged_attempts: self.max_hedged_attempts,
-            hedging_mode: self.hedging_mode.clone(),
+            delay_fn: self.delay_fn.clone(),
             clone_input: self.clone_input.clone().expect("clone_input must be set in Ready state"),
             should_recover: self.should_recover.clone().expect("should_recover must be set in Ready state"),
             on_execute: self.on_execute.clone(),
@@ -290,13 +297,17 @@ mod tests {
         let layer: HedgingLayer<_, _, NotSet, NotSet> = HedgingLayer::new("test_hedging".into(), &context);
 
         assert_eq!(layer.max_hedged_attempts, 1);
-        assert!(!layer.hedging_mode.is_immediate());
         assert!(!layer.handle_unavailable);
         assert!(layer.clone_input.is_none());
         assert!(layer.should_recover.is_none());
         assert!(layer.on_execute.is_none());
         assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_hedging");
         assert!(layer.enable_if.call(&"test_input".to_string()));
+        // Default delay should be 500ms
+        let args = HedgingDelayArgs {
+            attempt: Attempt::new(1, false),
+        };
+        assert_eq!(layer.delay_fn.call(&"any".to_string(), args), Duration::from_millis(500));
     }
 
     #[test]
@@ -357,17 +368,25 @@ mod tests {
 
     #[test]
     fn configuration_methods_work() {
-        let layer = create_ready_layer().max_hedged_attempts(3).hedging_mode(HedgingMode::immediate());
+        let layer = create_ready_layer()
+            .max_hedged_attempts(3)
+            .hedging_delay(Duration::ZERO);
 
         assert_eq!(layer.max_hedged_attempts, 3);
-        assert!(layer.hedging_mode.is_immediate());
+        let args = HedgingDelayArgs {
+            attempt: Attempt::new(1, false),
+        };
+        assert_eq!(layer.delay_fn.call(&"any".to_string(), args), Duration::ZERO);
     }
 
     #[test]
-    fn hedging_delay_sets_delay_mode() {
+    fn hedging_delay_sets_fixed_delay() {
         let layer = create_ready_layer().hedging_delay(Duration::from_millis(500));
 
-        assert!(!layer.hedging_mode.is_immediate());
+        let args = HedgingDelayArgs {
+            attempt: Attempt::new(1, false),
+        };
+        assert_eq!(layer.delay_fn.call(&"any".to_string(), args), Duration::from_millis(500));
     }
 
     #[test]
