@@ -29,6 +29,7 @@ thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
+mutants = { workspace = true }
 
 [lints]
 workspace = true

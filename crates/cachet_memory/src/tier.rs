@@ -115,6 +115,7 @@ where
     ///     .time_to_idle(Duration::from_secs(60))
     ///     .build();
     /// ```
+    #[cfg_attr(test, mutants::skip)] // Default::default() for InMemoryCacheBuilder calls new(), identical behavior
     #[must_use]
     pub fn builder() -> InMemoryCacheBuilder<K, V> {
         InMemoryCacheBuilder::new()
@@ -179,5 +180,28 @@ where
 
     fn len(&self) -> Option<u64> {
         Some(self.inner.entry_count())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[test]
+    fn with_capacity_sets_max_capacity() {
+        let cache = InMemoryCache::<String, i32>::with_capacity(100);
+        assert_eq!(cache.inner.policy().max_capacity(), Some(100));
+    }
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[test]
+    fn len_returns_nonzero_after_insert() {
+        let cache = InMemoryCache::<String, i32>::new();
+        futures::executor::block_on(async {
+            cache.inner.insert("key".to_string(), CacheEntry::new(42)).await;
+            cache.inner.run_pending_tasks().await;
+        });
+        assert!(cache.len().unwrap() > 0);
     }
 }

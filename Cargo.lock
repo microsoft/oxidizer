@@ -332,6 +332,7 @@ dependencies = [
  "cachet_tier",
  "futures",
  "moka",
+ "mutants",
  "thread_aware",
 ]
 

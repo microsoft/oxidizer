@@ -258,6 +258,16 @@ fn mock_cache_debug_contains_name() {
     assert!(debug.contains("MockCache"));
 }
 
+#[tokio::test]
+async fn mock_cache_clone_shares_state() {
+    let cache = MockCache::<String, i32>::new();
+    cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+    let cloned = cache.clone();
+    let entry = cloned.get(&"key".to_string()).await.unwrap().unwrap();
+    assert_eq!(*entry.value(), 42);
+}
+
 #[test]
 fn mock_cache_default_creates_empty() {
     let cache = MockCache::<String, i32>::default();

@@ -207,3 +207,38 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
         InMemoryCache::from_builder(&self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_capacity_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(100);
+        assert_eq!(builder.max_capacity, Some(100));
+    }
+
+    #[test]
+    fn initial_capacity_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(50);
+        assert_eq!(builder.initial_capacity, Some(50));
+    }
+
+    #[test]
+    fn time_to_live_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(Duration::from_secs(300));
+        assert_eq!(builder.time_to_live, Some(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn time_to_idle_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(Duration::from_secs(60));
+        assert_eq!(builder.time_to_idle, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn name_stores_value() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test");
+        assert_eq!(builder.name, Some("test".to_string()));
+    }
+}
