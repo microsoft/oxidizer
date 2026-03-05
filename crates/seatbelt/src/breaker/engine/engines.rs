@@ -40,15 +40,9 @@ impl Engines {
 
         // Slow path: acquire write lock to insert a new engine.
         let mut map = self.map.write().expect(ERR_POISONED_LOCK);
+        let engine = map.entry(key.clone()).or_insert_with(|| Arc::new(self.create_engine(key)));
 
-        // Double-check after acquiring the write lock.
-        if let Some(engine) = map.get(key) {
-            return Arc::clone(engine);
-        }
-
-        let engine = Arc::new(self.create_engine(key));
-        map.insert(key.clone(), Arc::clone(&engine));
-        engine
+        Arc::clone(engine)
     }
 
     #[cfg(test)]
