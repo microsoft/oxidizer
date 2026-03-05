@@ -162,6 +162,8 @@
 //! # }
 //! ```
 //!
+#![doc = include_str!("../examples/README.md")]
+//!
 //! # Features
 //!
 //! This crate provides several optional features that can be enabled in your `Cargo.toml`:
