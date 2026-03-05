@@ -676,6 +676,7 @@ mod service_tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn cache_builder_service_creates_cache() -> TestResult {
         block_on(async {
@@ -691,6 +692,7 @@ mod service_tests {
         })
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn cache_service_get() -> TestResult {
         block_on(async {
@@ -707,6 +709,7 @@ mod service_tests {
         })
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn cache_service_get_miss() -> TestResult {
         block_on(async {
@@ -722,6 +725,7 @@ mod service_tests {
         })
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn cache_service_insert() -> TestResult {
         block_on(async {
@@ -740,6 +744,7 @@ mod service_tests {
         })
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn cache_service_invalidate() -> TestResult {
         block_on(async {
@@ -757,6 +762,7 @@ mod service_tests {
         })
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn cache_service_clear() -> TestResult {
         block_on(async {
