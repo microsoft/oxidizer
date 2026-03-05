@@ -367,16 +367,7 @@ mod tests {
         let layer: RetryLayer<String, String, NotSet, NotSet> = Retry::layer("test_retry", &context);
         let layer = layer.recovery_with(|_, _| RecoveryInfo::never()).clone_input();
 
-        let retry = layer.layer(Execute::new(|v: String| async move { v }));
-
-        assert_eq!(retry.shared.telemetry.pipeline_name.to_string(), "test_pipeline");
-        assert_eq!(retry.shared.telemetry.strategy_name.to_string(), "test_retry");
-        assert_eq!(retry.shared.max_attempts, 4);
-        assert_eq!(retry.shared.backoff.0.base_delay, Duration::from_millis(10));
-        assert_eq!(retry.shared.backoff.0.backoff_type, Backoff::Exponential);
-        assert!(retry.shared.backoff.0.use_jitter);
-        assert!(retry.shared.on_retry.is_none());
-        assert!(retry.shared.enable_if.call(&"str".to_string()));
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[cfg_attr(miri, ignore)]
