@@ -56,19 +56,19 @@ async fn main() {
     println!("[main] result: {output} (took {:?})", start.elapsed());
 }
 
-/// Simulates a service where the first call is slow (500ms) and the second
-/// call (the hedging attempt) is fast (50ms). The hedging attempt completes before the original,
-/// demonstrating how hedging reduces tail latency.
+/// Simulates a service where the first two calls are slow (500ms) and subsequent
+/// calls (the second hedging attempt onwards) are fast (50ms). The fast hedging
+/// attempt completes before the slow ones, demonstrating how hedging reduces tail latency.
 async fn slow_then_fast_operation(input: String, clock: &Clock) -> String {
     let call = CALL_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if call < 2 {
-        // Original request: simulate a slow response
-        println!("[service] attempt 0: slow path (500ms)");
+        // Original request and first hedge: simulate a slow response
+        println!("[service] attempt {call}: slow path (500ms)");
         clock.delay(Duration::from_millis(500)).await;
         format!("{input} - slow response")
     } else {
-        // Hedging request: simulate a fast response
+        // Second hedging request: simulate a fast response
         println!("[service] attempt {call}: fast path (50ms)");
         clock.delay(Duration::from_millis(50)).await;
         format!("{input} - fast response")
