@@ -32,6 +32,7 @@ use cachet_tier::CacheTier;
 /// use cachet::Cache;
 /// use tick::Clock;
 /// use std::time::Duration;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
 /// let clock = Clock::new_frozen();
 /// let cache = Cache::builder::<String, i32>(clock)

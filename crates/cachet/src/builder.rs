@@ -38,6 +38,7 @@ mod sealed {
 /// ```
 /// use cachet::Cache;
 /// use tick::Clock;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
 /// let clock = Clock::new_frozen();
 /// let cache = Cache::builder::<String, i32>(clock)
@@ -61,6 +62,7 @@ pub trait CacheTierBuilder<K, V>: Sealed {
 /// use cachet::Cache;
 /// use tick::Clock;
 /// use std::time::Duration;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
 /// let clock = Clock::new_frozen();
 /// let cache = Cache::builder::<String, i32>(clock)
@@ -139,6 +141,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// ```
     /// use cachet::Cache;
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -218,6 +221,7 @@ impl<K, V, S> CacheBuilder<K, V, S> {
     /// ```
     /// use cachet::Cache;
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -243,6 +247,7 @@ impl<K, V, S> CacheBuilder<K, V, S> {
     /// use cachet::Cache;
     /// use tick::Clock;
     /// use std::time::Duration;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -302,6 +307,7 @@ where
     /// ```
     /// use cachet::Cache;
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -369,6 +375,7 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     /// ```
     /// use cachet::{Cache, FallbackPromotionPolicy};
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
@@ -477,6 +484,7 @@ where
     /// ```
     /// use cachet::Cache;
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let l2 = Cache::builder::<String, i32>(clock.clone()).memory();

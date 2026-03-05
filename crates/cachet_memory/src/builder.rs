@@ -23,6 +23,7 @@ use crate::tier::InMemoryCache;
 /// ```
 /// use cachet_memory::InMemoryCache;
 /// use std::time::Duration;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
 /// let cache = InMemoryCache::<String, i32>::builder()
 ///     .max_capacity(1000)
@@ -77,6 +78,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     ///
     /// ```
     /// use cachet_memory::InMemoryCache;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(10_000)
@@ -97,6 +99,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     ///
     /// ```
     /// use cachet_memory::InMemoryCache;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .initial_capacity(100)
@@ -123,6 +126,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     /// ```
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .time_to_live(Duration::from_secs(300))
@@ -147,6 +151,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     /// ```
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .time_to_idle(Duration::from_secs(60))
@@ -167,6 +172,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     ///
     /// ```
     /// use cachet_memory::InMemoryCache;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .name("user-cache")
@@ -185,6 +191,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     /// ```
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(1000)

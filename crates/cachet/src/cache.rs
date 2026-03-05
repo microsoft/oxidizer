@@ -66,6 +66,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// ```
 /// use cachet::{Cache, CacheEntry};
 /// use tick::Clock;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 /// # futures::executor::block_on(async {
 ///
 /// let clock = Clock::new_frozen();
@@ -86,6 +87,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
 /// use std::time::Duration;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 /// # futures::executor::block_on(async {
 ///
 /// let clock = Clock::new_frozen();
@@ -121,6 +123,7 @@ impl Cache<(), (), ()> {
     /// use cachet::Cache;
     /// use tick::Clock;
     /// use std::time::Duration;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -226,6 +229,7 @@ where
     /// ```
     /// use cachet::{Cache, CacheEntry};
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     /// # futures::executor::block_on(async {
     ///
     /// let clock = Clock::new_frozen();
@@ -262,6 +266,7 @@ where
     /// ```
     /// use cachet::{Cache, CacheEntry};
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     /// # futures::executor::block_on(async {
     ///
     /// let clock = Clock::new_frozen();
@@ -349,6 +354,7 @@ where
     /// ```
     /// use cachet::Cache;
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     /// # futures::executor::block_on(async {
     ///
     /// let clock = Clock::new_frozen();
@@ -412,6 +418,7 @@ where
     /// ```
     /// use cachet::{Cache, Error};
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     /// # futures::executor::block_on(async {
     ///
     /// let clock = Clock::new_frozen();
@@ -474,6 +481,7 @@ where
     /// ```
     /// use cachet::Cache;
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     /// # futures::executor::block_on(async {
     ///
     /// let clock = Clock::new_frozen();

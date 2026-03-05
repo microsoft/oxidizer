@@ -92,6 +92,7 @@ impl<V> FallbackPromotionPolicy<V> {
     /// ```
     /// use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
     /// use tick::Clock;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let min_len = 3;
     /// let clock = Clock::new_frozen();
@@ -154,6 +155,7 @@ impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
 /// use std::time::Duration;
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 /// # futures::executor::block_on(async {
 ///
 /// let clock = Clock::new_frozen();

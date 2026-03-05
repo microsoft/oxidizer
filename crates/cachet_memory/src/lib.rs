@@ -16,6 +16,7 @@
 //! use cachet_memory::InMemoryCacheBuilder;
 //! use cachet_tier::{CacheEntry, CacheTier};
 //! use std::time::Duration;
+//! # if cfg!(miri) { return; } // moka is incompatible with Miri
 //!
 //! # futures::executor::block_on(async {
 //! let cache = InMemoryCacheBuilder::<String, i32>::new()

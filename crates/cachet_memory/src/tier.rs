@@ -26,6 +26,7 @@ use crate::builder::InMemoryCacheBuilder;
 /// ```
 /// use cachet_memory::InMemoryCache;
 /// use cachet_tier::{CacheEntry, CacheTier};
+/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 /// # futures::executor::block_on(async {
 ///
 /// let cache = InMemoryCache::<String, i32>::new();
@@ -69,6 +70,7 @@ where
     ///
     /// ```
     /// use cachet_memory::InMemoryCache;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::new();
     /// ```
@@ -86,6 +88,7 @@ where
     ///
     /// ```
     /// use cachet_memory::InMemoryCache;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::with_capacity(1000);
     /// ```
@@ -104,6 +107,7 @@ where
     /// ```
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(1000)

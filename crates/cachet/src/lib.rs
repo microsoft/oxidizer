@@ -20,6 +20,7 @@
 //! ```
 //! use cachet::{Cache, CacheEntry};
 //! use tick::Clock;
+//! # if cfg!(miri) { return; } // moka is incompatible with Miri
 //! # futures::executor::block_on(async {
 //!
 //! let clock = Clock::new_frozen();
@@ -40,6 +41,7 @@
 //! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
 //! use tick::Clock;
 //! use std::time::Duration;
+//! # if cfg!(miri) { return; } // moka is incompatible with Miri
 //! # futures::executor::block_on(async {
 //!
 //! let clock = Clock::new_frozen();
