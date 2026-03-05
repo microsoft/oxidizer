@@ -24,6 +24,8 @@ allowed_external_types = [
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
     "recoverable::RecoveryKind",
+    "serde_core::de::*",
+    "serde_core::ser::*",
     "tick::clock::Clock",
     "tower_layer::Layer",
     "tower_service::Service",
@@ -36,20 +38,23 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["timeout", "retry", "breaker", "fallback"]
+default = []
 timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
+serde = ["dep:serde", "dep:jiff"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
+jiff = { workspace = true, features = ["std", "serde"], optional = true }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware = { workspace = true }
 tick = { workspace = true }
 tower-service = { workspace = true, optional = true }
@@ -61,6 +66,8 @@ criterion.workspace = true
 fastrand.workspace = true
 futures = { workspace = true, features = ["executor"] }
 http.workspace = true
+insta = { workspace = true, features = ["json"] }
+jiff = { workspace = true, default-features = true, features = ["serde"] }
 layered = { workspace = true, features = ["tower-service"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
@@ -68,6 +75,8 @@ opentelemetry = { workspace = true, default-features = false, features = ["metri
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
 rstest.workspace = true
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true }
 static_assertions.workspace = true
 testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
@@ -108,6 +117,10 @@ required-features = ["retry", "timeout", "tower-service"]
 [[example]]
 name = "breaker"
 required-features = ["breaker", "metrics"]
+
+[[example]]
+name = "config"
+required-features = ["retry", "breaker", "timeout", "serde"]
 
 [[example]]
 name = "fallback"
