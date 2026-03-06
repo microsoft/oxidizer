@@ -16,7 +16,8 @@ use crate::handle::JoinHandleInner;
 /// Runtime-agnostic task spawner.
 ///
 /// `Spawner` abstracts task spawning across different async runtimes. Use the
-/// built-in constructors for common runtimes, or [`Spawner::new_custom`] for custom
+/// built-in constructors for common runtimes, or
+/// [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) for custom
 /// implementations.
 ///
 /// # Examples
@@ -33,18 +34,19 @@ use crate::handle::JoinHandleInner;
 ///     println!("Task running!");
 /// });
 /// handle.await; // Wait for task to complete
-///     
+///
 /// # }
 /// ```
 ///
 /// ## Custom Runtime
 ///
 /// ```rust,ignore
-/// use anyspawn::Spawner;
+/// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
 ///
-/// let spawner = Spawner::new_custom(|fut| {
+/// let spawner = CustomSpawnerBuilder::custom("threadpool", |fut: BoxedFuture| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
-/// });
+/// })
+/// .build();
 ///
 /// let handle = spawner.spawn(async {
 ///     println!("Running on custom runtime!");
@@ -136,22 +138,15 @@ impl Spawner {
     /// The closure receives a boxed, pinned future and is responsible for
     /// spawning it on the appropriate runtime.
     ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use anyspawn::Spawner;
-    ///
-    /// let spawner = Spawner::new_custom(|fut| {
-    ///     std::thread::spawn(move || futures::executor::block_on(fut));
-    /// });
-    /// ```
+    /// Prefer using [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder)
+    /// which provides naming and layer composition.
     #[cfg(feature = "custom")]
     #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
-    pub fn new_custom<F>(f: F) -> Self
+    pub(crate) fn new_custom<F>(f: F, name: &'static str, layer_names: Vec<&'static str>) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
-        Self(SpawnerKind::Custom(CustomSpawner(Arc::new(f))))
+        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, layer_names)))
     }
 
     /// Spawns an async task on the runtime.

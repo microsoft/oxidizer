@@ -7,6 +7,8 @@
 //! Tests for `Spawner` implementations.
 
 use anyspawn::Spawner;
+#[cfg(feature = "custom")]
+use anyspawn::CustomSpawnerBuilder;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync);
 
@@ -36,9 +38,10 @@ async fn tokio_spawn_fire_and_forget() {
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawn_and_await() {
-    let spawner = Spawner::new_custom(|fut| {
+    let spawner = CustomSpawnerBuilder::custom("threadpool", |fut| {
         std::thread::spawn(move || futures::executor::block_on(fut));
-    });
+    })
+    .build();
 
     let result = futures::executor::block_on(spawner.spawn(async { 42 }));
     assert_eq!(result, 42);
@@ -47,9 +50,10 @@ fn custom_spawn_and_await() {
 #[cfg(feature = "custom")]
 #[tokio::test]
 async fn custom_spawn_fire_and_forget() {
-    let spawner = Spawner::new_custom(|fut| {
+    let spawner = CustomSpawnerBuilder::custom("threadpool", |fut| {
         std::thread::spawn(move || futures::executor::block_on(fut));
-    });
+    })
+    .build();
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -65,7 +69,8 @@ async fn custom_spawn_fire_and_forget() {
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawner_debug() {
-    let spawner = Spawner::new_custom(|_| {});
+    let spawner = CustomSpawnerBuilder::custom("noop", |_| {}).build();
     let debug_str = format!("{spawner:?}");
     assert!(debug_str.contains("CustomSpawner"));
+    assert!(debug_str.contains("noop"));
 }
