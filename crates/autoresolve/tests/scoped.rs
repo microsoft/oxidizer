@@ -172,14 +172,12 @@ fn parent_types_inherited_by_children() {
     parent.get::<Validator>(); // eagerly resolve in parent
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
-    let shared = parent.into_shared();
-
-    let mut child1 = shared.scoped(RequestBase {
+    let mut child1 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
     });
-    let mut child2 = shared.scoped(RequestBase {
+    let mut child2 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -197,9 +195,8 @@ fn parent_types_inherited_by_children() {
 fn auto_promotes_to_parent() {
     let counter = Arc::new(AtomicUsize::new(0));
     let parent = app(counter.clone()); // Validator NOT eagerly resolved
-    let shared = parent.into_shared();
 
-    let mut child1 = shared.scoped(RequestBase {
+    let mut child1 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -208,7 +205,7 @@ fn auto_promotes_to_parent() {
     assert_eq!(child1.get::<Validator>().instance, 1);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
-    let mut child2 = shared.scoped(RequestBase {
+    let mut child2 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -223,15 +220,14 @@ fn auto_promotes_to_parent() {
 fn child_types_are_independent() {
     let counter = Arc::new(AtomicUsize::new(0));
     let parent = app(counter);
-    let shared = parent.into_shared();
 
     let req_counter1 = Arc::new(AtomicUsize::new(0));
     let req_counter2 = Arc::new(AtomicUsize::new(0));
 
-    let mut child1 = shared.scoped(RequestBase {
+    let mut child1 = parent.scoped(RequestBase {
         request: Request { counter: req_counter1 },
     });
-    let mut child2 = shared.scoped(RequestBase {
+    let mut child2 = parent.scoped(RequestBase {
         request: Request { counter: req_counter2 },
     });
 
@@ -247,8 +243,7 @@ fn try_get_checks_both_stores() {
     let mut parent = app(counter);
     parent.get::<Validator>(); // eagerly resolve
 
-    let shared = parent.into_shared();
-    let mut child = shared.scoped(RequestBase {
+    let mut child = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -272,14 +267,13 @@ fn try_get_checks_both_stores() {
 fn client_shares_validator_across_siblings() {
     let counter = Arc::new(AtomicUsize::new(0));
     let parent = app(counter.clone());
-    let shared = parent.into_shared();
 
-    let mut child1 = shared.scoped(RequestBase {
+    let mut child1 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
     });
-    let mut child2 = shared.scoped(RequestBase {
+    let mut child2 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -302,10 +296,9 @@ fn client_shares_validator_across_siblings() {
 fn three_level_promotes_validator_to_app() {
     let counter = Arc::new(AtomicUsize::new(0));
     let parent = app(counter.clone());
-    let shared = parent.into_shared();
 
     // Request 1
-    let req1 = shared.scoped(RequestBase {
+    let req1 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -321,7 +314,7 @@ fn three_level_promotes_validator_to_app() {
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
     // Request 2 (sibling) — still reuses from app ancestor.
-    let req2 = shared.scoped(RequestBase {
+    let req2 = parent.scoped(RequestBase {
         request: Request {
             counter: Arc::new(AtomicUsize::new(0)),
         },
@@ -339,13 +332,12 @@ fn three_level_promotes_validator_to_app() {
 fn three_level_promotes_cv_to_request() {
     let counter = Arc::new(AtomicUsize::new(0));
     let parent = app(counter);
-    let shared = parent.into_shared();
 
     let req_counter1 = Arc::new(AtomicUsize::new(0));
     let req_counter2 = Arc::new(AtomicUsize::new(0));
 
     // Request 1
-    let req1 = shared.scoped(RequestBase {
+    let req1 = parent.scoped(RequestBase {
         request: Request {
             counter: req_counter1.clone(),
         },
@@ -361,7 +353,7 @@ fn three_level_promotes_cv_to_request() {
     assert_eq!(req_counter1.load(Ordering::SeqCst), 1);
 
     // Request 2 — must construct its own CorrelationVector.
-    let req2 = shared.scoped(RequestBase {
+    let req2 = parent.scoped(RequestBase {
         request: Request {
             counter: req_counter2.clone(),
         },
@@ -380,10 +372,9 @@ fn three_level_promotes_cv_to_request() {
 fn three_level_task_handler_local_but_shares_cv() {
     let counter = Arc::new(AtomicUsize::new(0));
     let parent = app(counter);
-    let shared = parent.into_shared();
 
     let req_counter = Arc::new(AtomicUsize::new(0));
-    let req1 = shared.scoped(RequestBase {
+    let req1 = parent.scoped(RequestBase {
         request: Request {
             counter: req_counter.clone(),
         },
@@ -411,14 +402,13 @@ fn three_level_task_handler_local_but_shares_cv() {
 fn three_level_task_client_shares_client_within_request() {
     let app_counter = Arc::new(AtomicUsize::new(0));
     let parent = app(app_counter.clone());
-    let shared = parent.into_shared();
 
     let req_counter1 = Arc::new(AtomicUsize::new(0));
     // Start at 100 so instance values from different requests are distinguishable.
     let req_counter2 = Arc::new(AtomicUsize::new(100));
 
     // Request 1
-    let req1 = shared.scoped(RequestBase {
+    let req1 = parent.scoped(RequestBase {
         request: Request {
             counter: req_counter1.clone(),
         },
@@ -442,7 +432,7 @@ fn three_level_task_client_shares_client_within_request() {
     assert_eq!(req_counter1.load(Ordering::SeqCst), 1);
 
     // Request 2
-    let req2 = shared.scoped(RequestBase {
+    let req2 = parent.scoped(RequestBase {
         request: Request {
             counter: req_counter2.clone(),
         },

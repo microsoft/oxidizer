@@ -20,4 +20,4 @@ pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};
 pub use resolve_from::ResolveFrom;
 pub use resolver::Resolver;
 pub use resolver_store::ResolverStore;
-pub use scoped_resolver::{ScopedResolver, SharedResolver};
+pub use scoped_resolver::ScopedResolver;

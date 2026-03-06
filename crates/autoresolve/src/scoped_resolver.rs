@@ -3,61 +3,18 @@ use std::sync::Arc;
 
 use type_map::concurrent::TypeMap;
 
-use crate::base_type::{BaseType, ScopedUnder};
 use crate::resolve_deps::ResolutionDeps;
 use crate::resolve_from::ResolveFrom;
+use crate::resolver::Resolver;
 use crate::resolver_store::ResolverStore;
 use crate::shared_type_map::SharedTypeMap;
 
-/// A shared parent resolver that can spawn scoped child resolvers.
-///
-/// Created from a [`Resolver`](crate::Resolver) via
-/// [`into_shared()`](crate::Resolver::into_shared), or from a [`ScopedResolver`] via
-/// [`into_shared()`](ScopedResolver::into_shared) to enable nested scoping.
-///
-/// The underlying type map uses interior mutability, allowing scoped children to read
-/// types that were pre-resolved in the parent.
-pub struct SharedResolver<T> {
-    pub(crate) types: Arc<SharedTypeMap>,
-    pub(crate) ancestors: Vec<Arc<SharedTypeMap>>,
-    pub(crate) base: PhantomData<T>,
-}
-
-impl<T: Send + Sync + 'static> SharedResolver<T> {
-    /// Creates a new scoped resolver that inherits types from this shared parent.
-    ///
-    /// The scoped base struct's fields are automatically inserted as root types.
-    /// Types pre-resolved in the parent (and its ancestors) are visible to the child.
-    /// New types resolved by the child are stored locally and dropped when the scoped
-    /// resolver is dropped.
-    ///
-    /// The child resolver's type parameter is `S` (the scoped base type), which
-    /// determines which types are resolvable in the child scope. Parent root types
-    /// are propagated into the child scope via `#[base(scoped(Parent))]`.
-    pub fn scoped<S>(&self, roots: S) -> ScopedResolver<S>
-    where
-        S: BaseType<S> + ScopedUnder<Parent = T>,
-    {
-        let mut ancestors = Vec::with_capacity(1 + self.ancestors.len());
-        ancestors.push(Arc::clone(&self.types));
-        ancestors.extend(self.ancestors.iter().map(Arc::clone));
-
-        let mut resolver = ScopedResolver {
-            ancestors,
-            types: TypeMap::new(),
-            depth: None,
-            base: PhantomData,
-        };
-        roots.insert_into(&mut resolver);
-        resolver
-    }
-}
-
 /// A child resolver that reads from a shared parent and resolves new types locally.
 ///
-/// Created from a [`SharedResolver`] via [`scoped()`](SharedResolver::scoped). Types
-/// pre-resolved in the parent (and its ancestors) are shared across all scoped children.
-/// New types are resolved into the local scope and dropped when this resolver is dropped.
+/// Created from a [`Resolver`] via [`scoped()`](Resolver::scoped). Types
+/// previously resolved in the parent (and its ancestors) are shared across all
+/// scoped children. New types are resolved into the local scope and dropped when
+/// this resolver is dropped.
 ///
 /// When a newly-resolved type depends only on ancestor data, it is automatically
 /// promoted into the appropriate ancestor via `get_or_insert()` so sibling scoped
@@ -170,6 +127,15 @@ impl<T: Send + Sync + 'static> ResolverStore<T> for ScopedResolver<T> {
 }
 
 impl<T: Send + Sync + 'static> ScopedResolver<T> {
+    pub(crate) fn new_with_ancestors(ancestors: Vec<Arc<SharedTypeMap>>) -> Self {
+        ScopedResolver {
+            ancestors,
+            types: TypeMap::new(),
+            depth: None,
+            base: PhantomData,
+        }
+    }
+
     pub fn insert<V: Send + Sync + 'static>(&mut self, value: V) {
         self.types.insert(value);
     }
@@ -195,12 +161,12 @@ impl<T: Send + Sync + 'static> ScopedResolver<T> {
         ResolverStore::resolve(self)
     }
 
-    /// Converts this scoped resolver into a shared parent for nested scoping.
+    /// Converts this scoped resolver into a [`Resolver`] for nested scoping.
     ///
     /// Types resolved locally in this scope become the new shared layer. Ancestor
     /// types remain accessible to grandchildren through the ancestor chain.
-    pub fn into_shared(self) -> SharedResolver<T> {
-        SharedResolver {
+    pub fn into_shared(self) -> Resolver<T> {
+        Resolver {
             types: Arc::new(SharedTypeMap::from_type_map(self.types)),
             ancestors: self.ancestors,
             base: PhantomData,

@@ -16,6 +16,11 @@ impl SharedTypeMap {
         SharedTypeMap { inner: Mutex::new(types) }
     }
 
+    pub(crate) fn contains<O: Send + Sync + 'static>(&self) -> bool {
+        let guard = self.inner.lock().expect("SharedTypeMap mutex poisoned");
+        guard.get::<O>().is_some()
+    }
+
     pub(crate) fn try_get<O: Send + Sync + 'static>(&self) -> Option<&O> {
         let guard = self.inner.lock().expect("SharedTypeMap mutex poisoned");
         let ptr = guard.get::<O>().map(|r| r as *const O);
