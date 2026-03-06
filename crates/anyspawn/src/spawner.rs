@@ -3,7 +3,7 @@
 
 //! [`Spawner`] for plugging in runtime implementations.
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 #[cfg(feature = "custom")]
 use std::sync::Arc;
 
@@ -16,9 +16,10 @@ use crate::handle::JoinHandleInner;
 /// Runtime-agnostic task spawner.
 ///
 /// `Spawner` abstracts task spawning across different async runtimes. Use the
-/// built-in constructors for common runtimes, or
-/// [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) for custom
-/// implementations.
+/// built-in constructors for common runtimes, [`Spawner::new_custom`] for a
+/// simple custom closure, or [`Spawner::builder`] /
+/// [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) for layered
+/// composition with named debug output.
 ///
 /// # Examples
 ///
@@ -41,12 +42,11 @@ use crate::handle::JoinHandleInner;
 /// ## Custom Runtime
 ///
 /// ```rust,ignore
-/// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+/// use anyspawn::Spawner;
 ///
-/// let spawner = CustomSpawnerBuilder::custom("threadpool", |fut: BoxedFuture| {
+/// let spawner = Spawner::new_custom(|fut| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
-/// })
-/// .build();
+/// });
 ///
 /// let handle = spawner.spawn(async {
 ///     println!("Running on custom runtime!");
@@ -96,10 +96,10 @@ use crate::handle::JoinHandleInner;
 /// }
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Spawner(SpawnerKind);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio,
@@ -138,15 +138,67 @@ impl Spawner {
     /// The closure receives a boxed, pinned future and is responsible for
     /// spawning it on the appropriate runtime.
     ///
-    /// Prefer using [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder)
-    /// which provides naming and layer composition.
+    /// For layer composition and named debug output, use
+    /// [`Spawner::builder`] or [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use anyspawn::Spawner;
+    ///
+    /// let spawner = Spawner::new_custom(|fut| {
+    ///     std::thread::spawn(move || futures::executor::block_on(fut));
+    /// });
+    /// ```
     #[cfg(feature = "custom")]
     #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
-    pub(crate) fn new_custom<F>(f: F, name: &'static str, layer_names: Vec<&'static str>) -> Self
+    pub fn new_custom<F>(f: F) -> Self
+    where
+        F: Fn(BoxedFuture) + Send + Sync + 'static,
+    {
+        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), "custom", Box::default())))
+    }
+
+    /// Creates a custom spawner with name and layer metadata for [`Debug`]
+    /// output. Used by [`CustomSpawnerBuilder::build`](crate::CustomSpawnerBuilder::build).
+    #[cfg(feature = "custom")]
+    pub(crate) fn new_custom_named<F>(f: F, name: &'static str, layer_names: Box<[&'static str]>) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
         Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, layer_names)))
+    }
+
+    /// Creates a [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) using
+    /// Tokio as the base spawn function.
+    ///
+    /// This is a shorthand for
+    /// [`CustomSpawnerBuilder::tokio()`](crate::CustomSpawnerBuilder::tokio).
+    ///
+    /// # Panics
+    ///
+    /// The resulting [`Spawner`] will panic if used outside a Tokio runtime.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use anyspawn::{BoxedFuture, Spawner};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let spawner = Spawner::builder()
+    ///     .layer("logging", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+    ///         spawn(fut);
+    ///     })
+    ///     .build();
+    /// # let _ = spawner;
+    /// # }
+    /// ```
+    #[cfg(all(feature = "tokio", feature = "custom"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "tokio", feature = "custom"))))]
+    #[must_use]
+    pub fn builder() -> crate::CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static> {
+        crate::CustomSpawnerBuilder::tokio()
     }
 
     /// Spawns an async task on the runtime.
@@ -181,6 +233,17 @@ impl Spawner {
             SpawnerKind::Tokio => JoinHandle(JoinHandleInner::Tokio(::tokio::spawn(work))),
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
+        }
+    }
+}
+
+impl Debug for Spawner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            #[cfg(feature = "tokio")]
+            SpawnerKind::Tokio => f.debug_tuple("Spawner").field(&"tokio").finish(),
+            #[cfg(feature = "custom")]
+            SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
         }
     }
 }
