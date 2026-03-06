@@ -166,10 +166,10 @@
 //!
 //! # Examples
 //!
-//! Runnable examples covering each middleware and common composition patterns:
+//! Examples covering each middleware and common composition patterns:
 //!
 //! - [`timeout`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs): Basic timeout that cancels long-running operations.
-//! - [`timeout_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs): Dynamic timeout durations and timeout callbacks.
+//! - [`timeout_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs): Dynamic timeout duration and timeout callbacks.
 //! - [`retry`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs): Automatic retry with input cloning and recovery classification.
 //! - [`retry_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs): Custom input cloning with attempt metadata injection.
 //! - [`retry_outage`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs): Input restoration from errors when cloning is not possible.
