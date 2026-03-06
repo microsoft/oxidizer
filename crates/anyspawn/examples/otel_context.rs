@@ -10,8 +10,8 @@
 //! so spans, baggage, and other context values propagate automatically.
 
 use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
-use opentelemetry::context::FutureExt as OtelFutureExt;
 use opentelemetry::Context;
+use opentelemetry::context::FutureExt as OtelFutureExt;
 
 #[tokio::main]
 async fn main() {

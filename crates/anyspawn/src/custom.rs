@@ -23,12 +23,12 @@ pub(crate) struct CustomSpawner {
 }
 
 impl CustomSpawner {
-    pub(crate) fn new(
-        spawn_fn: Arc<SpawnFn>,
-        name: &'static str,
-        layer_names: Box<[&'static str]>,
-    ) -> Self {
-        Self { spawn_fn, name, layer_names }
+    pub(crate) fn new(spawn_fn: Arc<SpawnFn>, name: &'static str, layer_names: Box<[&'static str]>) -> Self {
+        Self {
+            spawn_fn,
+            name,
+            layer_names,
+        }
     }
 
     pub(crate) fn call<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
