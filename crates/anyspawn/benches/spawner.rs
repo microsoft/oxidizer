@@ -26,7 +26,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // smol benchmarks
-    let smol_spawner = Spawner::new_custom(|fut| {
+    let smol_spawner = Spawner::new_custom("smol", |fut| {
         smol::spawn(fut).detach();
     });
 

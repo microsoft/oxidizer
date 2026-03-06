@@ -44,7 +44,7 @@ use crate::handle::JoinHandleInner;
 /// ```rust,ignore
 /// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::new_custom(|fut| {
+/// let spawner = Spawner::new_custom("threadpool", |fut| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
 /// });
 ///
@@ -135,10 +135,11 @@ impl Spawner {
 
     /// Creates a custom spawner from a closure.
     ///
+    /// The `name` identifies this spawner in [`Debug`] output.
     /// The closure receives a boxed, pinned future and is responsible for
     /// spawning it on the appropriate runtime.
     ///
-    /// For layer composition and named debug output, use
+    /// For layer composition, use
     /// [`Spawner::builder`] or [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder).
     ///
     /// # Examples
@@ -146,23 +147,23 @@ impl Spawner {
     /// ```rust
     /// use anyspawn::Spawner;
     ///
-    /// let spawner = Spawner::new_custom(|fut| {
+    /// let spawner = Spawner::new_custom("threadpool", |fut| {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));
     /// });
     /// ```
     #[cfg(feature = "custom")]
     #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
-    pub fn new_custom<F>(f: F) -> Self
+    pub fn new_custom<F>(name: &'static str, f: F) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
-        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), "custom", Box::default())))
+        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, Box::default())))
     }
 
     /// Creates a custom spawner with name and layer metadata for [`Debug`]
-    /// output. Used by [`CustomSpawnerBuilder::build`](crate::CustomSpawnerBuilder::build).
+    /// output. Used internally by [`CustomSpawnerBuilder::build`](crate::CustomSpawnerBuilder::build).
     #[cfg(feature = "custom")]
-    pub(crate) fn new_custom_named<F>(f: F, name: &'static str, layer_names: Box<[&'static str]>) -> Self
+    pub(crate) fn new_with_layers<F>(name: &'static str, f: F, layer_names: Box<[&'static str]>) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
