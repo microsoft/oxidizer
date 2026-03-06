@@ -1,36 +1,36 @@
 use crate::ResolveFrom;
-use crate::resolver::Resolver;
+use crate::resolver_store::ResolverStore;
 
 pub struct ResolutionDepsEnd;
 
 pub struct ResolutionDepsNode<H, T>(pub H, pub T);
 
-pub trait ResolutionDeps<T>: Send + Sync + 'static {
+pub trait ResolutionDeps<T: 'static>: Send + Sync + 'static {
     type Resolved<'a>
     where
         Self: 'a,
         T: 'a;
 
-    fn ensure(base: &mut Resolver<T>);
+    fn ensure<S: ResolverStore<T>>(store: &mut S);
 
-    fn get_private(base: &Resolver<T>) -> Self::Resolved<'_>;
+    fn get_private<S: ResolverStore<T>>(store: &S) -> Self::Resolved<'_>;
 
-    fn get(base: &mut Resolver<T>) -> Self::Resolved<'_> {
-        Self::ensure(base);
-        Self::get_private(base)
+    fn get<S: ResolverStore<T>>(store: &mut S) -> Self::Resolved<'_> {
+        Self::ensure(store);
+        Self::get_private(store)
     }
 }
 
-impl<T> ResolutionDeps<T> for ResolutionDepsEnd {
+impl<T: 'static> ResolutionDeps<T> for ResolutionDepsEnd {
     type Resolved<'a>
         = ResolutionDepsEnd
     where
         Self: 'a,
         T: 'a;
 
-    fn ensure(_base: &mut Resolver<T>) {}
+    fn ensure<S: ResolverStore<T>>(_store: &mut S) {}
 
-    fn get_private(_base: &Resolver<T>) -> Self::Resolved<'_> {
+    fn get_private<S: ResolverStore<T>>(_store: &S) -> Self::Resolved<'_> {
         ResolutionDepsEnd
     }
 }
@@ -46,14 +46,16 @@ where
     where
         Self: 'a,
         T: 'a;
-    fn get_private(base: &Resolver<T>) -> Self::Resolved<'_> {
-        let tail = Rest::get_private(base);
-        let head = base.try_get::<H>().expect("Ensure must have been called before new");
+    fn get_private<S: ResolverStore<T>>(store: &S) -> Self::Resolved<'_> {
+        let tail = Rest::get_private(store);
+        let head = store
+            .lookup::<H>()
+            .expect("ensure must have been called before get_private");
         ResolutionDepsNode(head, tail)
     }
 
-    fn ensure(base: &mut Resolver<T>) {
-        base.ensure::<H>();
-        Rest::ensure(base);
+    fn ensure<S: ResolverStore<T>>(store: &mut S) {
+        store.resolve::<H>();
+        Rest::ensure(store);
     }
 }

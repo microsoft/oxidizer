@@ -37,14 +37,14 @@ macro_rules! resolver {
 
     // Composite entry with more entries following.
     (@__entry $base:ident $r:ident .. $name:ident : $ty:ident , $( $rest:tt )+ ) => {
-        $ty!(@impls $base, $ty);
+        $ty!(@impls $base);
         $ty!(@insert $r, $name);
         $crate::resolver!(@__entry $base $r $( $rest )+ );
     };
 
     // Composite entry, last (optional trailing comma).
     (@__entry $base:ident $r:ident .. $name:ident : $ty:ident $(,)? ) => {
-        $ty!(@impls $base, $ty);
+        $ty!(@impls $base);
         $ty!(@insert $r, $name);
     };
 
