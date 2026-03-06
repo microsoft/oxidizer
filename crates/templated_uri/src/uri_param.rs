@@ -106,6 +106,29 @@ mod tests {
     }
 
     #[test]
+    fn uri_param_all_numeric_types() {
+        assert_eq!(format!("{}", 1u8.as_uri_safe()), "1");
+        assert_eq!(format!("{}", 2u16.as_uri_safe()), "2");
+        assert_eq!(format!("{}", 3u64.as_uri_safe()), "3");
+        assert_eq!(format!("{}", 4u128.as_uri_safe()), "4");
+        assert_eq!(format!("{}", 5usize.as_uri_safe()), "5");
+        assert_eq!(format!("{}", NonZeroU8::new(1).unwrap().as_uri_safe()), "1");
+        assert_eq!(format!("{}", NonZeroU16::new(2).unwrap().as_uri_safe()), "2");
+        assert_eq!(format!("{}", NonZeroU32::new(3).unwrap().as_uri_safe()), "3");
+        assert_eq!(format!("{}", NonZeroU64::new(4).unwrap().as_uri_safe()), "4");
+        assert_eq!(format!("{}", NonZeroU128::new(5).unwrap().as_uri_safe()), "5");
+        assert_eq!(format!("{}", NonZeroUsize::new(6).unwrap().as_uri_safe()), "6");
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(format!("{}", ip.as_uri_safe()), "127.0.0.1");
+    }
+
+    #[test]
+    fn uri_param_uri_safe_string() {
+        let s = UriSafeString::encode("hello");
+        assert_eq!(format!("{}", s.as_uri_safe()), "hello");
+    }
+
+    #[test]
     fn test_uri_unsafe_param_sensitive() {
         // Test line 78-84: UriUnsafeParam for Sensitive<T> where T: Display
         let data_class = DataClass::new("test", "sensitive");
