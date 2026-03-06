@@ -631,6 +631,109 @@ fn cache_debug_with_stampede_protection() {
 }
 
 // =============================================================================
+// Borrow semantics tests
+// =============================================================================
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn borrow_get_insert_with_str_key() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        // Use &str keys with Cache<String, i32>
+        cache.insert("key", CacheEntry::new(42)).await?;
+        let entry = cache.get("key").await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+
+        assert!(cache.get("missing").await?.is_none());
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn borrow_invalidate_with_str_key() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        cache.insert("key", CacheEntry::new(42)).await?;
+        assert!(cache.contains("key").await?);
+
+        cache.invalidate("key").await?;
+        assert!(!cache.contains("key").await?);
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn borrow_get_or_insert_with_str_key() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        let entry = cache.get_or_insert("key", || async { 42 }).await?;
+        assert_eq!(*entry.value(), 42);
+
+        // Second call returns cached value
+        let entry = cache.get_or_insert("key", || async { 100 }).await?;
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn borrow_try_get_or_insert_with_str_key() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        let entry = cache.try_get_or_insert("key", || async { Ok::<_, Error>(42) }).await?;
+        assert_eq!(*entry.value(), 42);
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn borrow_optionally_get_or_insert_with_str_key() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+        let result = cache.optionally_get_or_insert("missing", || async { None::<i32> }).await?;
+        assert!(result.is_none());
+
+        let result = cache.optionally_get_or_insert("key", || async { Some(42) }).await?;
+        assert_eq!(*result.unwrap().value(), 42);
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn borrow_stampede_protection_with_str_key() -> TestResult {
+    block_on(async {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+        cache.insert("key", CacheEntry::new(42)).await?;
+        let entry = cache.get("key").await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
+
+        cache.invalidate("key").await?;
+        assert!(cache.get("key").await?.is_none());
+
+        let entry = cache.get_or_insert("new", || async { 77 }).await?;
+        assert_eq!(*entry.value(), 77);
+        Ok(())
+    })
+}
+
+// =============================================================================
 // Service feature tests
 // =============================================================================
 

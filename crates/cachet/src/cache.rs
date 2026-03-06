@@ -3,7 +3,7 @@
 
 //! The main cache type with telemetry and stampede protection.
 
-use std::{fmt::Debug, hash::Hash};
+use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 
 use tick::Clock;
 use uniflight::Merger;
@@ -74,8 +74,8 @@ impl<K, V> Debug for Mergers<K, V> {
 ///     .memory()
 ///     .build();
 ///
-/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-/// let value = cache.get(&"key".to_string()).await?;
+/// cache.insert("key", CacheEntry::new(42)).await?;
+/// let value = cache.get("key").await?;
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # Ok::<(), cachet::Error>(())
 /// # });
@@ -235,20 +235,27 @@ where
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// let result = cache.get(&"missing".to_string()).await?;
+    /// let result = cache.get("missing").await?;
     /// assert!(result.is_none());
     /// # Ok::<(), cachet::Error>(())
     /// # });
     /// ```
-    pub async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+    pub async fn get<Q>(&self, key: &Q) -> Result<Option<CacheEntry<V>>, Error>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
+    {
         if let Some(mergers) = &self.mergers {
+            let owned = key.to_owned();
+            let storage = &self.storage;
             mergers
                 .get
-                .execute(key, || self.storage.get(key))
+                .execute(key, move || async move { storage.get(&owned).await })
                 .await
                 .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
         } else {
-            self.storage.get(key).await
+            let owned = key.to_owned();
+            self.storage.get(&owned).await
         }
     }
 
@@ -272,12 +279,17 @@ where
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+    /// cache.insert("key", CacheEntry::new(42)).await?;
     /// # Ok::<(), cachet::Error>(())
     /// # });
     /// ```
-    pub async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.storage.insert(key, entry).await
+    pub async fn insert<Q>(&self, key: &Q, entry: CacheEntry<V>) -> Result<(), Error>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
+    {
+        let owned = key.to_owned();
+        self.storage.insert(&owned, entry).await
     }
 
     /// Invalidates (removes) a value from the cache.
@@ -289,15 +301,22 @@ where
     /// # Errors
     ///
     /// Returns an error if the underlying cache tier operation fails.
-    pub async fn invalidate(&self, key: &K) -> Result<(), Error> {
+    pub async fn invalidate<Q>(&self, key: &Q) -> Result<(), Error>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
+    {
         if let Some(mergers) = &self.mergers {
+            let owned = key.to_owned();
+            let storage = &self.storage;
             mergers
                 .invalidate
-                .execute(key, || self.storage.invalidate(key))
+                .execute(key, move || async move { storage.invalidate(&owned).await })
                 .await
                 .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
         } else {
-            self.storage.invalidate(key).await
+            let owned = key.to_owned();
+            self.storage.invalidate(&owned).await
         }
     }
 
@@ -306,7 +325,11 @@ where
     /// # Errors
     ///
     /// Returns an error if the underlying cache tier operation fails.
-    pub async fn contains(&self, key: &K) -> Result<bool, Error> {
+    pub async fn contains<Q>(&self, key: &Q) -> Result<bool, Error>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
+    {
         Ok(self.get(key).await?.is_some())
     }
 
@@ -360,23 +383,26 @@ where
     /// let clock = Clock::new_frozen();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// let entry = cache.get_or_insert(&"key".to_string(), || async { 42 }).await?;
+    /// let entry = cache.get_or_insert("key", || async { 42 }).await?;
     /// assert_eq!(*entry.value(), 42);
     /// # Ok::<(), cachet::Error>(())
     /// # });
     /// ```
-    pub async fn get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
+    pub async fn get_or_insert<Q, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
     where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
         Fut: Future<Output = V> + Send,
     {
+        let owned = key.to_owned();
         if let Some(mergers) = &self.mergers {
             mergers
                 .get_or_insert
-                .execute(key, || self.do_get_or_insert(key, f))
+                .execute(key, move || async move { self.do_get_or_insert(&owned, f).await })
                 .await
                 .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
         } else {
-            self.do_get_or_insert(key, f).await
+            self.do_get_or_insert(&owned, f).await
         }
     }
 
@@ -425,24 +451,27 @@ where
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// let result = cache
-    ///     .try_get_or_insert(&"key".to_string(), || async { Ok::<_, std::io::Error>(42) })
+    ///     .try_get_or_insert("key", || async { Ok::<_, std::io::Error>(42) })
     ///     .await;
     /// assert!(result.is_ok());
     /// # });
     /// ```
-    pub async fn try_get_or_insert<E, Fut>(&self, key: &K, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
+    pub async fn try_get_or_insert<Q, E, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
     where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
         E: std::error::Error + Send + Sync + 'static,
         Fut: Future<Output = Result<V, E>> + Send,
     {
+        let owned = key.to_owned();
         if let Some(mergers) = &self.mergers {
             mergers
                 .try_get_or_insert
-                .execute(key, || self.do_try_get_or_insert(key, f))
+                .execute(key, move || async move { self.do_try_get_or_insert(&owned, f).await })
                 .await
                 .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
         } else {
-            self.do_try_get_or_insert(key, f).await
+            self.do_try_get_or_insert(&owned, f).await
         }
     }
 
@@ -489,30 +518,33 @@ where
     ///
     /// // Returns None without caching
     /// let result = cache
-    ///     .optionally_get_or_insert(&"missing".to_string(), || async { None })
+    ///     .optionally_get_or_insert("missing", || async { None })
     ///     .await?;
     /// assert!(result.is_none());
     ///
     /// // Returns Some and caches
     /// let result = cache
-    ///     .optionally_get_or_insert(&"key".to_string(), || async { Some(42) })
+    ///     .optionally_get_or_insert("key", || async { Some(42) })
     ///     .await?;
     /// assert_eq!(*result.unwrap().value(), 42);
     /// # Ok::<(), cachet::Error>(())
     /// # });
     /// ```
-    pub async fn optionally_get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut + Send) -> Result<Option<CacheEntry<V>>, Error>
+    pub async fn optionally_get_or_insert<Q, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<Option<CacheEntry<V>>, Error>
     where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
         Fut: Future<Output = Option<V>> + Send,
     {
+        let owned = key.to_owned();
         if let Some(mergers) = &self.mergers {
             mergers
                 .optionally_get_or_insert
-                .execute(key, || self.do_optionally_get_or_insert(key, f))
+                .execute(key, move || async move { self.do_optionally_get_or_insert(&owned, f).await })
                 .await
                 .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
         } else {
-            self.do_optionally_get_or_insert(key, f).await
+            self.do_optionally_get_or_insert(&owned, f).await
         }
     }
 
