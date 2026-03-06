@@ -156,7 +156,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         circuit_breaker.open.duration = stats.opened_duration(self.clock.instant()).as_secs(),
                         circuit_breaker.id = %self.breaker_id,
                         circuit_breaker.probes.total = stats.probes_total,
-                        circuit_breaker.probes.successfull = stats.probes_successes,
+                        circuit_breaker.probes.successful = stats.probes_successes,
                         circuit_breaker.probes.failed = stats.probes_failures,
                         circuit_breaker.probes.lost = stats.probes_lost,
                         circuit_breaker.rejections = stats.rejected,
