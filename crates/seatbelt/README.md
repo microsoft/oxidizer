@@ -143,10 +143,10 @@ let service = ServiceBuilder::new()
 
 ## Examples
 
-Runnable examples covering each middleware and common composition patterns:
+Examples covering each middleware and common composition patterns:
 
 * [`timeout`][__link13]: Basic timeout that cancels long-running operations.
-* [`timeout_advanced`][__link14]: Dynamic timeout durations and timeout callbacks.
+* [`timeout_advanced`][__link14]: Dynamic timeout duration and timeout callbacks.
 * [`retry`][__link15]: Automatic retry with input cloning and recovery classification.
 * [`retry_advanced`][__link16]: Custom input cloning with attempt metadata injection.
 * [`retry_outage`][__link17]: Input restoration from errors when cloning is not possible.
@@ -182,7 +182,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG63RPvQRXuQSGzmDAHkjkSvqG1QA-4AlsJOaG2Tob1JFn2wuYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4STOoP2_1kjG_YFfNmBbFbQG7vz1CXQ1d10GxetSJWWkufEYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/hedging/index.html
