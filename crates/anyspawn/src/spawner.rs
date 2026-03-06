@@ -3,7 +3,7 @@
 
 //! [`Spawner`] for plugging in runtime implementations.
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 #[cfg(feature = "custom")]
 use std::sync::Arc;
 
@@ -16,8 +16,9 @@ use crate::handle::JoinHandleInner;
 /// Runtime-agnostic task spawner.
 ///
 /// `Spawner` abstracts task spawning across different async runtimes. Use the
-/// built-in constructors for common runtimes, or [`Spawner::new_custom`] for custom
-/// implementations.
+/// built-in constructors for common runtimes, [`Spawner::new_custom`] for a
+/// simple custom closure, or [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) for layered
+/// composition with named debug output.
 ///
 /// # Examples
 ///
@@ -33,7 +34,7 @@ use crate::handle::JoinHandleInner;
 ///     println!("Task running!");
 /// });
 /// handle.await; // Wait for task to complete
-///     
+///
 /// # }
 /// ```
 ///
@@ -42,7 +43,7 @@ use crate::handle::JoinHandleInner;
 /// ```rust,ignore
 /// use anyspawn::Spawner;
 ///
-/// let spawner = Spawner::new_custom(|fut| {
+/// let spawner = Spawner::new_custom("threadpool", |fut| {
 ///     std::thread::spawn(move || futures::executor::block_on(fut));
 /// });
 ///
@@ -94,10 +95,10 @@ use crate::handle::JoinHandleInner;
 /// }
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Spawner(SpawnerKind);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio,
@@ -133,25 +134,38 @@ impl Spawner {
 
     /// Creates a custom spawner from a closure.
     ///
+    /// The `name` identifies this spawner in [`Debug`] output.
     /// The closure receives a boxed, pinned future and is responsible for
     /// spawning it on the appropriate runtime.
     ///
+    /// For layer composition, use [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder).
+    ///
     /// # Examples
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// use anyspawn::Spawner;
     ///
-    /// let spawner = Spawner::new_custom(|fut| {
+    /// let spawner = Spawner::new_custom("threadpool", |fut| {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));
     /// });
     /// ```
     #[cfg(feature = "custom")]
     #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
-    pub fn new_custom<F>(f: F) -> Self
+    pub fn new_custom<F>(name: &'static str, f: F) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
-        Self(SpawnerKind::Custom(CustomSpawner(Arc::new(f))))
+        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, Box::default())))
+    }
+
+    /// Creates a custom spawner with name and layer metadata for [`Debug`]
+    /// output. Used internally by [`CustomSpawnerBuilder::build`](crate::CustomSpawnerBuilder::build).
+    #[cfg(feature = "custom")]
+    pub(crate) fn new_with_layers<F>(name: &'static str, f: F, layer_names: Box<[&'static str]>) -> Self
+    where
+        F: Fn(BoxedFuture) + Send + Sync + 'static,
+    {
+        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, layer_names)))
     }
 
     /// Spawns an async task on the runtime.
@@ -186,6 +200,17 @@ impl Spawner {
             SpawnerKind::Tokio => JoinHandle(JoinHandleInner::Tokio(::tokio::spawn(work))),
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
+        }
+    }
+}
+
+impl Debug for Spawner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            #[cfg(feature = "tokio")]
+            SpawnerKind::Tokio => f.debug_tuple("Spawner").field(&"tokio").finish(),
+            #[cfg(feature = "custom")]
+            SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
         }
     }
 }

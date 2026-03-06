@@ -12,7 +12,7 @@ use futures::executor::block_on;
 #[tokio::main]
 async fn main() {
     // Create a spawner that runs futures on background threads
-    let spawner = Spawner::new_custom(|fut| {
+    let spawner = Spawner::new_custom("threadpool", |fut| {
         spawn(move || block_on(fut));
     });
 
