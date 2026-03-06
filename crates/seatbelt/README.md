@@ -145,46 +145,35 @@ let service = ServiceBuilder::new()
 
 Runnable examples covering each middleware and common composition patterns:
 
-* [`timeout`][__link12]: Basic timeout that cancels long-running operations.
-* [`timeout_advanced`][__link13]: Dynamic timeout durations and timeout callbacks.
-* [`retry`][__link14]: Automatic retry with input cloning and recovery classification.
-* [`retry_advanced`][__link15]: Custom input cloning with attempt metadata injection.
-* [`retry_outage`][__link16]: Input restoration from errors when cloning is not possible.
-* [`breaker`][__link17]: Circuit breaker that monitors failure rates.
-* [`fallback`][__link18]: Substitutes default values for invalid outputs.
-* [`resilience_pipeline`][__link19]: Composing retry and timeout with metrics.
-* [`tower`][__link20]: Tower `ServiceBuilder` integration.
-* [`config`][__link21]: Loading settings from a [JSON file][__link22].
+* [`timeout`][__link13]: Basic timeout that cancels long-running operations.
+* [`timeout_advanced`][__link14]: Dynamic timeout durations and timeout callbacks.
+* [`retry`][__link15]: Automatic retry with input cloning and recovery classification.
+* [`retry_advanced`][__link16]: Custom input cloning with attempt metadata injection.
+* [`retry_outage`][__link17]: Input restoration from errors when cloning is not possible.
+* [`breaker`][__link18]: Circuit breaker that monitors failure rates.
+* [`hedging`][__link19]: Hedging slow requests with parallel attempts to reduce tail latency.
+* [`fallback`][__link20]: Substitutes default values for invalid outputs.
+* [`resilience_pipeline`][__link21]: Composing retry and timeout with metrics.
+* [`tower`][__link22]: Tower `ServiceBuilder` integration.
+* [`config`][__link23]: Loading settings from a [JSON file][__link24].
 
 ## Features
 
 This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-<<<<<<< HEAD
-* **`timeout`** - Enables the [`timeout`][__link13] middleware for canceling long-running operations.
-* **`retry`** - Enables the [`retry`][__link14] middleware for automatically retrying failed operations with
+* **`timeout`** - Enables the [`timeout`][__link25] middleware for canceling long-running operations.
+* **`retry`** - Enables the [`retry`][__link26] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`hedging`** - Enables the [`hedging`][__link15] middleware for reducing tail latency via additional
+* **`hedging`** - Enables the [`hedging`][__link27] middleware for reducing tail latency via additional
   concurrent requests with configurable delay modes.
-* **`breaker`** - Enables the [`breaker`][__link16] middleware for preventing cascading failures.
-* **`fallback`** - Enables the [`fallback`][__link17] middleware for replacing invalid output with a
-=======
-* **`timeout`** - Enables the [`timeout`][__link23] middleware for canceling long-running operations.
-* **`retry`** - Enables the [`retry`][__link24] middleware for automatically retrying failed operations with
-  configurable backoff strategies, jitter, and recovery classification.
-* **`breaker`** - Enables the [`breaker`][__link25] middleware for preventing cascading failures.
-* **`fallback`** - Enables the [`fallback`][__link26] middleware for replacing invalid output with a
->>>>>>> origin/main
+* **`breaker`** - Enables the [`breaker`][__link28] middleware for preventing cascading failures.
+* **`fallback`** - Enables the [`fallback`][__link29] middleware for replacing invalid output with a
   user-defined alternative.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 * **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
   configuration types.
-<<<<<<< HEAD
-* **`tower-service`** - Enables [`tower_service::Service`][__link18] trait implementations for all
-=======
-* **`tower-service`** - Enables [`tower_service::Service`][__link27] trait implementations for all
->>>>>>> origin/main
+* **`tower-service`** - Enables [`tower_service::Service`][__link30] trait implementations for all
   resilience middleware.
 
 
@@ -193,44 +182,32 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
-<<<<<<< HEAD
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzRovKhKct9gG-lDZcao4MaxG0vZFGxWCphfG2ZI-noryWXJYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG63RPvQRXuQSGzmDAHkjkSvqG1QA-4AlsJOaG2Tob1JFn2wuYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/hedging/index.html
  [__link11]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
  [__link12]: https://docs.rs/seatbelt/0.3.1/seatbelt/fallback/index.html
- [__link13]: https://docs.rs/seatbelt/0.3.1/seatbelt/timeout/index.html
- [__link14]: https://docs.rs/seatbelt/0.3.1/seatbelt/retry/index.html
- [__link15]: https://docs.rs/seatbelt/0.3.1/seatbelt/hedging/index.html
- [__link16]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
- [__link17]: https://docs.rs/seatbelt/0.3.1/seatbelt/fallback/index.html
- [__link18]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
-=======
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-h5X_wYKkOdGzmzySp-X6wWGyOeAMrS0ICyG1NcDWN9F0QhYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC4zLjGCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
- [__link0]: https://crates.io/crates/layered/0.3.0
- [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
- [__link10]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
- [__link11]: https://docs.rs/seatbelt/0.3.1/seatbelt/fallback/index.html
- [__link12]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs
- [__link13]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs
- [__link14]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs
- [__link15]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs
- [__link16]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs
- [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs
- [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs
- [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs
->>>>>>> origin/main
+ [__link13]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs
+ [__link14]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs
+ [__link15]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs
+ [__link16]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs
+ [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs
+ [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs
+ [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs
  [__link2]: https://docs.rs/tick/0.2.1/tick/?search=Clock
- [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs
- [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs
- [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
- [__link23]: https://docs.rs/seatbelt/0.3.1/seatbelt/timeout/index.html
- [__link24]: https://docs.rs/seatbelt/0.3.1/seatbelt/retry/index.html
- [__link25]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
- [__link26]: https://docs.rs/seatbelt/0.3.1/seatbelt/fallback/index.html
- [__link27]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
+ [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs
+ [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs
+ [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs
+ [__link23]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs
+ [__link24]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
+ [__link25]: https://docs.rs/seatbelt/0.3.1/seatbelt/timeout/index.html
+ [__link26]: https://docs.rs/seatbelt/0.3.1/seatbelt/retry/index.html
+ [__link27]: https://docs.rs/seatbelt/0.3.1/seatbelt/hedging/index.html
+ [__link28]: https://docs.rs/seatbelt/0.3.1/seatbelt/breaker/index.html
+ [__link29]: https://docs.rs/seatbelt/0.3.1/seatbelt/fallback/index.html
  [__link3]: https://crates.io/crates/tick/0.2.1
+ [__link30]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
  [__link4]: https://docs.rs/seatbelt/0.3.1/seatbelt/?search=ResilienceContext
  [__link5]: https://docs.rs/seatbelt/0.3.1/seatbelt/?search=ResilienceContext
  [__link6]: https://docs.rs/recoverable/0.1.1/recoverable/?search=RecoveryInfo
