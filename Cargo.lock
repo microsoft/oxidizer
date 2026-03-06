@@ -66,6 +66,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-channel",
+ "opentelemetry",
  "smol",
  "static_assertions",
  "tick",

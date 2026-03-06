@@ -35,6 +35,7 @@ smol = "2"
 static_assertions.workspace = true
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+opentelemetry = { workspace = true, features = ["futures"] }
 
 [[bench]]
 name = "spawner"
@@ -48,6 +49,10 @@ required-features = ["tokio", "custom"]
 [[example]]
 name = "tokio"
 required-features = ["tokio"]
+
+[[example]]
+name = "otel_context"
+required-features = ["tokio", "custom"]
 
 [lints]
 workspace = true
