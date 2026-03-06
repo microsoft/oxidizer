@@ -32,11 +32,11 @@ tokio = { workspace = true, features = ["rt"], optional = true }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 insta.workspace = true
+opentelemetry = { workspace = true, features = ["futures"] }
 smol = "2"
 static_assertions.workspace = true
 tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
-opentelemetry = { workspace = true, features = ["futures"] }
 
 [[bench]]
 name = "spawner"
