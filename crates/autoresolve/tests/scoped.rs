@@ -1,5 +1,7 @@
 #![allow(dead_code)] // Test structs exist to exercise the DI graph, not all fields are read.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use autoresolve_macros::{base, composite, resolvable};
 
 // --- "Global" types (application lifetime, shared via parent) ---
@@ -120,6 +122,23 @@ struct ScopedRoots {
     request_context: RequestContext,
 }
 
+static COUNTED_CLIENT_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Clone)]
+struct CountedClient {
+    number: i32,
+}
+
+#[resolvable]
+impl CountedClient {
+    fn new(validator: &Validator, clock: &Clock) -> Self {
+        let count = COUNTED_CLIENT_CONSTRUCTIONS.fetch_add(1, Ordering::SeqCst) + 1;
+        Self {
+            number: validator.number() + clock.number() + count as i32,
+        }
+    }
+}
+
 fn create_parent(builtins: Builtins) -> autoresolve::Resolver<Base> {
     autoresolve::Resolver::new(Base { builtins })
 }
@@ -226,4 +245,34 @@ fn scoped_resolver_try_get_checks_both_stores() {
     // After resolving, try_get finds it in child.
     child.get::<CorrelationVector>();
     assert!(child.try_get::<CorrelationVector>().is_some());
+}
+
+#[test]
+fn scoped_resolver_shares_parent_resolved_types() {
+    COUNTED_CLIENT_CONSTRUCTIONS.store(0, Ordering::SeqCst);
+
+    let builtins = Builtins {
+        scheduler: Scheduler,
+        clock: Clock,
+    };
+
+    let mut parent = create_parent(builtins);
+    parent.get::<CountedClient>(); // eagerly resolve once in parent
+    assert_eq!(COUNTED_CLIENT_CONSTRUCTIONS.load(Ordering::SeqCst), 1);
+
+    let shared = parent.into_shared();
+
+    // Two scoped children both access CountedClient — should NOT construct it again.
+    let mut child1 = shared.scoped();
+    child1.insert(RequestContext { request_id: 1 });
+    let c1 = child1.get::<CountedClient>();
+    assert_eq!(c1.number, 42 + 10 + 1);
+
+    let mut child2 = shared.scoped();
+    child2.insert(RequestContext { request_id: 2 });
+    let c2 = child2.get::<CountedClient>();
+    assert_eq!(c2.number, 42 + 10 + 1);
+
+    // Still only one construction — both children read from the shared parent.
+    assert_eq!(COUNTED_CLIENT_CONSTRUCTIONS.load(Ordering::SeqCst), 1);
 }
