@@ -36,10 +36,7 @@ use crate::{Uri, ValidationError};
 ///     user_id: UriSafeString::from_static("john_doe"),
 /// };
 ///
-/// assert_eq!(
-///     user_path.to_uri_string(),
-///     "/acme/user/john_doe/"
-/// );
+/// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
 /// ```
 ///
 /// # Classified fields
@@ -66,10 +63,7 @@ use crate::{Uri, ValidationError};
 ///     org_id: UriSafeString::from_static("acme"),
 ///     user_id: Sensitive::new(UriSafeString::from_static("john_doe"), Pii),
 /// };
-/// assert_eq!(
-///     user_path.to_uri_string(),
-///     "/acme/user/john_doe/"
-/// );
+/// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
 ///
 /// let redaction_engine = RedactionEngine::builder().build();
 ///

@@ -321,6 +321,15 @@ mod tests {
     }
 
     #[test]
+    fn debug_delegates_to_inner() {
+        let safe = UriSafeString::encode("hello");
+        assert_eq!(format!("{safe:?}"), format!("{:?}", "hello"));
+
+        let safe_num = UriSafe::from(42u32);
+        assert_eq!(format!("{safe_num:?}"), "42");
+    }
+
+    #[test]
     fn test_uri_safe_string_from_static() {
         let safe = UriSafeString::from_static("hello_world");
         assert_eq!(safe.as_str(), "hello_world");
