@@ -6,17 +6,28 @@
 
 //! Tests for `CustomSpawnerBuilder` naming and debug output.
 
-use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+use anyspawn::{BoxedFuture, CustomSpawnerBuilder, Spawner};
 
 #[test]
-fn builder_debug_shows_name() {
-    let builder = CustomSpawnerBuilder::tokio();
-    let debug = format!("{builder:?}");
-    assert!(debug.contains("tokio"), "expected 'tokio' in: {debug}");
+fn tokio_spawner_debug() {
+    let spawner = Spawner::new_tokio();
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner("tokio")"#);
 }
 
 #[test]
-fn builder_debug_shows_layer_names() {
+fn custom_spawner_debug() {
+    let spawner = Spawner::new_custom(|_| {});
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "custom" })"#);
+}
+
+#[test]
+fn builder_debug_no_layers() {
+    let builder = CustomSpawnerBuilder::tokio();
+    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio" }"#);
+}
+
+#[test]
+fn builder_debug_with_layers() {
     let builder = CustomSpawnerBuilder::tokio()
         .layer("tracing", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
@@ -25,30 +36,17 @@ fn builder_debug_shows_layer_names() {
             spawn(fut);
         });
 
-    let debug = format!("{builder:?}");
-    assert!(debug.contains("tracing"), "expected 'tracing' in: {debug}");
-    assert!(debug.contains("metrics"), "expected 'metrics' in: {debug}");
+    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio", layers: ["tracing", "metrics"] }"#);
 }
 
 #[test]
-fn builder_debug_no_layers_field_when_empty() {
-    let builder = CustomSpawnerBuilder::tokio();
-    let debug = format!("{builder:?}");
-    assert!(!debug.contains("layers"), "expected no 'layers' in: {debug}");
+fn builder_custom_name_debug() {
+    let builder = CustomSpawnerBuilder::custom("smol", |_: BoxedFuture| {});
+    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "smol" }"#);
 }
 
 #[test]
-fn spawner_debug_shows_custom_name() {
-    let spawner = CustomSpawnerBuilder::custom("my-runtime", |_: BoxedFuture| {}).build();
-    let debug = format!("{spawner:?}");
-    assert!(
-        debug.contains("my-runtime"),
-        "expected 'my-runtime' in: {debug}"
-    );
-}
-
-#[test]
-fn spawner_debug_shows_layers() {
+fn built_spawner_debug_with_layers() {
     let spawner = CustomSpawnerBuilder::tokio()
         .layer("otel-context", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
@@ -58,23 +56,19 @@ fn spawner_debug_shows_layers() {
         })
         .build();
 
-    let debug = format!("{spawner:?}");
-    assert!(
-        debug.contains("otel-context"),
-        "expected 'otel-context' in: {debug}"
-    );
-    assert!(
-        debug.contains("panic-handler"),
-        "expected 'panic-handler' in: {debug}"
-    );
-    assert!(debug.contains("tokio"), "expected 'tokio' in: {debug}");
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio", layers: ["otel-context", "panic-handler"] })"#);
 }
 
 #[test]
-fn spawner_debug_no_layers_when_empty() {
+fn built_spawner_debug_no_layers() {
     let spawner = CustomSpawnerBuilder::tokio().build();
-    let debug = format!("{spawner:?}");
-    assert!(!debug.contains("layers"), "expected no 'layers' in: {debug}");
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
+}
+
+#[test]
+fn builder_method_returns_tokio_builder() {
+    let spawner = Spawner::builder().build();
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
 #[tokio::test]

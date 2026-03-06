@@ -6,16 +6,15 @@
 use std::thread::{sleep, spawn};
 use std::time::Duration;
 
-use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+use anyspawn::Spawner;
 use futures::executor::block_on;
 
 #[tokio::main]
 async fn main() {
     // Create a spawner that runs futures on background threads
-    let spawner = CustomSpawnerBuilder::custom("threadpool", |fut: BoxedFuture| {
+    let spawner = Spawner::new_custom(|fut| {
         spawn(move || block_on(fut));
-    })
-    .build();
+    });
 
     // Fire-and-forget: spawn a task without waiting for its result
     let () = spawner
