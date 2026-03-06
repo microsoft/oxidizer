@@ -17,8 +17,7 @@ use crate::handle::JoinHandleInner;
 ///
 /// `Spawner` abstracts task spawning across different async runtimes. Use the
 /// built-in constructors for common runtimes, [`Spawner::new_custom`] for a
-/// simple custom closure, or [`Spawner::builder`] /
-/// [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) for layered
+/// simple custom closure, or [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) for layered
 /// composition with named debug output.
 ///
 /// # Examples
