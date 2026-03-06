@@ -16,8 +16,8 @@ fn tokio_spawner_debug() {
 
 #[test]
 fn custom_spawner_debug() {
-    let spawner = Spawner::new_custom(|_| {});
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "custom" })"#);
+    let spawner = Spawner::new_custom("my-runtime", |_| {});
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "my-runtime" })"#);
 }
 
 #[test]

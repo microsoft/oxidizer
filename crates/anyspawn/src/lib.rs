@@ -36,7 +36,7 @@
 //! ```rust,ignore
 //! use anyspawn::Spawner;
 //!
-//! let spawner = Spawner::new_custom(|fut| {
+//! let spawner = Spawner::new_custom("threadpool", |fut| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
 //! });
 //!
