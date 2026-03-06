@@ -8,9 +8,6 @@
 //! OpenTelemetry [`Context`]. This example adds a layer that captures the
 //! caller's current context and reattaches it inside the spawned future,
 //! so spans, baggage, and other context values propagate automatically.
-//!
-//! The layer uses [`FutureExt::with_context`] which re-attaches the context
-//! on every `poll`, avoiding the `!Send` limitation of [`ContextGuard`].
 
 use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
 use opentelemetry::context::FutureExt as OtelFutureExt;
@@ -18,13 +15,8 @@ use opentelemetry::Context;
 
 #[tokio::main]
 async fn main() {
-    // Build a spawner that automatically propagates the OTel context into
-    // every spawned task.
     let spawner = CustomSpawnerBuilder::tokio()
         .layer("otel-context", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            // Capture the caller's current OTel context *before* spawning.
-            // `with_context` wraps the future so the context is re-attached
-            // on every poll — no `!Send` guard held across awaits.
             let cx = Context::current();
             spawn(Box::pin(fut.with_context(cx)));
         })

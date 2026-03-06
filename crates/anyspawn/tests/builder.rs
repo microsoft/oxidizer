@@ -65,12 +65,6 @@ fn built_spawner_debug_no_layers() {
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
-#[test]
-fn builder_method_returns_tokio_builder() {
-    let spawner = Spawner::builder().build();
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
-}
-
 #[tokio::test]
 async fn layered_spawner_still_works() {
     let spawner = CustomSpawnerBuilder::tokio()
