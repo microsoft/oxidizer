@@ -7,7 +7,8 @@
 //! the underlying moka configuration, providing a stable API surface
 //! without exposing moka types.
 
-use std::hash::Hash;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 use std::time::Duration;
 
@@ -34,12 +35,13 @@ use crate::tier::InMemoryCache;
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct InMemoryCacheBuilder<K, V> {
+pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) max_capacity: Option<u64>,
     pub(crate) initial_capacity: Option<usize>,
     pub(crate) time_to_live: Option<Duration>,
     pub(crate) time_to_idle: Option<Duration>,
     pub(crate) name: Option<String>,
+    pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -62,10 +64,13 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             time_to_live: None,
             time_to_idle: None,
             name: None,
+            hasher: RandomState::new(),
             _phantom: PhantomData,
         }
     }
+}
 
+impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// Sets the maximum capacity of the cache.
     ///
     /// Once the capacity is reached, entries will be evicted to make room
@@ -184,6 +189,37 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
         self
     }
 
+    /// Sets a custom hash builder for the cache.
+    ///
+    /// By default, the cache uses `RandomState` (the standard library's
+    /// default hasher). Use this method to provide an alternative hasher
+    /// implementation (e.g., `FxBuildHasher` for faster hashing).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cachet_memory::InMemoryCache;
+    /// use std::collections::hash_map::RandomState;
+    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
+    ///
+    /// let cache = InMemoryCache::<String, i32>::builder()
+    ///     .hasher(RandomState::new())
+    ///     .max_capacity(1000)
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn hasher<H2>(self, hasher: H2) -> InMemoryCacheBuilder<K, V, H2> {
+        InMemoryCacheBuilder {
+            max_capacity: self.max_capacity,
+            initial_capacity: self.initial_capacity,
+            time_to_live: self.time_to_live,
+            time_to_idle: self.time_to_idle,
+            name: self.name,
+            hasher,
+            _phantom: PhantomData,
+        }
+    }
+
     /// Builds the configured `InMemoryCache`.
     ///
     /// # Examples
@@ -199,10 +235,11 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
     ///     .build();
     /// ```
     #[must_use]
-    pub fn build(self) -> InMemoryCache<K, V>
+    pub fn build(self) -> InMemoryCache<K, V, H>
     where
         K: Hash + Eq + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
+        H: BuildHasher + Clone + Send + Sync + 'static,
     {
         InMemoryCache::from_builder(&self)
     }
