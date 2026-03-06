@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0] - 2026-03-06
+
+- ⚠️ Breaking
+
+  - no more default features ([#303](https://github.com/microsoft/oxidizer/pull/303))
+
+- ✨ Features
+
+  - introduce hedging resilience middleware ([#298](https://github.com/microsoft/oxidizer/pull/298))
+  - introduce fallback middleware ([#294](https://github.com/microsoft/oxidizer/pull/294))
+  - introduce config for each middleware ([#302](https://github.com/microsoft/oxidizer/pull/302))
+  - improve telemetry ([#297](https://github.com/microsoft/oxidizer/pull/297))
+  - improve documentation
+
 ## [0.3.1] - 2026-02-27
 
 - ✨ Features
