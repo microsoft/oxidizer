@@ -7,35 +7,118 @@ use crate::base_type::{BaseType, ScopedUnder};
 use crate::resolve_deps::ResolutionDeps;
 use crate::resolve_from::ResolveFrom;
 use crate::resolver_store::ResolverStore;
-use crate::scoped_resolver::ScopedResolver;
 use crate::shared_type_map::SharedTypeMap;
 
 /// A resolver that lazily constructs types from their dependencies.
 ///
-/// Uses interior mutability so it can also serve as a shared parent for
-/// [`ScopedResolver`] children via [`scoped()`](Resolver::scoped).
+/// Uses interior mutability (`Arc<SharedTypeMap>`) so that resolved types are
+/// visible to child scopes created via [`scoped()`](Resolver::scoped).
+///
+/// When a resolver has ancestors (i.e. it was created by `scoped()`), newly
+/// resolved types are automatically promoted into the shallowest ancestor whose
+/// data was sufficient to construct them. This lets sibling scopes share
+/// resolved instances without redundant construction.
 pub struct Resolver<T> {
-    pub(crate) types: Arc<SharedTypeMap>,
-    pub(crate) ancestors: Vec<Arc<SharedTypeMap>>,
-    pub(crate) base: PhantomData<T>,
+    types: Arc<SharedTypeMap>,
+    ancestors: Vec<Arc<SharedTypeMap>>,
+    /// Tracks the shallowest scope tier that contributed a dependency during
+    /// the current resolution chain. `None` means no dependencies have been
+    /// seen yet; `Some(0)` means local data was used; `Some(n)` for n >= 1
+    /// means the shallowest dependency came from `ancestors[n - 1]`.
+    depth: Option<usize>,
+    base: PhantomData<T>,
+}
+
+impl<T: Send + Sync + 'static> Resolver<T> {
+    /// Returns the value and its ancestor index (1-based tier).
+    fn lookup_in_ancestors_with_tier<O: Send + Sync + 'static>(&self) -> Option<(usize, &O)> {
+        self.ancestors
+            .iter()
+            .enumerate()
+            .find_map(|(i, a)| a.try_get::<O>().map(|v| (i + 1, v)))
+    }
+
+    /// Records that a dependency was found at the given tier (0 = local,
+    /// 1 = ancestors[0], 2 = ancestors[1], …). Keeps the minimum.
+    fn mark(&mut self, tier: usize) {
+        self.depth = Some(match self.depth {
+            None => tier,
+            Some(d) => d.min(tier),
+        });
+    }
 }
 
 impl<T: Send + Sync + 'static> ResolverStore<T> for Resolver<T> {
     fn resolve<O: ResolveFrom<T>>(&mut self) -> &O {
+        // Fast path: already resolved locally or in an ancestor.
         if self.types.contains::<O>() {
+            self.mark(0);
             return self.types.try_get::<O>().expect("guarded by contains() above");
         }
-        if self.ancestors.iter().any(|a| a.contains::<O>()) {
+        if let Some((tier, _)) = self.lookup_in_ancestors_with_tier::<O>() {
+            self.mark(tier);
             return self
                 .ancestors
                 .iter()
                 .find_map(|a| a.try_get::<O>())
-                .expect("guarded by any() check above");
+                .expect("guarded by lookup_in_ancestors_with_tier above");
         }
+
+        // Slow path: resolve dependencies and construct the type.
+        let saved = self.depth;
+        self.depth = None;
 
         let inputs = <<O as ResolveFrom<T>>::Inputs as ResolutionDeps<T>>::get(self);
         let result = O::new(inputs);
-        self.types.get_or_insert(result)
+
+        let storage_depth = self.depth;
+        self.depth = saved;
+
+        match storage_depth {
+            // Dependencies came from local scope — must stay local.
+            Some(0) => {
+                let reference = self.types.get_or_insert(result);
+                // Inline mark: direct field write enables borrow splitting
+                // (self.depth is disjoint from self.types).
+                self.depth = Some(match self.depth {
+                    None => 0,
+                    Some(d) => d.min(0),
+                });
+                reference
+            }
+            // All dependencies came from ancestors[n-1] or deeper — promote.
+            Some(n) => {
+                let ancestor = &self.ancestors[n - 1];
+                let reference = ancestor.get_or_insert(result);
+                // Inline mark: direct field write enables borrow splitting
+                // (self.depth is disjoint from self.ancestors).
+                self.depth = Some(match self.depth {
+                    None => n,
+                    Some(d) => d.min(n),
+                });
+                reference
+            }
+            // No dependencies (leaf type) — promote to deepest ancestor, or store locally.
+            None => {
+                if self.ancestors.is_empty() {
+                    let reference = self.types.get_or_insert(result);
+                    self.depth = Some(match self.depth {
+                        None => 0,
+                        Some(d) => d.min(0),
+                    });
+                    reference
+                } else {
+                    let len = self.ancestors.len();
+                    let ancestor = self.ancestors.last().expect("guarded by !is_empty() above");
+                    let reference = ancestor.get_or_insert(result);
+                    self.depth = Some(match self.depth {
+                        None => len,
+                        Some(d) => d.min(len),
+                    });
+                    reference
+                }
+            }
+        }
     }
 
     fn lookup<O: Send + Sync + 'static>(&self) -> Option<&O> {
@@ -67,6 +150,7 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         Resolver {
             types: Arc::new(SharedTypeMap::from_type_map(TypeMap::new())),
             ancestors: Vec::new(),
+            depth: None,
             base: PhantomData,
         }
     }
@@ -96,13 +180,13 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         ResolverStore::resolve(self)
     }
 
-    /// Creates a new scoped resolver that inherits types from this resolver.
+    /// Creates a child resolver that inherits types from this resolver.
     ///
     /// The scoped base struct's fields are automatically inserted as root types.
     /// Types already resolved in this resolver (and its ancestors) are visible to
-    /// the child. New types resolved by the child are stored locally and dropped
-    /// when the scoped resolver is dropped.
-    pub fn scoped<S>(&self, roots: S) -> ScopedResolver<S>
+    /// the child. New types resolved by the child may be promoted into an ancestor
+    /// if all their dependencies came from that ancestor (or deeper).
+    pub fn scoped<S>(&self, roots: S) -> Resolver<S>
     where
         S: BaseType<S> + ScopedUnder<Parent = T>,
     {
@@ -110,7 +194,12 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         ancestors.push(Arc::clone(&self.types));
         ancestors.extend(self.ancestors.iter().map(Arc::clone));
 
-        let mut resolver = ScopedResolver::new_with_ancestors(ancestors);
+        let mut resolver = Resolver::<S> {
+            types: Arc::new(SharedTypeMap::from_type_map(TypeMap::new())),
+            ancestors,
+            depth: None,
+            base: PhantomData,
+        };
         roots.insert_into(&mut resolver);
         resolver
     }

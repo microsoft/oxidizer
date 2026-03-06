@@ -303,13 +303,12 @@ fn three_level_promotes_validator_to_app() {
             counter: Arc::new(AtomicUsize::new(0)),
         },
     });
-    let req1_shared = req1.into_shared();
 
-    let mut task1a = req1_shared.scoped(TaskBase { task: Task { id: 100 } });
+    let mut task1a = req1.scoped(TaskBase { task: Task { id: 100 } });
     assert_eq!(task1a.get::<Validator>().instance, 1);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
-    let mut task1b = req1_shared.scoped(TaskBase { task: Task { id: 200 } });
+    let mut task1b = req1.scoped(TaskBase { task: Task { id: 200 } });
     assert_eq!(task1b.get::<Validator>().instance, 1);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
@@ -319,9 +318,8 @@ fn three_level_promotes_validator_to_app() {
             counter: Arc::new(AtomicUsize::new(0)),
         },
     });
-    let req2_shared = req2.into_shared();
 
-    let mut task2a = req2_shared.scoped(TaskBase { task: Task { id: 300 } });
+    let mut task2a = req2.scoped(TaskBase { task: Task { id: 300 } });
     assert_eq!(task2a.get::<Validator>().instance, 1);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
@@ -342,13 +340,12 @@ fn three_level_promotes_cv_to_request() {
             counter: req_counter1.clone(),
         },
     });
-    let req1_shared = req1.into_shared();
 
-    let mut task1a = req1_shared.scoped(TaskBase { task: Task { id: 100 } });
+    let mut task1a = req1.scoped(TaskBase { task: Task { id: 100 } });
     assert_eq!(task1a.get::<CorrelationVector>().instance, 1);
     assert_eq!(req_counter1.load(Ordering::SeqCst), 1);
 
-    let mut task1b = req1_shared.scoped(TaskBase { task: Task { id: 200 } });
+    let mut task1b = req1.scoped(TaskBase { task: Task { id: 200 } });
     assert_eq!(task1b.get::<CorrelationVector>().instance, 1);
     assert_eq!(req_counter1.load(Ordering::SeqCst), 1);
 
@@ -358,9 +355,8 @@ fn three_level_promotes_cv_to_request() {
             counter: req_counter2.clone(),
         },
     });
-    let req2_shared = req2.into_shared();
 
-    let mut task2a = req2_shared.scoped(TaskBase { task: Task { id: 300 } });
+    let mut task2a = req2.scoped(TaskBase { task: Task { id: 300 } });
     assert_eq!(task2a.get::<CorrelationVector>().instance, 1);
     assert_eq!(req_counter2.load(Ordering::SeqCst), 1);
 }
@@ -379,10 +375,9 @@ fn three_level_task_handler_local_but_shares_cv() {
             counter: req_counter.clone(),
         },
     });
-    let req1_shared = req1.into_shared();
 
-    let mut task1 = req1_shared.scoped(TaskBase { task: Task { id: 10 } });
-    let mut task2 = req1_shared.scoped(TaskBase { task: Task { id: 20 } });
+    let mut task1 = req1.scoped(TaskBase { task: Task { id: 10 } });
+    let mut task2 = req1.scoped(TaskBase { task: Task { id: 20 } });
 
     let th1 = task1.get::<TaskHandler>();
     let th2 = task2.get::<TaskHandler>();
@@ -413,10 +408,9 @@ fn three_level_task_client_shares_client_within_request() {
             counter: req_counter1.clone(),
         },
     });
-    let req1_shared = req1.into_shared();
 
-    let mut task1a = req1_shared.scoped(TaskBase { task: Task { id: 10 } });
-    let mut task1b = req1_shared.scoped(TaskBase { task: Task { id: 20 } });
+    let mut task1a = req1.scoped(TaskBase { task: Task { id: 10 } });
+    let mut task1b = req1.scoped(TaskBase { task: Task { id: 20 } });
 
     let tc1a = task1a.get::<TaskClient>();
     let tc1b = task1b.get::<TaskClient>();
@@ -437,9 +431,8 @@ fn three_level_task_client_shares_client_within_request() {
             counter: req_counter2.clone(),
         },
     });
-    let req2_shared = req2.into_shared();
 
-    let mut task2a = req2_shared.scoped(TaskBase { task: Task { id: 30 } });
+    let mut task2a = req2.scoped(TaskBase { task: Task { id: 30 } });
     let tc2a = task2a.get::<TaskClient>();
 
     // Same Validator (promoted to app), but different CV (request-scoped).
