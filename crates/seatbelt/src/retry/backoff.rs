@@ -19,6 +19,7 @@ const EXPONENTIAL_FACTOR: f64 = 2.0;
 /// different approaches to spacing out retries to avoid overwhelming failing systems while
 /// balancing responsiveness and resource utilization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 pub enum Backoff {
     /// Constant backoff strategy that maintains consistent delays between attempts.
     ///

@@ -173,6 +173,7 @@
 //! ```
 mod args;
 mod callbacks;
+mod config;
 mod layer;
 mod service;
 
@@ -181,6 +182,7 @@ mod telemetry;
 
 pub use args::{OnTimeoutArgs, TimeoutOutputArgs, TimeoutOverrideArgs};
 pub(crate) use callbacks::{OnTimeout, TimeoutOutput, TimeoutOverride};
+pub use config::TimeoutConfig;
 pub use layer::TimeoutLayer;
 pub use service::Timeout;
 #[cfg(feature = "tower-service")]
