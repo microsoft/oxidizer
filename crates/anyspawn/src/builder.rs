@@ -13,7 +13,7 @@ use crate::custom::BoxedFuture;
 ///
 /// # Design
 ///
-/// Layers compose statically via generics — no `Arc` or `Box<dyn Fn>` is
+/// Layers compose statically via generics - no `Arc` or `Box<dyn Fn>` is
 /// allocated until the final [`build()`](Self::build) step, which produces a
 /// single `Arc`-wrapped closure for the [`Spawner`].
 ///
