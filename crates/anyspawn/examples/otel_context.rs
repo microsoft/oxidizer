@@ -33,7 +33,7 @@ async fn main() {
             // Inside the spawned task the context is available thanks to
             // the layer above.
             let cx = Context::current();
-            let id = cx.get::<RequestId>().map(|r| r.0.as_str()).unwrap_or("<missing>");
+            let id = cx.get::<RequestId>().map_or("<missing>", |r| r.0.as_str());
             println!("spawned task sees RequestId = {id}");
             id == "abc-123"
         })

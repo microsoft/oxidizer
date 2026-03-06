@@ -276,6 +276,7 @@ toolchain
 toolchains
 topologies
 trait
+typestate
 TTL
 TTLs
 tuple
