@@ -18,4 +18,6 @@ fn compile_fail() {
     // End-to-end resolution errors
     t.compile_fail("tests/compile_fail/missing_dependency.rs");
     t.compile_fail("tests/compile_fail/dependency_cycle.rs");
+    t.compile_fail("tests/compile_fail/scoped_type_not_resolvable_from_parent.rs");
+    t.compile_fail("tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs");
 }

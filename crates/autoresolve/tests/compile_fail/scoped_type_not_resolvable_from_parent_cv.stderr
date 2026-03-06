@@ -1,0 +1,31 @@
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:34:26
+   |
+34 |     let _ = parent.get::<CorrelationVector>();
+   |                    ---   ^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
+      but trait `ResolveFrom<RequestBase>` is implemented for it
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:1
+   |
+24 | #[base(scoped(AppBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `RequestBase`, found `AppBase`
+note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:12:1
+   |
+12 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+13 | impl CorrelationVector {
+   |      ^^^^^^^^^^^^^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `base` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)

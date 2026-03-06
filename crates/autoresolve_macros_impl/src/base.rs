@@ -184,6 +184,10 @@ fn generate_primary(struct_name: &Ident, clean_struct: &TokenStream, fields: &[B
         })
         .collect();
 
+    // Propagation macro: emits ResolveFrom<$target> for all root types (used by
+    // #[base(scoped(...))] to pull parent roots into child scopes).
+    let propagation_body = propagation_body_for(fields);
+
     Ok(quote! {
         #clean_struct
 
@@ -197,7 +201,43 @@ fn generate_primary(struct_name: &Ident, clean_struct: &TokenStream, fields: &[B
                 #(#insert_stmts)*
             }
         }
+
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! #struct_name {
+            (@propagate $target:ident) => {
+                #propagation_body
+            };
+        }
     })
+}
+
+/// Builds the body of a `@propagate` macro arm for the given fields.
+///
+/// - `#[spread]` fields: invokes `$crate::Composite!(@impls $target)`
+/// - Regular fields: emits a `ResolveFrom<$target>` impl directly
+fn propagation_body_for(fields: &[BaseField<'_>]) -> TokenStream {
+    let stmts: Vec<_> = fields
+        .iter()
+        .map(|f| {
+            let ty = f.ty;
+            if f.is_spread {
+                quote! { #ty!(@impls $target); }
+            } else {
+                quote! {
+                    impl ::autoresolve::ResolveFrom<$target> for #ty {
+                        type Inputs = ::autoresolve::ResolutionDepsEnd;
+
+                        fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
+                            unreachable!("root types are pre-inserted into the resolver")
+                        }
+                    }
+                }
+            }
+        })
+        .collect();
+
+    quote! { #(#stmts)* }
 }
 
 fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent: &Ident) -> syn::Result<TokenStream> {
@@ -212,13 +252,13 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
         .expect("clean_struct is a valid struct")
         .ident;
 
-    // Generate ResolveFrom<Parent> for each field type.
+    // Generate ResolveFrom<Self> for each field type (own scope, not parent scope).
     let impls: Vec<_> = fields
         .iter()
         .map(|f| {
             let ty = f.ty;
             quote! {
-                impl ::autoresolve::ResolveFrom<#parent> for #ty {
+                impl ::autoresolve::ResolveFrom<#struct_name> for #ty {
                     type Inputs = ::autoresolve::ResolutionDepsEnd;
 
                     fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
@@ -241,16 +281,50 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
         })
         .collect();
 
+    // Propagation body for this scope's own fields.
+    let own_propagation: Vec<_> = fields
+        .iter()
+        .map(|f| {
+            let ty = f.ty;
+            quote! {
+                impl ::autoresolve::ResolveFrom<$target> for #ty {
+                    type Inputs = ::autoresolve::ResolutionDepsEnd;
+
+                    fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
+                        unreachable!("scoped root types are pre-inserted into the resolver")
+                    }
+                }
+            }
+        })
+        .collect();
+
     Ok(quote! {
         #clean_struct
 
+        // Propagate parent's root types into this scope.
+        #parent!(@propagate #struct_name);
+
         #(#impls)*
 
-        impl ::autoresolve::BaseType<#parent> for #struct_name {
-            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#parent>) {
+        impl ::autoresolve::ScopedUnder for #struct_name {
+            type Parent = #parent;
+        }
+
+        impl ::autoresolve::BaseType<#struct_name> for #struct_name {
+            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
             }
+        }
+
+        // Propagation macro: chains parent propagation with own fields.
+        #[doc(hidden)]
+        #[macro_export]
+        macro_rules! #struct_name {
+            (@propagate $target:ident) => {
+                #parent!(@propagate $target);
+                #(#own_propagation)*
+            };
         }
     })
 }

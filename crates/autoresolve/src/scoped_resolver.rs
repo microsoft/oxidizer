@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use type_map::concurrent::TypeMap;
 
-use crate::base_type::BaseType;
+use crate::base_type::{BaseType, ScopedUnder};
 use crate::resolve_deps::ResolutionDeps;
 use crate::resolve_from::ResolveFrom;
 use crate::resolver_store::ResolverStore;
@@ -30,7 +30,14 @@ impl<T: Send + Sync + 'static> SharedResolver<T> {
     /// Types pre-resolved in the parent (and its ancestors) are visible to the child.
     /// New types resolved by the child are stored locally and dropped when the scoped
     /// resolver is dropped.
-    pub fn scoped<S: BaseType<T>>(&self, roots: S) -> ScopedResolver<T> {
+    ///
+    /// The child resolver's type parameter is `S` (the scoped base type), which
+    /// determines which types are resolvable in the child scope. Parent root types
+    /// are propagated into the child scope via `#[base(scoped(Parent))]`.
+    pub fn scoped<S>(&self, roots: S) -> ScopedResolver<S>
+    where
+        S: BaseType<S> + ScopedUnder<Parent = T>,
+    {
         let mut ancestors = Vec::with_capacity(1 + self.ancestors.len());
         ancestors.push(Arc::clone(&self.types));
         ancestors.extend(self.ancestors.iter().map(Arc::clone));

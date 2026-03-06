@@ -20,3 +20,13 @@ impl ::autoresolve::BaseType<Base> for Base {
         __store.store_value(telemetry);
     }
 }
+#[doc(hidden)]
+#[macro_export]
+macro_rules! Base {
+    (@ propagate $target:ident) => {
+        Builtins!(@ impls $target); impl ::autoresolve::ResolveFrom < $target > for
+        Telemetry { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+        ::autoresolve::ResolutionDepsEnd) -> Self {
+        unreachable!("root types are pre-inserted into the resolver") } }
+    };
+}

@@ -14,7 +14,7 @@ pub use autoresolve_macros::base;
 pub use autoresolve_macros::composite;
 #[cfg(feature = "macros")]
 pub use autoresolve_macros::resolvable;
-pub use base_type::BaseType;
+pub use base_type::{BaseType, ScopedUnder};
 pub use composite::CompositePart;
 pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};
 pub use resolve_from::ResolveFrom;

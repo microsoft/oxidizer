@@ -1,0 +1,84 @@
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+   |
+70 |     let _ = parent.get::<TaskHandler>();
+   |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:7:1
+   |
+ 7 | struct Request;
+   | ^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveFrom<T>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:1
+   |
+55 | #[base(scoped(AppBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   | |
+   | `Request` implements `ResolveFrom<RequestBase>`
+   | `Request` implements `ResolveFrom<TaskBase>`
+...
+60 | #[base(scoped(RequestBase))]
+   | ---------------------------- in this attribute macro expansion
+note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
+   |
+17 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+18 | impl CorrelationVector {
+   |      ^^^^^^^^^^^^^^^^^
+   = note: 1 redundant requirement hidden
+   = note: required for `TaskHandler` to implement `ResolveFrom<AppBase>`
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `base` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Task: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+   |
+70 |     let _ = parent.get::<TaskHandler>();
+   |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Task`
+      but trait `ResolveFrom<TaskBase>` is implemented for it
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:60:1
+   |
+60 | #[base(scoped(RequestBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `TaskBase`, found `AppBase`
+note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:29:1
+   |
+29 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+30 | impl TaskProperties {
+   |      ^^^^^^^^^^^^^^
+   = note: 1 redundant requirement hidden
+   = note: required for `TaskHandler` to implement `ResolveFrom<AppBase>`
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `base` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused variable: `cv`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:45:12
+   |
+45 |     fn new(cv: &CorrelationVector, tp: &TaskProperties) -> Self {
+   |            ^^ help: if this is intentional, prefix it with an underscore: `_cv`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default

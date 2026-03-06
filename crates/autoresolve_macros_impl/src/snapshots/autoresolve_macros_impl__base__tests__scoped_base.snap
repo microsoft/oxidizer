@@ -5,15 +5,29 @@ expression: pretty_print(result)
 struct ScopedRoots {
     request_context: RequestContext,
 }
-impl ::autoresolve::ResolveFrom<Base> for RequestContext {
+Base!(@ propagate ScopedRoots);
+impl ::autoresolve::ResolveFrom<ScopedRoots> for RequestContext {
     type Inputs = ::autoresolve::ResolutionDepsEnd;
     fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
         unreachable!("scoped root types are inserted by ScopedBase::insert_into")
     }
 }
-impl ::autoresolve::BaseType<Base> for ScopedRoots {
-    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
+impl ::autoresolve::ScopedUnder for ScopedRoots {
+    type Parent = Base;
+}
+impl ::autoresolve::BaseType<ScopedRoots> for ScopedRoots {
+    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<ScopedRoots>) {
         let Self { request_context } = self;
         __store.store_value(request_context);
     }
+}
+#[doc(hidden)]
+#[macro_export]
+macro_rules! ScopedRoots {
+    (@ propagate $target:ident) => {
+        Base!(@ propagate $target); impl ::autoresolve::ResolveFrom < $target > for
+        RequestContext { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+        ::autoresolve::ResolutionDepsEnd) -> Self {
+        unreachable!("scoped root types are pre-inserted into the resolver") } }
+    };
 }

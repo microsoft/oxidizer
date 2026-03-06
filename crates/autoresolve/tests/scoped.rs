@@ -145,7 +145,7 @@ struct RequestBase {
     request: Request,
 }
 
-#[base(scoped(AppBase))]
+#[base(scoped(RequestBase))]
 struct TaskBase {
     task: Task,
 }
@@ -390,7 +390,7 @@ fn three_level_task_handler_local_but_shares_cv() {
     });
     let req1_shared = req1.into_shared();
 
-    let mut task1: autoresolve::ScopedResolver<AppBase> = req1_shared.scoped(TaskBase { task: Task { id: 10 } });
+    let mut task1 = req1_shared.scoped(TaskBase { task: Task { id: 10 } });
     let mut task2 = req1_shared.scoped(TaskBase { task: Task { id: 20 } });
 
     let th1 = task1.get::<TaskHandler>();
