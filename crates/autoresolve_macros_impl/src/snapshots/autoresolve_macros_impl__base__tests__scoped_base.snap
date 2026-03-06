@@ -11,9 +11,9 @@ impl ::autoresolve::ResolveFrom<Base> for RequestContext {
         unreachable!("scoped root types are inserted by ScopedBase::insert_into")
     }
 }
-impl ::autoresolve::ScopedBase<Base> for ScopedRoots {
-    fn insert_into(self, __resolver: &mut ::autoresolve::ScopedResolver<Base>) {
+impl ::autoresolve::BaseType<Base> for ScopedRoots {
+    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
         let Self { request_context } = self;
-        __resolver.insert(request_context);
+        __store.store_value(request_context);
     }
 }

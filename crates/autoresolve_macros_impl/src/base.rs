@@ -170,16 +170,16 @@ fn generate_primary(struct_name: &Ident, clean_struct: &TokenStream, fields: &[B
     // Destructure field names for the BaseType impl.
     let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
 
-    // Insertion logic: spread fields use composite @insert, regular fields use direct insert.
+    // Insertion logic: spread fields use composite @insert, regular fields use store_value.
     let insert_stmts: Vec<_> = fields
         .iter()
         .map(|f| {
             let ident = f.ident;
             if f.is_spread {
                 let ty = f.ty;
-                quote! { #ty!(@insert __resolver, #ident); }
+                quote! { #ty!(@insert __store, #ident); }
             } else {
-                quote! { __resolver.insert(#ident); }
+                quote! { __store.store_value(#ident); }
             }
         })
         .collect();
@@ -191,12 +191,10 @@ fn generate_primary(struct_name: &Ident, clean_struct: &TokenStream, fields: &[B
 
         #(#regular_impls)*
 
-        impl ::autoresolve::BaseType for #struct_name {
-            fn into_resolver(self) -> ::autoresolve::Resolver<Self> {
+        impl ::autoresolve::BaseType<#struct_name> for #struct_name {
+            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
                 let Self { #(#field_idents),* } = self;
-                let mut __resolver = ::autoresolve::Resolver::<Self>::new_empty();
                 #(#insert_stmts)*
-                __resolver
             }
         }
     })
@@ -234,12 +232,12 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
     // Destructure field names for the ScopedBase impl.
     let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
 
-    // Insert each field into the scoped resolver.
+    // Insert each field into the store.
     let insert_stmts: Vec<_> = fields
         .iter()
         .map(|f| {
             let ident = f.ident;
-            quote! { __resolver.insert(#ident); }
+            quote! { __store.store_value(#ident); }
         })
         .collect();
 
@@ -248,8 +246,8 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
 
         #(#impls)*
 
-        impl ::autoresolve::ScopedBase<#parent> for #struct_name {
-            fn insert_into(self, __resolver: &mut ::autoresolve::ScopedResolver<#parent>) {
+        impl ::autoresolve::BaseType<#parent> for #struct_name {
+            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#parent>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
             }

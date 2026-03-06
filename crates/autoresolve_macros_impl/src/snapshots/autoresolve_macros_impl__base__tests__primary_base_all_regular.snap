@@ -18,12 +18,10 @@ impl ::autoresolve::ResolveFrom<Base> for Clock {
         unreachable!("base types are pre-inserted into the resolver")
     }
 }
-impl ::autoresolve::BaseType for Base {
-    fn into_resolver(self) -> ::autoresolve::Resolver<Self> {
+impl ::autoresolve::BaseType<Base> for Base {
+    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
         let Self { scheduler, clock } = self;
-        let mut __resolver = ::autoresolve::Resolver::<Self>::new_empty();
-        __resolver.insert(scheduler);
-        __resolver.insert(clock);
-        __resolver
+        __store.store_value(scheduler);
+        __store.store_value(clock);
     }
 }

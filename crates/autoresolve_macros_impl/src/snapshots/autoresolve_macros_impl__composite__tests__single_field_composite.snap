@@ -21,8 +21,8 @@ mod wrapper {
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("composite parts are pre-inserted into the resolver") } }
         };
-        (@ insert $resolver:ident, $name:ident) => {
-            $resolver .insert($name .inner);
+        (@ insert $store:ident, $name:ident) => {
+            $store .store_value($name .inner);
         };
     }
 }

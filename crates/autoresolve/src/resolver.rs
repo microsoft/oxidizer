@@ -42,9 +42,11 @@ impl<T: Send + Sync + 'static> Resolver<T> {
     /// `#[base]` proc macro to generate the [`BaseType`] implementation.
     pub fn new(base: T) -> Self
     where
-        T: BaseType,
+        T: BaseType<T>,
     {
-        base.into_resolver()
+        let mut resolver = Self::new_empty();
+        base.insert_into(&mut resolver);
+        resolver
     }
 
     pub fn new_empty() -> Self {

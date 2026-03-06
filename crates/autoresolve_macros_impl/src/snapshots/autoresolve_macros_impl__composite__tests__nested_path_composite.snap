@@ -34,8 +34,8 @@ mod builtins {
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("composite parts are pre-inserted into the resolver") } }
         };
-        (@ insert $resolver:ident, $name:ident) => {
-            $resolver .insert($name .scheduler); $resolver .insert($name .clock);
+        (@ insert $store:ident, $name:ident) => {
+            $store .store_value($name .scheduler); $store .store_value($name .clock);
         };
     }
 }

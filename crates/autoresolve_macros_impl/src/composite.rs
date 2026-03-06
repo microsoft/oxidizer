@@ -136,13 +136,13 @@ pub fn composite(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
         })
         .collect();
 
-    // Body of the generated macro's `@insert` arm: move each field into the resolver.
+    // Body of the generated macro's `@insert` arm: move each field into the store.
     let insert_body: Vec<_> = named_fields
         .iter()
         .map(|field| {
             let field_name = field.ident.as_ref().expect("guarded by named-fields check above");
             quote! {
-                $resolver.insert($name.#field_name);
+                $store.store_value($name.#field_name);
             }
         })
         .collect();
@@ -177,7 +177,7 @@ pub fn composite(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
                 (@impls $base:ident) => {
                     #(#impls_body)*
                 };
-                (@insert $resolver:ident, $name:ident) => {
+                (@insert $store:ident, $name:ident) => {
                     #(#insert_body)*
                 };
             }
