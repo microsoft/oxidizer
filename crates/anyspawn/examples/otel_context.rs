@@ -21,7 +21,7 @@ async fn main() {
     // Build a spawner that automatically propagates the OTel context into
     // every spawned task.
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer("otel-context", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             // Capture the caller's current OTel context *before* spawning.
             // `with_context` wraps the future so the context is re-attached
             // on every poll — no `!Send` guard held across awaits.

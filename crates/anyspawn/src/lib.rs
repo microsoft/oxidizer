@@ -34,11 +34,12 @@
 //! ## Custom Runtime
 //!
 //! ```rust,ignore
-//! use anyspawn::Spawner;
+//! use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
 //!
-//! let spawner = Spawner::new_custom(|fut| {
+//! let spawner = CustomSpawnerBuilder::custom("threadpool", |fut: BoxedFuture| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
-//! });
+//! })
+//! .build();
 //!
 //! // Returns a JoinHandle that can be awaited or dropped
 //! let handle = spawner.spawn(async { 42 });
@@ -47,7 +48,7 @@
 //! # Features
 //!
 //! - `tokio` (default): Enables the [`Spawner::new_tokio`] constructor
-//! - `custom`: Enables the [`Spawner::new_custom`] constructor
+//! - `custom`: Enables the [`CustomSpawnerBuilder`]
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]

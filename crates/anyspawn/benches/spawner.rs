@@ -7,7 +7,7 @@
     reason = "Benchmarks don't require documentation and should fail fast on errors"
 )]
 
-use anyspawn::Spawner;
+use anyspawn::{BoxedFuture, CustomSpawnerBuilder, Spawner};
 use criterion::{Criterion, criterion_group, criterion_main};
 
 fn entry(c: &mut Criterion) {
@@ -26,9 +26,10 @@ fn entry(c: &mut Criterion) {
     });
 
     // smol benchmarks
-    let smol_spawner = Spawner::new_custom(|fut| {
+    let smol_spawner = CustomSpawnerBuilder::custom("smol", |fut: BoxedFuture| {
         smol::spawn(fut).detach();
-    });
+    })
+    .build();
 
     group.bench_function("smol_direct", |b| {
         b.iter(|| smol::block_on(async { smol::spawn(async { 42 }).await }));
