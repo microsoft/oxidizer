@@ -186,16 +186,14 @@ fn scoped_resolver_inherits_parent_types() {
     let shared = parent.into_shared();
 
     // Scoped child for request 1
-    let mut child1 = shared.scoped();
-    child1.insert(RequestContext { request_id: 1 });
+    let mut child1 = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 1 } });
     let handler1 = child1.get::<RequestHandler>();
     assert_eq!(handler1.correlation_vector.request_id, 1);
     // Client was resolved in parent — child reads it from there.
     assert_eq!(handler1.client.number(), 42 + 10);
 
     // Scoped child for request 2
-    let mut child2 = shared.scoped();
-    child2.insert(RequestContext { request_id: 2 });
+    let mut child2 = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 2 } });
     let handler2 = child2.get::<RequestHandler>();
     assert_eq!(handler2.correlation_vector.request_id, 2);
     assert_eq!(handler2.client.number(), 42 + 10);
@@ -212,8 +210,7 @@ fn scoped_resolver_resolves_missing_parent_types_locally() {
     let parent = create_parent(builtins);
     let shared = parent.into_shared();
 
-    let mut child = shared.scoped();
-    child.insert(RequestContext { request_id: 42 });
+    let mut child = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 42 } });
 
     // Client wasn't in parent, but its deps (Scheduler, Clock) are.
     // The child resolves Client locally using parent's root types.
@@ -233,11 +230,9 @@ fn scoped_resolver_child_types_are_independent() {
     let shared = parent.into_shared();
 
     // Two children with different request contexts.
-    let mut child1 = shared.scoped();
-    child1.insert(RequestContext { request_id: 100 });
+    let mut child1 = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 100 } });
 
-    let mut child2 = shared.scoped();
-    child2.insert(RequestContext { request_id: 200 });
+    let mut child2 = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 200 } });
 
     // Each child resolves its own CorrelationVector from its own RequestContext.
     let cv1 = child1.get::<CorrelationVector>();
@@ -258,8 +253,7 @@ fn scoped_resolver_try_get_checks_both_stores() {
     parent.get::<Validator>(); // eagerly resolve Validator in parent
 
     let shared = parent.into_shared();
-    let mut child = shared.scoped();
-    child.insert(RequestContext { request_id: 1 });
+    let mut child = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 1 } });
 
     // Validator is in parent — try_get should find it.
     assert!(child.try_get::<Validator>().is_some());
@@ -292,13 +286,11 @@ fn scoped_resolver_shares_parent_resolved_types() {
     let shared = parent.into_shared();
 
     // Two scoped children both access CountedClient — should NOT construct it again.
-    let mut child1 = shared.scoped();
-    child1.insert(RequestContext { request_id: 1 });
+    let mut child1 = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 1 } });
     let c1 = child1.get::<CountedClient>();
     assert_eq!(c1.number, 42 + 10 + 1);
 
-    let mut child2 = shared.scoped();
-    child2.insert(RequestContext { request_id: 2 });
+    let mut child2 = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 2 } });
     let c2 = child2.get::<CountedClient>();
     assert_eq!(c2.number, 42 + 10 + 1);
 
@@ -318,22 +310,19 @@ fn scoped_resolver_supports_nested_scoping() {
     let shared = parent.into_shared();
 
     // Level 1: request scope
-    let mut request_scope = shared.scoped();
-    request_scope.insert(RequestContext { request_id: 7 });
+    let mut request_scope = shared.scoped(ScopedRoots { request_context: RequestContext { request_id: 7 } });
     request_scope.get::<RequestHandler>(); // eagerly resolve in request scope
 
     let request_shared = request_scope.into_shared();
 
     // Level 2: task scopes within the request
-    let mut task1 = request_shared.scoped();
-    task1.insert(Task { task_id: 100 });
+    let mut task1 = request_shared.scoped(TaskScopedRoots { task: Task { task_id: 100 } });
     let tsc1 = task1.get::<TaskScopedClient>();
     assert_eq!(tsc1.request_id, 7);
     assert_eq!(tsc1.task_id, 100);
     assert_eq!(tsc1.client_number, 42 + 10);
 
-    let mut task2 = request_shared.scoped();
-    task2.insert(Task { task_id: 200 });
+    let mut task2 = request_shared.scoped(TaskScopedRoots { task: Task { task_id: 200 } });
     let tsc2 = task2.get::<TaskScopedClient>();
     assert_eq!(tsc2.request_id, 7);
     assert_eq!(tsc2.task_id, 200);

@@ -210,6 +210,10 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
         }
     }
 
+    let struct_name = &syn::parse2::<syn::ItemStruct>(clean_struct.clone())
+        .expect("clean_struct is a valid struct")
+        .ident;
+
     // Generate ResolveFrom<Parent> for each field type.
     let impls: Vec<_> = fields
         .iter()
@@ -220,10 +224,22 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
                     type Inputs = ::autoresolve::ResolutionDepsEnd;
 
                     fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
-                        unreachable!("scoped root types are pre-inserted into the scoped resolver")
+                        unreachable!("scoped root types are inserted by ScopedBase::insert_into")
                     }
                 }
             }
+        })
+        .collect();
+
+    // Destructure field names for the ScopedBase impl.
+    let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
+
+    // Insert each field into the scoped resolver.
+    let insert_stmts: Vec<_> = fields
+        .iter()
+        .map(|f| {
+            let ident = f.ident;
+            quote! { __resolver.insert(#ident); }
         })
         .collect();
 
@@ -231,6 +247,13 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
         #clean_struct
 
         #(#impls)*
+
+        impl ::autoresolve::ScopedBase<#parent> for #struct_name {
+            fn insert_into(self, __resolver: &mut ::autoresolve::ScopedResolver<#parent>) {
+                let Self { #(#field_idents),* } = self;
+                #(#insert_stmts)*
+            }
+        }
     })
 }
 

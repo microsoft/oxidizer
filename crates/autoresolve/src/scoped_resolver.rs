@@ -6,6 +6,7 @@ use type_map::concurrent::TypeMap;
 use crate::resolve_deps::ResolutionDeps;
 use crate::resolve_from::ResolveFrom;
 use crate::resolver_store::ResolverStore;
+use crate::scoped_base::ScopedBase;
 use crate::shared_type_map::SharedTypeMap;
 
 /// A shared parent resolver that can spawn scoped child resolvers.
@@ -25,19 +26,22 @@ pub struct SharedResolver<T> {
 impl<T: Send + Sync + 'static> SharedResolver<T> {
     /// Creates a new scoped resolver that inherits types from this shared parent.
     ///
+    /// The scoped base struct's fields are automatically inserted as root types.
     /// Types pre-resolved in the parent (and its ancestors) are visible to the child.
     /// New types resolved by the child are stored locally and dropped when the scoped
     /// resolver is dropped.
-    pub fn scoped(&self) -> ScopedResolver<T> {
+    pub fn scoped<S: ScopedBase<T>>(&self, roots: S) -> ScopedResolver<T> {
         let mut ancestors = Vec::with_capacity(1 + self.ancestors.len());
         ancestors.push(Arc::clone(&self.types));
         ancestors.extend(self.ancestors.iter().map(Arc::clone));
 
-        ScopedResolver {
+        let mut resolver = ScopedResolver {
             ancestors,
             types: TypeMap::new(),
             base: PhantomData,
-        }
+        };
+        roots.insert_into(&mut resolver);
+        resolver
     }
 }
 
@@ -76,9 +80,7 @@ impl<T: Send + Sync + 'static> ResolverStore<T> for ScopedResolver<T> {
     }
 
     fn lookup<O: Send + Sync + 'static>(&self) -> Option<&O> {
-        self.types
-            .get::<O>()
-            .or_else(|| self.lookup_in_ancestors::<O>())
+        self.types.get::<O>().or_else(|| self.lookup_in_ancestors::<O>())
     }
 
     fn store_value<O: Send + Sync + 'static>(&mut self, value: O) {

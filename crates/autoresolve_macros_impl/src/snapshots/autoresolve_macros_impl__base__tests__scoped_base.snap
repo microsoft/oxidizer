@@ -8,6 +8,12 @@ struct ScopedRoots {
 impl ::autoresolve::ResolveFrom<Base> for RequestContext {
     type Inputs = ::autoresolve::ResolutionDepsEnd;
     fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
-        unreachable!("scoped root types are pre-inserted into the scoped resolver")
+        unreachable!("scoped root types are inserted by ScopedBase::insert_into")
+    }
+}
+impl ::autoresolve::ScopedBase<Base> for ScopedRoots {
+    fn insert_into(self, __resolver: &mut ::autoresolve::ScopedResolver<Base>) {
+        let Self { request_context } = self;
+        __resolver.insert(request_context);
     }
 }
