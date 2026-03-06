@@ -43,6 +43,7 @@ timeout = []
 retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
+hedging = ["dep:futures-util"]
 serde = ["dep:serde", "dep:jiff"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
@@ -50,6 +51,7 @@ tower-service = ["dep:tower-service"]
 
 [dependencies]
 fastrand = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true, features = ["alloc"] }
 jiff = { workspace = true, features = ["std", "serde"], optional = true }
 layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
@@ -65,10 +67,11 @@ alloc_tracker.workspace = true
 criterion.workspace = true
 fastrand.workspace = true
 futures = { workspace = true, features = ["executor"] }
+futures-util = { workspace = true, features = ["alloc"] }
 http.workspace = true
 insta = { workspace = true, features = ["json"] }
 jiff = { workspace = true, default-features = true, features = ["serde"] }
-layered = { workspace = true, features = ["tower-service"] }
+layered = { workspace = true, features = ["tower-service", "dynamic-service"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
@@ -114,6 +117,10 @@ name = "tower"
 required-features = ["retry", "timeout", "tower-service"]
 
 [[example]]
+name = "hedging"
+required-features = ["hedging"]
+
+[[example]]
 name = "breaker"
 required-features = ["breaker", "metrics"]
 
@@ -144,6 +151,11 @@ required-features = ["retry"]
 name = "breaker"
 harness = false
 required-features = ["breaker"]
+
+[[bench]]
+name = "hedging"
+harness = false
+required-features = ["hedging"]
 
 [lints]
 workspace = true

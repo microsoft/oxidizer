@@ -90,6 +90,36 @@ macro_rules! define_fn_wrapper {
         $crate::utils::define_fn_wrapper!($name<$($generics),*>(Fn() -> ()));
     };
 
+    // Non-generic base case: Name(Fn(param_name: param_type, ...) -> return_type)
+    ($name:ident(Fn($($param_name:ident: $param_ty:ty),*) -> $return_ty:ty)) => {
+        pub(crate) struct $name(std::sync::Arc<dyn Fn($($param_ty),*) -> $return_ty + Send + Sync>);
+
+        impl $name {
+            pub(crate) fn new<F>(predicate: F) -> Self
+            where
+                F: Fn($($param_ty),*) -> $return_ty + Send + Sync + 'static,
+            {
+                Self(std::sync::Arc::new(predicate))
+            }
+
+            pub(crate) fn call(&self, $($param_name: $param_ty),*) -> $return_ty {
+                (self.0)($($param_name),*)
+            }
+        }
+
+        impl Clone for $name {
+            fn clone(&self) -> Self {
+                Self(self.0.clone())
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($name)).finish()
+            }
+        }
+    };
+
     // Match pattern without return type (defaults to unit)
     ($name:ident(Fn($($param_name:ident: $param_ty:ty),*))) => {
         $crate::utils::define_fn_wrapper!($name(Fn($($param_name: $param_ty),*) -> ()));
@@ -135,6 +165,7 @@ mod tests {
     use std::fmt::Debug;
 
     define_fn_wrapper!(InOut<In, Out>(Fn(&In) -> Out));
+    define_fn_wrapper!(NoGeneric(Fn(&str) -> String));
 
     #[test]
     fn static_assertions() {
@@ -160,5 +191,16 @@ mod tests {
         let debug_str = format!("{wrapper:?}");
 
         assert_eq!(debug_str, "InOut");
+    }
+
+    #[test]
+    fn debug_non_generic_ok() {
+        let wrapper = NoGeneric::new(|input: &str| input.to_owned());
+
+        assert_eq!(wrapper.call("hello"), "hello");
+
+        let debug_str = format!("{wrapper:?}");
+
+        assert_eq!(debug_str, "NoGeneric");
     }
 }

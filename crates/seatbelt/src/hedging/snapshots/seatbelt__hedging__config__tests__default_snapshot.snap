@@ -1,0 +1,9 @@
+---
+source: crates/seatbelt/src/hedging/config.rs
+expression: config
+---
+{
+  "enabled": true,
+  "hedging_delay": "500ms",
+  "max_hedged_attempts": 1
+}

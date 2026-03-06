@@ -11,6 +11,7 @@
         feature = "timeout",
         feature = "breaker",
         feature = "fallback",
+        feature = "hedging",
         feature = "metrics",
         feature = "logs"
     )),
@@ -107,6 +108,7 @@
 //!
 //! - [`timeout`] - Middleware that cancels long-running operations.
 //! - [`retry`] - Middleware that automatically retries failed operations.
+//! - [`hedging`] - Middleware that reduces tail latency via additional concurrent execution.
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
 //!
@@ -162,7 +164,21 @@
 //! # }
 //! ```
 //!
-#![doc = include_str!("../examples/README.md")]
+//! # Examples
+//!
+//! Examples covering each middleware and common composition patterns:
+//!
+//! - [`timeout`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs): Basic timeout that cancels long-running operations.
+//! - [`timeout_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs): Dynamic timeout duration and timeout callbacks.
+//! - [`retry`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs): Automatic retry with input cloning and recovery classification.
+//! - [`retry_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs): Custom input cloning with attempt metadata injection.
+//! - [`retry_outage`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs): Input restoration from errors when cloning is not possible.
+//! - [`breaker`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs): Circuit breaker that monitors failure rates.
+//! - [`hedging`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs): Hedging slow requests with parallel attempts to reduce tail latency.
+//! - [`fallback`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/fallback.rs): Substitutes default values for invalid outputs.
+//! - [`resilience_pipeline`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs): Composing retry and timeout with metrics.
+//! - [`tower`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs): Tower `ServiceBuilder` integration.
+//! - [`config`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs): Loading settings from a [JSON file](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json).
 //!
 //! # Features
 //!
@@ -171,6 +187,8 @@
 //! - **`timeout`** - Enables the [`timeout`] middleware for canceling long-running operations.
 //! - **`retry`** - Enables the [`retry`] middleware for automatically retrying failed operations with
 //!   configurable backoff strategies, jitter, and recovery classification.
+//! - **`hedging`** - Enables the [`hedging`] middleware for reducing tail latency via additional
+//!   concurrent requests with configurable delay modes.
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a
 //!   user-defined alternative.
@@ -187,7 +205,7 @@ pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 mod context;
 pub use context::ResilienceContext;
 
-#[cfg(any(feature = "retry", test))]
+#[cfg(any(feature = "retry", feature = "hedging", test))]
 pub(crate) mod attempt;
 
 pub mod typestates;
@@ -204,10 +222,20 @@ pub mod breaker;
 #[cfg(any(feature = "fallback", test))]
 pub mod fallback;
 
+#[cfg(any(feature = "hedging", test))]
+pub mod hedging;
+
 #[cfg(any(feature = "retry", feature = "breaker", test))]
 mod rnd;
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "fallback", test))]
+#[cfg(any(
+    feature = "retry",
+    feature = "breaker",
+    feature = "timeout",
+    feature = "fallback",
+    feature = "hedging",
+    test
+))]
 pub(crate) mod utils;
 
 #[cfg(any(feature = "metrics", test))]

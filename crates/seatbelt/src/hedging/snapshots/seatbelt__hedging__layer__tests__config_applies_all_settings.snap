@@ -1,0 +1,38 @@
+---
+source: crates/seatbelt/src/hedging/layer.rs
+expression: layer
+---
+HedgingLayer {
+    context: ResilienceContext {
+        clock: Clock {
+            kind: "controlled",
+            timers: 0,
+            alive: true,
+            affinity: None,
+            ..
+        },
+        name: "test_pipeline",
+        meter: None,
+        logs_enabled: false,
+        _in: PhantomData<fn() -> alloc::string::String>,
+        _out: PhantomData<fn() -> alloc::string::String>,
+    },
+    max_hedged_attempts: 4,
+    delay_fn: DelayFn,
+    clone_input: Some(
+        CloneInput,
+    ),
+    should_recover: Some(
+        ShouldRecover,
+    ),
+    on_execute: None,
+    handle_unavailable: false,
+    enable_if: Disabled,
+    telemetry: TelemetryHelper {
+        pipeline_name: "test_pipeline",
+        strategy_name: "test",
+        event_reporter: None,
+        logs_enabled: false,
+    },
+    _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::Set) -> alloc::string::String>,
+}
