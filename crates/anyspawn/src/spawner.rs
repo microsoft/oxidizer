@@ -170,38 +170,6 @@ impl Spawner {
         Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, layer_names)))
     }
 
-    /// Creates a [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder) using
-    /// Tokio as the base spawn function.
-    ///
-    /// This is a shorthand for
-    /// [`CustomSpawnerBuilder::tokio()`](crate::CustomSpawnerBuilder::tokio).
-    ///
-    /// # Panics
-    ///
-    /// The resulting [`Spawner`] will panic if used outside a Tokio runtime.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use anyspawn::{BoxedFuture, Spawner};
-    ///
-    /// # #[tokio::main]
-    /// # async fn main() {
-    /// let spawner = Spawner::builder()
-    ///     .layer("logging", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-    ///         spawn(fut);
-    ///     })
-    ///     .build();
-    /// # let _ = spawner;
-    /// # }
-    /// ```
-    #[cfg(all(feature = "tokio", feature = "custom"))]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "tokio", feature = "custom"))))]
-    #[must_use]
-    pub fn builder() -> crate::CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static> {
-        crate::CustomSpawnerBuilder::tokio()
-    }
-
     /// Spawns an async task on the runtime.
     ///
     /// Returns a [`JoinHandle`] that can be awaited to retrieve the task's result,
