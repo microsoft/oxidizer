@@ -86,6 +86,7 @@ impl<T: Send + Sync + 'static> Resolver<T> {
     pub fn into_shared(self) -> SharedResolver<T> {
         SharedResolver {
             types: Arc::new(SharedTypeMap::from_type_map(self.types)),
+            ancestors: Vec::new(),
             base: PhantomData,
         }
     }

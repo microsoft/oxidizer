@@ -122,6 +122,35 @@ struct ScopedRoots {
     request_context: RequestContext,
 }
 
+// --- "Task-scoped" types (per-task within a request, grandchild resolver) ---
+
+#[derive(Clone)]
+struct Task {
+    task_id: u64,
+}
+
+#[base(scoped(Base))]
+struct TaskScopedRoots {
+    task: Task,
+}
+
+struct TaskScopedClient {
+    request_id: u64,
+    task_id: u64,
+    client_number: i32,
+}
+
+#[resolvable]
+impl TaskScopedClient {
+    fn new(handler: &RequestHandler, task: &Task) -> Self {
+        Self {
+            request_id: handler.correlation_vector.request_id,
+            task_id: task.task_id,
+            client_number: handler.client.number(),
+        }
+    }
+}
+
 static COUNTED_CLIENT_CONSTRUCTIONS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone)]
@@ -275,4 +304,38 @@ fn scoped_resolver_shares_parent_resolved_types() {
 
     // Still only one construction — both children read from the shared parent.
     assert_eq!(COUNTED_CLIENT_CONSTRUCTIONS.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn scoped_resolver_supports_nested_scoping() {
+    let builtins = Builtins {
+        scheduler: Scheduler,
+        clock: Clock,
+    };
+
+    // Level 0: application scope
+    let parent = create_parent(builtins);
+    let shared = parent.into_shared();
+
+    // Level 1: request scope
+    let mut request_scope = shared.scoped();
+    request_scope.insert(RequestContext { request_id: 7 });
+    request_scope.get::<RequestHandler>(); // eagerly resolve in request scope
+
+    let request_shared = request_scope.into_shared();
+
+    // Level 2: task scopes within the request
+    let mut task1 = request_shared.scoped();
+    task1.insert(Task { task_id: 100 });
+    let tsc1 = task1.get::<TaskScopedClient>();
+    assert_eq!(tsc1.request_id, 7);
+    assert_eq!(tsc1.task_id, 100);
+    assert_eq!(tsc1.client_number, 42 + 10);
+
+    let mut task2 = request_shared.scoped();
+    task2.insert(Task { task_id: 200 });
+    let tsc2 = task2.get::<TaskScopedClient>();
+    assert_eq!(tsc2.request_id, 7);
+    assert_eq!(tsc2.task_id, 200);
+    assert_eq!(tsc2.client_number, 42 + 10);
 }
