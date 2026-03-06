@@ -7,7 +7,11 @@ use std::sync::Arc;
 
 use futures_channel::oneshot;
 
-pub(crate) type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+/// A type-erased, heap-allocated, pinned future that returns `()`.
+///
+/// This is the future type that [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder)
+/// layers and spawn functions operate on.
+pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 
 /// Internal wrapper for custom spawn functions.
