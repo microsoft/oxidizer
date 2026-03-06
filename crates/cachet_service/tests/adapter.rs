@@ -156,7 +156,7 @@ fn cache_response_is_miss_for_none() {
 }
 
 #[test]
-fn cache_response_into_enextracts_value() {
+fn cache_response_into_entry_extracts_value() {
     let response = CacheResponse::Get(Some(CacheEntry::new(42)));
     let entry = response.into_entry();
     assert!(entry.is_some());
@@ -164,7 +164,7 @@ fn cache_response_into_enextracts_value() {
 }
 
 #[test]
-fn cache_response_into_enreturns_none_for_non_get() {
+fn cache_response_into_entry_returns_none_for_non_get() {
     let response: CacheResponse<i32> = CacheResponse::Insert();
     assert!(response.into_entry().is_none());
 

@@ -10,7 +10,7 @@ const METER_NAME: &str = "cachet";
 const VERSION: &str = "v0.1.0";
 const SCHEMA_URL: &str = "https://opentelemetry.io/schemas/1.47.0";
 const CACHE_EVENT_COUNT_NAME: &str = "cache.event.count";
-const CACHE_OPERATION_DURATION_NAME: &str = "cache.operation.duration_ns";
+const CACHE_OPERATION_DURATION_NAME: &str = "cache.operation.duration";
 const CACHE_SIZE_NAME: &str = "cache.size";
 
 pub(crate) fn create_meter(meter_provider: &dyn MeterProvider) -> Meter {

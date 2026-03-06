@@ -48,13 +48,13 @@ pub struct Error {
 }
 
 impl Error {
-    /// Creates a new error wrapping a cause.
-    pub fn caused_by(cause: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+    fn caused_by(cause: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
         Self {
             ohno_core: OhnoCore::from(cause),
             recovery_info: RecoveryInfo::never(),
         }
     }
+
     /// Creates a new error wrapping a source error.
     ///
     /// This preserves the original error type for later extraction via
@@ -86,8 +86,8 @@ impl Error {
     ///
     /// let error = Error::from_message("operation failed");
     /// ```
-    pub fn from_message(message: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
-        Self::caused_by(message)
+    pub fn from_message(message: impl Into<String>) -> Self {
+        Self::caused_by(message.into())
     }
 
     /// Attaches recovery information to this error.
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn error_debug_contains_cause_message() {
-        let error = Error::caused_by("test error message");
+        let error = Error::from_message("test error message");
         let debug_str = format!("{error:?}");
         assert!(
             debug_str.contains("test error message"),
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn error_display_contains_cause_message() {
-        let error = Error::caused_by("display test");
+        let error = Error::from_message("display test");
         let display_str = format!("{error}");
         assert!(
             display_str.contains("display test"),
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn result_type_alias_propagates_errors() {
         fn returns_err() -> Result<i32> {
-            Err(Error::caused_by("expected failure"))
+            Err(Error::from_message("expected failure"))
         }
 
         let err = returns_err().expect_err("should return an error");

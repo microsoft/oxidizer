@@ -68,7 +68,7 @@ where
         let request = CacheOperation::Get(GetRequest::new(key.clone()));
         match self.service.execute(request).await? {
             CacheResponse::Get(entry) => Ok(entry),
-            _ => Ok(None),
+            _ => Err(Error::from_message("unexpected response type for get")),
         }
     }
 
@@ -177,7 +177,9 @@ mod tests {
         let _inner: &MockService = adapter.inner();
     }
 
-    // Service that returns wrong response types to exercise error branches
+    // Service that returns wrong response types to exercise the defensive error branches.
+    // The type system cannot prevent a Service implementation from returning the wrong
+    // CacheResponse variant for a given CacheOperation, so we guard against it at runtime.
     #[derive(Debug, Clone)]
     struct WrongResponseService;
 
@@ -197,10 +199,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn adapter_get_wrong_response_returns_none() {
+    async fn adapter_get_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
-        let result = adapter.get(&"key".to_string()).await.unwrap();
-        assert!(result.is_none());
+        let result = adapter.get(&"key".to_string()).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

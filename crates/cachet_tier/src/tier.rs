@@ -7,6 +7,8 @@
 //! This trait is designed for composition: implement the storage operations,
 //! then use `cachet` to layer on telemetry, TTL, and multi-tier fallback.
 
+use std::future::Future;
+
 use crate::{CacheEntry, Error};
 
 /// Trait for cache tier implementations.

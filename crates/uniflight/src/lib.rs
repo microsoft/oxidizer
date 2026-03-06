@@ -361,7 +361,7 @@ where
         async move {
             // Box the future immediately to keep state machine size small.
             // Without boxing, the entire Fut type would be embedded in our state machine.
-            // With boxing, we only store a 16-byte pointer.
+            // With boxing, we only store an 8-byte thin pointer.
             let boxed = Box::pin(func());
             let result = cell.get_or_init(boxed).await.clone();
             drop(cell); // Release our Arc before cleanup check

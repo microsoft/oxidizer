@@ -157,11 +157,10 @@ where
     K: Clone,
     V: Clone,
 {
-    /// Sets a predicate that determines when `try_*` operations should fail.
+    /// Sets a predicate that determines when operations should fail.
     ///
     /// The predicate receives the operation and returns `true` if it should fail.
-    /// This only affects the fallible `try_*` methods; infallible methods like
-    /// `get()` and `insert()` always succeed.
+    /// All cache operations (`get`, `insert`, `invalidate`, `clear`) are affected.
     ///
     /// # Examples
     ///
@@ -177,7 +176,7 @@ where
     /// cache.fail_when(|op| matches!(op, CacheOp::Get(_)));
     ///
     /// // Fail gets for a specific key
-    /// cache.fail_when(|op| matches!(op, CacheOp::Get(k) if k == "bad_key"));
+    /// cache.fail_when(|op| matches!(op, CacheOp::Get(k) if k.as_str() == "bad_key"));
     /// ```
     pub fn fail_when<F>(&self, predicate: F)
     where
@@ -220,7 +219,7 @@ where
         let op = CacheOp::Get(key.clone());
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::caused_by("mock: get failed"));
+            return Err(Error::from_message("mock: get failed"));
         }
         self.record(op);
         Ok(self.data.lock().get(key).cloned())
@@ -233,7 +232,7 @@ where
         };
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::caused_by("mock: insert failed"));
+            return Err(Error::from_message("mock: insert failed"));
         }
         self.record(op);
         self.data.lock().insert(key.clone(), entry);
@@ -244,7 +243,7 @@ where
         let op = CacheOp::Invalidate(key.clone());
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::caused_by("mock: invalidate failed"));
+            return Err(Error::from_message("mock: invalidate failed"));
         }
         self.record(op);
         self.data.lock().remove(key);
@@ -255,7 +254,7 @@ where
         let op = CacheOp::Clear;
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::caused_by("mock: clear failed"));
+            return Err(Error::from_message("mock: clear failed"));
         }
         self.record(op);
         self.data.lock().clear();
