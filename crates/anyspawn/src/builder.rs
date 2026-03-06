@@ -148,11 +148,7 @@ where
     /// # let _ = spawner;
     /// # }
     /// ```
-    pub fn layer<L>(
-        self,
-        name: &'static str,
-        layer_fn: L,
-    ) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static>
+    pub fn layer<L>(self, name: &'static str, layer_fn: L) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static>
     where
         L: Fn(BoxedFuture, &dyn Fn(BoxedFuture)) + Send + Sync + 'static,
     {
