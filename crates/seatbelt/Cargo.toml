@@ -68,9 +68,10 @@ futures = { workspace = true, features = ["executor"] }
 http.workspace = true
 insta = { workspace = true, features = ["json"] }
 jiff = { workspace = true, default-features = true, features = ["serde"] }
-layered = { workspace = true, features = ["tower-service"] }
+layered = { workspace = true, features = ["tower-service", "dynamic-service"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }
 opentelemetry-stdout = { workspace = true, default-features = false, features = ["metrics", "logs"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
@@ -124,6 +125,10 @@ required-features = ["retry", "breaker", "timeout", "serde"]
 [[example]]
 name = "fallback"
 required-features = ["fallback"]
+
+[[example]]
+name = "http_client"
+required-features = ["retry", "timeout"]
 
 [[bench]]
 name = "observability"
