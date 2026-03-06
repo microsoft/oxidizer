@@ -139,8 +139,7 @@ impl Spawner {
     /// The closure receives a boxed, pinned future and is responsible for
     /// spawning it on the appropriate runtime.
     ///
-    /// For layer composition, use
-    /// [`Spawner::builder`] or [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder).
+    /// For layer composition, use [`CustomSpawnerBuilder`](crate::CustomSpawnerBuilder).
     ///
     /// # Examples
     ///
