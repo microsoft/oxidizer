@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use tick::Clock;
 
@@ -13,7 +13,7 @@ use crate::utils::TelemetryHelper;
 /// Manages circuit breaker engines for different breaker IDs.
 #[derive(Debug)]
 pub(crate) struct Engines {
-    map: Mutex<HashMap<BreakerId, Arc<Engine>>>,
+    map: RwLock<HashMap<BreakerId, Arc<Engine>>>,
     engine_options: EngineOptions,
     clock: Clock,
     telemetry: TelemetryHelper,
@@ -22,7 +22,7 @@ pub(crate) struct Engines {
 impl Engines {
     pub fn new(engine_options: EngineOptions, clock: Clock, telemetry: TelemetryHelper) -> Self {
         Self {
-            map: Mutex::new(HashMap::new()),
+            map: RwLock::new(HashMap::new()),
             engine_options,
             clock,
             telemetry,
@@ -30,20 +30,24 @@ impl Engines {
     }
 
     pub fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
-        let mut map = self.map.lock().expect(ERR_POISONED_LOCK);
-
-        if let Some(engine) = map.get(key) {
-            return Arc::clone(engine);
+        // Fast path: read lock for existing engines (common case).
+        {
+            let map = self.map.read().expect(ERR_POISONED_LOCK);
+            if let Some(engine) = map.get(key) {
+                return Arc::clone(engine);
+            }
         }
 
-        let engine = Arc::new(self.create_engine(key));
-        map.insert(key.clone(), Arc::clone(&engine));
-        engine
+        // Slow path: acquire write lock to insert a new engine.
+        let mut map = self.map.write().expect(ERR_POISONED_LOCK);
+        let engine = map.entry(key.clone()).or_insert_with(|| Arc::new(self.create_engine(key)));
+
+        Arc::clone(engine)
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
-        let map = self.map.lock().expect(ERR_POISONED_LOCK);
+        let map = self.map.read().expect(ERR_POISONED_LOCK);
         map.len()
     }
 

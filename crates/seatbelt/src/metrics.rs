@@ -5,7 +5,7 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry::metrics::{Meter, MeterProvider};
 
 const METER_NAME: &str = "seatbelt";
-const VERSION: &str = "v0.1.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SCHEMA_URL: &str = "https://opentelemetry.io/schemas/1.47.0";
 
 pub(crate) fn create_meter(meter_provider: &dyn MeterProvider) -> Meter {
@@ -51,7 +51,7 @@ mod tests {
         assert!(str.contains("resilience.event"));
         assert!(str.contains("u64"));
         assert!(str.contains("seatbelt"));
-        assert!(str.contains("v0.1.0"));
+        assert!(str.contains(env!("CARGO_PKG_VERSION")));
         assert!(str.contains("https://opentelemetry.io/schemas/1.47"));
     }
 }
