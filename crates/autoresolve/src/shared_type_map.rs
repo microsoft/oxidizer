@@ -13,9 +13,7 @@ pub(crate) struct SharedTypeMap {
 
 impl SharedTypeMap {
     pub(crate) fn from_type_map(types: TypeMap) -> Self {
-        SharedTypeMap {
-            inner: Mutex::new(types),
-        }
+        SharedTypeMap { inner: Mutex::new(types) }
     }
 
     pub(crate) fn try_get<O: Send + Sync + 'static>(&self) -> Option<&O> {

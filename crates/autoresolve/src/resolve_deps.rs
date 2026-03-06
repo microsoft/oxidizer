@@ -48,9 +48,7 @@ where
         T: 'a;
     fn get_private<S: ResolverStore<T>>(store: &S) -> Self::Resolved<'_> {
         let tail = Rest::get_private(store);
-        let head = store
-            .lookup::<H>()
-            .expect("ensure must have been called before get_private");
+        let head = store.lookup::<H>().expect("ensure must have been called before get_private");
         ResolutionDepsNode(head, tail)
     }
 
