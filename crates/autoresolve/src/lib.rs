@@ -1,3 +1,4 @@
+mod base_type;
 mod composite;
 mod resolve_deps;
 mod resolve_from;
@@ -8,9 +9,12 @@ mod scoped_resolver;
 pub(crate) mod shared_type_map;
 
 #[cfg(feature = "macros")]
+pub use autoresolve_macros::base;
+#[cfg(feature = "macros")]
 pub use autoresolve_macros::composite;
 #[cfg(feature = "macros")]
 pub use autoresolve_macros::resolvable;
+pub use base_type::BaseType;
 pub use composite::CompositePart;
 pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};
 pub use resolve_from::ResolveFrom;

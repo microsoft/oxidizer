@@ -1,4 +1,4 @@
-use autoresolve_macros::{composite, resolvable};
+use autoresolve_macros::{base, composite, resolvable};
 
 #[derive(Clone)]
 pub struct Scheduler;
@@ -106,6 +106,12 @@ impl MyService {
     }
 }
 
+#[base]
+struct MyBase {
+    #[spread]
+    builtins: Builtins,
+}
+
 #[test]
 fn test_autoresolve() {
     let builtins = Builtins {
@@ -113,7 +119,7 @@ fn test_autoresolve() {
         clock: Clock,
     };
 
-    let mut resolver = autoresolve::resolver!(MyBase, ..builtins: Builtins);
+    let mut resolver = autoresolve::Resolver::new(MyBase { builtins });
 
     let service = resolver.get::<MyService>();
 

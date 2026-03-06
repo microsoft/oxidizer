@@ -1,0 +1,29 @@
+---
+source: crates/autoresolve_macros_impl/src/base.rs
+expression: pretty_print(result)
+---
+struct Base {
+    scheduler: Scheduler,
+    clock: Clock,
+}
+impl ::autoresolve::ResolveFrom<Base> for Scheduler {
+    type Inputs = ::autoresolve::ResolutionDepsEnd;
+    fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
+        unreachable!("base types are pre-inserted into the resolver")
+    }
+}
+impl ::autoresolve::ResolveFrom<Base> for Clock {
+    type Inputs = ::autoresolve::ResolutionDepsEnd;
+    fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
+        unreachable!("base types are pre-inserted into the resolver")
+    }
+}
+impl ::autoresolve::BaseType for Base {
+    fn into_resolver(self) -> ::autoresolve::Resolver<Self> {
+        let Self { scheduler, clock } = self;
+        let mut __resolver = ::autoresolve::Resolver::<Self>::new_empty();
+        __resolver.insert(scheduler);
+        __resolver.insert(clock);
+        __resolver
+    }
+}

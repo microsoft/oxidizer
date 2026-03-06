@@ -1,0 +1,13 @@
+---
+source: crates/autoresolve_macros_impl/src/base.rs
+expression: pretty_print(result)
+---
+struct ScopedRoots {
+    request_context: RequestContext,
+}
+impl ::autoresolve::ResolveFrom<Base> for RequestContext {
+    type Inputs = ::autoresolve::ResolutionDepsEnd;
+    fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
+        unreachable!("scoped root types are pre-inserted into the scoped resolver")
+    }
+}

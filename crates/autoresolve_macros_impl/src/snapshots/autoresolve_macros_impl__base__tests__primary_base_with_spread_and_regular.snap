@@ -1,0 +1,24 @@
+---
+source: crates/autoresolve_macros_impl/src/base.rs
+expression: pretty_print(result)
+---
+struct Base {
+    builtins: Builtins,
+    telemetry: Telemetry,
+}
+Builtins!(@ impls Base);
+impl ::autoresolve::ResolveFrom<Base> for Telemetry {
+    type Inputs = ::autoresolve::ResolutionDepsEnd;
+    fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
+        unreachable!("base types are pre-inserted into the resolver")
+    }
+}
+impl ::autoresolve::BaseType for Base {
+    fn into_resolver(self) -> ::autoresolve::Resolver<Self> {
+        let Self { builtins, telemetry } = self;
+        let mut __resolver = ::autoresolve::Resolver::<Self>::new_empty();
+        Builtins!(@ insert __resolver, builtins);
+        __resolver.insert(telemetry);
+        __resolver
+    }
+}

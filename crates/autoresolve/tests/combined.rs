@@ -1,6 +1,6 @@
 #![allow(dead_code)] // Test structs exist to exercise the DI graph, not all fields are read.
 
-use autoresolve_macros::{composite, resolvable};
+use autoresolve_macros::{base, composite, resolvable};
 
 #[derive(Clone)]
 pub struct Scheduler;
@@ -114,6 +114,14 @@ impl OutboundClient {
     }
 }
 
+#[base]
+struct Base {
+    #[spread]
+    builtins: Builtins,
+    telemetry: Telemetry,
+    request: Request,
+}
+
 #[test]
 fn test_combined() {
     let builtins = Builtins {
@@ -123,11 +131,11 @@ fn test_combined() {
     let telemetry = Telemetry;
     let request = Request;
 
-    let mut resolver = autoresolve::resolver!(Base,
-        ..builtins: Builtins,
-        telemetry: Telemetry,
-        request: Request,
-    );
+    let mut resolver = autoresolve::Resolver::new(Base {
+        builtins,
+        telemetry,
+        request,
+    });
 
     let outbound = resolver.get::<OutboundClient>();
     // Verify the object was constructed — Client depends on Validator + Scheduler + Telemetry,

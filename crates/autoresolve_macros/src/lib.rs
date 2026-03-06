@@ -55,3 +55,44 @@ pub fn resolvable(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) 
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
+
+/// Declares a struct as a resolver base type, generating the wiring needed to construct a
+/// [`Resolver`] from it.
+///
+/// # Primary base
+///
+/// Applied without arguments, `#[base]` generates:
+/// - `ResolveFrom<Base>` impls for each field type (composite fields use their `@impls` arm).
+/// - A [`BaseType`] impl that builds a [`Resolver`] by inserting all fields.
+///
+/// Fields annotated with `#[spread]` are treated as composite types — their individual parts
+/// are spread into the resolver via the composite's generated macro.
+///
+/// ```ignore
+/// #[autoresolve::base]
+/// struct Base {
+///     #[spread]
+///     builtins: Builtins,
+///     telemetry: Telemetry,
+/// }
+///
+/// let resolver = Resolver::new(Base { builtins, telemetry });
+/// ```
+///
+/// # Scoped roots
+///
+/// With `scoped(ParentBase)`, the macro generates `ResolveFrom<ParentBase>` impls for each
+/// field type, declaring them as root types that will be pre-inserted into scoped resolvers.
+///
+/// ```ignore
+/// #[autoresolve::base(scoped(Base))]
+/// struct ScopedRoots {
+///     request_context: RequestContext,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn base(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    autoresolve_macros_impl::base(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use type_map::concurrent::TypeMap;
 
+use crate::base_type::BaseType;
 use crate::resolve_deps::ResolutionDeps;
 use crate::resolve_from::ResolveFrom;
 use crate::resolver_store::ResolverStore;
@@ -35,13 +36,15 @@ impl<T: Send + Sync + 'static> ResolverStore<T> for Resolver<T> {
 }
 
 impl<T: Send + Sync + 'static> Resolver<T> {
-    pub fn new(t: T) -> Self {
-        let mut type_map = TypeMap::new();
-        type_map.insert(t);
-        Resolver {
-            types: type_map,
-            base: PhantomData,
-        }
+    /// Creates a resolver from a base type that implements [`BaseType`].
+    ///
+    /// The base struct's fields are automatically inserted as root types. Use the
+    /// `#[base]` proc macro to generate the [`BaseType`] implementation.
+    pub fn new(base: T) -> Self
+    where
+        T: BaseType,
+    {
+        base.into_resolver()
     }
 
     pub fn new_empty() -> Self {
