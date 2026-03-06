@@ -352,14 +352,16 @@ where
 mod tests {
     use std::future::poll_fn;
 
-    use layered::{Execute, Layer};
+    use layered::Execute;
     use opentelemetry::KeyValue;
     use tick::ClockControl;
 
     use super::*;
     use crate::ResilienceContext;
-    use crate::testing::{FailReadyService, MetricTester};
+    use crate::testing::FailReadyService;
     use crate::typestates::Set;
+    use layered::Layer;
+    use testing_aids::MetricTester;
 
     #[cfg_attr(miri, ignore)]
     #[test]
@@ -407,7 +409,7 @@ mod tests {
     async fn retry_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
+        use testing_aids::LogCapture;
 
         let log_capture = LogCapture::new();
         let _guard = log_capture.subscriber().set_default();

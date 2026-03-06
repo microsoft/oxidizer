@@ -81,6 +81,7 @@ rstest.workspace = true
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true }
 static_assertions.workspace = true
+testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 tower = { workspace = true, features = ["util"] }

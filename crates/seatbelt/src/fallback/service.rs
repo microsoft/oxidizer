@@ -230,7 +230,7 @@ mod tests {
     async fn fallback_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
+        use testing_aids::LogCapture;
 
         let log_capture = LogCapture::new();
         let _guard = log_capture.subscriber().set_default();
@@ -257,8 +257,8 @@ mod tests {
     async fn fallback_emits_metrics() {
         use opentelemetry::KeyValue;
 
-        use crate::testing::MetricTester;
         use crate::utils::{EVENT_NAME, PIPELINE_NAME, STRATEGY_NAME};
+        use testing_aids::MetricTester;
 
         let metrics = MetricTester::new();
         let clock = tick::Clock::new_frozen();

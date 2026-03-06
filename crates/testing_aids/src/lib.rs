@@ -12,9 +12,11 @@ use std::{env, process, thread};
 
 mod log;
 mod macros;
+mod metrics;
 mod yielding;
 
 pub use log::*;
+pub use metrics::*;
 pub use yielding::*;
 
 /// If something (whatever) does not happen in a test within this time, the test will fail.
