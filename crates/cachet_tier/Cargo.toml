@@ -30,6 +30,7 @@ allowed_external_types = [
 [features]
 default = ["dynamic-cache"]
 dynamic-cache = ["dep:dynosaur"]
+serde = ["dep:serde"]
 test-util = ["dep:parking_lot"]
 
 [dependencies]
@@ -37,9 +38,11 @@ dynosaur = { workspace = true, optional = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true, optional = true }
 recoverable = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"], optional = true }
 
 [dev-dependencies]
 parking_lot = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 tick = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = [
     "macros",

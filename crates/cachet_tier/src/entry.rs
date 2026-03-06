@@ -28,6 +28,7 @@ use std::{
 /// assert_eq!(entry.ttl(), Some(Duration::from_secs(60)));
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CacheEntry<V> {
     value: V,
     cached_at: Option<SystemTime>,
@@ -130,5 +131,38 @@ impl<V> Deref for CacheEntry<V> {
 impl<V> From<V> for CacheEntry<V> {
     fn from(value: V) -> Self {
         Self::new(value)
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_plain() {
+        let entry = CacheEntry::new(42);
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: CacheEntry<i32> = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry, deserialized);
+    }
+
+    #[test]
+    fn round_trip_with_ttl() {
+        let entry = CacheEntry::expires_after("hello".to_string(), Duration::from_secs(60));
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: CacheEntry<String> = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry, deserialized);
+    }
+
+    #[test]
+    fn round_trip_with_ttl_and_cached_at() {
+        let entry = CacheEntry::expires_at(
+            99u64,
+            Duration::from_secs(300),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: CacheEntry<u64> = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry, deserialized);
     }
 }
