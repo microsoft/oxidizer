@@ -28,7 +28,7 @@ allowed_external_types = [
 ]
 
 [dependencies]
-cachet_tier = { path = "../cachet_tier" }
+cachet_tier = { workspace = true }
 layered = { workspace = true }
 
 [dev-dependencies]

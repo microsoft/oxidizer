@@ -44,9 +44,9 @@ service = ["dep:cachet_service", "dep:layered"]
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
-cachet_memory = { path = "../cachet_memory", optional = true }
-cachet_service = { path = "../cachet_service", optional = true }
-cachet_tier = { path = "../cachet_tier" }
+cachet_memory = { workspace = true, optional = true }
+cachet_service = { workspace = true, optional = true }
+cachet_tier = { workspace = true }
 dynosaur = { workspace = true, optional = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
@@ -64,7 +64,7 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
+cachet_tier = { workspace = true, features = ["test-util"] }
 criterion = { workspace = true }
 dynosaur = { workspace = true }
 opentelemetry = { workspace = true, features = [
@@ -74,7 +74,7 @@ opentelemetry = { workspace = true, features = [
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
 recoverable = { workspace = true }
 seatbelt = { workspace = true, features = ["retry", "tower-service"] }
-testing_aids = { path = "../testing_aids" }
+testing_aids = { workspace = true }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true, features = ["std"] }
