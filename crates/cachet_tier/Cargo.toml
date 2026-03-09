@@ -28,12 +28,10 @@ allowed_external_types = [
 ]
 
 [features]
-default = ["dynamic-cache"]
-dynamic-cache = ["dep:dynosaur"]
 test-util = ["dep:parking_lot"]
 
 [dependencies]
-dynosaur = { workspace = true, optional = true }
+dynosaur = { workspace = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true, optional = true }
 recoverable = { workspace = true }

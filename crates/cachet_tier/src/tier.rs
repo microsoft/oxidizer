@@ -20,10 +20,7 @@ use crate::{CacheEntry, Error};
 /// Only `len` and `is_empty` have default implementations:
 /// - `len`: Returns `None` (not all tiers track size)
 /// - `is_empty`: Delegates to `len`
-#[cfg_attr(
-    any(test, feature = "dynamic-cache"),
-    dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))
-)]
+#[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;

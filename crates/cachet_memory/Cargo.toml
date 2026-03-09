@@ -28,8 +28,14 @@ moka = { version = "0.12", features = ["future"] }
 thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
+[[bench]]
+name = "overhead"
+harness = false
 
 [lints]
 workspace = true

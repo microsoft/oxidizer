@@ -55,9 +55,8 @@
 //!
 //! # Dynamic Dispatch
 //!
-//! Enable the `dynamic-cache` feature for [`DynamicCache`], which wraps any `CacheTier`
-//! in a type-erased container. This is useful for multi-tier caches with heterogeneous
-//! storage backends.
+//! [`DynamicCache`] wraps any `CacheTier` in a type-erased container. This is useful
+//! for multi-tier caches with heterogeneous storage backends.
 
 mod entry;
 mod error;
@@ -65,10 +64,8 @@ mod error;
 pub mod testing;
 mod tier;
 
-#[cfg(any(test, feature = "dynamic-cache"))]
 mod dynamic;
 
-#[cfg(any(test, feature = "dynamic-cache"))]
 #[doc(inline)]
 pub use dynamic::{DynamicCache, DynamicCacheExt};
 #[doc(inline)]

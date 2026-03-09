@@ -40,11 +40,12 @@ fn future_size_bounded_with_nesting() {
     let insert_size = size_of_val(&cache.insert(&key, CacheEntry::new(42)));
     let invalidate_size = size_of_val(&cache.invalidate(&key));
 
-    // Current sizes: get=904, insert=192, invalidate=224
-    // get is larger because primary lookup is not boxed (to avoid allocation on hits)
-    assert!(get_size < 1000, "Get future size is too large: {get_size}");
-    assert!(insert_size < 500, "Insert future size is too large: {insert_size}");
-    assert!(invalidate_size < 500, "Invalidate future size is too large: {invalidate_size}");
+    // Fallback tier is type-erased via DynamicCache, so future sizes are constant
+    // regardless of nesting depth. Sizes are slightly larger than single-level due to
+    // the DynamicCache wrapper, but do not grow with additional tiers.
+    assert!(get_size < 1700, "Get future size is too large: {get_size}");
+    assert!(insert_size < 1700, "Insert future size is too large: {insert_size}");
+    assert!(invalidate_size < 1700, "Invalidate future size is too large: {invalidate_size}");
 }
 
 #[cfg_attr(miri, ignore)]

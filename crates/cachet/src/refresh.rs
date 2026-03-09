@@ -90,12 +90,11 @@ where
     }
 }
 
-impl<K, V, P, F> FallbackCache<K, V, P, F>
+impl<K, V, P> FallbackCache<K, V, P>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
-    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Triggers a background refresh for the given key.
     ///
@@ -126,12 +125,11 @@ where
     }
 }
 
-impl<K, V, P, F> FallbackCacheInner<K, V, P, F>
+impl<K, V, P> FallbackCacheInner<K, V, P>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
-    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
         let timed = self.clock.timed_async(self.fallback.get(&key)).await;
@@ -328,7 +326,7 @@ mod fetch_and_promote_tests {
         futures::executor::block_on(f)
     }
 
-    fn build_fallback_cache<P, F>(primary: P, fallback: F, policy: FallbackPromotionPolicy<i32>) -> FallbackCache<String, i32, P, F> {
+    fn build_fallback_cache<P, F: CacheTier<String, i32> + 'static>(primary: P, fallback: F, policy: FallbackPromotionPolicy<i32>) -> FallbackCache<String, i32, P> {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)

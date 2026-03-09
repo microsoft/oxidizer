@@ -483,7 +483,7 @@ where
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
-    type Tier = FallbackCache<K, V, PB::Tier, FB::Tier>;
+    type Tier = FallbackCache<K, V, PB::Tier>;
 }
 
 #[expect(private_bounds, reason = "Buildable is an internal trait")]
@@ -512,7 +512,7 @@ where
     ///     .fallback(l2)
     ///     .build();
     /// ```
-    pub fn build(self) -> Cache<K, V, FallbackCache<K, V, PB::Tier, FB::Tier>> {
+    pub fn build(self) -> Cache<K, V, FallbackCache<K, V, PB::Tier>> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -556,7 +556,7 @@ where
     PB: Buildable<K, V>,
     FB: Buildable<K, V>,
 {
-    type Output = FallbackCache<K, V, PB::Output, FB::Output>;
+    type Output = FallbackCache<K, V, PB::Output>;
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let name = self.name;

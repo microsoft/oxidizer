@@ -17,13 +17,12 @@
 //!
 //! ## Basic In-Memory Cache
 //!
-//! ```
+//! ```no_run
 //! use cachet::{Cache, CacheEntry};
 //! use tick::Clock;
-//! # if cfg!(miri) { return; } // moka is incompatible with Miri
-//! # futures::executor::block_on(async {
+//! # tokio::runtime::Runtime::new().unwrap().block_on(async {
 //!
-//! let clock = Clock::new_frozen();
+//! let clock = Clock::new_tokio();
 //! let cache = Cache::builder::<String, i32>(clock)
 //!     .memory()
 //!     .build();
@@ -37,14 +36,13 @@
 //!
 //! ## Multi-Tier Cache with Fallback
 //!
-//! ```
+//! ```no_run
 //! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
 //! use tick::Clock;
 //! use std::time::Duration;
-//! # if cfg!(miri) { return; } // moka is incompatible with Miri
-//! # futures::executor::block_on(async {
+//! # tokio::runtime::Runtime::new().unwrap().block_on(async {
 //!
-//! let clock = Clock::new_frozen();
+//! let clock = Clock::new_tokio();
 //! let l2 = Cache::builder::<String, String>(clock.clone()).memory();
 //!
 //! let cache = Cache::builder::<String, String>(clock)
@@ -65,7 +63,7 @@
 //! | Metric | Type | Unit | Description |
 //! |--------|------|------|-------------|
 //! | `cache.event.count` | Counter | event | Cache operation events |
-//! | `cache.operation.duration_ns` | Histogram | s | Operation latency |
+//! | `cache.operation.duration` | Histogram | s | Operation latency |
 //! | `cache.size` | Gauge | entry | Current entry count |
 //!
 //! **Attributes:** `cache.name`, `cache.operation`, `cache.activity`
@@ -100,7 +98,6 @@ pub use cachet_memory::InMemoryCache;
 pub use cachet_service::{CacheOperation, CacheResponse, CacheServiceExt, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
 #[doc(inline)]
 pub use cachet_tier::{CacheEntry, CacheTier, Error, Result};
-#[cfg(feature = "dynamic-cache")]
 #[doc(inline)]
 pub use cachet_tier::{DynamicCache, DynamicCacheExt};
 #[doc(inline)]

@@ -330,10 +330,12 @@ name = "cachet_memory"
 version = "0.1.0"
 dependencies = [
  "cachet_tier",
+ "criterion",
  "futures",
  "moka",
  "mutants",
  "thread_aware",
+ "tokio",
 ]
 
 [[package]]

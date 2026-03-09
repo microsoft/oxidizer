@@ -14,7 +14,7 @@ use tick::Clock;
 use crate::refresh::TimeToRefresh;
 use crate::telemetry::CacheTelemetry;
 use crate::{Error, cache::CacheName, telemetry::ext::ClockExt};
-use cachet_tier::{CacheEntry, CacheTier};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, DynamicCacheExt};
 
 /// Type alias for promotion predicate functions.
 type PromotionPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
@@ -123,10 +123,10 @@ impl<V> FallbackPromotionPolicy<V> {
     }
 }
 
-pub(crate) struct FallbackCacheInner<K, V, P, F> {
+pub(crate) struct FallbackCacheInner<K, V, P> {
     pub(crate) name: CacheName,
     pub(crate) primary: P,
-    pub(crate) fallback: F,
+    pub(crate) fallback: DynamicCache<K, V>,
     pub(crate) policy: FallbackPromotionPolicy<V>,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
@@ -134,7 +134,7 @@ pub(crate) struct FallbackCacheInner<K, V, P, F> {
     _phantom: PhantomData<K>,
 }
 
-impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
+impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FallbackCacheInner")
             .field("name", &self.name)
@@ -170,16 +170,16 @@ impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
 /// # });
 /// ```
 #[derive(Debug)]
-pub struct FallbackCache<K, V, P, F> {
-    pub(crate) inner: Arc<FallbackCacheInner<K, V, P, F>>,
+pub struct FallbackCache<K, V, P> {
+    pub(crate) inner: Arc<FallbackCacheInner<K, V, P>>,
 }
 
-impl<K, V, P, F> FallbackCache<K, V, P, F> {
-    /// Creates a new fallback cache with a primary and fallback tier.
+impl<K, V, P> FallbackCache<K, V, P> {
+    /// Creates a new fallback cache with a primary and type-erased fallback tier.
     pub(crate) fn new(
         name: CacheName,
         primary: P,
-        fallback: F,
+        fallback: impl CacheTier<K, V> + 'static,
         policy: FallbackPromotionPolicy<V>,
         clock: Clock,
         refresh: Option<TimeToRefresh<K>>,
@@ -189,7 +189,7 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
             inner: Arc::new(FallbackCacheInner {
                 name,
                 primary,
-                fallback,
+                fallback: fallback.into_dynamic(),
                 policy,
                 clock,
                 refresh,
@@ -200,17 +200,15 @@ impl<K, V, P, F> FallbackCache<K, V, P, F> {
     }
 }
 
-impl<K, V, P, F> FallbackCache<K, V, P, F>
+impl<K, V, P> FallbackCache<K, V, P>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
-    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Handles the fallback path when primary cache misses.
     /// This is a separate method so we can box just this path, keeping hits fast.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        // Box the fallback future to bound stack usage regardless of nesting depth.
         let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
 
         // Propagate any error from fallback
@@ -226,12 +224,11 @@ where
     }
 }
 
-impl<K, V, P, F> CacheTier<K, V> for FallbackCache<K, V, P, F>
+impl<K, V, P> CacheTier<K, V> for FallbackCache<K, V, P>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
-    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         // Primary lookup is not boxed to avoid allocation on the hot path (hits).

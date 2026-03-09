@@ -35,7 +35,6 @@ allowed_external_types = [
 
 [features]
 default = ["memory"]
-dynamic-cache = ["dep:dynosaur"]
 logs = ["dep:opentelemetry", "dep:tracing"]
 test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
@@ -47,7 +46,6 @@ anyspawn = { workspace = true, features = ["tokio"] }
 cachet_memory = { path = "../cachet_memory", optional = true }
 cachet_service = { path = "../cachet_service", optional = true }
 cachet_tier = { path = "../cachet_tier" }
-dynosaur = { workspace = true, optional = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
@@ -113,7 +111,7 @@ required-features = ["memory", "logs", "metrics"]
 
 [[example]]
 name = "dynamic"
-required-features = ["dynamic-cache", "memory", "logs", "metrics"]
+required-features = ["memory", "logs", "metrics"]
 
 [[example]]
 name = "get_or_insert"
