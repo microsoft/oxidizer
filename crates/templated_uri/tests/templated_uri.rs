@@ -266,6 +266,35 @@ fn test_field_level_unredacted() {
     );
 }
 
+#[templated(template = "/{org_id}/search{?query,limit}")]
+#[derive(Clone)]
+struct SearchPath {
+    org_id: OrgId,
+    #[unredacted]
+    query: UriSafeString,
+    #[unredacted]
+    limit: u32,
+}
+
+#[test]
+fn test_redacted_query_params() {
+    let path = SearchPath {
+        org_id: OrgId(UriSafeString::from_static("Acme")),
+        query: UriSafeString::from_static("rust"),
+        limit: 10,
+    };
+
+    assert_eq!(path.to_uri_string(), "/Acme/search?query=rust&limit=10");
+
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+
+    assert_eq!(
+        path.to_redacted_string(&redaction_engine),
+        "/****/search?query=rust&limit=10",
+        "Redacted display should preserve query param structure (key=value with ? and & delimiters)"
+    );
+}
+
 /// Test for the label functionality - allows providing a simpler label for telemetry
 /// when the template is too complex.
 #[templated(
