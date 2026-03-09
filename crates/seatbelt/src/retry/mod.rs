@@ -201,7 +201,7 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-pub use crate::attempt::Attempt;
+pub use recoverable::Attempt;
 pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;

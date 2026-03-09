@@ -19,11 +19,18 @@
 //! the operation succeeded or failed. Both successful operations and permanent failures
 //! should use [`RecoveryInfo::never`][RecoveryInfo::never] since recovery is not necessary or desirable.
 //!
+//! # Attempt Information
+//!
+//! [`Attempt`] contains basic information about an execution attempt, such as the current attempt
+//! index and whether this is the first or last attempt. It is typically associated with
+//! [`RecoveryInfo`] to decide how an operation should be retried or recovered.
+//!
 //! # Core Types
 //!
 //! - [`RecoveryInfo`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
 //! - [`Recovery`]: A trait for types that can determine their recoverability.
 //! - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
+//! - [`Attempt`]: Represents a single attempt in a resilience operation.
 //!
 //! # Examples
 //!
@@ -77,6 +84,9 @@
 //! let immediate = RecoveryInfo::retry().delay(Duration::ZERO);
 //! assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 //! ```
+
+mod attempt;
+pub use attempt::Attempt;
 
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
