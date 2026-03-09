@@ -2,36 +2,6 @@
 //!
 //! See the [`autoresolve`] crate for documentation and examples.
 
-/// Marks a struct as a composite type whose fields are individually injected into the resolver.
-///
-/// The `#[composite]` attribute generates:
-/// - `CompositePart<N>` trait impls mapping each field index to its type.
-/// - A same-named declarative macro used internally by `resolver!` to register all field types.
-///
-/// # Example
-///
-/// ```ignore
-/// #[composite]
-/// struct Builtins {
-///     scheduler: Scheduler,
-///     clock: Clock,
-/// }
-/// ```
-///
-/// Then in `resolver!`, use `..name: Type` to decompose the composite:
-///
-/// ```ignore
-/// let mut resolver = autoresolve::resolver!(MyBase,
-///     ..builtins: Builtins,
-/// );
-/// ```
-#[proc_macro_attribute]
-pub fn composite(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    autoresolve_macros_impl::composite(attr.into(), item.into())
-        .unwrap_or_else(|e| e.to_compile_error())
-        .into()
-}
-
 /// Marks an `impl` block as participating in the autoresolve dependency injection system.
 ///
 /// The `fn new(...)` method in the block defines the dependency list. Each parameter must be a
@@ -56,39 +26,54 @@ pub fn resolvable(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) 
         .into()
 }
 
-/// Declares a struct as a resolver base type, generating the wiring needed to construct a
+/// Declares a module containing a resolver base type, generating the wiring needed to construct a
 /// [`Resolver`] from it.
+///
+/// The module must contain exactly one struct with named fields. The macro generates hidden
+/// re-exports (`__PartN`) so that the generated `macro_rules!` arms can reference field types via
+/// `$crate::mod_name::__PartN`, making the generated code independent of import paths at the call
+/// site.
 ///
 /// # Primary base
 ///
 /// Applied without arguments, `#[base]` generates:
-/// - `ResolveFrom<Base>` impls for each field type (composite fields use their `@impls` arm).
+/// - `ResolveFrom<Base>` impls for each field type (`#[spread]` fields delegate to their `@impls` arm).
 /// - A [`BaseType`] impl that builds a [`Resolver`] by inserting all fields.
+/// - A same-named declarative macro with `@impls` and `@insert` arms for use with `#[spread]` and `resolver!`.
+/// - Hidden `__PartN` re-exports and friendly re-exports of field types.
 ///
-/// Fields annotated with `#[spread]` are treated as composite types — their individual parts
-/// are spread into the resolver via the composite's generated macro.
+/// Fields annotated with `#[spread]` are treated as spreadable base types — their individual
+/// parts are spread into the resolver via the type's generated macro arms.
 ///
 /// ```ignore
 /// #[autoresolve::base]
-/// struct Base {
-///     #[spread]
-///     builtins: Builtins,
-///     telemetry: Telemetry,
+/// mod app_base {
+///     pub struct AppBase {
+///         #[spread]
+///         pub builtins: super::Builtins,
+///         pub telemetry: super::Telemetry,
+///     }
 /// }
+/// use app_base::AppBase;
 ///
-/// let resolver = Resolver::new(Base { builtins, telemetry });
+/// let resolver = Resolver::new(AppBase { builtins, telemetry });
 /// ```
 ///
 /// # Scoped roots
 ///
-/// With `scoped(ParentBase)`, the macro generates `ResolveFrom<ParentBase>` impls for each
-/// field type, declaring them as root types that will be pre-inserted into scoped resolvers.
+/// With `scoped(ParentBase)`, the macro generates `ResolveFrom<ScopedBase>` impls for each
+/// field type and a `ScopedUnder` impl linking to the parent, declaring its fields as root types
+/// that will be pre-inserted into scoped resolvers.
 ///
 /// ```ignore
-/// #[autoresolve::base(scoped(Base))]
-/// struct ScopedRoots {
-///     request_context: RequestContext,
+/// #[autoresolve::base(scoped(AppBase))]
+/// mod request_base {
+///     use super::app_base::AppBase;
+///     pub struct RequestBase {
+///         pub request: super::Request,
+///     }
 /// }
+/// use request_base::RequestBase;
 /// ```
 #[proc_macro_attribute]
 pub fn base(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {

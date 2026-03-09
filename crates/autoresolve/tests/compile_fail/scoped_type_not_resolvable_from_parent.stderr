@@ -1,7 +1,21 @@
-error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+warning: unused import: `request_base::RequestBase`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:66:5
    |
-70 |     let _ = parent.get::<TaskHandler>();
+66 | use request_base::RequestBase;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `task_base::TaskBase`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:75:5
+   |
+75 | use task_base::TaskBase;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:82:26
+   |
+82 |     let _ = parent.get::<TaskHandler>();
    |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
    |                    |
    |                    required by a bound introduced by this call
@@ -9,19 +23,19 @@ error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
 help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:7:1
    |
- 7 | struct Request;
-   | ^^^^^^^^^^^^^^
+ 7 | pub struct Request;
+   | ^^^^^^^^^^^^^^^^^^
 help: the following other types implement trait `ResolveFrom<T>`
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:1
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:59:1
    |
-55 | #[base(scoped(AppBase))]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^
+59 | #[base(scoped(super::app_base::AppBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    | |
    | `Request` implements `ResolveFrom<RequestBase>`
    | `Request` implements `ResolveFrom<TaskBase>`
 ...
-60 | #[base(scoped(RequestBase))]
-   | ---------------------------- in this attribute macro expansion
+68 | #[base(scoped(super::request_base::RequestBase))]
+   | ------------------------------------------------- in this attribute macro expansion
 note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
    |
@@ -42,19 +56,19 @@ note: required by a bound in `Resolver::<T>::get`
    = note: this error originates in the attribute macro `base` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `Task: ResolveFrom<AppBase>` is not satisfied
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:82:26
    |
-70 |     let _ = parent.get::<TaskHandler>();
+82 |     let _ = parent.get::<TaskHandler>();
    |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
    |                    |
    |                    required by a bound introduced by this call
    |
 help: the trait `ResolveFrom<AppBase>` is not implemented for `Task`
       but trait `ResolveFrom<TaskBase>` is implemented for it
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:60:1
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:68:1
    |
-60 | #[base(scoped(RequestBase))]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+68 | #[base(scoped(super::request_base::RequestBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = help: for that trait implementation, expected `TaskBase`, found `AppBase`
 note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:29:1

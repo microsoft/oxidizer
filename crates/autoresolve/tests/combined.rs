@@ -1,6 +1,6 @@
 #![allow(dead_code)] // Test structs exist to exercise the DI graph, not all fields are read.
 
-use autoresolve_macros::{base, composite, resolvable};
+use autoresolve_macros::{base, resolvable};
 
 #[derive(Clone)]
 pub struct Scheduler;
@@ -14,7 +14,7 @@ impl Scheduler {
 #[derive(Clone)]
 pub struct Clock;
 
-#[composite(builtins)]
+#[base]
 mod builtins {
     #[derive(Clone)]
     pub struct Builtins {
@@ -44,7 +44,7 @@ impl Validator {
 }
 
 #[derive(Clone)]
-struct Telemetry;
+pub struct Telemetry;
 
 #[derive(Clone)]
 struct SdkProvider {
@@ -83,7 +83,7 @@ impl Client {
 }
 
 #[derive(Clone)]
-struct Request;
+pub struct Request;
 
 #[derive(Clone)]
 struct CorrelationVector {
@@ -115,12 +115,16 @@ impl OutboundClient {
 }
 
 #[base]
-struct Base {
-    #[spread]
-    builtins: Builtins,
-    telemetry: Telemetry,
-    request: Request,
+mod base {
+    pub struct Base {
+        #[spread]
+        pub builtins: super::Builtins,
+        pub telemetry: super::Telemetry,
+        pub request: super::Request,
+    }
 }
+
+use base::Base;
 
 #[test]
 fn test_combined() {

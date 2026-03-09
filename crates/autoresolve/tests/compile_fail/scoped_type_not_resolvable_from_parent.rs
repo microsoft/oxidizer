@@ -1,13 +1,13 @@
 use autoresolve_macros::{base, resolvable};
 
 #[derive(Clone)]
-struct Scheduler;
+pub struct Scheduler;
 
 #[derive(Clone)]
-struct Request;
+pub struct Request;
 
 #[derive(Clone)]
-struct Task {
+pub struct Task {
     id: u64,
 }
 
@@ -48,19 +48,31 @@ impl TaskHandler {
 }
 
 #[base]
-struct AppBase {
-    scheduler: Scheduler,
+mod app_base {
+    pub struct AppBase {
+        pub scheduler: super::Scheduler,
+    }
 }
 
-#[base(scoped(AppBase))]
-struct RequestBase {
-    request: Request,
+use app_base::AppBase;
+
+#[base(scoped(super::app_base::AppBase))]
+mod request_base {
+    pub struct RequestBase {
+        pub request: super::Request,
+    }
 }
 
-#[base(scoped(RequestBase))]
-struct TaskBase {
-    task: Task,
+use request_base::RequestBase;
+
+#[base(scoped(super::request_base::RequestBase))]
+mod task_base {
+    pub struct TaskBase {
+        pub task: super::Task,
+    }
 }
+
+use task_base::TaskBase;
 
 fn main() {
     let mut parent = autoresolve::Resolver::new(AppBase { scheduler: Scheduler });

@@ -5,7 +5,7 @@
 ///
 /// - `name: Type` — a direct base type. The variable `name` of type `Type` is pre-inserted into
 ///   the resolver.
-/// - `..name: Type` — a composite type (annotated with `#[composite]`). Each field of `Type` is
+/// - `..name: Type` — a spreadable base type (annotated with `#[base]`). Each field of `Type` is
 ///   extracted and pre-inserted individually.
 ///
 /// Both kinds can be freely mixed.

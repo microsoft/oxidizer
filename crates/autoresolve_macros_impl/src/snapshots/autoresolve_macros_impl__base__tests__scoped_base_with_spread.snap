@@ -4,10 +4,13 @@ expression: pretty_print(result)
 ---
 mod scoped_mod {
     struct ScopedRoots {
+        builtins: Builtins,
         request_context: RequestContext,
     }
     #[doc(hidden)]
     pub(crate) use RequestContext as __Part0;
+    #[allow(unused_imports)]
+    pub(crate) use Builtins as Builtins;
     #[allow(unused_imports)]
     pub(crate) use RequestContext as RequestContext;
     impl ::autoresolve::ResolveFrom<ScopedRoots> for RequestContext {
@@ -21,12 +24,14 @@ mod scoped_mod {
     }
 }
 Base!(@ impls scoped_mod::ScopedRoots);
+Builtins!(@ impls scoped_mod::ScopedRoots);
 impl ::autoresolve::BaseType<scoped_mod::ScopedRoots> for scoped_mod::ScopedRoots {
     fn insert_into(
         self,
         __store: &mut impl ::autoresolve::ResolverStore<scoped_mod::ScopedRoots>,
     ) {
-        let Self { request_context } = self;
+        let Self { builtins, request_context } = self;
+        Builtins!(@ insert __store, builtins);
         __store.store_value(request_context);
     }
 }
@@ -34,13 +39,14 @@ impl ::autoresolve::BaseType<scoped_mod::ScopedRoots> for scoped_mod::ScopedRoot
 #[allow(unused_macros)]
 macro_rules! ScopedRoots {
     (@ impls $base:path) => {
-        Base!(@ impls $base); impl ::autoresolve::ResolveFrom < $base > for
-        scoped_mod::__Part0 { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
-        ::autoresolve::ResolutionDepsEnd) -> Self {
+        Base!(@ impls $base); Builtins!(@ impls $base); impl ::autoresolve::ResolveFrom <
+        $base > for scoped_mod::__Part0 { type Inputs = ::autoresolve::ResolutionDepsEnd;
+        fn new(_ : ::autoresolve::ResolutionDepsEnd) -> Self {
         unreachable!("root types are pre-inserted into the resolver") } }
     };
     (@ insert $store:ident, $name:ident) => {
-        $store .store_value($name .request_context);
+        { let __spread = $name .builtins; Builtins!(@ insert $store, __spread); } $store
+        .store_value($name .request_context);
     };
 }
 const _: fn() = || {

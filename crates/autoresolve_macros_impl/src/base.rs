@@ -1,6 +1,7 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{Fields, Ident, ItemStruct, Type};
+use syn::spanned::Spanned;
+use syn::{Fields, Ident, Item, ItemMod, ItemStruct, Type};
 
 /// Classifies fields in a `#[base]` struct.
 struct BaseField<'a> {
@@ -14,7 +15,7 @@ enum BaseMode {
     /// Primary base type: generates `BaseType` impl + `ResolveFrom` impls + insertion logic.
     Primary,
     /// Scoped root declaration: generates `ResolveFrom<Parent>` impls only.
-    Scoped(Ident),
+    Scoped(syn::Path),
 }
 
 fn parse_mode(attr: TokenStream) -> syn::Result<BaseMode> {
@@ -22,7 +23,7 @@ fn parse_mode(attr: TokenStream) -> syn::Result<BaseMode> {
         return Ok(BaseMode::Primary);
     }
 
-    // Expect: `scoped(Ident)`
+    // Expect: `scoped(Path)`
     let tokens: Vec<proc_macro2::TokenTree> = attr.into_iter().collect();
     if tokens.len() != 2 {
         return Err(syn::Error::new(
@@ -49,32 +50,63 @@ fn parse_mode(attr: TokenStream) -> syn::Result<BaseMode> {
         }
     };
 
-    let parent: Ident = syn::parse2(group.stream())?;
+    let parent: syn::Path = syn::parse2(group.stream())?;
     Ok(BaseMode::Scoped(parent))
 }
 
 pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let mode = parse_mode(attr)?;
 
-    let item_struct: ItemStruct = syn::parse2(item)?;
+    let item_mod: ItemMod = syn::parse2(item)?;
 
-    if !item_struct.generics.params.is_empty() {
+    let (_, items) = item_mod
+        .content
+        .as_ref()
+        .ok_or_else(|| syn::Error::new_spanned(&item_mod, "#[base] requires a module with a body (not `mod name;`)"))?;
+
+    // Find exactly one struct with named fields inside the module.
+    let structs: Vec<&ItemStruct> = items
+        .iter()
+        .filter_map(|item| if let Item::Struct(s) = item { Some(s) } else { None })
+        .filter(|s| matches!(s.fields, Fields::Named(_)))
+        .collect();
+
+    let the_struct = match structs.len() {
+        1 => structs[0],
+        0 => {
+            return Err(syn::Error::new_spanned(
+                &item_mod,
+                "#[base] module must contain a struct with named fields",
+            ));
+        }
+        _ => {
+            return Err(syn::Error::new_spanned(
+                &item_mod,
+                "#[base] module must contain exactly one struct with named fields",
+            ));
+        }
+    };
+
+    if !the_struct.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(
-            &item_struct.generics,
+            &the_struct.generics,
             "#[base] does not support generic structs",
         ));
     }
 
-    let named_fields = match &item_struct.fields {
+    let named_fields = match &the_struct.fields {
         Fields::Named(named) => &named.named,
-        _ => {
-            return Err(syn::Error::new_spanned(&item_struct, "#[base] requires a struct with named fields"));
-        }
+        _ => unreachable!("guarded by filter above"),
     };
 
     if named_fields.is_empty() {
-        return Err(syn::Error::new_spanned(&item_struct, "#[base] requires at least one field"));
+        return Err(syn::Error::new_spanned(the_struct, "#[base] requires at least one field"));
     }
+
+    let struct_name = &the_struct.ident;
+    let mod_ident = &item_mod.ident;
+    let mod_vis = &item_mod.vis;
+    let mod_attrs: Vec<_> = item_mod.attrs.iter().collect();
 
     // Classify fields: #[spread] vs regular.
     let fields: Vec<BaseField<'_>> = named_fields
@@ -97,14 +129,14 @@ pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
         }
     }
 
-    // Validate: #[spread] fields must have a single-segment type path (used as macro name).
+    // Validate: #[spread] fields must not have a qualified self type.
     for f in &fields {
         if f.is_spread {
             if let Type::Path(tp) = f.ty {
-                if tp.path.segments.len() != 1 || tp.qself.is_some() {
+                if tp.qself.is_some() {
                     return Err(syn::Error::new_spanned(
                         f.ty,
-                        "#[spread] field type must be a single identifier (the composite macro name)",
+                        "#[spread] field type must be a simple path (the base type name)",
                     ));
                 }
             }
@@ -112,9 +144,8 @@ pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     }
 
     // Re-emit the struct, stripping #[spread] attributes from fields.
-    let struct_vis = &item_struct.vis;
-    let struct_attrs: Vec<_> = item_struct.attrs.iter().collect();
-    let struct_name = &item_struct.ident;
+    let struct_vis = &the_struct.vis;
+    let struct_attrs: Vec<_> = the_struct.attrs.iter().collect();
     let clean_fields: Vec<_> = named_fields
         .iter()
         .map(|field| {
@@ -132,24 +163,98 @@ pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
         }
     };
 
+    // Other items in the module (everything except the struct we found).
+    let other_items: Vec<_> = items
+        .iter()
+        .filter(|item| !matches!(item, Item::Struct(s) if s.ident == *struct_name))
+        .collect();
+
     match mode {
-        BaseMode::Primary => generate_primary(struct_name, &clean_struct, &fields),
-        BaseMode::Scoped(parent) => generate_scoped(&clean_struct, &fields, &parent),
+        BaseMode::Primary => generate_primary(mod_ident, mod_vis, &mod_attrs, &other_items, struct_name, &clean_struct, &fields),
+        BaseMode::Scoped(parent) => generate_scoped(
+            mod_ident,
+            mod_vis,
+            &mod_attrs,
+            &other_items,
+            struct_name,
+            &clean_struct,
+            &fields,
+            &parent,
+        ),
     }
 }
 
-fn generate_primary(struct_name: &Ident, clean_struct: &TokenStream, fields: &[BaseField<'_>]) -> syn::Result<TokenStream> {
-    // For #[spread] fields: invoke the composite's @impls arm.
-    let spread_impls: Vec<_> = fields
-        .iter()
-        .filter(|f| f.is_spread)
-        .map(|f| {
-            let ty = f.ty;
-            quote! { #ty!(@impls #struct_name); }
-        })
-        .collect();
+/// Extracts the macro name (last path segment) for a `#[spread]` field's type.
+fn spread_macro_ident(ty: &Type) -> &Ident {
+    match ty {
+        Type::Path(tp) => &tp.path.segments.last().expect("guarded by path validation above").ident,
+        _ => panic!("guarded by path validation above"),
+    }
+}
 
-    // For regular fields: generate ResolveFrom<Base> impls.
+/// Generates hidden `__PartN` re-exports for regular (non-spread) fields so that the
+/// generated `macro_rules!` arms can reference types via `$crate::mod::__PartN`.
+fn regular_reexports(fields: &[BaseField<'_>]) -> Vec<TokenStream> {
+    fields
+        .iter()
+        .filter(|f| !f.is_spread)
+        .enumerate()
+        .map(|(i, f)| {
+            let field_ty = f.ty;
+            let part_name = Ident::new(&format!("__Part{i}"), field_ty.span());
+            quote! {
+                #[doc(hidden)]
+                pub(crate) use #field_ty as #part_name;
+            }
+        })
+        .collect()
+}
+
+/// Generates friendly re-exports for all field types using their last path segment,
+/// so consumers who glob-import the module get the field types available.
+fn friendly_reexports(fields: &[BaseField<'_>]) -> Vec<TokenStream> {
+    fields
+        .iter()
+        .filter_map(|f| {
+            if let Type::Path(tp) = f.ty {
+                let last_seg = &tp.path.segments.last()?.ident;
+                Some(quote! {
+                    #[allow(unused_imports)]
+                    pub(crate) use #tp as #last_seg;
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Generates canary references that validate the module path is correct at the definition site.
+fn canary_refs(fields: &[BaseField<'_>], mod_ident: &Ident) -> Vec<TokenStream> {
+    fields
+        .iter()
+        .filter(|f| !f.is_spread)
+        .enumerate()
+        .map(|(i, f)| {
+            let part_name = Ident::new(&format!("__Part{i}"), f.ty.span());
+            quote! { _ = std::mem::size_of::<crate::#mod_ident::#part_name>(); }
+        })
+        .collect()
+}
+
+fn generate_primary(
+    mod_ident: &Ident,
+    mod_vis: &syn::Visibility,
+    mod_attrs: &[&syn::Attribute],
+    other_items: &[&Item],
+    struct_name: &Ident,
+    clean_struct: &TokenStream,
+    fields: &[BaseField<'_>],
+) -> syn::Result<TokenStream> {
+    let reexports = regular_reexports(fields);
+    let friendly = friendly_reexports(fields);
+
+    // For regular fields: generate ResolveFrom<Self> impls (inside the module, no macro calls).
     let regular_impls: Vec<_> = fields
         .iter()
         .filter(|f| !f.is_spread)
@@ -167,65 +272,98 @@ fn generate_primary(struct_name: &Ident, clean_struct: &TokenStream, fields: &[B
         })
         .collect();
 
+    // For #[spread] fields: invoke their @impls arm at the definition site.
+    // Uses bare macro name (no crate:: prefix) to avoid the
+    // `macro_expanded_macro_exports_accessed_by_absolute_paths` lint.
+    let qualified_name = quote! { #mod_ident::#struct_name };
+    let spread_impls: Vec<_> = fields
+        .iter()
+        .filter(|f| f.is_spread)
+        .map(|f| {
+            let macro_name = spread_macro_ident(f.ty);
+            quote! { #macro_name!(@impls #qualified_name); }
+        })
+        .collect();
+
     // Destructure field names for the BaseType impl.
     let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
 
-    // Insertion logic: spread fields use composite @insert, regular fields use store_value.
+    // Insertion logic: spread fields use @insert macro arm (bare name), regular fields use store_value.
     let insert_stmts: Vec<_> = fields
         .iter()
         .map(|f| {
             let ident = f.ident;
             if f.is_spread {
-                let ty = f.ty;
-                quote! { #ty!(@insert __store, #ident); }
+                let macro_name = spread_macro_ident(f.ty);
+                quote! { #macro_name!(@insert __store, #ident); }
             } else {
                 quote! { __store.store_value(#ident); }
             }
         })
         .collect();
 
-    // Propagation macro: emits ResolveFrom<$target> for all root types (used by
-    // #[base(scoped(...))] to pull parent roots into child scopes).
-    let propagation_body = propagation_body_for(fields);
+    let impls_body = impls_body_for(fields, mod_ident);
+    let insert_body = insert_body_for(fields);
+    let canaries = canary_refs(fields, mod_ident);
 
     Ok(quote! {
-        #clean_struct
+        #(#mod_attrs)*
+        #mod_vis mod #mod_ident {
+            #(#other_items)*
 
+            #clean_struct
+
+            #(#reexports)*
+
+            #(#friendly)*
+
+            #(#regular_impls)*
+        }
+
+        // Definition-site: spread fields propagate their types into this base.
         #(#spread_impls)*
 
-        #(#regular_impls)*
-
-        impl ::autoresolve::BaseType<#struct_name> for #struct_name {
-            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
+        impl ::autoresolve::BaseType<#mod_ident::#struct_name> for #mod_ident::#struct_name {
+            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#mod_ident::#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
             }
         }
 
         #[doc(hidden)]
-        #[macro_export]
+        #[allow(unused_macros)]
         macro_rules! #struct_name {
-            (@propagate $target:ident) => {
-                #propagation_body
+            (@impls $base:path) => {
+                #impls_body
+            };
+            (@insert $store:ident, $name:ident) => {
+                #insert_body
             };
         }
+
+        const _: fn() = || {
+            #(#canaries)*
+        };
     })
 }
 
-/// Builds the body of a `@propagate` macro arm for the given fields.
+/// Builds the body of the `@impls` macro arm for the given fields.
 ///
-/// - `#[spread]` fields: invokes `$crate::Composite!(@impls $target)`
-/// - Regular fields: emits a `ResolveFrom<$target>` impl directly
-fn propagation_body_for(fields: &[BaseField<'_>]) -> TokenStream {
+/// - `#[spread]` fields: invokes `MacroName!(@impls $base)` (bare name, textual scoping)
+/// - Regular fields: emits `ResolveFrom<$base>` impl using `mod::__PartN`
+fn impls_body_for(fields: &[BaseField<'_>], mod_ident: &Ident) -> TokenStream {
+    let mut regular_idx = 0usize;
     let stmts: Vec<_> = fields
         .iter()
         .map(|f| {
-            let ty = f.ty;
             if f.is_spread {
-                quote! { #ty!(@impls $target); }
+                let macro_name = spread_macro_ident(f.ty);
+                quote! { #macro_name!(@impls $base); }
             } else {
+                let part_name = Ident::new(&format!("__Part{regular_idx}"), Span::call_site());
+                regular_idx += 1;
                 quote! {
-                    impl ::autoresolve::ResolveFrom<$target> for #ty {
+                    impl ::autoresolve::ResolveFrom<$base> for #mod_ident::#part_name {
                         type Inputs = ::autoresolve::ResolutionDepsEnd;
 
                         fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
@@ -240,21 +378,51 @@ fn propagation_body_for(fields: &[BaseField<'_>]) -> TokenStream {
     quote! { #(#stmts)* }
 }
 
-fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent: &Ident) -> syn::Result<TokenStream> {
-    // For scoped mode, #[spread] is not supported — each field is a direct root type.
-    for f in fields {
-        if f.is_spread {
-            return Err(syn::Error::new_spanned(f.ty, "#[spread] is not supported in #[base(scoped(...))]"));
-        }
-    }
-
-    let struct_name = &syn::parse2::<syn::ItemStruct>(clean_struct.clone())
-        .expect("clean_struct is a valid struct")
-        .ident;
-
-    // Generate ResolveFrom<Self> for each field type (own scope, not parent scope).
-    let impls: Vec<_> = fields
+/// Builds the body of the `@insert` macro arm for the given fields.
+///
+/// - `#[spread]` fields: binds the field to a local and delegates to `MacroName!(@insert ...)`
+/// - Regular fields: calls `$store.store_value($name.field)`
+fn insert_body_for(fields: &[BaseField<'_>]) -> TokenStream {
+    let stmts: Vec<_> = fields
         .iter()
+        .map(|f| {
+            let ident = f.ident;
+            if f.is_spread {
+                let macro_name = spread_macro_ident(f.ty);
+                quote! {
+                    {
+                        let __spread = $name.#ident;
+                        #macro_name!(@insert $store, __spread);
+                    }
+                }
+            } else {
+                quote! { $store.store_value($name.#ident); }
+            }
+        })
+        .collect();
+
+    quote! { #(#stmts)* }
+}
+
+fn generate_scoped(
+    mod_ident: &Ident,
+    mod_vis: &syn::Visibility,
+    mod_attrs: &[&syn::Attribute],
+    other_items: &[&Item],
+    struct_name: &Ident,
+    clean_struct: &TokenStream,
+    fields: &[BaseField<'_>],
+    parent: &syn::Path,
+) -> syn::Result<TokenStream> {
+    let parent_macro = &parent.segments.last().expect("parent path validated during parsing").ident;
+
+    let reexports = regular_reexports(fields);
+    let friendly = friendly_reexports(fields);
+
+    // For regular fields: generate ResolveFrom<Self> (inside the module, no macro calls).
+    let regular_impls: Vec<_> = fields
+        .iter()
+        .filter(|f| !f.is_spread)
         .map(|f| {
             let ty = f.ty;
             quote! {
@@ -262,70 +430,93 @@ fn generate_scoped(clean_struct: &TokenStream, fields: &[BaseField<'_>], parent:
                     type Inputs = ::autoresolve::ResolutionDepsEnd;
 
                     fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
-                        unreachable!("scoped root types are inserted by ScopedBase::insert_into")
+                        unreachable!("scoped root types are inserted by BaseType::insert_into")
                     }
                 }
             }
         })
         .collect();
 
-    // Destructure field names for the ScopedBase impl.
+    // Definition-site calls use bare macro names (no crate:: prefix) and qualified struct path.
+    let qualified_name = quote! { #mod_ident::#struct_name };
+
+    // Propagate parent's root types into this scope.
+    let parent_propagation = quote! { #parent_macro!(@impls #qualified_name); };
+
+    // For #[spread] fields: invoke their @impls arm.
+    let spread_impls: Vec<_> = fields
+        .iter()
+        .filter(|f| f.is_spread)
+        .map(|f| {
+            let macro_name = spread_macro_ident(f.ty);
+            quote! { #macro_name!(@impls #qualified_name); }
+        })
+        .collect();
+
     let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
 
-    // Insert each field into the store.
+    // Insertion logic: spread fields use @insert (bare name), regular fields use store_value.
     let insert_stmts: Vec<_> = fields
         .iter()
         .map(|f| {
             let ident = f.ident;
-            quote! { __store.store_value(#ident); }
-        })
-        .collect();
-
-    // Propagation body for this scope's own fields.
-    let own_propagation: Vec<_> = fields
-        .iter()
-        .map(|f| {
-            let ty = f.ty;
-            quote! {
-                impl ::autoresolve::ResolveFrom<$target> for #ty {
-                    type Inputs = ::autoresolve::ResolutionDepsEnd;
-
-                    fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
-                        unreachable!("scoped root types are pre-inserted into the resolver")
-                    }
-                }
+            if f.is_spread {
+                let macro_name = spread_macro_ident(f.ty);
+                quote! { #macro_name!(@insert __store, #ident); }
+            } else {
+                quote! { __store.store_value(#ident); }
             }
         })
         .collect();
 
+    let own_impls_body = impls_body_for(fields, mod_ident);
+    let own_insert_body = insert_body_for(fields);
+    let canaries = canary_refs(fields, mod_ident);
+
     Ok(quote! {
-        #clean_struct
+        #(#mod_attrs)*
+        #mod_vis mod #mod_ident {
+            #(#other_items)*
 
-        // Propagate parent's root types into this scope.
-        #parent!(@propagate #struct_name);
+            #clean_struct
 
-        #(#impls)*
+            #(#reexports)*
 
-        impl ::autoresolve::ScopedUnder for #struct_name {
-            type Parent = #parent;
+            #(#friendly)*
+
+            #(#regular_impls)*
+
+            impl ::autoresolve::ScopedUnder for #struct_name {
+                type Parent = #parent;
+            }
         }
 
-        impl ::autoresolve::BaseType<#struct_name> for #struct_name {
-            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
+        // Definition-site: propagate parent + spread types into this scope.
+        #parent_propagation
+        #(#spread_impls)*
+
+        impl ::autoresolve::BaseType<#mod_ident::#struct_name> for #mod_ident::#struct_name {
+            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#mod_ident::#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
             }
         }
 
-        // Propagation macro: chains parent propagation with own fields.
         #[doc(hidden)]
-        #[macro_export]
+        #[allow(unused_macros)]
         macro_rules! #struct_name {
-            (@propagate $target:ident) => {
-                #parent!(@propagate $target);
-                #(#own_propagation)*
+            (@impls $base:path) => {
+                #parent_macro!(@impls $base);
+                #own_impls_body
+            };
+            (@insert $store:ident, $name:ident) => {
+                #own_insert_body
             };
         }
+
+        const _: fn() = || {
+            #(#canaries)*
+        };
     })
 }
 
@@ -342,10 +533,12 @@ mod tests {
     fn primary_base_with_spread_and_regular() {
         let attr = TokenStream::new();
         let input = quote! {
-            struct Base {
-                #[spread]
-                builtins: Builtins,
-                telemetry: Telemetry,
+            mod app_base {
+                struct Base {
+                    #[spread]
+                    builtins: Builtins,
+                    telemetry: Telemetry,
+                }
             }
         };
         let result = base(attr, input).expect("should succeed");
@@ -356,9 +549,11 @@ mod tests {
     fn primary_base_all_regular() {
         let attr = TokenStream::new();
         let input = quote! {
-            struct Base {
-                scheduler: Scheduler,
-                clock: Clock,
+            mod base_mod {
+                struct Base {
+                    scheduler: Scheduler,
+                    clock: Clock,
+                }
             }
         };
         let result = base(attr, input).expect("should succeed");
@@ -369,8 +564,10 @@ mod tests {
     fn scoped_base() {
         let attr = quote! { scoped(Base) };
         let input = quote! {
-            struct ScopedRoots {
-                request_context: RequestContext,
+            mod scoped_mod {
+                struct ScopedRoots {
+                    request_context: RequestContext,
+                }
             }
         };
         let result = base(attr, input).expect("should succeed");
@@ -378,10 +575,20 @@ mod tests {
     }
 
     #[test]
-    fn error_on_empty_struct() {
+    fn error_on_empty_module() {
         let attr = TokenStream::new();
         let input = quote! {
-            struct Empty {}
+            mod empty {}
+        };
+        let result = base(attr, input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn error_on_no_body() {
+        let attr = TokenStream::new();
+        let input = quote! {
+            mod empty;
         };
         let result = base(attr, input);
         assert!(result.is_err());
@@ -391,8 +598,10 @@ mod tests {
     fn error_on_generics() {
         let attr = TokenStream::new();
         let input = quote! {
-            struct Base<T> {
-                field: T,
+            mod base_mod {
+                struct Base<T> {
+                    field: T,
+                }
             }
         };
         let result = base(attr, input);
@@ -400,34 +609,41 @@ mod tests {
     }
 
     #[test]
-    fn error_on_tuple_struct() {
+    fn error_on_empty_struct() {
         let attr = TokenStream::new();
         let input = quote! {
-            struct Base(Scheduler, Clock);
+            mod base_mod {
+                struct Base {}
+            }
         };
         let result = base(attr, input);
         assert!(result.is_err());
     }
 
     #[test]
-    fn error_on_scoped_with_spread() {
+    fn scoped_base_with_spread() {
         let attr = quote! { scoped(Base) };
         let input = quote! {
-            struct ScopedRoots {
-                #[spread]
-                builtins: Builtins,
+            mod scoped_mod {
+                struct ScopedRoots {
+                    #[spread]
+                    builtins: Builtins,
+                    request_context: RequestContext,
+                }
             }
         };
-        let result = base(attr, input);
-        assert!(result.is_err());
+        let result = base(attr, input).expect("should succeed");
+        insta::assert_snapshot!(pretty_print(result));
     }
 
     #[test]
     fn error_on_invalid_attribute() {
         let attr = quote! { something_wrong };
         let input = quote! {
-            struct Base {
-                field: Field,
+            mod base_mod {
+                struct Base {
+                    field: Field,
+                }
             }
         };
         let result = base(attr, input);

@@ -1,4 +1,4 @@
-use autoresolve_macros::{base, composite, resolvable};
+use autoresolve_macros::{base, resolvable};
 
 #[derive(Clone)]
 pub struct Scheduler;
@@ -18,7 +18,7 @@ impl Clock {
     }
 }
 
-#[composite(builtins)]
+#[base]
 mod builtins {
     #[derive(Clone)]
     pub struct Builtins {
@@ -107,10 +107,14 @@ impl MyService {
 }
 
 #[base]
-struct MyBase {
-    #[spread]
-    builtins: Builtins,
+mod my_base {
+    pub struct MyBase {
+        #[spread]
+        pub builtins: super::Builtins,
+    }
 }
+
+use my_base::MyBase;
 
 #[test]
 fn test_autoresolve() {
