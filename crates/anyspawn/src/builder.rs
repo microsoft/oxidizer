@@ -49,7 +49,7 @@ use crate::custom::BoxedFuture;
 pub struct CustomSpawnerBuilder<S> {
     spawn_fn: S,
     name: &'static str,
-    layer_names: Vec<&'static str>,
+    layer_names: Vec<Box<str>>,
 }
 
 impl CustomSpawnerBuilder<()> {
@@ -148,13 +148,13 @@ where
     /// # let _ = spawner;
     /// # }
     /// ```
-    pub fn layer<L>(self, name: &'static str, layer_fn: L) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static>
+    pub fn layer<L>(self, name: impl AsRef<str>, layer_fn: L) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static>
     where
         L: Fn(BoxedFuture, &dyn Fn(BoxedFuture)) + Send + Sync + 'static,
     {
         let inner = self.spawn_fn;
         let mut layer_names = self.layer_names;
-        layer_names.push(name);
+        layer_names.push(Box::from(name.as_ref()));
         CustomSpawnerBuilder {
             spawn_fn: move |fut: BoxedFuture| {
                 layer_fn(fut, &inner);

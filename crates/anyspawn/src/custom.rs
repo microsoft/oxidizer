@@ -19,11 +19,11 @@ type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 pub(crate) struct CustomSpawner {
     spawn_fn: Arc<SpawnFn>,
     name: &'static str,
-    layer_names: Arc<[&'static str]>,
+    layer_names: Arc<[Box<str>]>,
 }
 
 impl CustomSpawner {
-    pub(crate) fn new(spawn_fn: Arc<SpawnFn>, name: &'static str, layer_names: Arc<[&'static str]>) -> Self {
+    pub(crate) fn new(spawn_fn: Arc<SpawnFn>, name: &'static str, layer_names: Arc<[Box<str>]>) -> Self {
         Self {
             spawn_fn,
             name,
