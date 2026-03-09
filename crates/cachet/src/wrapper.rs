@@ -134,6 +134,11 @@ where
 
     async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
+        if entry.ttl().is_none() {
+            if let Some(ttl) = self.ttl {
+                entry.set_ttl(ttl);
+            }
+        }
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
@@ -244,6 +249,73 @@ mod tests {
 
         // Entry TTL is longer than tier TTL, so entry should not be expired
         assert!(!wrapper.is_expired(&entry));
+    }
+
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        futures::executor::block_on(f)
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn insert_sets_tier_ttl_when_entry_has_no_ttl() {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let inner = InMemoryCache::<String, i32>::new();
+            let inner_check = inner.clone();
+            let telemetry = TelemetryConfig::new().build();
+            let tier_ttl = Duration::from_secs(60);
+            let wrapper: CacheWrapper<String, i32, _> =
+                CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
+
+            let entry = CacheEntry::new(42);
+            assert!(entry.ttl().is_none());
+
+            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+
+            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+            assert_eq!(stored.ttl(), Some(tier_ttl));
+        });
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn insert_preserves_per_entry_ttl_over_tier_ttl() {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let inner = InMemoryCache::<String, i32>::new();
+            let inner_check = inner.clone();
+            let telemetry = TelemetryConfig::new().build();
+            let tier_ttl = Duration::from_secs(60);
+            let entry_ttl = Duration::from_secs(30);
+            let wrapper: CacheWrapper<String, i32, _> =
+                CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry);
+
+            let entry = CacheEntry::expires_at(42, entry_ttl, clock.system_time());
+
+            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+
+            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+            assert_eq!(stored.ttl(), Some(entry_ttl));
+        });
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn insert_without_tier_ttl_leaves_entry_ttl_unset() {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let inner = InMemoryCache::<String, i32>::new();
+            let inner_check = inner.clone();
+            let telemetry = TelemetryConfig::new().build();
+            let wrapper: CacheWrapper<String, i32, _> =
+                CacheWrapper::new("test", inner, clock, None, telemetry);
+
+            let entry = CacheEntry::new(42);
+            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+
+            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+            assert!(stored.ttl().is_none());
+        });
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
