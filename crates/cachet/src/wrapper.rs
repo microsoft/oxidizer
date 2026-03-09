@@ -41,17 +41,17 @@ use cachet_tier::CacheTier;
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct CacheWrapper<K, V, S> {
+pub struct CacheWrapper<K, V, CT> {
     pub(crate) name: CacheName,
-    pub(crate) inner: S,
+    pub(crate) inner: CT,
     pub(crate) clock: Clock,
     pub(crate) ttl: Option<Duration>,
     pub(crate) telemetry: CacheTelemetry,
     _phantom: PhantomData<(K, V)>,
 }
 
-impl<K, V, S> CacheWrapper<K, V, S> {
-    pub(crate) fn new(name: CacheName, inner: S, clock: Clock, ttl: Option<Duration>, telemetry: CacheTelemetry) -> Self {
+impl<K, V, CT> CacheWrapper<K, V, CT> {
+    pub(crate) fn new(name: CacheName, inner: CT, clock: Clock, ttl: Option<Duration>, telemetry: CacheTelemetry) -> Self {
         Self {
             name,
             inner,
@@ -70,12 +70,12 @@ impl<K, V, S> CacheWrapper<K, V, S> {
 
     /// Returns a reference to the wrapped storage tier.
     #[must_use]
-    pub fn inner(&self) -> &S {
+    pub fn inner(&self) -> &CT {
         &self.inner
     }
 }
 
-impl<K, V, S> CacheWrapper<K, V, S>
+impl<K, V, CT> CacheWrapper<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
@@ -114,7 +114,7 @@ where
     }
 }
 
-impl<K, V, S> CacheTier<K, V> for CacheWrapper<K, V, S>
+impl<K, V, CT> CacheTier<K, V> for CacheWrapper<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,

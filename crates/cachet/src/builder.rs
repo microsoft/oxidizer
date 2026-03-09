@@ -71,9 +71,9 @@ pub trait CacheTierBuilder<K, V>: Sealed {
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct CacheBuilder<K, V, S = ()> {
+pub struct CacheBuilder<K, V, CT = ()> {
     name: Option<&'static str>,
-    storage: S,
+    storage: CT,
     ttl: Option<Duration>,
     clock: Clock,
     telemetry: TelemetryConfig,
@@ -116,7 +116,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// # #[cfg(not(feature = "test-util"))]
     /// # fn main() {}
     /// ```
-    pub fn storage<S>(self, storage: S) -> CacheBuilder<K, V, S>
+    pub fn storage<CT>(self, storage: CT) -> CacheBuilder<K, V, CT>
     where
         CT: CacheTier<K, V>,
     {
@@ -187,7 +187,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     }
 }
 
-impl<K, V, S> CacheBuilder<K, V, S> {
+impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// Sets a human-readable name for this cache tier, used in telemetry attributes.
     ///
     /// If not set, a name is derived from the storage type.
@@ -276,7 +276,7 @@ impl<K, V, S> CacheBuilder<K, V, S> {
     }
 }
 
-impl<K, V, S> CacheBuilder<K, V, S>
+impl<K, V, CT> CacheBuilder<K, V, CT>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
@@ -323,20 +323,20 @@ where
     ///     .memory()
     ///     .build();
     /// ```
-    pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, S>> {
+    pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, CT>> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
 
-impl<K, V, S> Sealed for CacheBuilder<K, V, S> where CT: CacheTier<K, V> + Send + Sync + 'static {}
+impl<K, V, CT> Sealed for CacheBuilder<K, V, CT> where CT: CacheTier<K, V> + Send + Sync + 'static {}
 
-impl<K, V, S> CacheTierBuilder<K, V> for CacheBuilder<K, V, S>
+impl<K, V, CT> CacheTierBuilder<K, V> for CacheBuilder<K, V, CT>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
-    type Tier = CacheWrapper<K, V, S>;
+    type Tier = CacheWrapper<K, V, CT>;
 }
 
 /// Builder for a cache with fallback tiers.
@@ -526,13 +526,13 @@ pub(crate) trait Buildable<K, V> {
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output;
 }
 
-impl<K, V, S> Buildable<K, V> for CacheBuilder<K, V, S>
+impl<K, V, CT> Buildable<K, V> for CacheBuilder<K, V, CT>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
-    type Output = CacheWrapper<K, V, S>;
+    type Output = CacheWrapper<K, V, CT>;
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let clock = self.clock.clone();
@@ -545,7 +545,7 @@ where
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        CacheWrapper::new(short_type_name::<S>(self.name), self.storage, clock, self.ttl, telemetry)
+        CacheWrapper::new(short_type_name::<CT>(self.name), self.storage, clock, self.ttl, telemetry)
     }
 }
 

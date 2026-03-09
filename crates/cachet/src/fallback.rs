@@ -211,7 +211,7 @@ where
     /// This is a separate method so we can box just this path, keeping hits fast.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         // Box the fallback future to bound stack usage regardless of nesting depth.
-        let timed = self.inner.clock.timed_async(Box::pin(self.inner.fallback.get(key))).await;
+        let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
 
         // Propagate any error from fallback
         let fallback_value = timed.result?;
@@ -248,33 +248,30 @@ where
             return Ok(Some(value));
         }
 
-        // Fallback lookup - also boxed to bound future size
-        Box::pin(self.get_from_fallback(key)).await
+        // Fallback lookup - unboxed for benchmarking
+        self.get_from_fallback(key).await
     }
 
     async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        // Box both futures to bound stack usage regardless of nesting depth.
         let (primary_result, fallback_result) = join!(
-            Box::pin(self.inner.primary.insert(key, entry.clone())),
-            Box::pin(self.inner.fallback.insert(key, entry))
+            self.inner.primary.insert(key, entry.clone()),
+            self.inner.fallback.insert(key, entry)
         );
         primary_result?;
         fallback_result
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        // Box both futures to bound stack usage regardless of nesting depth.
         let (primary_result, fallback_result) = join!(
-            Box::pin(self.inner.primary.invalidate(key)),
-            Box::pin(self.inner.fallback.invalidate(key))
+            self.inner.primary.invalidate(key),
+            self.inner.fallback.invalidate(key)
         );
         primary_result?;
         fallback_result
     }
 
     async fn clear(&self) -> Result<(), Error> {
-        // Box both futures to bound stack usage regardless of nesting depth.
-        let (primary_result, fallback_result) = join!(Box::pin(self.inner.primary.clear()), Box::pin(self.inner.fallback.clear()));
+        let (primary_result, fallback_result) = join!(self.inner.primary.clear(), self.inner.fallback.clear());
         primary_result?;
         fallback_result
     }

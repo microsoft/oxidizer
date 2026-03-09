@@ -102,9 +102,9 @@ impl<K, V> Debug for Mergers<K, V> {
 /// # });
 /// ```
 #[derive(Debug)]
-pub struct Cache<K, V, S = ()> {
+pub struct Cache<K, V, CT = ()> {
     pub(crate) name: CacheName,
-    pub(crate) storage: S,
+    pub(crate) storage: CT,
     pub(crate) clock: Clock,
     /// Mergers for stampede protection on all operations.
     /// Only present when `stampede_protection` is enabled.
@@ -138,13 +138,13 @@ impl Cache<(), (), ()> {
 }
 
 /// Constructor and access methods.
-impl<K, V, S> Cache<K, V, S>
+impl<K, V, CT> Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync,
 {
-    pub(crate) fn new(name: CacheName, storage: S, clock: Clock, stampede_protection: bool) -> Self {
+    pub(crate) fn new(name: CacheName, storage: CT, clock: Clock, stampede_protection: bool) -> Self {
         Self {
             name,
             storage,
@@ -158,7 +158,7 @@ where
     /// This allows accessing tier-specific functionality not exposed by
     /// the main `Cache` API.
     #[must_use]
-    pub fn inner(&self) -> &S {
+    pub fn inner(&self) -> &CT {
         &self.storage
     }
 
@@ -169,7 +169,7 @@ where
     #[must_use]
     pub fn into_dynamic(self) -> Cache<K, V, DynamicCache<K, V>>
     where
-        S: DynamicCacheExt<K, V>,
+        CT: DynamicCacheExt<K, V>,
     {
         Cache {
             name: self.name,
@@ -181,7 +181,7 @@ where
 }
 
 /// Public API methods - work for both native and mocked caches.
-impl<K, V, S> Cache<K, V, S>
+impl<K, V, CT> Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
@@ -202,7 +202,7 @@ where
 }
 
 /// Public API methods that require `CacheTier` dispatch.
-impl<K, V, S> Cache<K, V, S>
+impl<K, V, CT> Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
@@ -571,7 +571,7 @@ where
 /// This enables `Cache` to participate in service middleware hierarchies,
 /// allowing composition with retry, timeout, logging, and other middleware.
 #[cfg(feature = "service")]
-impl<K, V, S> layered::Service<cachet_service::CacheOperation<K, V>> for Cache<K, V, S>
+impl<K, V, CT> layered::Service<cachet_service::CacheOperation<K, V>> for Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
