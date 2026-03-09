@@ -9,8 +9,7 @@
 #![cfg(feature = "memory")]
 
 use anyspawn::Spawner;
-use cachet::refresh::TimeToRefresh;
-use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
+use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, TimeToRefresh};
 use cachet_tier::testing::MockCache;
 use std::time::Duration;
 use tick::Clock;
@@ -501,8 +500,6 @@ async fn do_refresh_updates_primary_from_fallback() -> TestResult {
 #[tokio::test]
 async fn do_refresh_deduplicates_in_flight() -> TestResult {
     // Exercises do_refresh deduplication: second call with same key is a no-op
-    use cachet::refresh::TimeToRefresh;
-
     let control = tick::ClockControl::new();
     let clock = control.to_clock();
     let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();

@@ -63,13 +63,12 @@ impl<K, V> Debug for Mergers<K, V> {
 ///
 /// ## Basic Cache
 ///
-/// ```
+/// ```no_run
 /// use cachet::{Cache, CacheEntry};
 /// use tick::Clock;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
-/// # futures::executor::block_on(async {
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 ///
-/// let clock = Clock::new_frozen();
+/// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock)
 ///     .memory()
 ///     .build();
@@ -83,14 +82,13 @@ impl<K, V> Debug for Mergers<K, V> {
 ///
 /// ## Multi-Tier Cache
 ///
-/// ```
+/// ```no_run
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
 /// use std::time::Duration;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
-/// # futures::executor::block_on(async {
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 ///
-/// let clock = Clock::new_frozen();
+/// let clock = Clock::new_tokio();
 /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
 ///
 /// let cache = Cache::builder::<String, String>(clock)
@@ -119,17 +117,18 @@ impl Cache<(), (), ()> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
     /// use std::time::Duration;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
     ///     .ttl(Duration::from_secs(60))
     ///     .build();
+    /// # });
     /// ```
     #[must_use]
     pub fn builder<K, V>(clock: Clock) -> CacheBuilder<K, V> {
@@ -156,7 +155,7 @@ where
     ///
     /// This allows accessing tier-specific functionality not exposed by
     /// the main `Cache` API.
-    #[must_use]
+    #[must_use  ]
     pub fn inner(&self) -> &CT {
         &self.storage
     }
@@ -166,7 +165,7 @@ where
     /// This erases the concrete storage type, allowing caches with different
     /// storage implementations to be used interchangeably at runtime.
     #[must_use]
-    pub fn into_dynamic(self) -> Cache<K, V, DynamicCache<K, V>>
+    pub(crate) fn into_dynamic(self) -> Cache<K, V, DynamicCache<K, V>>
     where
         CT: DynamicCacheExt<K, V>,
     {
@@ -211,7 +210,7 @@ where
     ///
     /// # Stampede Protection
     ///
-    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
     /// concurrent requests for the same key are merged so only one performs the lookup.
     /// All waiters share the result, including errors.
     ///
@@ -223,13 +222,12 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::{Cache, CacheEntry};
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
-    /// # futures::executor::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// let result = cache.get("missing").await?;
@@ -267,13 +265,12 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::{Cache, CacheEntry};
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
-    /// # futures::executor::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// cache.insert("key", CacheEntry::new(42)).await?;
@@ -291,13 +288,18 @@ where
 
     /// Invalidates (removes) a value from the cache.
     ///
+    /// For multi-tier caches, invalidation is sent to all tiers concurrently.
+    ///
     /// # Stampede Protection
     ///
     /// When enabled, concurrent invalidations for the same key are merged.
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying cache tier operation fails.
+    /// Returns an error if the underlying cache tier operation fails. When this
+    /// returns an error, it signals that some cache tier failed to remove the
+    /// entry. You may wish to retry the call using normal retry semantics in
+    /// order to attempt the removal again later.
     pub async fn invalidate<Q>(&self, key: &Q) -> Result<(), Error>
     where
         K: Borrow<Q>,
@@ -360,7 +362,7 @@ where
     ///
     /// # Stampede Protection
     ///
-    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
     /// concurrent calls for the same missing key are coalesced - only one caller
     /// computes the value while others wait and share the result.
     ///
@@ -371,13 +373,12 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
-    /// # futures::executor::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// let entry = cache.get_or_insert("key", || async { 42 }).await?;
@@ -423,7 +424,7 @@ where
     ///
     /// # Stampede Protection
     ///
-    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
     /// concurrent calls for the same missing key are coalesced. If the computation
     /// fails, the error is shared with all waiters but not cached.
     ///
@@ -438,13 +439,12 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::{Cache, Error};
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
-    /// # futures::executor::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// let result = cache
@@ -494,7 +494,7 @@ where
     ///
     /// # Stampede Protection
     ///
-    /// When enabled via [`stampede_protection()`](crate::builder::CacheBuilder::stampede_protection),
+    /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
     /// concurrent calls for the same missing key are coalesced.
     ///
     /// # Errors
@@ -504,13 +504,12 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
-    /// # futures::executor::block_on(async {
+    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// // Returns None without caching

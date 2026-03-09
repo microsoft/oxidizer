@@ -13,7 +13,7 @@ use std::{
 };
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, refresh::TimeToRefresh};
+use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, TimeToRefresh};
 use tick::Clock;
 
 #[derive(Clone)]

@@ -47,34 +47,6 @@ fn clock_returns_reference() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn into_dynamic_preserves_functionality() -> TestResult {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().build();
-
-        // Insert before converting
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-
-        let dynamic = cache.into_dynamic();
-
-        // Verify existing data is accessible
-        let entry = dynamic.get(&"key".to_string()).await?.expect("entry should exist");
-        assert_eq!(*entry.value(), 42);
-
-        // Verify we can still insert and retrieve
-        dynamic.insert(&"new".to_string(), CacheEntry::new(100)).await?;
-        assert_eq!(*dynamic.get(&"new".to_string()).await?.unwrap().value(), 100);
-
-        // Verify get_or_insert works (requires Cache wrapper functionality)
-        let entry = dynamic.get_or_insert(&"computed".to_string(), || async { 200 }).await?;
-        assert_eq!(*entry.value(), 200);
-
-        Ok(())
-    })
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
 fn get_insert_operations() -> TestResult {
     block_on(async {
         let clock = Clock::new_frozen();
@@ -536,28 +508,6 @@ fn stampede_protection_converts_panic_to_error() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
-#[test]
-fn into_dynamic_with_stampede_protection() -> TestResult {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
-
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-
-        // into_dynamic must preserve the Mergers when stampede_protection was enabled
-        let dynamic = cache.into_dynamic();
-
-        let entry = dynamic.get(&"key".to_string()).await?.expect("entry should exist");
-        assert_eq!(*entry.value(), 42);
-
-        // get_or_insert through dynamic cache with stampede protection
-        let entry2 = dynamic.get_or_insert(&"new".to_string(), || async { 77 }).await?;
-        assert_eq!(*entry2.value(), 77);
-
-        Ok(())
-    })
-}
 
 #[cfg_attr(miri, ignore)]
 #[test]
