@@ -1,20 +1,28 @@
-use autoresolve_macros::{base, resolvable};
+use autoresolve_macros::base;
 
-#[derive(Clone)]
-pub struct Scheduler;
+// Each type lives in its own module so the generated code must resolve paths
+// across module boundaries — validating that `#[base]` and `#[resolvable]`
+// produce correct impls even when not all types are in scope at the usage site.
 
-impl Scheduler {
-    fn number(&self) -> i32 {
-        42
+mod scheduler {
+    #[derive(Clone)]
+    pub struct Scheduler;
+
+    impl Scheduler {
+        pub(crate) fn number(&self) -> i32 {
+            42
+        }
     }
 }
 
-#[derive(Clone)]
-pub struct Clock;
+mod clock {
+    #[derive(Clone)]
+    pub struct Clock;
 
-impl Clock {
-    fn number(&self) -> i32 {
-        42
+    impl Clock {
+        pub(crate) fn number(&self) -> i32 {
+            42
+        }
     }
 }
 
@@ -22,87 +30,112 @@ impl Clock {
 mod builtins {
     #[derive(Clone)]
     pub struct Builtins {
-        pub scheduler: super::Scheduler,
-        pub clock: super::Clock,
+        pub scheduler: super::scheduler::Scheduler,
+        pub clock: super::clock::Clock,
     }
 }
 
-use builtins::Builtins;
+mod validator {
+    use autoresolve_macros::resolvable;
 
-#[derive(Clone)]
-struct Validator {
-    scheduler: Scheduler,
-}
+    use super::scheduler::Scheduler;
 
-#[resolvable]
-impl Validator {
-    fn new(scheduler: &Scheduler) -> Self {
-        Self {
-            scheduler: scheduler.clone(),
+    #[derive(Clone)]
+    pub struct Validator {
+        scheduler: Scheduler,
+    }
+
+    #[resolvable]
+    impl Validator {
+        fn new(scheduler: &Scheduler) -> Self {
+            Self {
+                scheduler: scheduler.clone(),
+            }
+        }
+
+        pub(crate) fn number(&self) -> i32 {
+            self.scheduler.number()
         }
     }
+}
 
-    fn number(&self) -> i32 {
-        self.scheduler.number()
+mod client {
+    use autoresolve_macros::resolvable;
+
+    use super::clock::Clock;
+    use super::validator::Validator;
+
+    #[derive(Clone)]
+    pub struct Client {
+        validator: Validator,
+        clock: Clock,
     }
-}
 
-#[derive(Clone)]
-struct Client {
-    validator: Validator,
-    clock: Clock,
-}
+    #[resolvable]
+    impl Client {
+        fn new(validator: &Validator, clock: &Clock) -> Self {
+            Self {
+                validator: validator.clone(),
+                clock: clock.clone(),
+            }
+        }
 
-#[resolvable]
-impl Client {
-    fn new(validator: &Validator, clock: &Clock) -> Self {
-        Self {
-            validator: validator.clone(),
-            clock: clock.clone(),
+        pub(crate) fn number(&self) -> i32 {
+            self.validator.number() + self.clock.number()
         }
     }
+}
 
-    fn number(&self) -> i32 {
-        self.validator.number() + self.clock.number()
+mod config {
+    use autoresolve_macros::resolvable;
+
+    use super::clock::Clock;
+    use super::scheduler::Scheduler;
+
+    #[derive(Clone)]
+    pub struct Config {
+        clock: Clock,
+        scheduler: Scheduler,
     }
-}
 
-#[derive(Clone)]
-struct Config {
-    clock: Clock,
-    scheduler: Scheduler,
-}
+    #[resolvable]
+    impl Config {
+        fn new(clock: &Clock, scheduler: &Scheduler) -> Self {
+            Self {
+                clock: clock.clone(),
+                scheduler: scheduler.clone(),
+            }
+        }
 
-#[resolvable]
-impl Config {
-    fn new(clock: &Clock, scheduler: &Scheduler) -> Self {
-        Self {
-            clock: clock.clone(),
-            scheduler: scheduler.clone(),
+        pub(crate) fn number(&self) -> i32 {
+            self.clock.number() * 2
         }
     }
+}
 
-    fn number(&self) -> i32 {
-        self.clock.number() * 2
+mod my_service {
+    use autoresolve_macros::resolvable;
+
+    use super::client::Client;
+    use super::config::Config;
+
+    pub struct MyService {
+        client: Client,
+        config: Config,
     }
-}
 
-struct MyService {
-    client: Client,
-    config: Config,
-}
-
-#[resolvable]
-impl MyService {
-    fn new(client: &Client, config: &Config) -> Self {
-        Self {
-            client: client.clone(),
-            config: config.clone(),
+    #[resolvable]
+    impl MyService {
+        fn new(client: &Client, config: &Config) -> Self {
+            Self {
+                client: client.clone(),
+                config: config.clone(),
+            }
         }
-    }
 
-    fn number(&self) -> i32 {
-        self.client.number() + self.config.number()
+        pub(crate) fn number(&self) -> i32 {
+            self.client.number() + self.config.number()
+        }
     }
 }
 
@@ -110,14 +143,18 @@ impl MyService {
 mod my_base {
     pub struct MyBase {
         #[spread]
-        pub builtins: super::Builtins,
+        pub builtins: super::builtins::Builtins,
     }
 }
 
-use my_base::MyBase;
-
 #[test]
 fn test_autoresolve() {
+    use builtins::Builtins;
+    use clock::Clock;
+    use my_base::MyBase;
+    use my_service::MyService;
+    use scheduler::Scheduler;
+
     let builtins = Builtins {
         scheduler: Scheduler,
         clock: Clock,
