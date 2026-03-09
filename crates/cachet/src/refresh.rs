@@ -318,7 +318,7 @@ mod fetch_and_promote_tests {
     use crate::fallback::FallbackPromotionPolicy;
     use crate::telemetry::{TelemetryConfig, attributes};
     use cachet_memory::InMemoryCache;
-    use cachet_tier::testing::MockCache;
+    use cachet_tier::MockCache;
     use testing_aids::MetricTester;
     use tick::Clock;
 
@@ -326,7 +326,11 @@ mod fetch_and_promote_tests {
         futures::executor::block_on(f)
     }
 
-    fn build_fallback_cache<P, F: CacheTier<String, i32> + 'static>(primary: P, fallback: F, policy: FallbackPromotionPolicy<i32>) -> FallbackCache<String, i32, P> {
+    fn build_fallback_cache<P, F: CacheTier<String, i32> + 'static>(
+        primary: P,
+        fallback: F,
+        policy: FallbackPromotionPolicy<i32>,
+    ) -> FallbackCache<String, i32, P> {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)

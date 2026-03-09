@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry, Error, FallbackPromotionPolicy};
-use cachet_tier::testing::{CacheOp, MockCache};
+use cachet_tier::{CacheOp, MockCache};
 use tick::Clock;
 
 type TestResult = Result<(), Error>;

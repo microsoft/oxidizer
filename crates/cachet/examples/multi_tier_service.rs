@@ -9,12 +9,12 @@
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
-use cachet_tier::testing::MockCache;
+use cachet_tier::MockCache;
 use tick::Clock;
 
 #[tokio::main]
 async fn main() {
-    let clock = Clock::new_frozen();
+    let clock = Clock::new_tokio();
 
     // L2: Simulated remote cache (in practice: Redis via .service())
     let l2_storage = MockCache::<String, String>::new();

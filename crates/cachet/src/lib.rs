@@ -247,4 +247,4 @@ pub use refresh::TimeToRefresh;
 
 #[cfg(any(feature = "test-util", test))]
 #[doc(inline)]
-pub use cachet_tier::testing::{CacheOp, MockCache};
+pub use cachet_tier::{CacheOp, MockCache};

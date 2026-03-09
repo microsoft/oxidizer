@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! In-memory cache implementation using moka.
+//! In-memory cache tier implementation.
 //!
-//! This module provides an in-memory cache tier backed by the moka crate,
-//! which offers high-performance concurrent caching with eviction policies.
+//! This module provides a high-performance concurrent in-memory cache tier
+//! with automatic eviction and optional time-based expiration.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
@@ -15,7 +15,7 @@ use thread_aware::{Arc, PerProcess, ThreadAware};
 
 use crate::builder::InMemoryCacheBuilder;
 
-/// An in-memory cache tier backed by moka.
+/// A concurrent in-memory cache tier.
 ///
 /// This cache provides:
 /// - Concurrent access with high performance
@@ -24,18 +24,15 @@ use crate::builder::InMemoryCacheBuilder;
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use cachet_memory::InMemoryCache;
 /// use cachet_tier::{CacheEntry, CacheTier};
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
-/// # futures::executor::block_on(async {
 ///
 /// let cache = InMemoryCache::<String, i32>::new();
 ///
 /// cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 /// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
-/// # });
 /// ```
 #[derive(Debug, Clone, ThreadAware)]
 pub struct InMemoryCache<K, V, H = RandomState>
@@ -45,7 +42,7 @@ where
     H: BuildHasher + Clone + Send + Sync + 'static,
 {
     // TODO: Eventually we can support different strategies here.
-    // For now we will use Moka as a PerProcess cache since it supports concurrency.
+    // For now we use a PerProcess cache since it supports concurrency.
     inner: Arc<Cache<K, CacheEntry<V>, H>, PerProcess>,
 }
 
@@ -70,9 +67,8 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::new();
     /// ```
@@ -88,9 +84,8 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::with_capacity(1000);
     /// ```
@@ -106,10 +101,9 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(1000)

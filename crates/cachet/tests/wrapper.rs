@@ -6,7 +6,7 @@
 #![cfg(feature = "memory")]
 
 use cachet::{Cache, CacheEntry, Error};
-use cachet_tier::testing::{CacheOp, MockCache};
+use cachet_tier::{CacheOp, MockCache};
 use std::time::Duration;
 use tick::Clock;
 

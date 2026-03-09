@@ -165,7 +165,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use cachet_tier::testing::{MockCache, CacheOp};
+    /// use cachet_tier::{MockCache, CacheOp};
     ///
     /// let cache: MockCache<String, i32> = MockCache::new();
     ///

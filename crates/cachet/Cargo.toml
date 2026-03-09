@@ -109,7 +109,6 @@ required-features = ["memory", "logs", "metrics"]
 name = "multi_tier"
 required-features = ["memory", "logs", "metrics"]
 
-
 [[example]]
 name = "get_or_insert"
 required-features = ["memory"]

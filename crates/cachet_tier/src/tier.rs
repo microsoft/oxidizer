@@ -34,16 +34,31 @@ pub trait CacheTier<K, V>: Send + Sync {
     /// Clears all entries, returning an error if the operation fails.
     fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send;
 
-    /// Returns the number of entries, if supported.
+    /// Returns an **approximate** count of entries, if the implementation supports it.
     ///
-    /// Returns `None` for implementations that don't track size.
+    /// Returns `None` for implementations that do not track size.
+    ///
+    /// # Approximation
+    ///
+    /// The returned count may include entries that have logically expired but have
+    /// not yet been evicted. Many implementations perform eviction lazily or on a
+    /// background schedule, so `len()` can temporarily overcount after TTL expiry
+    /// or after `invalidate` / `clear` calls that have not yet been fully applied.
+    ///
+    /// Do not use this value for exact bookkeeping or correctness decisions. It is
+    /// suitable for approximate capacity monitoring, metrics, and health checks.
     fn len(&self) -> Option<u64> {
         None
     }
 
-    /// Returns `true` if the cache contains no entries.
+    /// Returns `true` if the cache **appears** to contain no entries.
     ///
-    /// Returns `None` for implementations that don't track size.
+    /// Returns `None` for implementations that do not track size.
+    ///
+    /// Subject to the same approximation caveat as [`len`](Self::len): a return
+    /// value of `false` does not guarantee that a subsequent `get` will find anything,
+    /// and a return value of `true` does not guarantee the cache is actually empty if
+    /// entries have expired but not yet been evicted.
     fn is_empty(&self) -> Option<bool> {
         self.len().map(|len| len == 0)
     }

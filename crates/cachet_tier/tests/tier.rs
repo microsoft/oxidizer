@@ -3,7 +3,7 @@
 
 //! Integration tests for `CacheTier` trait default implementations.
 
-use cachet_tier::testing::MockCache;
+use cachet_tier::MockCache;
 use cachet_tier::{CacheEntry, CacheTier, Error};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -236,7 +236,7 @@ async fn mock_cache_clear_failures() {
 
 #[tokio::test]
 async fn mock_cache_operations_recording() {
-    use cachet_tier::testing::CacheOp;
+    use cachet_tier::CacheOp;
 
     let cache = MockCache::<String, i32>::new();
     cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();

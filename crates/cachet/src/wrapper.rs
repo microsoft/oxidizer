@@ -32,9 +32,8 @@ use cachet_tier::CacheTier;
 /// use cachet::Cache;
 /// use tick::Clock;
 /// use std::time::Duration;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
-/// let clock = Clock::new_frozen();
+/// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock)
 ///     .memory()
 ///     .ttl(Duration::from_secs(60))
@@ -264,8 +263,7 @@ mod tests {
             let inner_check = inner.clone();
             let telemetry = TelemetryConfig::new().build();
             let tier_ttl = Duration::from_secs(60);
-            let wrapper: CacheWrapper<String, i32, _> =
-                CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
+            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
 
             let entry = CacheEntry::new(42);
             assert!(entry.ttl().is_none());
@@ -287,8 +285,7 @@ mod tests {
             let telemetry = TelemetryConfig::new().build();
             let tier_ttl = Duration::from_secs(60);
             let entry_ttl = Duration::from_secs(30);
-            let wrapper: CacheWrapper<String, i32, _> =
-                CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry);
+            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry);
 
             let entry = CacheEntry::expires_at(42, entry_ttl, clock.system_time());
 
@@ -307,8 +304,7 @@ mod tests {
             let inner = InMemoryCache::<String, i32>::new();
             let inner_check = inner.clone();
             let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> =
-                CacheWrapper::new("test", inner, clock, None, telemetry);
+            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
 
             let entry = CacheEntry::new(42);
             wrapper.insert(&"key".to_string(), entry).await.unwrap();

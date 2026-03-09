@@ -10,7 +10,7 @@
 
 use anyspawn::Spawner;
 use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, TimeToRefresh};
-use cachet_tier::testing::MockCache;
+use cachet_tier::MockCache;
 use std::time::Duration;
 use tick::Clock;
 
@@ -601,7 +601,7 @@ fn fallback_get_promotion_failure_still_returns_value() -> TestResult {
 
         // Primary fails on insert (promotion), fallback has the value
         let primary_storage = MockCache::<String, i32>::new();
-        primary_storage.fail_when(|op| matches!(op, cachet_tier::testing::CacheOp::Insert { .. }));
+        primary_storage.fail_when(|op| matches!(op, cachet_tier::CacheOp::Insert { .. }));
 
         let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
         fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await?;

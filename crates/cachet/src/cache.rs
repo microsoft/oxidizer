@@ -155,7 +155,7 @@ where
     ///
     /// This allows accessing tier-specific functionality not exposed by
     /// the main `Cache` API.
-    #[must_use  ]
+    #[must_use]
     pub fn inner(&self) -> &CT {
         &self.storage
     }
@@ -341,15 +341,34 @@ where
         self.storage.clear().await
     }
 
-    /// Returns the number of entries in the cache, if supported by the underlying storage.
+    /// Returns an **approximate** count of entries, if supported by the underlying storage.
+    ///
+    /// Returns `None` if the underlying storage does not support size tracking.
+    ///
+    /// # Approximation
+    ///
+    /// The count is approximate for two reasons:
+    ///
+    /// 1. **Lazy eviction** — entries that have passed their TTL may still be counted
+    ///    until the underlying store evicts them. Eviction typically happens lazily
+    ///    during cache operations or on a background schedule, so the count can
+    ///    temporarily overcount after expiry.
+    /// 2. **Primary tier only** — for multi-tier (fallback) caches, only the primary
+    ///    tier is counted. Entries that exist exclusively in the fallback tier are not
+    ///    reflected here.
+    ///
+    /// Use this value for approximate capacity monitoring and metrics, not for
+    /// correctness decisions.
     #[must_use]
     pub fn len(&self) -> Option<u64> {
         self.storage.len()
     }
 
-    /// Returns `true` if the cache contains no entries.
+    /// Returns `true` if the cache **appears** to contain no entries.
     ///
-    /// Returns `None` if the underlying storage doesn't support size tracking.
+    /// Returns `None` if the underlying storage does not support size tracking.
+    ///
+    /// Subject to the same approximation caveats as [`len`](Self::len).
     #[must_use]
     pub fn is_empty(&self) -> Option<bool> {
         self.storage.is_empty()

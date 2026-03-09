@@ -9,7 +9,7 @@ use std::{hint::black_box, sync::Arc, time::Instant};
 
 use cachet::{Cache, CacheEntry, CacheTier};
 use cachet_memory::InMemoryCache;
-use cachet_tier::testing::MockCache;
+use cachet_tier::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use tick::Clock;

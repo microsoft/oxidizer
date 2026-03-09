@@ -42,7 +42,7 @@ where
 
 #[tokio::main]
 async fn main() {
-    let clock = Clock::new_frozen();
+    let clock = Clock::new_tokio();
     let cache = Cache::builder::<String, String>(clock).memory().build();
 
     // Wrap cache with logging middleware

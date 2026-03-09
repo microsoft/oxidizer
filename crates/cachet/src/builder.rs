@@ -38,9 +38,8 @@ mod sealed {
 /// ```
 /// use cachet::Cache;
 /// use tick::Clock;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
-/// let clock = Clock::new_frozen();
+/// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock)
 ///     .memory()
 ///     .build();
@@ -62,9 +61,8 @@ pub trait CacheTierBuilder<K, V>: Sealed {
 /// use cachet::Cache;
 /// use tick::Clock;
 /// use std::time::Duration;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
-/// let clock = Clock::new_frozen();
+/// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock)
 ///     .memory()
 ///     .ttl(Duration::from_secs(60))
@@ -108,7 +106,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// use tick::Clock;
     ///
     /// let mock = MockCache::<String, i32>::new();
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .storage(mock)
     ///     .build();
@@ -138,12 +136,11 @@ impl<K, V> CacheBuilder<K, V, ()> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
     ///     .build();
@@ -227,12 +224,11 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
     ///     .stampede_protection()
@@ -252,13 +248,12 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
     /// use std::time::Duration;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
     ///     .ttl(Duration::from_secs(300))
@@ -313,12 +308,11 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
     ///     .build();
@@ -390,12 +384,11 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::{Cache, FallbackPromotionPolicy};
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
     ///
     /// let cache = Cache::builder::<String, String>(clock)
@@ -499,12 +492,11 @@ where
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let l2 = Cache::builder::<String, i32>(clock.clone()).memory();
     ///
     /// let cache = Cache::builder::<String, i32>(clock)

@@ -40,7 +40,7 @@ impl Service<CacheOperation<String, String>> for RemoteCache {
 
 #[tokio::main]
 async fn main() {
-    let clock = Clock::new_frozen();
+    let clock = Clock::new_tokio();
 
     // .service() wraps the Service in ServiceAdapter, converting it to CacheTier
     let cache = Cache::builder::<String, String>(clock).service(RemoteCache::default()).build();

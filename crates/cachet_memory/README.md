@@ -13,11 +13,11 @@
 
 </div>
 
-High-performance in-memory cache backed by moka.
+High-performance in-memory cache tier.
 
-This crate provides [`InMemoryCache`][__link0], a concurrent in-memory cache using the moka
+This crate provides [`InMemoryCache`][__link0], a concurrent in-memory cache with a
 `TinyLFU` eviction algorithm for excellent hit rates. Use [`InMemoryCacheBuilder`][__link1]
-to configure capacity, TTL, and TTI without exposing moka types directly.
+to configure capacity, TTL, and TTI.
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ assert_eq!(*value.unwrap().value(), 42);
 * **Capacity limits**: Set maximum entry count with automatic eviction
 * **TTL/TTI**: Configure time-to-live and time-to-idle expiration
 * **Thread-safe**: Safe for concurrent access from multiple tasks
-* **Zero external types**: Builder API avoids exposing moka in your public API
+* **Zero external types**: Builder API keeps implementation details private
 
 
 <hr/>
@@ -49,6 +49,6 @@ assert_eq!(*value.unwrap().value(), 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5zMv3XdUFuTG_OQY7JdqLyMG0q43IO-DcL3G5BBDqihT_Z0YWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
- [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=tier::InMemoryCache
- [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=builder::InMemoryCacheBuilder
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGz_PLStTuO9KG_5Ob2y2SxTfG6qRMWmCSKFKG9EtNWxx1SieYWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
+ [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCache
+ [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder

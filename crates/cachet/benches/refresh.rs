@@ -8,8 +8,8 @@
 use std::{collections::HashMap, hint::black_box, time::Duration, time::Instant};
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, FallbackPromotionPolicy, refresh::TimeToRefresh};
-use cachet_tier::testing::MockCache;
+use cachet::{Cache, CacheEntry, FallbackPromotionPolicy, TimeToRefresh};
+use cachet_tier::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
 use tick::Clock;
 use tokio::runtime::Runtime;

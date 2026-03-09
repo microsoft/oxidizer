@@ -61,7 +61,7 @@
 mod entry;
 mod error;
 #[cfg(any(feature = "test-util", test))]
-pub mod testing;
+mod testing;
 mod tier;
 
 mod dynamic;
@@ -72,5 +72,8 @@ pub use dynamic::{DynamicCache, DynamicCacheExt};
 pub use entry::CacheEntry;
 #[doc(inline)]
 pub use error::{Error, Result};
+#[cfg(any(feature = "test-util", test))]
+#[doc(inline)]
+pub use testing::{CacheOp, MockCache};
 #[doc(inline)]
 pub use tier::CacheTier;

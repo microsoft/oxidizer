@@ -6,7 +6,7 @@
 #![cfg(feature = "memory")]
 
 use cachet::{Cache, CacheEntry, Error};
-use cachet_tier::testing::MockCache;
+use cachet_tier::MockCache;
 use tick::Clock;
 
 type TestResult = Result<(), Error>;
@@ -435,7 +435,7 @@ fn error_is_sync() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_propagates_storage_errors() {
-    use cachet_tier::testing::{CacheOp, MockCache};
+    use cachet_tier::{CacheOp, MockCache};
 
     block_on(async {
         let clock = Clock::new_frozen();
@@ -508,7 +508,6 @@ fn stampede_protection_converts_panic_to_error() {
     });
 }
 
-
 #[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_invalidate_removes_entry() -> TestResult {
@@ -530,7 +529,7 @@ fn stampede_protection_invalidate_removes_entry() -> TestResult {
 #[test]
 fn try_get_or_insert_with_storage_error_propagates() {
     block_on(async {
-        use cachet_tier::testing::{CacheOp, MockCache};
+        use cachet_tier::{CacheOp, MockCache};
 
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();
@@ -549,7 +548,7 @@ fn try_get_or_insert_with_storage_error_propagates() {
 #[test]
 fn optionally_get_or_insert_with_storage_error_propagates() {
     block_on(async {
-        use cachet_tier::testing::{CacheOp, MockCache};
+        use cachet_tier::{CacheOp, MockCache};
 
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();

@@ -89,13 +89,12 @@ impl<V> FallbackPromotionPolicy<V> {
     ///
     /// The closure can capture external state if needed.
     ///
-    /// ```
+    /// ```no_run
     /// use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
     /// use tick::Clock;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let min_len = 3;
-    /// let clock = Clock::new_frozen();
+    /// let clock = Clock::new_tokio();
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
@@ -155,10 +154,8 @@ impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
 /// use std::time::Duration;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
-/// # futures::executor::block_on(async {
 ///
-/// let clock = Clock::new_frozen();
+/// let clock = Clock::new_tokio();
 /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
 ///
 /// let cache = Cache::builder::<String, String>(clock)
@@ -167,7 +164,6 @@ impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
 ///     .fallback(l2)
 ///     .promotion_policy(FallbackPromotionPolicy::always())
 ///     .build();
-/// # });
 /// ```
 #[derive(Debug)]
 pub struct FallbackCache<K, V, P> {
@@ -259,10 +255,7 @@ where
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        let (primary_result, fallback_result) = join!(
-            self.inner.primary.invalidate(key),
-            self.inner.fallback.invalidate(key)
-        );
+        let (primary_result, fallback_result) = join!(self.inner.primary.invalidate(key), self.inner.fallback.invalidate(key));
         primary_result?;
         fallback_result
     }

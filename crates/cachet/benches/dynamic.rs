@@ -11,8 +11,8 @@ use std::{hint::black_box, time::Instant};
 
 use alloc_tracker::{Allocator, Session};
 use cachet::{Cache, CacheEntry};
+use cachet_tier::MockCache;
 use cachet_tier::{DynamicCache, DynamicCacheExt};
-use cachet_tier::testing::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
 use tick::Clock;
 use tokio::runtime::Runtime;

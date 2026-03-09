@@ -4,7 +4,7 @@
 //! `MockCache` for testing: record operations, inject failures, pre-populate data.
 
 use cachet::{Cache, CacheEntry};
-use cachet_tier::testing::{CacheOp, MockCache};
+use cachet_tier::{CacheOp, MockCache};
 use tick::Clock;
 
 #[tokio::main]

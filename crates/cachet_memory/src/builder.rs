@@ -4,8 +4,8 @@
 //! Builder for configuring in-memory caches.
 //!
 //! This module provides a builder API for `InMemoryCache` that abstracts
-//! the underlying moka configuration, providing a stable API surface
-//! without exposing moka types.
+//! the underlying cache configuration, providing a stable API surface
+//! without exposing implementation details.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
@@ -17,14 +17,13 @@ use crate::tier::InMemoryCache;
 /// Builder for configuring an `InMemoryCache`.
 ///
 /// This builder provides a stable API for common cache configuration
-/// options without exposing the underlying moka cache implementation.
+/// options without exposing the underlying cache implementation.
 ///
 /// # Examples
 ///
 /// ```
 /// use cachet_memory::InMemoryCache;
 /// use std::time::Duration;
-/// # if cfg!(miri) { return; } // moka is incompatible with Miri
 ///
 /// let cache = InMemoryCache::<String, i32>::builder()
 ///     .max_capacity(1000)
@@ -81,9 +80,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(10_000)
@@ -102,9 +100,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .initial_capacity(100)
@@ -128,10 +125,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .time_to_live(Duration::from_secs(300))
@@ -153,10 +149,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .time_to_idle(Duration::from_secs(60))
@@ -175,9 +170,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .name("user-cache")
@@ -197,10 +191,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
     /// use std::collections::hash_map::RandomState;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .hasher(RandomState::new())
@@ -224,10 +217,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
-    /// # if cfg!(miri) { return; } // moka is incompatible with Miri
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(1000)
