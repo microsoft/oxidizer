@@ -155,7 +155,11 @@ impl Spawner {
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
-        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, Arc::from([] as [Box<str>; 0]))))
+        Self(SpawnerKind::Custom(CustomSpawner::new(
+            Arc::new(f),
+            name,
+            Arc::from([] as [Box<str>; 0]),
+        )))
     }
 
     /// Creates a custom spawner with name and layer metadata for [`Debug`]
