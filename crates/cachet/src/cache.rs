@@ -142,7 +142,7 @@ impl<K, V, S> Cache<K, V, S>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    S: CacheTier<K, V> + Send + Sync,
+    CT: CacheTier<K, V> + Send + Sync,
 {
     pub(crate) fn new(name: CacheName, storage: S, clock: Clock, stampede_protection: bool) -> Self {
         Self {
@@ -206,7 +206,7 @@ impl<K, V, S> Cache<K, V, S>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    S: CacheTier<K, V> + Send + Sync,
+    CT: CacheTier<K, V> + Send + Sync,
 {
     /// Retrieves a value from the cache.
     ///
@@ -575,7 +575,7 @@ impl<K, V, S> layered::Service<cachet_service::CacheOperation<K, V>> for Cache<K
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    S: CacheTier<K, V> + Send + Sync,
+    CT: CacheTier<K, V> + Send + Sync,
 {
     type Out = Result<cachet_service::CacheResponse<V>, Error>;
 

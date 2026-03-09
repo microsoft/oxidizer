@@ -118,7 +118,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// ```
     pub fn storage<S>(self, storage: S) -> CacheBuilder<K, V, S>
     where
-        S: CacheTier<K, V>,
+        CT: CacheTier<K, V>,
     {
         CacheBuilder {
             name: self.name,
@@ -280,7 +280,7 @@ impl<K, V, S> CacheBuilder<K, V, S>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    S: CacheTier<K, V> + Send + Sync + 'static,
+    CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Creates a fallback cache with this as the primary tier.
     ///
@@ -328,13 +328,13 @@ where
     }
 }
 
-impl<K, V, S> Sealed for CacheBuilder<K, V, S> where S: CacheTier<K, V> + Send + Sync + 'static {}
+impl<K, V, S> Sealed for CacheBuilder<K, V, S> where CT: CacheTier<K, V> + Send + Sync + 'static {}
 
 impl<K, V, S> CacheTierBuilder<K, V> for CacheBuilder<K, V, S>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    S: CacheTier<K, V> + Send + Sync + 'static,
+    CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     type Tier = CacheWrapper<K, V, S>;
 }
@@ -530,7 +530,7 @@ impl<K, V, S> Buildable<K, V> for CacheBuilder<K, V, S>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    S: CacheTier<K, V> + Send + Sync + 'static,
+    CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     type Output = CacheWrapper<K, V, S>;
 

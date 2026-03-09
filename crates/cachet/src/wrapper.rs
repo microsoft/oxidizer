@@ -79,7 +79,7 @@ impl<K, V, S> CacheWrapper<K, V, S>
 where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
-    S: CacheTier<K, V> + Send + Sync,
+    CT: CacheTier<K, V> + Send + Sync,
 {
     fn is_expired(&self, entry: &CacheEntry<V>) -> bool {
         // Per-entry TTL takes precedence over tier-level TTL
@@ -118,7 +118,7 @@ impl<K, V, S> CacheTier<K, V> for CacheWrapper<K, V, S>
 where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
-    S: CacheTier<K, V> + Send + Sync,
+    CT: CacheTier<K, V> + Send + Sync,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let timed = self.clock.timed_async(self.inner.get(key)).await;
