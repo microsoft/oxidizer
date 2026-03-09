@@ -5,191 +5,34 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use autoresolve_macros::base;
 
-// Each type lives in its own module so the generated code must resolve paths
-// across module boundaries — validating that `#[base]` and `#[resolvable]`
-// produce correct impls even when not all types are in scope at the usage site.
+// Each type lives in its own module (separate file) so the generated code must
+// resolve paths across module boundaries — validating that `#[base]` and
+// `#[resolvable]` produce correct impls even when not all types are in scope at
+// the usage site.
 
 // =============================================================================
 // Root types — one per scope level, each carrying a construction counter.
 // =============================================================================
 
-mod scheduler {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
-
-    /// App-level root. The counter is used by [`super::validator::Validator`] to stamp each instance.
-    #[derive(Clone)]
-    pub struct Scheduler {
-        pub(crate) counter: Arc<AtomicUsize>,
-    }
-}
-
-mod request {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
-
-    /// Request-level root. The counter is used by [`super::correlation_vector::CorrelationVector`]
-    /// to stamp each instance.
-    #[derive(Clone)]
-    pub struct Request {
-        pub(crate) counter: Arc<AtomicUsize>,
-    }
-}
-
-mod task {
-    /// Task-level root. Each task carries a unique id.
-    #[derive(Clone)]
-    pub struct Task {
-        pub(crate) id: u64,
-    }
-}
+mod request;
+mod scheduler;
+mod task;
 
 // =============================================================================
 // Single-scope dependencies — each captures the counter value at construction.
 // =============================================================================
 
-mod validator {
-    use std::sync::atomic::Ordering;
-
-    use autoresolve_macros::resolvable;
-
-    use super::scheduler::Scheduler;
-
-    /// Depends on Scheduler (app-level). `instance` records which construction this was.
-    #[derive(Clone)]
-    pub struct Validator {
-        pub(crate) instance: usize,
-    }
-
-    #[resolvable]
-    impl Validator {
-        fn new(scheduler: &Scheduler) -> Self {
-            Self {
-                instance: scheduler.counter.fetch_add(1, Ordering::SeqCst) + 1,
-            }
-        }
-    }
-}
-
-mod correlation_vector {
-    use std::sync::atomic::Ordering;
-
-    use autoresolve_macros::resolvable;
-
-    use super::request::Request;
-
-    /// Depends on Request (request-level). `instance` records which construction this was.
-    #[derive(Clone)]
-    pub struct CorrelationVector {
-        pub(crate) instance: usize,
-    }
-
-    #[resolvable]
-    impl CorrelationVector {
-        fn new(request: &Request) -> Self {
-            Self {
-                instance: request.counter.fetch_add(1, Ordering::SeqCst) + 1,
-            }
-        }
-    }
-}
-
-mod task_properties {
-    use autoresolve_macros::resolvable;
-
-    use super::task::Task;
-
-    /// Depends on Task (task-level). Captures the task id.
-    #[derive(Clone)]
-    pub struct TaskProperties {
-        pub(crate) task_id: u64,
-    }
-
-    #[resolvable]
-    impl TaskProperties {
-        fn new(task: &Task) -> Self {
-            Self { task_id: task.id }
-        }
-    }
-}
+mod correlation_vector;
+mod task_properties;
+mod validator;
 
 // =============================================================================
 // Cross-scope dependencies — combine objects from different levels.
 // =============================================================================
 
-mod client {
-    use autoresolve_macros::resolvable;
-
-    use super::correlation_vector::CorrelationVector;
-    use super::validator::Validator;
-
-    /// App + Request: depends on Validator and CorrelationVector.
-    #[derive(Clone)]
-    pub struct Client {
-        pub(crate) validator_instance: usize,
-        pub(crate) cv_instance: usize,
-    }
-
-    #[resolvable]
-    impl Client {
-        fn new(validator: &Validator, cv: &CorrelationVector) -> Self {
-            Self {
-                validator_instance: validator.instance,
-                cv_instance: cv.instance,
-            }
-        }
-    }
-}
-
-mod task_handler {
-    use autoresolve_macros::resolvable;
-
-    use super::correlation_vector::CorrelationVector;
-    use super::task_properties::TaskProperties;
-
-    /// Request + Task: depends on CorrelationVector and TaskProperties.
-    #[derive(Clone)]
-    pub struct TaskHandler {
-        pub(crate) cv_instance: usize,
-        pub(crate) task_id: u64,
-    }
-
-    #[resolvable]
-    impl TaskHandler {
-        fn new(cv: &CorrelationVector, tp: &TaskProperties) -> Self {
-            Self {
-                cv_instance: cv.instance,
-                task_id: tp.task_id,
-            }
-        }
-    }
-}
-
-mod task_client {
-    use autoresolve_macros::resolvable;
-
-    use super::client::Client;
-    use super::task_properties::TaskProperties;
-
-    /// Task + App (via Client): depends on TaskProperties and Client.
-    #[derive(Clone)]
-    pub struct TaskClient {
-        pub(crate) task_id: u64,
-        pub(crate) validator_instance: usize,
-        pub(crate) cv_instance: usize,
-    }
-
-    #[resolvable]
-    impl TaskClient {
-        fn new(tp: &TaskProperties, client: &Client) -> Self {
-            Self {
-                task_id: tp.task_id,
-                validator_instance: client.validator_instance,
-                cv_instance: client.cv_instance,
-            }
-        }
-    }
-}
+mod client;
+mod task_client;
+mod task_handler;
 
 // =============================================================================
 // Base types — three-level hierarchy: App → Request → Task.
