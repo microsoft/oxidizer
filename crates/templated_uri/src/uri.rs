@@ -414,7 +414,7 @@ mod tests {
     fn test_uri_into_http_uri() {
         let base_uri = BaseUri::from_uri_static("https://example.com/");
         let path_and_query_with_slash = PathAndQuery::from_static("/path?query=1");
-        let path_and_query_without_slash = PathAndQuery::from_static("/path?query=1");
+        let path_and_query_without_slash = PathAndQuery::from_static("path?query=1");
 
         let uri: Uri = Uri::default().base_uri(base_uri).path_and_query(path_and_query_with_slash.clone());
         let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");

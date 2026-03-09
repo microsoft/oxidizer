@@ -114,10 +114,20 @@ impl UriSafeString {
     pub fn encode(s: impl AsRef<str>) -> Self {
         let s = s.as_ref();
         let encoded = PctString::encode(s.chars(), UriReserved::Any);
-        // If nothing was encoded the PctString contains the same characters - avoid
-        // a redundant allocation by comparing lengths (encoding can only grow the string).
         if encoded.as_str().len() == s.len() {
             Self(Cow::Owned(s.to_owned()))
+        } else {
+            Self(Cow::Owned(encoded.into_string()))
+        }
+    }
+
+    /// Like [`encode`](Self::encode), but takes an owned `String` to avoid
+    /// re-allocating when no encoding is needed.
+    #[must_use]
+    pub fn encode_owned(s: String) -> Self {
+        let encoded = PctString::encode(s.chars(), UriReserved::Any);
+        if encoded.as_str().len() == s.len() {
+            Self(Cow::Owned(s))
         } else {
             Self(Cow::Owned(encoded.into_string()))
         }
@@ -260,7 +270,7 @@ impl From<String> for UriSafeString {
     /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
     fn from(s: String) -> Self {
-        Self::encode(s)
+        Self::encode_owned(s)
     }
 }
 
@@ -339,6 +349,18 @@ mod tests {
     fn test_from_string_valid() {
         let result = UriSafeString::from("valid_string_123".to_string());
         assert_eq!(result.as_str(), "valid_string_123");
+    }
+
+    #[test]
+    fn encode_owned_no_encoding_reuses_string() {
+        let safe = UriSafeString::encode_owned("hello_world".to_string());
+        assert_eq!(safe.as_str(), "hello_world");
+    }
+
+    #[test]
+    fn encode_owned_encodes_reserved() {
+        let safe = UriSafeString::encode_owned("hello{world}".to_string());
+        assert_eq!(safe.as_str(), "hello%7Bworld%7D");
     }
 
     #[test]
