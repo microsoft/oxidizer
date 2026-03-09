@@ -137,7 +137,6 @@ impl Cache<(), (), ()> {
     }
 }
 
-/// Constructor and access methods.
 impl<K, V, CT> Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
@@ -180,7 +179,6 @@ where
     }
 }
 
-/// Public API methods - work for both native and mocked caches.
 impl<K, V, CT> Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync,
@@ -201,7 +199,6 @@ where
     }
 }
 
-/// Public API methods that require `CacheTier` dispatch.
 impl<K, V, CT> Cache<K, V, CT>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
@@ -566,10 +563,6 @@ where
     }
 }
 
-/// Service implementation for cache operations.
-///
-/// This enables `Cache` to participate in service middleware hierarchies,
-/// allowing composition with retry, timeout, logging, and other middleware.
 #[cfg(feature = "service")]
 impl<K, V, CT> layered::Service<cachet_service::CacheOperation<K, V>> for Cache<K, V, CT>
 where
