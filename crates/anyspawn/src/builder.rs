@@ -169,7 +169,7 @@ where
     /// This is the only step that boxes the spawn function: the fully composed
     /// closure is wrapped in an `Arc<dyn Fn>` for use by the [`Spawner`].
     pub fn build(self) -> Spawner {
-        Spawner::new_with_layers(self.name, self.spawn_fn, self.layer_names.into_boxed_slice())
+        Spawner::new_with_layers(self.name, self.spawn_fn, self.layer_names.into())
     }
 }
 
