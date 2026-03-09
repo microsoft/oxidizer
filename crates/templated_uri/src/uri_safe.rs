@@ -21,6 +21,7 @@ use uuid::Uuid;
 /// For strings, use the encoding/validating constructors on [`UriSafe<Cow<'static, str>>`]
 /// (aliased as [`UriSafeString`]).
 #[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct UriSafe<T>(T);
 
 impl<T: Display> Display for UriSafe<T> {
@@ -300,6 +301,14 @@ impl AsRef<str> for UriSafeString {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for UriSafeString {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::try_new(s).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +476,25 @@ mod tests {
     #[should_panic(expected = "string contains invalid URL encoding character")]
     fn from_static_urlencoded_bad_char() {
         let _ = UriSafeString::from_static("hello%3-world");
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn uri_safe_string_roundtrip() {
+            let original = UriSafeString::encode("hello world");
+            let json = serde_json::to_string(&original).unwrap();
+            assert_eq!(json, r#""hello%20world""#);
+            let deserialized: UriSafeString = serde_json::from_str(&json).unwrap();
+            assert_eq!(original, deserialized);
+        }
+
+        #[test]
+        fn uri_safe_string_deserialize_rejects_reserved() {
+            let result: Result<UriSafeString, _> = serde_json::from_str(r#""hello{world}""#);
+            assert!(result.is_err());
+        }
     }
 }

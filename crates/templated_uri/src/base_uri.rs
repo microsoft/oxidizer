@@ -683,6 +683,21 @@ impl Display for BaseUri {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for BaseUri {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for BaseUri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1038,26 @@ mod tests {
             assert_eq!(new_base_uri.origin().port(), 8443);
             assert_eq!(new_base_uri.port(), 8443);
             assert_eq!(new_base_uri.to_string(), "https://example.com:8443/api/");
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn base_uri_roundtrip() {
+            let original = BaseUri::from_uri_static("https://example.com:8443/api/");
+            let json = serde_json::to_string(&original).unwrap();
+            assert_eq!(json, r#""https://example.com:8443/api/""#);
+            let deserialized: BaseUri = serde_json::from_str(&json).unwrap();
+            assert_eq!(original, deserialized);
+        }
+
+        #[test]
+        fn base_uri_deserialize_rejects_invalid() {
+            let result: Result<BaseUri, _> = serde_json::from_str(r#""not-a-uri""#);
+            assert!(result.is_err());
         }
     }
 }

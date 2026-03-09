@@ -113,6 +113,21 @@ impl From<BasePath> for PathAndQuery {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for BasePath {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for BasePath {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use ohno::ErrorExt;
@@ -183,5 +198,25 @@ mod test {
         assert_eq!(path.as_str(), "/string/path/");
         let p2 = path.as_str().as_ptr();
         assert_eq!(p, p2, "The string data should not be copied");
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn base_path_roundtrip() {
+            let original: BasePath = "/api/v1/".parse().unwrap();
+            let json = serde_json::to_string(&original).unwrap();
+            assert_eq!(json, r#""/api/v1/""#);
+            let deserialized: BasePath = serde_json::from_str(&json).unwrap();
+            assert_eq!(original, deserialized);
+        }
+
+        #[test]
+        fn base_path_deserialize_rejects_invalid() {
+            let result: Result<BasePath, _> = serde_json::from_str(r#""no-slashes""#);
+            assert!(result.is_err());
+        }
     }
 }

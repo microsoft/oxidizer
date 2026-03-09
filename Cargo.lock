@@ -1982,6 +1982,8 @@ dependencies = [
  "mutants",
  "ohno",
  "pct-str",
+ "serde",
+ "serde_json",
  "static_assertions",
  "templated_uri_macros",
  "tokio",

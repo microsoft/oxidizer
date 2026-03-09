@@ -121,6 +121,38 @@ impl Origin {
     }
 }
 
+impl std::str::FromStr for Origin {
+    type Err = ValidationError;
+
+    /// Parses an `Origin` from a string in the form `scheme://authority`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ValidationError`] if the string is not a valid origin
+    /// (missing scheme, unsupported scheme, or invalid authority).
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uri: http::Uri = s.parse().map_err(ValidationError::caused_by)?;
+        let scheme = uri.scheme().ok_or_else(|| ValidationError::caused_by("missing scheme"))?.clone();
+        let authority = uri.authority().ok_or_else(|| ValidationError::caused_by("missing authority"))?.clone();
+        Self::new(scheme, authority)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Origin {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Origin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 impl Display for Origin {
     /// Formats the `Origin` as a string in the form `scheme://authority`.
     ///
@@ -232,5 +264,38 @@ mod tests {
             authority: Authority::from_static("example.com"),
         };
         origin.port();
+    }
+
+    #[test]
+    fn from_str_valid() {
+        let origin: Origin = "https://example.com:8443".parse().unwrap();
+        assert_eq!(origin.scheme().as_str(), "https");
+        assert_eq!(origin.authority().as_str(), "example.com:8443");
+    }
+
+    #[test]
+    fn from_str_missing_scheme() {
+        let result: Result<Origin, _> = "example.com".parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_str_unsupported_scheme() {
+        let result: Result<Origin, _> = "ftp://example.com".parse();
+        assert!(result.is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn origin_roundtrip() {
+            let original = Origin::new(Scheme::HTTPS, "example.com:8443").unwrap();
+            let json = serde_json::to_string(&original).unwrap();
+            assert_eq!(json, r#""https://example.com:8443""#);
+            let deserialized: Origin = serde_json::from_str(&json).unwrap();
+            assert_eq!(original, deserialized);
+        }
     }
 }
