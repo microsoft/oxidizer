@@ -1056,8 +1056,7 @@ mod tests {
 
         #[test]
         fn base_uri_deserialize_rejects_invalid() {
-            let result: Result<BaseUri, _> = serde_json::from_str(r#""not-a-uri""#);
-            assert!(result.is_err());
+            serde_json::from_str::<BaseUri>(r#""not-a-uri""#).unwrap_err();
         }
     }
 }

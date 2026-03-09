@@ -215,8 +215,7 @@ mod test {
 
         #[test]
         fn base_path_deserialize_rejects_invalid() {
-            let result: Result<BasePath, _> = serde_json::from_str(r#""no-slashes""#);
-            assert!(result.is_err());
+            serde_json::from_str::<BasePath>(r#""no-slashes""#).unwrap_err();
         }
     }
 }

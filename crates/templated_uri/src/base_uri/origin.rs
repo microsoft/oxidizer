@@ -133,7 +133,10 @@ impl std::str::FromStr for Origin {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let uri: http::Uri = s.parse().map_err(ValidationError::caused_by)?;
         let scheme = uri.scheme().ok_or_else(|| ValidationError::caused_by("missing scheme"))?.clone();
-        let authority = uri.authority().ok_or_else(|| ValidationError::caused_by("missing authority"))?.clone();
+        let authority = uri
+            .authority()
+            .ok_or_else(|| ValidationError::caused_by("missing authority"))?
+            .clone();
         Self::new(scheme, authority)
     }
 }
@@ -275,14 +278,12 @@ mod tests {
 
     #[test]
     fn from_str_missing_scheme() {
-        let result: Result<Origin, _> = "example.com".parse();
-        assert!(result.is_err());
+        "example.com".parse::<Origin>().unwrap_err();
     }
 
     #[test]
     fn from_str_unsupported_scheme() {
-        let result: Result<Origin, _> = "ftp://example.com".parse();
-        assert!(result.is_err());
+        "ftp://example.com".parse::<Origin>().unwrap_err();
     }
 
     #[cfg(feature = "serde")]

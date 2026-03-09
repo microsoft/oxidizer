@@ -493,8 +493,7 @@ mod tests {
 
         #[test]
         fn uri_safe_string_deserialize_rejects_reserved() {
-            let result: Result<UriSafeString, _> = serde_json::from_str(r#""hello{world}""#);
-            assert!(result.is_err());
+            serde_json::from_str::<UriSafeString>(r#""hello{world}""#).unwrap_err();
         }
     }
 }

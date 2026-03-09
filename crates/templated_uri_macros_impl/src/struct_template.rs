@@ -70,6 +70,10 @@ impl Fields {
 
 // #[proc_macro_derive(TemplatedPathAndQuery, attributes(templated, unredacted))]
 pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> TokenStream {
+    if !matches!(data.fields, syn::Fields::Named(_)) {
+        crate::bail!(ident, "#[templated] can only be applied to structs with named fields");
+    }
+
     // Parse the derive input using the Opts struct with custom parsing
     let struct_name = ident.to_string();
     let Opts {

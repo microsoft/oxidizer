@@ -601,7 +601,9 @@ mod tests {
     fn test_parse_error() {
         let attr = quote! { template="/example.com/{param" };
         let item = quote! {
-            struct ParseErrorTest;
+            struct ParseErrorTest {
+                param: String,
+            }
         };
 
         let output_pretty = pretty_parse(attr, item);
@@ -617,7 +619,9 @@ mod tests {
 
         let attr = quote! { template="/example.com/{>param}" };
         let item = quote! {
-            struct ParseErrorTest;
+            struct ParseErrorTest {
+                param: String,
+            }
         };
 
         let output_pretty = pretty_parse(attr, item);
@@ -628,6 +632,20 @@ mod tests {
         assert!(
             output_pretty.contains("Failed to parse URI"),
             "Output should contain error message: {output_pretty}"
+        );
+    }
+
+    #[test]
+    fn test_tuple_struct_rejected() {
+        let attr = quote! { template = "/test/{param}" };
+        let item = quote! {
+            struct TupleTest(String);
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert!(
+            output_pretty.contains("can only be applied to structs with named fields"),
+            "Output should reject tuple structs: {output_pretty}"
         );
     }
 
