@@ -1,8 +1,8 @@
 use autoresolve_macros::resolvable;
 
 use super::client::Client;
-use super::clock::Clock;
 use super::correlation_vector::CorrelationVector;
+use super::runtime::clock::Clock;
 
 pub struct OutboundClient {
     correlation_vector: CorrelationVector,

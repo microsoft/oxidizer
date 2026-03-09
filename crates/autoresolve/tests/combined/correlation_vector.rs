@@ -1,6 +1,6 @@
 use autoresolve_macros::resolvable;
 
-use super::request::Request;
+use super::http::request::Request;
 
 #[derive(Clone)]
 pub struct CorrelationVector {

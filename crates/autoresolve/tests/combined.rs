@@ -7,17 +7,25 @@ use autoresolve_macros::base;
 // `#[resolvable]` produce correct impls even when not all types are in scope at
 // the usage site.
 
-mod http;
-#[macro_use]
-mod runtime;
-use runtime::builtins;
+mod scheduler;
+mod clock;
 mod telemetry;
+mod request;
 
+#[base]
+mod builtins {
+    #[derive(Clone)]
+    pub struct Builtins {
+        pub scheduler: super::scheduler::Scheduler,
+        pub clock: super::clock::Clock,
+    }
+}
+
+mod validator;
+mod sdk_provider;
 mod client;
 mod correlation_vector;
 mod outbound_client;
-mod sdk_provider;
-mod validator;
 
 #[base]
 mod base {
@@ -25,7 +33,7 @@ mod base {
         #[spread]
         pub builtins: super::builtins::Builtins,
         pub telemetry: super::telemetry::Telemetry,
-        pub request: super::http::request::Request,
+        pub request: super::request::Request,
     }
 }
 
@@ -33,10 +41,10 @@ mod base {
 fn test_combined() {
     use base::Base;
     use builtins::Builtins;
-    use http::request::Request;
+    use clock::Clock;
     use outbound_client::OutboundClient;
-    use runtime::clock::Clock;
-    use runtime::scheduler::Scheduler;
+    use request::Request;
+    use scheduler::Scheduler;
     use telemetry::Telemetry;
 
     let builtins = Builtins {

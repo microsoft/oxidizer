@@ -5,9 +5,17 @@ use autoresolve_macros::base;
 // `#[resolvable]` produce correct impls even when not all types are in scope at
 // the usage site.
 
-#[macro_use]
-mod runtime;
-use runtime::builtins;
+mod clock;
+mod scheduler;
+
+#[base]
+mod builtins {
+    #[derive(Clone)]
+    pub struct Builtins {
+        pub scheduler: super::scheduler::Scheduler,
+        pub clock: super::clock::Clock,
+    }
+}
 
 mod client;
 mod config;
@@ -25,10 +33,10 @@ mod my_base {
 #[test]
 fn test_autoresolve() {
     use builtins::Builtins;
+    use clock::Clock;
     use my_base::MyBase;
     use my_service::MyService;
-    use runtime::clock::Clock;
-    use runtime::scheduler::Scheduler;
+    use scheduler::Scheduler;
 
     let builtins = Builtins {
         scheduler: Scheduler,

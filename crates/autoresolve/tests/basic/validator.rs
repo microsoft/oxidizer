@@ -1,6 +1,6 @@
 use autoresolve_macros::resolvable;
 
-use super::scheduler::Scheduler;
+use super::runtime::scheduler::Scheduler;
 
 #[derive(Clone)]
 pub struct Validator {

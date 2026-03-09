@@ -1,6 +1,6 @@
 use autoresolve_macros::resolvable;
 
-use super::clock::Clock;
+use super::runtime::clock::Clock;
 use super::validator::Validator;
 
 #[derive(Clone)]
