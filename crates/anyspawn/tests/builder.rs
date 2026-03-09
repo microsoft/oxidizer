@@ -3,6 +3,7 @@
 
 #![allow(missing_docs, reason = "test code")]
 #![cfg(all(feature = "tokio", feature = "custom"))]
+#![cfg(not(miri))] // miri doesn't work well with `insta` snapshots
 
 //! Tests for `CustomSpawnerBuilder` naming and debug output.
 
