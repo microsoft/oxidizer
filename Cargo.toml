@@ -110,6 +110,8 @@ trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
+axum = { version = "0.8", default-features = false }
+tokio-stream = { version = "0.1", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
 [workspace.lints.rust]

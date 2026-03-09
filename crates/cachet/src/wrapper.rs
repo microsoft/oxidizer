@@ -134,6 +134,9 @@ where
 
     async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
+        if let Some(ttl) = self.ttl {
+            entry.set_ttl(ttl);
+        }
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {

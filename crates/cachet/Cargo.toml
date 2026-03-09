@@ -73,7 +73,9 @@ opentelemetry = { workspace = true, features = [
 ] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
 recoverable = { workspace = true }
-seatbelt = { workspace = true, features = ["retry", "tower-service"] }
+seatbelt = { workspace = true, features = ["retry", "timeout", "tower-service"] }
+cachet_redis = { path = "../cachet_redis" }
+redis = { workspace = true, features = ["aio", "connection-manager", "tokio-comp"] }
 testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt"] }
@@ -145,6 +147,10 @@ required-features = ["memory", "service"]
 
 [[example]]
 name = "service_middleware_composition"
+required-features = ["memory", "service"]
+
+[[example]]
+name = "redis_multi_tier"
 required-features = ["memory", "service"]
 
 [lints]

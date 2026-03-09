@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cachet Redis Dashboard</title>
+<style>
+  :root {
+    --bg: #1a1b26; --bg2: #24283b; --bg3: #414868;
+    --fg: #c0caf5; --fg2: #a9b1d6; --accent: #7aa2f7;
+    --green: #9ece6a; --red: #f7768e; --yellow: #e0af68; --cyan: #7dcfff;
+    --border: #3b4261; --radius: 6px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.5; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  h1 { color: var(--accent); font-size: 1.4rem; margin-bottom: 16px; }
+  h2 { color: var(--fg2); font-size: 1.1rem; margin-bottom: 8px; }
+  .section { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+
+  /* Forms */
+  input, select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; font-size: 0.9rem; }
+  input:focus { outline: none; border-color: var(--accent); }
+  button { background: var(--accent); color: var(--bg); border: none; border-radius: var(--radius); padding: 6px 16px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+  button:hover { opacity: 0.9; }
+  button.danger { background: var(--red); }
+  button.secondary { background: var(--bg3); color: var(--fg); }
+  label { color: var(--fg2); font-size: 0.85rem; }
+
+  /* Connection bar */
+  .conn-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .conn-bar input { flex: 1; min-width: 200px; }
+  .status { font-size: 0.85rem; padding: 4px 10px; border-radius: var(--radius); }
+  .status.ok { background: var(--green); color: var(--bg); }
+  .status.err { background: var(--red); color: var(--bg); }
+  .status.none { background: var(--bg3); color: var(--fg2); }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; color: var(--fg2); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--border); word-break: break-all; }
+  tr:hover td { background: rgba(122,162,247,0.06); }
+
+  /* Grid layouts */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .form-grid label { display: flex; flex-direction: column; gap: 2px; }
+  .stat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center; }
+  .stat-card .value { font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+  .stat-card .label { font-size: 0.75rem; color: var(--fg2); }
+
+  /* Charts */
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .charts canvas { width: 100%; height: 200px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+
+  /* Insert form */
+  .insert-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .insert-row label { display: flex; flex-direction: column; gap: 2px; }
+  .insert-row label:first-child { flex: 1; }
+  .insert-row label:nth-child(2) { flex: 2; }
+
+  /* Key detail */
+  .detail-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+  .detail-overlay.open { display: flex; }
+  .detail-box { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; max-width: 600px; width: 90%; max-height: 80vh; overflow: auto; }
+  .detail-box pre { background: var(--bg); padding: 10px; border-radius: var(--radius); overflow-x: auto; font-size: 0.85rem; white-space: pre-wrap; }
+  .detail-box .close { float: right; cursor: pointer; color: var(--fg2); font-size: 1.2rem; }
+
+  .pagination { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .pagination span { color: var(--fg2); font-size: 0.85rem; }
+
+  @media (max-width: 700px) {
+    .charts { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Cachet Redis Dashboard</h1>
+
+  <!-- Connection -->
+  <div class="section">
+    <h2>Connection</h2>
+    <div class="conn-bar">
+      <input id="redis-url" type="text" value="redis://127.0.0.1/" placeholder="redis://host:port/db">
+      <button onclick="doConnect()">Connect</button>
+      <span id="conn-status" class="status none">Disconnected</span>
+    </div>
+  </div>
+
+  <!-- Insert -->
+  <div class="section">
+    <h2>Insert Key</h2>
+    <div class="insert-row">
+      <label>Key <input id="ins-key" type="text" placeholder="my:key"></label>
+      <label>Value <input id="ins-val" type="text" placeholder="some value"></label>
+      <label>TTL (s) <input id="ins-ttl" type="number" value="0" min="0" style="width:80px"></label>
+      <button onclick="doInsert()">Insert</button>
+    </div>
+  </div>
+
+  <!-- Browser -->
+  <div class="section">
+    <h2>Redis Browser</h2>
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+      <input id="scan-pattern" type="text" value="*" placeholder="pattern" style="width:200px">
+      <button onclick="doScan(0)">Scan</button>
+      <button class="danger" onclick="doFlush()">Flush DB</button>
+    </div>
+    <table>
+      <thead><tr><th>Key</th><th>Type</th><th>TTL</th><th>Actions</th></tr></thead>
+      <tbody id="keys-body"></tbody>
+    </table>
+    <div class="pagination">
+      <button class="secondary" id="btn-next" onclick="doScanNext()" style="display:none">Next Page</button>
+      <span id="scan-info"></span>
+    </div>
+  </div>
+
+  <!-- Load Test Config -->
+  <div class="section">
+    <h2>Load Test</h2>
+    <div class="form-grid" style="margin-bottom:10px">
+      <label>Concurrency <input id="lt-concurrency" type="number" value="8" min="1"></label>
+      <label>Duration (s) <input id="lt-duration" type="number" value="10" min="1"></label>
+      <label>Key Count <input id="lt-keys" type="number" value="1000" min="1"></label>
+      <label>Read Ratio <input id="lt-read" type="number" value="0.8" min="0" max="1" step="0.1"></label>
+      <label>Memory TTL (s) <input id="lt-mem-ttl" type="number" value="5" min="0"></label>
+      <label>Redis TTL (s) <input id="lt-redis-ttl" type="number" value="60" min="0"></label>
+      <label>Key Prefix <input id="lt-prefix" type="text" value="loadtest:"></label>
+      <label>Resilience <select id="lt-resilience"><option value="false">Off</option><option value="true">On</option></select></label>
+      <label>Stampede Protection <select id="lt-stampede"><option value="true">On</option><option value="false">Off</option></select></label>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button id="btn-start" onclick="startLoadTest()">Start Load Test</button>
+      <button id="btn-stop" class="danger" onclick="stopLoadTest()" style="display:none">Stop</button>
+    </div>
+  </div>
+
+  <!-- Live Stats -->
+  <div class="section" id="stats-section" style="display:none">
+    <h2>Live Metrics</h2>
+    <div class="stat-cards">
+      <div class="stat-card"><div class="value" id="st-ops">0</div><div class="label">ops/sec</div></div>
+      <div class="stat-card"><div class="value" id="st-total">0</div><div class="label">Total Ops</div></div>
+      <div class="stat-card"><div class="value" id="st-hits">0</div><div class="label">Hits</div></div>
+      <div class="stat-card"><div class="value" id="st-misses">0</div><div class="label">Misses</div></div>
+      <div class="stat-card"><div class="value" id="st-inserts">0</div><div class="label">Inserts</div></div>
+      <div class="stat-card"><div class="value" id="st-svc-calls">0</div><div class="label">Service Calls</div></div>
+      <div class="stat-card"><div class="value" id="st-errors">0</div><div class="label">Errors</div></div>
+      <div class="stat-card"><div class="value" id="st-p50">0</div><div class="label">p50 (μs)</div></div>
+      <div class="stat-card"><div class="value" id="st-p95">0</div><div class="label">p95 (μs)</div></div>
+      <div class="stat-card"><div class="value" id="st-p99">0</div><div class="label">p99 (μs)</div></div>
+      <div class="stat-card"><div class="value" id="st-elapsed">0</div><div class="label">Elapsed (s)</div></div>
+    </div>
+    <div class="charts">
+      <canvas id="chart-throughput" width="580" height="200"></canvas>
+      <canvas id="chart-latency" width="580" height="200"></canvas>
+      <canvas id="chart-service" width="580" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- Cache Telemetry -->
+  <div class="section" id="telemetry-section" style="display:none">
+    <h2>Cache Telemetry (OpenTelemetry)</h2>
+    <div class="charts" style="margin-bottom:12px">
+      <canvas id="chart-events" width="580" height="200"></canvas>
+      <canvas id="chart-hits-by-tier" width="580" height="200"></canvas>
+      <canvas id="chart-otel-latency" width="580" height="200"></canvas>
+    </div>
+    <div id="telemetry-content"></div>
+  </div>
+</div>
+
+<!-- Key Detail Overlay -->
+<div class="detail-overlay" id="detail-overlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-box">
+    <span class="close" onclick="closeDetail()">&times;</span>
+    <h2 style="margin-bottom:10px">Key Detail</h2>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let scanCursor = 0;
+let eventSource = null;
+let throughputHistory = [];
+let latencyHistory = [];
+let serviceCallsHistory = [];
+// Telemetry time-series: { eventRates: [{hit, miss, ...}], durations: [{tierName: avgSecs}] }
+let telemetryHistory = { events: [], durations: [], hitsByTier: [] };
+let prevEventCounts = {};
+let prevHitsByTier = {};
+
+// ── API helpers ────────────────────────────────────────────────
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+
+// ── Connection ─────────────────────────────────────────────────
+
+async function doConnect() {
+  const url = $('#redis-url').value.trim();
+  const st = $('#conn-status');
+  try {
+    await api('POST', '/api/connect', { redis_url: url });
+    st.textContent = 'Connected'; st.className = 'status ok';
+  } catch (e) {
+    st.textContent = e.message; st.className = 'status err';
+  }
+}
+
+// ── Insert ─────────────────────────────────────────────────────
+
+async function doInsert() {
+  const key = $('#ins-key').value.trim();
+  const value = $('#ins-val').value;
+  const ttl = parseInt($('#ins-ttl').value, 10) || 0;
+  if (!key) return;
+  try {
+    await api('POST', '/api/insert', { key, value, ttl_secs: ttl || null });
+    $('#ins-key').value = ''; $('#ins-val').value = '';
+    doScan(0);
+  } catch (e) { alert(e.message); }
+}
+
+// ── Browser ────────────────────────────────────────────────────
+
+async function doScan(cursor) {
+  const pattern = $('#scan-pattern').value.trim() || '*';
+  try {
+    const data = await api('GET', `/api/keys?pattern=${encodeURIComponent(pattern)}&cursor=${cursor}&count=100`);
+    scanCursor = data.next_cursor;
+    const tbody = $('#keys-body');
+    tbody.innerHTML = '';
+    for (const k of data.keys) {
+      const tr = document.createElement('tr');
+      const ttlText = k.ttl === -1 ? 'none' : k.ttl === -2 ? 'expired' : k.ttl + 's';
+      tr.innerHTML = `<td>${esc(k.key)}</td><td>${esc(k.key_type)}</td><td>${ttlText}</td>` +
+        `<td><button class="secondary" onclick="viewKey('${esc(k.key)}')">View</button> ` +
+        `<button class="danger" onclick="delKey('${esc(k.key)}')">Del</button></td>`;
+      tbody.appendChild(tr);
+    }
+    $('#btn-next').style.display = scanCursor > 0 ? '' : 'none';
+    $('#scan-info').textContent = `${data.keys.length} keys` + (scanCursor > 0 ? ` · cursor ${scanCursor}` : ' · end');
+  } catch (e) { alert(e.message); }
+}
+
+function doScanNext() { doScan(scanCursor); }
+
+async function doFlush() {
+  if (!confirm('Flush entire database?')) return;
+  try { await api('DELETE', '/api/keys'); doScan(0); } catch (e) { alert(e.message); }
+}
+
+async function viewKey(key) {
+  try {
+    const data = await api('GET', `/api/key/${encodeURIComponent(key)}`);
+    let html = `<p><strong>Key:</strong> ${esc(data.key)}</p>`;
+    html += `<p><strong>Type:</strong> ${esc(data.key_type)}</p>`;
+    html += `<p><strong>TTL:</strong> ${data.ttl === -1 ? 'none' : data.ttl + 's'}</p>`;
+    if (data.value != null) {
+      html += `<p><strong>Raw Value:</strong></p><pre>${esc(data.value)}</pre>`;
+    }
+    if (data.cache_entry) {
+      html += `<p style="margin-top:10px"><strong>CacheEntry Metadata:</strong></p>`;
+      html += `<pre>${esc(JSON.stringify(data.cache_entry, null, 2))}</pre>`;
+    }
+    $('#detail-content').innerHTML = html;
+    $('#detail-overlay').classList.add('open');
+  } catch (e) { alert(e.message); }
+}
+
+function closeDetail() { $('#detail-overlay').classList.remove('open'); }
+
+async function delKey(key) {
+  try { await api('DELETE', `/api/key/${encodeURIComponent(key)}`); doScan(0); } catch (e) { alert(e.message); }
+}
+
+// ── Load Test ──────────────────────────────────────────────────
+
+async function startLoadTest() {
+  const config = {
+    concurrency: parseInt($('#lt-concurrency').value, 10),
+    duration_secs: parseInt($('#lt-duration').value, 10),
+    key_count: parseInt($('#lt-keys').value, 10),
+    read_ratio: parseFloat($('#lt-read').value),
+    memory_ttl_secs: parseInt($('#lt-mem-ttl').value, 10),
+    redis_ttl_secs: parseInt($('#lt-redis-ttl').value, 10),
+    key_prefix: $('#lt-prefix').value,
+    use_resilience: $('#lt-resilience').value === 'true',
+    use_stampede_protection: $('#lt-stampede').value === 'true',
+  };
+  try {
+    await api('POST', '/api/load-test', config);
+    $('#btn-start').style.display = 'none';
+    $('#btn-stop').style.display = '';
+    $('#stats-section').style.display = '';
+    throughputHistory = [];
+    latencyHistory = [];
+    serviceCallsHistory = [];
+    telemetryHistory = { events: [], durations: [], hitsByTier: [] };
+    prevEventCounts = {};
+    prevHitsByTier = {};
+    startSSE();
+  } catch (e) { alert(e.message); }
+}
+
+async function stopLoadTest() {
+  try { await api('POST', '/api/load-test/stop'); } catch (e) { /* ignore */ }
+  $('#btn-start').style.display = '';
+  $('#btn-stop').style.display = 'none';
+}
+
+function startSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/api/load-test/stream');
+  eventSource.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    $('#st-ops').textContent = Math.round(m.ops_per_sec || 0);
+    $('#st-total').textContent = m.total_ops || 0;
+    $('#st-hits').textContent = m.total_hits || 0;
+    $('#st-misses').textContent = m.total_misses || 0;
+    $('#st-inserts').textContent = m.total_inserts || 0;
+    $('#st-svc-calls').textContent = m.total_service_calls || 0;
+    $('#st-errors').textContent = m.total_errors || 0;
+    $('#st-p50').textContent = m.p50_us || 0;
+    $('#st-p95').textContent = m.p95_us || 0;
+    $('#st-p99').textContent = m.p99_us || 0;
+    $('#st-elapsed').textContent = (m.elapsed_secs || 0).toFixed(1);
+
+    if (m.ops_per_sec !== undefined) {
+      throughputHistory.push(m.ops_per_sec);
+      latencyHistory.push({ p50: m.p50_us, p95: m.p95_us, p99: m.p99_us });
+      drawChart('chart-throughput', 'Throughput (ops/s)', [{ data: throughputHistory, color: '#7aa2f7', label: 'ops/s' }]);
+      drawChart('chart-latency', 'Latency (μs)', [
+        { data: latencyHistory.map(l => l.p50), color: '#9ece6a', label: 'p50' },
+        { data: latencyHistory.map(l => l.p95), color: '#e0af68', label: 'p95' },
+        { data: latencyHistory.map(l => l.p99), color: '#f7768e', label: 'p99' },
+      ]);
+
+      // Reads vs Service Calls chart (per-interval deltas)
+      serviceCallsHistory.push({ reads: m.total_hits || 0, svcCalls: m.total_service_calls || 0 });
+      if (serviceCallsHistory.length >= 2) {
+        const readDeltas = [];
+        const svcDeltas = [];
+        for (let i = 1; i < serviceCallsHistory.length; i++) {
+          readDeltas.push(serviceCallsHistory[i].reads - serviceCallsHistory[i-1].reads);
+          svcDeltas.push(serviceCallsHistory[i].svcCalls - serviceCallsHistory[i-1].svcCalls);
+        }
+        drawChart('chart-service', 'Reads vs Service Calls (per interval)', [
+          { data: readDeltas, color: '#7aa2f7', label: 'reads' },
+          { data: svcDeltas, color: '#9ece6a', label: 'svc calls' },
+        ]);
+      }
+    }
+
+    if (m.telemetry && m.telemetry.length > 0) {
+      renderTelemetry(m.telemetry);
+    }
+
+    if (m.running === false) {
+      if (eventSource) eventSource.close();
+      eventSource = null;
+      $('#btn-start').style.display = '';
+      $('#btn-stop').style.display = 'none';
+    }
+  };
+}
+
+// ── Canvas charts ──────────────────────────────────────────────
+
+function drawChart(canvasId, title, series) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = { top: 30, right: 12, bottom: 20, left: 55 };
+  const cw = W - pad.left - pad.right;
+  const ch = H - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#1a1b26';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.fillStyle = '#a9b1d6';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(title, pad.left, 16);
+
+  // Find max across all series
+  let allMax = 0;
+  for (const s of series) {
+    for (const v of s.data) { if (v > allMax) allMax = v; }
+  }
+  if (allMax === 0) allMax = 1;
+
+  // Y-axis ticks
+  ctx.fillStyle = '#414868';
+  ctx.strokeStyle = '#3b4261';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + ch - (ch * i / 4);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#a9b1d6';
+    ctx.fillText(Math.round(allMax * i / 4).toString(), 4, y + 4);
+  }
+
+  // Draw each series
+  for (const s of series) {
+    if (s.data.length < 2) continue;
+    const n = s.data.length;
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = pad.left + (cw * i / (n - 1));
+      const y = pad.top + ch - (ch * s.data[i] / allMax);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Legend
+  let lx = pad.left + 10;
+  ctx.font = '10px sans-serif';
+  for (const s of series) {
+    ctx.fillStyle = s.color;
+    ctx.fillRect(lx, pad.top + 4, 10, 3);
+    ctx.fillStyle = '#a9b1d6';
+    ctx.fillText(s.label, lx + 14, pad.top + 10);
+    lx += ctx.measureText(s.label).width + 30;
+  }
+}
+
+// ── Util ───────────────────────────────────────────────────────
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── Telemetry rendering ────────────────────────────────────────
+
+const EVENT_COLORS = {
+  'cache.hit': '#9ece6a', 'cache.miss': '#f7768e', 'cache.expired': '#e0af68',
+  'cache.inserted': '#7aa2f7', 'cache.invalidated': '#bb9af7', 'cache.ok': '#7dcfff',
+  'cache.error': '#ff5370', 'cache.fallback_promotion': '#c3e88d',
+  'cache.fallback': '#82aaff', 'cache.refresh_hit': '#a9b1d6', 'cache.refresh_miss': '#565f89',
+};
+const TIER_COLORS = ['#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7', '#7dcfff'];
+
+function renderTelemetry(metrics) {
+  const section = $('#telemetry-section');
+  section.style.display = '';
+
+  // ── Extract event counts (cache.event.count) → compute rates ──
+  const currentEvents = {};
+  const durationsByTier = {};
+  const currentHitsByTier = {};
+
+  for (const m of metrics) {
+    if (m.name === 'cache.event.count' && m.metric_type === 'counter') {
+      const activity = attrVal(m.attributes, 'cache.activity') || 'unknown';
+      currentEvents[activity] = (currentEvents[activity] || 0) + (m.value || 0);
+      // Track hits broken down by cache.name
+      if (activity === 'cache.hit') {
+        const tier = attrVal(m.attributes, 'cache.name') || 'unknown';
+        currentHitsByTier[tier] = (currentHitsByTier[tier] || 0) + (m.value || 0);
+      }
+    }
+    if (m.name === 'cache.operation.duration' && m.metric_type === 'histogram') {
+      const tier = attrVal(m.attributes, 'cache.name') || 'unknown';
+      if (!durationsByTier[tier]) durationsByTier[tier] = { sum: 0, count: 0 };
+      durationsByTier[tier].sum += (m.sum || 0);
+      durationsByTier[tier].count += (m.count || 0);
+    }
+  }
+
+  // Compute deltas for event rates
+  const rates = {};
+  for (const [activity, total] of Object.entries(currentEvents)) {
+    const prev = prevEventCounts[activity] || 0;
+    rates[activity] = Math.max(0, total - prev);
+  }
+  prevEventCounts = { ...currentEvents };
+  telemetryHistory.events.push(rates);
+
+  // Compute avg duration per tier
+  const avgDurations = {};
+  for (const [tier, d] of Object.entries(durationsByTier)) {
+    avgDurations[tier] = d.count > 0 ? (d.sum / d.count) * 1000 : 0; // convert to ms
+  }
+  telemetryHistory.durations.push(avgDurations);
+
+  // ── Draw event rate chart ──
+  const allActivities = [...new Set(telemetryHistory.events.flatMap(e => Object.keys(e)))];
+  const eventSeries = allActivities.map(a => ({
+    data: telemetryHistory.events.map(e => e[a] || 0),
+    color: EVENT_COLORS[a] || '#565f89',
+    label: a.replace('cache.', ''),
+  }));
+  if (eventSeries.length > 0) {
+    drawChart('chart-events', 'Cache Event Rate (per interval)', eventSeries);
+  }
+
+  // ── Draw hits-by-tier chart ──
+  const hitRates = {};
+  for (const [tier, total] of Object.entries(currentHitsByTier)) {
+    const prev = prevHitsByTier[tier] || 0;
+    hitRates[tier] = Math.max(0, total - prev);
+  }
+  prevHitsByTier = { ...currentHitsByTier };
+  telemetryHistory.hitsByTier.push(hitRates);
+
+  const allHitTiers = [...new Set(telemetryHistory.hitsByTier.flatMap(h => Object.keys(h)))];
+  const hitSeries = allHitTiers.map((t, i) => ({
+    data: telemetryHistory.hitsByTier.map(h => h[t] || 0),
+    color: TIER_COLORS[i % TIER_COLORS.length],
+    label: t,
+  }));
+  if (hitSeries.length > 0) {
+    drawChart('chart-hits-by-tier', 'Cache Hits by Tier (per interval)', hitSeries);
+  }
+
+  // ── Draw duration chart ──
+  const allTiers = [...new Set(telemetryHistory.durations.flatMap(d => Object.keys(d)))];
+  const durSeries = allTiers.map((t, i) => ({
+    data: telemetryHistory.durations.map(d => d[t] || 0),
+    color: TIER_COLORS[i % TIER_COLORS.length],
+    label: t,
+  }));
+  if (durSeries.length > 0) {
+    drawChart('chart-otel-latency', 'Avg Operation Duration (ms) by Tier', durSeries);
+  }
+
+  // ── Render summary table ──
+  const groups = {};
+  for (const m of metrics) {
+    if (!groups[m.name]) groups[m.name] = [];
+    groups[m.name].push(m);
+  }
+
+  let html = '';
+  for (const [name, items] of Object.entries(groups)) {
+    const type = items[0].metric_type;
+    html += `<h3 style="color:var(--accent);margin:12px 0 6px;font-size:0.95rem">${esc(name)} <span style="color:var(--fg2);font-size:0.8rem">(${type})</span></h3>`;
+    html += '<table><thead><tr><th>Attributes</th>';
+
+    if (type === 'counter') {
+      html += '<th>Value</th>';
+    } else if (type === 'histogram') {
+      html += '<th>Count</th><th>Sum</th><th>Min</th><th>Max</th><th>Avg</th>';
+    } else if (type === 'gauge') {
+      html += '<th>Value</th>';
+    }
+    html += '</tr></thead><tbody>';
+
+    for (const item of items) {
+      const attrs = item.attributes.map(([k,v]) => `${esc(k)}=${esc(v)}`).join(', ');
+      html += `<tr><td style="font-size:0.8rem">${attrs || '-'}</td>`;
+      if (type === 'counter') {
+        html += `<td>${fmtNum(item.value)}</td>`;
+      } else if (type === 'histogram') {
+        const avg = item.count > 0 ? item.sum / item.count : 0;
+        html += `<td>${fmtNum(item.count)}</td><td>${fmtDur(item.sum)}</td><td>${fmtDur(item.min)}</td><td>${fmtDur(item.max)}</td><td>${fmtDur(avg)}</td>`;
+      } else if (type === 'gauge') {
+        html += `<td>${fmtNum(item.gauge_value)}</td>`;
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+  }
+
+  $('#telemetry-content').innerHTML = html;
+}
+
+function attrVal(attrs, key) {
+  const pair = attrs.find(([k]) => k === key);
+  return pair ? pair[1] : null;
+}
+
+function fmtNum(v) {
+  if (v == null) return '-';
+  if (Number.isInteger(v)) return v.toLocaleString();
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function fmtDur(v) {
+  if (v == null) return '-';
+  // Duration metrics from cachet are in seconds
+  if (v < 0.001) return (v * 1_000_000).toFixed(0) + ' μs';
+  if (v < 1) return (v * 1000).toFixed(2) + ' ms';
+  return v.toFixed(3) + ' s';
+}
+</script>
+</body>
+</html>

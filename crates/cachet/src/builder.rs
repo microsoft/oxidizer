@@ -188,6 +188,15 @@ impl<K, V> CacheBuilder<K, V, ()> {
 }
 
 impl<K, V, S> CacheBuilder<K, V, S> {
+    /// Sets a human-readable name for this cache tier, used in telemetry attributes.
+    ///
+    /// If not set, a name is derived from the storage type.
+    #[must_use]
+    pub fn name(mut self, name: &'static str) -> Self {
+        self.name = Some(name);
+        self
+    }
+
     /// Enables logging for this cache.
     ///
     /// When enabled, cache operations will emit structured logs via the `tracing` crate.
@@ -349,6 +358,15 @@ pub struct FallbackBuilder<K, V, PB, FB> {
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
+    /// Sets a human-readable name for this fallback cache, used in telemetry attributes.
+    ///
+    /// If not set, a name is derived from the storage types.
+    #[must_use]
+    pub fn name(mut self, name: &'static str) -> Self {
+        self.name = Some(name);
+        self
+    }
+
     /// Enables logging for this fallback cache.
     #[cfg(any(feature = "logs", test))]
     #[must_use]
