@@ -212,7 +212,7 @@ fn is_string_error<T>(_: &T) -> bool {
 /// `StringError` is not detected and gets treated as a normal error source.
 ///
 /// TODO: switch to [`std::ptr::metadata`](https://doc.rust-lang.org/std/ptr/fn.metadata.html) once
-/// it become stable: https://github.com/rust-lang/rust/issues/81513
+/// it becomes stable: https://github.com/rust-lang/rust/issues/81513
 fn is_boxed_string_error(err: &(dyn StdError + Send + Sync + 'static)) -> bool {
     static STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> =
         std::sync::LazyLock::new(|| {
