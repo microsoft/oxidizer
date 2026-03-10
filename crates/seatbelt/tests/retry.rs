@@ -188,7 +188,7 @@ async fn retry_recovery_ensure_correct_delays(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn retry_recovery_ensure_correct_attempts(#[case] use_tower: bool) {
-    use seatbelt::retry::Attempt;
+    use seatbelt::Attempt;
 
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let attempts = Arc::new(Mutex::new(vec![]));

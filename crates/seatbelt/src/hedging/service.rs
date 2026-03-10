@@ -15,9 +15,9 @@ use layered::Service;
 use recoverable::RecoveryKind;
 use tick::Clock;
 
-use super::Attempt;
 use super::args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
 use super::callbacks::*;
+use crate::Attempt;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
 

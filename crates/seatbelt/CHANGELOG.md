@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1] - 2026-03-10
+
+- ✨ Features
+
+  - expose `seatbelt::Attempt` and obsolete `seatbelt::retry::Attempt` and `seatbelt::hedging::Attempt`
+
 ## [0.4.0] - 2026-03-06
 
 - ⚠️ Breaking
