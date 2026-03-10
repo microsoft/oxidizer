@@ -207,20 +207,22 @@ fn is_string_error<T>(_: &T) -> bool {
 
 /// Checks at runtime whether a type-erased error is std's private `StringError`
 /// by comparing its vtable against the known `StringError` vtable.
-/// 
+///
 /// This behavior is not guaranteed to be stable across Rust versions, so there might be cases where
 /// `StringError` is not detected and gets treated as a normal error source.
 fn is_boxed_string_error(err: &(dyn StdError + Send + Sync + 'static)) -> bool {
-    static STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
-        let err: Box<dyn StdError + Send + Sync + 'static> = "probe".into();
-        ptr_meta::metadata(&raw const *err)
-    });
+    static STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> =
+        std::sync::LazyLock::new(|| {
+            let err: Box<dyn StdError + Send + Sync + 'static> = "probe".into();
+            ptr_meta::metadata(&raw const *err)
+        });
 
     // errors constructed from `Cow` have a different vtable
-    static COW_STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
-        let err: Box<dyn StdError + Send + Sync + 'static> = Cow::Borrowed("probe").into();
-        ptr_meta::metadata(&raw const *err)
-    });
+    static COW_STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> =
+        std::sync::LazyLock::new(|| {
+            let err: Box<dyn StdError + Send + Sync + 'static> = Cow::Borrowed("probe").into();
+            ptr_meta::metadata(&raw const *err)
+        });
 
     ptr_meta::metadata(err) == *STRING_VTABLE || ptr_meta::metadata(err) == *COW_STRING_VTABLE
 }
