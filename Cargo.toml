@@ -22,34 +22,17 @@ homepage = "https://github.com/microsoft/oxidizer"
 
 [workspace.dependencies]
 
-# local dependencies
-anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.0" }
-bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
-data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.10.1" }
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
-data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
-fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
-fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
-fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.3.1" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
-recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.1" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.4.0" }
-testing_aids = { path = "crates/testing_aids", default-features = false }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
-tick = { path = "crates/tick", default-features = false, version = "0.2.1" }
-uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
-
 # external dependencies
 ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
+
+# local dependencies
+anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
 async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.0" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
@@ -82,6 +65,7 @@ pin-project-lite = { version = "0.2.13", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
+ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 regex = { version = "1.12.2", default-features = false }
@@ -103,7 +87,6 @@ tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
-ptr_meta = { version = "0.3.1", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 xutex = { version = "0.2.0", default-features = false }
