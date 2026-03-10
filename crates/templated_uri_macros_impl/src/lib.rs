@@ -40,6 +40,7 @@ pub(crate) use bail;
 
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
+#[cfg_attr(coverage_nightly, coverage(off))] // thin wrapper; tested via inner functions
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
     // Parse the item (struct/enum definition)
     let mut input: DeriveInput = match parse2(item) {
@@ -174,6 +175,7 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
+#[cfg_attr(coverage_nightly, coverage(off))] // thin wrapper; tested via inner functions
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
@@ -184,6 +186,7 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 }
 
 #[must_use]
+#[cfg_attr(coverage_nightly, coverage(off))] // thin wrapper; tested via inner functions
 pub fn uri_unsafe_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
