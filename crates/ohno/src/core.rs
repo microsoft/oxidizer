@@ -195,9 +195,14 @@ const STR_TYPE_IDS: [typeid::ConstTypeId; 3] = [
     typeid::ConstTypeId::of::<Cow<'_, str>>(),
 ];
 
+static BOX_STR_TYPE: std::sync::LazyLock<std::any::TypeId> = std::sync::LazyLock::new(|| {
+    let err: Box<dyn StdError + Send + Sync> = "a string error".into();
+    std::any::Any::type_id(&err)
+});
+
 fn is_string_error<T>(_: &T) -> bool {
     let typeid_of_t = typeid::of::<T>();
-    STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t)
+    STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t) || *BOX_STR_TYPE == typeid_of_t
 }
 
 /// Helper struct for formatting error messages in a consistent way.
@@ -261,14 +266,38 @@ mod tests {
         if let Source::Transparent(source) = &error.data.source {
             assert_eq!(source.to_string(), "msg");
         }
-        assert!(matches!(&error.data.source, Source::Transparent(_)), "expected transparent source");
+        assert!(matches!(&error.data.source, Source::Transparent(_)), "{:?}", error.data.source);
     }
+
+    #[test]
+    fn from_boxed_string_error() {
+        let boxed: Box<dyn StdError + Send + Sync> = "a boxed string error".into();
+        let error = OhnoCore::from(boxed);
+        assert!(error.source().is_none());
+        let Source::Transparent(source) = &error.data.source else {
+            panic!("expected transparent source: found {:?}", error.data.source);
+        };        
+        assert_eq!(source.to_string(), "a boxed string error");
+    }
+
+    #[test]
+    fn test_from_boxed_io_error() {
+        let io_error = std::io::Error::other("io error");
+        let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
+        println!("{:?}", std::any::Any::type_id(&boxed));
+        println!("{:?}", std::any::Any::type_id(boxed.as_ref()));
+        println!("{:?}", *BOX_STR_TYPE);
+        let error = OhnoCore::from(boxed);
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
+        assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
+    }
+
 
     #[test]
     fn test_caused_by_without_backtrace() {
         let io_error = std::io::Error::other("io error");
         let error = OhnoCore::without_backtrace(io_error);
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(!error.has_backtrace());
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
@@ -277,25 +306,15 @@ mod tests {
     fn test_caused_by() {
         let io_error = std::io::Error::other("io error");
         let error = OhnoCore::from(io_error);
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
-
-    #[test]
-    fn test_from_boxed_error() {
-        let io_error = std::io::Error::other("io error");
-        let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
-        let error = OhnoCore::from(boxed);
-        assert!(matches!(error.data.source, Source::Error(_)));
-        assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
-    }
-
     #[test]
     fn test_from_boxed_error_2() {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
         let error: OhnoCore = boxed.into();
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
 
@@ -338,7 +357,7 @@ mod tests {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
         let error: OhnoCore = boxed.into();
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
 
