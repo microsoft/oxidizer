@@ -47,6 +47,11 @@ pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream 
         Err(err) => return err.to_compile_error(),
     };
 
+    // Generic types are not supported
+    if !input.generics.params.is_empty() {
+        return syn::Error::new_spanned(&input.generics, "Generic types are not supported for #[templated]").to_compile_error();
+    }
+
     // If attributes were passed via the attribute macro, parse and add them
     if !attr.is_empty() {
         // Create an attribute from the tokens and add it to the input's attributes
@@ -1231,5 +1236,47 @@ mod tests {
         assert!(filtered_str.contains("String"), "Output should contain String type: {filtered_str}");
         assert!(filtered_str.contains("i32"), "Output should contain i32 type: {filtered_str}");
         assert!(filtered_str.contains("u64"), "Output should contain u64 type: {filtered_str}");
+    }
+
+    #[test]
+    fn test_generic_struct_rejected() {
+        let attr = quote! { template="/{param}" };
+        let item = quote! {
+            struct GenericTemplate<T> {
+                param: T,
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert_snapshot!(output_pretty, @r#"
+        ::core::compile_error! {
+            "Generic types are not supported for #[templated]"
+        }
+        "#);
+    }
+
+    #[test]
+    fn test_generic_uri_param_rejected() {
+        let input = quote! {
+            struct Wrapper<T>(T);
+        };
+
+        let output = uri_unsafe_param_derive_impl(input);
+        let output_str = output.to_string();
+        assert!(
+            output_str.contains("compile_error"),
+            "Should reject generic UriUnsafeParam: {output_str}"
+        );
+    }
+
+    #[test]
+    fn test_generic_uri_safe_param_rejected() {
+        let input = quote! {
+            struct Wrapper<T>(T);
+        };
+
+        let output = uri_param_derive_impl(input);
+        let output_str = output.to_string();
+        assert!(output_str.contains("compile_error"), "Should reject generic UriParam: {output_str}");
     }
 }

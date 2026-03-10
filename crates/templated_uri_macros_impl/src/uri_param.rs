@@ -12,6 +12,10 @@ use crate::bail;
 pub(crate) fn uri_param_impl(input: DeriveInput) -> TokenStream {
     let ident = &input.ident;
 
+    if !input.generics.params.is_empty() {
+        return syn::Error::new_spanned(&input.generics, "UriParam cannot be derived for generic types").to_compile_error();
+    }
+
     // Only support tuple structs (newtype pattern)
     let fields = match input.data {
         Data::Struct(ref data) => match data.fields {
@@ -47,6 +51,10 @@ pub(crate) fn uri_param_impl(input: DeriveInput) -> TokenStream {
 /// Generates the `UriUnsafeParam` trait implementation for a newtype struct.
 pub(crate) fn uri_unsafe_param_impl(input: DeriveInput) -> TokenStream {
     let ident = &input.ident;
+
+    if !input.generics.params.is_empty() {
+        return syn::Error::new_spanned(&input.generics, "UriUnsafeParam cannot be derived for generic types").to_compile_error();
+    }
 
     // Only support tuple structs (newtype pattern)
     let fields = match input.data {
