@@ -213,7 +213,7 @@ fn is_string_error<T>(_: &T) -> bool {
 fn is_boxed_string_error(err: &(dyn StdError + Send + Sync + 'static)) -> bool {
     static VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
         let err: Box<dyn StdError + Send + Sync + 'static> = "probe".into();
-        ptr_meta::metadata(&*err)
+        ptr_meta::metadata(&raw const *err)
     });
 
     ptr_meta::metadata(err) == *VTABLE
