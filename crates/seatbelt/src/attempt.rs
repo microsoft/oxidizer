@@ -1,18 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(dead_code, reason = "need to work across many combinations of features, let's just allow it")]
+
 use std::fmt::Display;
 
 /// Attribute key for the attempt index.
-#[cfg(any(feature = "metrics", test))]
 pub(crate) const ATTEMPT_INDEX: &str = "resilience.attempt.index";
 
 /// Attribute key for whether this is the last attempt.
-#[cfg(any(feature = "metrics", test))]
 pub(crate) const ATTEMPT_IS_LAST: &str = "resilience.attempt.is_last";
 
 /// Attribute key for the recovery kind that triggered the attempt.
-#[cfg(any(feature = "metrics", test))]
 pub(crate) const ATTEMPT_RECOVERY_KIND: &str = "resilience.attempt.recovery.kind";
 
 /// Tracks the current attempt within a resilience operation.
