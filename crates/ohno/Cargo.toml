@@ -28,6 +28,7 @@ test-util = []
 
 [dependencies]
 ohno_macros.workspace = true
+ptr_meta.workspace = true
 typeid.workspace = true
 
 [dev-dependencies]

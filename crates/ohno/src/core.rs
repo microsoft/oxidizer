@@ -205,32 +205,18 @@ fn is_string_error<T>(_: &T) -> bool {
     STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t)
 }
 
-/// Returns the vtable address from a trait object reference, for comparing
-/// whether two trait objects have the same concrete type.
-fn vtable_of(err: &(dyn StdError + Send + Sync)) -> usize {
-    let raw: *const (dyn StdError + Send + Sync) = err;
-    // SAFETY: *const dyn Trait is a fat pointer: (data_ptr, vtable_ptr).
-    // Transmuting to [usize; 2] extracts both pointer-sized components.
-    // This representation is documented in the Rustonomicon and relied upon
-    // by the Rust ecosystem. transmute also provides a compile-time size check.
-    let [_, vtable] = unsafe { std::mem::transmute::<*const (dyn StdError + Send + Sync), [usize; 2]>(raw) };
-    vtable
-}
-
-/// Returns the vtable address for std's private `StringError` type, produced
-/// when converting `&str`/`String` into `Box<dyn StdError + Send + Sync>`.
-fn string_error_vtable() -> usize {
-    static VTABLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *VTABLE.get_or_init(|| {
-        let err: Box<dyn StdError + Send + Sync> = "probe".into();
-        vtable_of(&*err)
-    })
-}
-
 /// Checks at runtime whether a type-erased error is std's private `StringError`
 /// by comparing its vtable against the known `StringError` vtable.
-fn is_boxed_string_error(err: &(dyn StdError + Send + Sync)) -> bool {
-    vtable_of(err) == string_error_vtable()
+/// 
+/// This behavior is not guaranteed to be stable across Rust versions, so there might be cases where
+/// `StringError` is not detected and gets treated as a normal error source.
+fn is_boxed_string_error(err: &(dyn StdError + Send + Sync + 'static)) -> bool {
+    static VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
+        let err: Box<dyn StdError + Send + Sync + 'static> = "probe".into();
+        ptr_meta::metadata(&*err)
+    });
+
+    ptr_meta::metadata(err) == *VTABLE
 }
 
 /// Helper struct for formatting error messages in a consistent way.
@@ -316,7 +302,6 @@ mod tests {
         assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
-
 
     #[test]
     fn test_caused_by_without_backtrace() {
