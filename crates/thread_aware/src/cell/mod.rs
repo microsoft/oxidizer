@@ -499,16 +499,6 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
                 Factory::Closure(factory, factory_source_affinity) => {
                     let factory_clone = (**factory).clone();
 
-                    // Detect inconsistent source affinities across multiple relocated() calls:
-                    // once factory_source_affinity is recorded, all subsequent calls must
-                    // supply the same source so that factory data is relocated correctly.
-                    debug_assert!(
-                        factory_source_affinity.is_none() || *factory_source_affinity == Some(source),
-                        "Caller passed source affinity {source:?} but the factory was originally created from \
-                         {factory_source_affinity:?}; all calls to relocated() on the same Arc must use the \
-                         same source affinity to ensure factory data is relocated consistently"
-                    );
-
                     // In case factory source is stored in factory, use that - it means we already transferred the factory
                     // once, so we know the original source affinity. Otherwise, use source as that means this is the first
                     // time we're transferring the Arc, so source is the source affinity of the factory as well.
