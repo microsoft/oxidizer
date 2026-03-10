@@ -554,6 +554,85 @@ mod tests {
     }
 
     #[test]
+    fn test_query_param_is_kv_expansion() {
+        let attr = quote! { template="/api/{resource}{?page,limit}" };
+        let item = quote! {
+            struct QueryTest {
+                resource: String,
+                page: String,
+                limit: String
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        // Verify the generated RedactedDisplay emits "key=" for query params
+        assert_snapshot!(output_pretty, @r#"
+        struct QueryTest {
+            resource: String,
+            page: String,
+            limit: String,
+        }
+        impl ::templated_uri::TemplatedPathAndQuery for QueryTest {
+            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+                "/api/{resource}{?page,limit}"
+            }
+            fn template(&self) -> &'static core::primitive::str {
+                "/api/{resource}?page={page}&limit={limit}"
+            }
+            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+                ::core::option::Option::None
+            }
+            fn to_uri_string(&self) -> ::std::string::String {
+                use ::templated_uri::UriParam;
+                use ::templated_uri::UriUnsafeParam;
+                let resource = self.resource.as_uri_safe();
+                let page = self.page.as_uri_safe();
+                let limit = self.limit.as_uri_safe();
+                ::std::format!("/api/{resource}?page={page}&limit={limit}")
+            }
+            fn to_path_and_query(
+                &self,
+            ) -> ::std::result::Result<
+                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::ValidationError,
+            > {
+                let uri_string = self.to_uri_string();
+                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+            }
+        }
+        impl ::std::fmt::Debug for QueryTest {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.debug_tuple("QueryTest").field(&"/api/{resource}{?page,limit}").finish()
+            }
+        }
+        impl ::data_privacy::RedactedDisplay for QueryTest {
+            fn fmt(
+                &self,
+                engine: &::data_privacy::RedactionEngine,
+                f: &mut ::std::fmt::Formatter,
+            ) -> ::std::fmt::Result {
+                ::std::write!(f, "{}", "/api/")?;
+                <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, engine, f)?;
+                ::std::write!(f, "?")?;
+                ::std::write!(f, "{}=", "page")?;
+                <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, engine, f)?;
+                ::std::write!(f, "&")?;
+                ::std::write!(f, "{}=", "limit")?;
+                <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, engine, f)?;
+                ::std::result::Result::Ok(())
+            }
+        }
+        impl From<QueryTest> for ::templated_uri::uri::TargetPathAndQuery {
+            fn from(value: QueryTest) -> Self {
+                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
+                    ::std::sync::Arc::new(value),
+                )
+            }
+        }
+        "#);
+    }
+
+    #[test]
     fn test_excessive_template_impl() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
         let item = quote! {
