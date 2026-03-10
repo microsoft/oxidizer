@@ -295,6 +295,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // miri does not guarantee vtable deduplication
     #[expect(clippy::redundant_type_annotations, reason = "this test intentionally uses explicit annotations")]
     fn from_boxed_string_error() {
         let err: &'static str = "a boxed string error";
@@ -443,6 +444,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)] // miri does not guarantee vtable deduplication
     #[expect(clippy::redundant_type_annotations, reason = "this test intentionally uses explicit annotations")]
     fn is_boxed_string_error_test() {
         let err: &'static str = "a string slice";
