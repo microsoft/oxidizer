@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::redundant_type_annotations, reason = "this test intetionally uses explicit annotations")]
+    #[expect(clippy::redundant_type_annotations, reason = "this test intentionally uses explicit annotations")]
     fn from_boxed_string_error() {
         let err: &'static str = "a boxed string error";
         let boxed: Box<dyn StdError + Send + Sync> = err.into();
