@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::redundant_type_annotations, reason = "this test intetionally uses explicit annotations")]
+    #[expect(clippy::redundant_type_annotations, reason = "this test intentionally uses explicit annotations")]
     fn is_boxed_string_error_test() {
         let err: &'static str = "a string slice";
         let string_err: Box<dyn StdError + Send + Sync> = err.into();
