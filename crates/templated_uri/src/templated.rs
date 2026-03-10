@@ -15,8 +15,8 @@ use crate::{Uri, ValidationError};
 /// This trait is not meant to be implemented directly; use the `#[templated]` attribute macro instead.
 ///
 /// Templates follow [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) Level 3.
-/// All template values must implement [`UriParam`](crate::UriParam), except for fragments (`{#foo}`)
-/// and unfiltered expansions (`{+foo}`). This ensures variables cannot contain reserved characters
+/// All template values must implement [`UriParam`](crate::UriParam), except for
+/// unfiltered expansions (`{+foo}`). This ensures variables cannot contain reserved characters
 /// as defined by the RFC.
 ///
 /// # Example

@@ -145,12 +145,14 @@ Level 3 URI Template specification. Supported expansions include:
 
 * Simple string expansion: `{var}`
 * Reserved string expansion: `{+var}`
-* Fragment expansion: `{#var}`
 * Path segments: `{/var}`
 * Query parameters: `{?var}`
 * Query continuation: `{&var}`
 
-Template variables must implement [`UriParam`][__link8] (except for fragment and reserved expansions)
+Note: Fragment expansion (`{#var}`) from RFC 6570 is **not supported** because URI
+fragments are stripped by the `http` crate and ignored by HTTP clients.
+
+Template variables must implement [`UriParam`][__link8] (except for reserved expansions)
 to ensure the resulting URI is valid.
 
 ## Integration with HTTP Ecosystem
@@ -166,7 +168,7 @@ and servers based on [`hyper`][__link12] like [`reqwest`][__link13].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4l3V8Tcw56VG5FLVHTvdz4qG8KZH5D_vJ8DG9zze4J82qvtYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyIZu7e6bvFMG9_SXWN1Sb-DG00_3R3OA9lRG1_XMNG8hlcrYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
  [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri

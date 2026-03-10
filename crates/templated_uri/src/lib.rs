@@ -137,12 +137,14 @@
 //!
 //! - Simple string expansion: `{var}`
 //! - Reserved string expansion: `{+var}`
-//! - Fragment expansion: `{#var}`
 //! - Path segments: `{/var}`
 //! - Query parameters: `{?var}`
 //! - Query continuation: `{&var}`
 //!
-//! Template variables must implement [`UriParam`] (except for fragment and reserved expansions)
+//! Note: Fragment expansion (`{#var}`) from RFC 6570 is **not supported** because URI
+//! fragments are stripped by the `http` crate and ignored by HTTP clients.
+//!
+//! Template variables must implement [`UriParam`] (except for reserved expansions)
 //! to ensure the resulting URI is valid.
 //!
 //! # Integration with HTTP Ecosystem
