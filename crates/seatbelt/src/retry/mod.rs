@@ -201,9 +201,9 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 #[deprecated(note = "import from `seatbelt::Attempt` instead")]
 pub use crate::attempt::Attempt;
+pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;
 pub(crate) use callbacks::{CloneInput, OnRetry, RestoreInput, ShouldRecover};
