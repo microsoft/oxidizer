@@ -313,7 +313,7 @@ impl BaseUri {
     /// ```
     pub fn from_uri_str(uri: &str) -> Result<Self, ValidationError> {
         uri.parse::<http::Uri>()
-            .map_err(|e| ValidationError::caused_by(e.to_string()))
+            .map_err(Into::into)
             .and_then(|uri| Self::from_http_uri(&uri))
     }
 

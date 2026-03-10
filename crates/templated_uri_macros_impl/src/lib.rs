@@ -40,7 +40,6 @@ pub(crate) use bail;
 
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // not relevant for auto-generated proc macros
-#[cfg_attr(coverage_nightly, coverage(off))] // thin wrapper; tested via inner functions
 pub fn templated_paq_impl(attr: &TokenStream, item: TokenStream) -> TokenStream {
     // Parse the item (struct/enum definition)
     let mut input: DeriveInput = match parse2(item) {
@@ -175,7 +174,6 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
 
 #[must_use]
 #[cfg_attr(test, mutants::skip)] // just emits compile error otherwise
-#[cfg_attr(coverage_nightly, coverage(off))] // thin wrapper; tested via inner functions
 pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
@@ -186,7 +184,6 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 }
 
 #[must_use]
-#[cfg_attr(coverage_nightly, coverage(off))] // thin wrapper; tested via inner functions
 pub fn uri_unsafe_param_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
@@ -1281,5 +1278,26 @@ mod tests {
         let output = uri_param_derive_impl(input);
         let output_str = output.to_string();
         assert!(output_str.contains("compile_error"), "Should reject generic UriParam: {output_str}");
+    }
+
+    #[test]
+    fn test_filter_original_unit_struct() {
+        use syn::DeriveInput;
+
+        let input: DeriveInput = syn::parse_quote! {
+            #[derive(Debug)]
+            #[templated(template = "/test")]
+            pub struct UnitStruct;
+        };
+
+        let filtered = super::filter_original(&input);
+        let filtered_str = filtered.to_string();
+
+        assert!(
+            filtered_str.contains("pub struct UnitStruct"),
+            "Should contain struct: {filtered_str}"
+        );
+        assert!(filtered_str.contains("derive"), "Should keep derive: {filtered_str}");
+        assert!(!filtered_str.contains("templated"), "Should filter templated: {filtered_str}");
     }
 }

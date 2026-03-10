@@ -25,7 +25,7 @@ pub use templated_uri_macros::UriParam;
 /// Derives the `UriUnsafeParam` trait for newtype wrappers with unrestricted characters.
 ///
 /// This derive macro implements `UriUnsafeParam` for tuple structs with exactly one field.
-/// The implementation calls `as_display()` on the inner type, making it suitable for use in
+/// The implementation delegates to the inner field's [`Display`](std::fmt::Display) impl, making it suitable for use in
 /// URI templates with unrestricted `{+param}` placeholders that allow reserved characters.
 ///
 /// # Requirements

@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // You need to be careful with this as it contains the classified data.
     let _actual_uri: Uri = target.clone();
 
-    // Either of this is safe for telemetry:
+    // Either of these is safe for telemetry:
     println!("Redacted URI: {target:?}"); // Prints safe generic debug representation
     println!(
         "Redacted URI: {}",
