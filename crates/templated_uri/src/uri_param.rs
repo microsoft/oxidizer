@@ -51,6 +51,12 @@ impl UriParam for UriSafeString {
     }
 }
 
+impl UriUnsafeParam for UriSafeString {
+    fn as_display(&self) -> impl Display {
+        self.as_str()
+    }
+}
+
 impl_uri_param!(usize);
 impl_uri_param!(u8);
 impl_uri_param!(u16);
@@ -126,6 +132,12 @@ mod tests {
     fn uri_param_uri_safe_string() {
         let s = UriSafeString::encode("hello");
         assert_eq!(format!("{}", s.as_uri_safe()), "hello");
+    }
+
+    #[test]
+    fn uri_unsafe_param_uri_safe_string() {
+        let s = UriSafeString::encode("hello world");
+        assert_eq!(format!("{}", s.as_display()), "hello%20world");
     }
 
     #[test]

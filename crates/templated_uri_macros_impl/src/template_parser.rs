@@ -115,8 +115,8 @@ impl<'a> ParamGroup<'a> {
             .map(|(param_kind, param_names)| ParamGroup { param_kind, param_names })
     }
 
-    /// Checks if the parameter group allows restricted parameters.
-    pub(crate) fn allows_restricted(&self) -> bool {
+    /// Checks if the parameter group allows unrestricted (reserved) characters in values.
+    pub(crate) fn is_unrestricted(&self) -> bool {
         matches!(self.param_kind, ParamKind::Unfiltered)
     }
 
@@ -124,7 +124,7 @@ impl<'a> ParamGroup<'a> {
     pub(crate) fn params(&self) -> impl Iterator<Item = Param<'a>> {
         self.param_names.iter().map(|&name| Param {
             name,
-            allows_restricted: self.allows_restricted(),
+            is_unrestricted: self.is_unrestricted(),
         })
     }
 
@@ -169,7 +169,7 @@ impl<'a> ParamGroup<'a> {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Param<'a> {
     pub(crate) name: &'a str,
-    pub(crate) allows_restricted: bool,
+    pub(crate) is_unrestricted: bool,
 }
 
 /// Represents a prefix for a prefixed parameter kind

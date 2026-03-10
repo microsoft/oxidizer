@@ -106,9 +106,11 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     let template_param_names = template.param_names();
 
     // Compare the template parameters with the struct fields and errors if there are mismatches.
-    let excess_values: Vec<_> = struct_field_names.difference(&template_param_names).collect();
+    let mut excess_values: Vec<_> = struct_field_names.difference(&template_param_names).collect();
+    excess_values.sort();
 
-    let missing_values: Vec<_> = template_param_names.difference(&struct_field_names).collect();
+    let mut missing_values: Vec<_> = template_param_names.difference(&struct_field_names).collect();
+    missing_values.sort();
 
     if !missing_values.is_empty() {
         crate::bail!(ident, "Missing values in struct: {missing_values:?}")
@@ -121,7 +123,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `UriSafe`).
     let unrestricted_params: HashSet<String> = template_params
         .iter()
-        .filter(|p| p.allows_restricted)
+        .filter(|p| p.is_unrestricted)
         .map(|p| p.name.to_owned())
         .collect();
 
