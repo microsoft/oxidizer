@@ -42,6 +42,6 @@ RetryLayer {
         logs_enabled: false,
     },
     restore_input: None,
-    handle_unavailable: false,
+    handle_unavailable: true,
     _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::Set) -> alloc::string::String>,
 }

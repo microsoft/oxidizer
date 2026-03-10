@@ -26,7 +26,7 @@ HedgingLayer {
         ShouldRecover,
     ),
     on_execute: None,
-    handle_unavailable: false,
+    handle_unavailable: true,
     enable_if: Disabled,
     telemetry: TelemetryHelper {
         pipeline_name: "test_pipeline",
