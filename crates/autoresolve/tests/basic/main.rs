@@ -5,7 +5,6 @@ use autoresolve_macros::base;
 // `#[resolvable]` produce correct impls even when not all types are in scope at
 // the usage site.
 
-#[macro_use]
 mod runtime;
 use runtime::builtins;
 

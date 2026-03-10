@@ -1,0 +1,5 @@
+error: scoped parent must be a module-qualified path (e.g., `parent_mod::ParentType`)
+  --> tests/compile_fail/scoped_parent_not_module_qualified.rs:14:15
+   |
+14 | #[base(scoped(AppBase))]
+   |               ^^^^^^^

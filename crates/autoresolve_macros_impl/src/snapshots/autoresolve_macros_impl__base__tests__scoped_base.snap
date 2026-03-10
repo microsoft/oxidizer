@@ -16,11 +16,29 @@ mod scoped_mod {
             unreachable!("scoped root types are inserted by BaseType::insert_into")
         }
     }
-    impl ::autoresolve::ScopedUnder for ScopedRoots {
-        type Parent = Base;
+    #[doc(hidden)]
+    pub(crate) use super::base_mod as __parent;
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! __autoresolve_scoped_mod {
+        (@ impls $base:path, $($self_mod:tt)*) => {
+            $($self_mod)* ::__parent::Base!(@ impls $base, $($self_mod)* ::__parent);
+            impl ::autoresolve::ResolveFrom < $base > for $($self_mod)* ::__Part0 { type
+            Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            ::autoresolve::ResolutionDepsEnd) -> Self {
+            unreachable!("root types are pre-inserted into the resolver") } }
+        };
+        (@ insert $store:ident, $name:ident, $($self_mod:tt)*) => {
+            $store .store_value($name .request_context);
+        };
     }
+    #[doc(hidden)]
+    pub use __autoresolve_scoped_mod as ScopedRoots;
 }
-Base!(@ impls scoped_mod::ScopedRoots);
+impl ::autoresolve::ScopedUnder for scoped_mod::ScopedRoots {
+    type Parent = base_mod::Base;
+}
+base_mod::Base!(@ impls scoped_mod::ScopedRoots, base_mod);
 impl ::autoresolve::BaseType<scoped_mod::ScopedRoots> for scoped_mod::ScopedRoots {
     fn insert_into(
         self,
@@ -30,19 +48,6 @@ impl ::autoresolve::BaseType<scoped_mod::ScopedRoots> for scoped_mod::ScopedRoot
         __store.store_value(request_context);
     }
 }
-#[doc(hidden)]
-#[allow(unused_macros)]
-macro_rules! ScopedRoots {
-    (@ impls $base:path) => {
-        Base!(@ impls $base); impl ::autoresolve::ResolveFrom < $base > for
-        scoped_mod::__Part0 { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
-        ::autoresolve::ResolutionDepsEnd) -> Self {
-        unreachable!("root types are pre-inserted into the resolver") } }
-    };
-    (@ insert $store:ident, $name:ident) => {
-        $store .store_value($name .request_context);
-    };
-}
 const _: fn() = || {
-    _ = std::mem::size_of::<crate::scoped_mod::__Part0>();
+    _ = std::mem::size_of::<scoped_mod::__Part0>();
 };

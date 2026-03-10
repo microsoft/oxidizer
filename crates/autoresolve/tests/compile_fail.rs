@@ -20,4 +20,7 @@ fn compile_fail() {
     t.compile_fail("tests/compile_fail/dependency_cycle.rs");
     t.compile_fail("tests/compile_fail/scoped_type_not_resolvable_from_parent.rs");
     t.compile_fail("tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs");
+
+    // Base macro validation errors
+    t.compile_fail("tests/compile_fail/scoped_parent_not_module_qualified.rs");
 }

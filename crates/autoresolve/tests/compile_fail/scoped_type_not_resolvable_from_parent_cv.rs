@@ -25,14 +25,12 @@ mod app_base {
 
 use app_base::AppBase;
 
-#[base(scoped(super::app_base::AppBase))]
+#[base(scoped(app_base::AppBase))]
 mod request_base {
     pub struct RequestBase {
         pub request: super::Request,
     }
 }
-
-use request_base::RequestBase;
 
 fn main() {
     let mut parent = autoresolve::Resolver::new(AppBase { scheduler: Scheduler });

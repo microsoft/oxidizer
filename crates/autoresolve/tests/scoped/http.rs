@@ -1,7 +1,5 @@
 use autoresolve_macros::base;
 
-use super::app_base;
-
 pub mod request;
 
 #[base(scoped(super::app_base::AppBase))]

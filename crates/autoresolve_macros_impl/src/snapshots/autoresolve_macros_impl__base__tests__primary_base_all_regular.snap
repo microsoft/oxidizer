@@ -27,6 +27,25 @@ mod base_mod {
             unreachable!("base types are pre-inserted into the resolver")
         }
     }
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! __autoresolve_base_mod {
+        (@ impls $base:path, $($self_mod:tt)*) => {
+            impl ::autoresolve::ResolveFrom < $base > for $($self_mod)* ::__Part0 { type
+            Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            ::autoresolve::ResolutionDepsEnd) -> Self {
+            unreachable!("root types are pre-inserted into the resolver") } } impl
+            ::autoresolve::ResolveFrom < $base > for $($self_mod)* ::__Part1 { type
+            Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            ::autoresolve::ResolutionDepsEnd) -> Self {
+            unreachable!("root types are pre-inserted into the resolver") } }
+        };
+        (@ insert $store:ident, $name:ident, $($self_mod:tt)*) => {
+            $store .store_value($name .scheduler); $store .store_value($name .clock);
+        };
+    }
+    #[doc(hidden)]
+    pub use __autoresolve_base_mod as Base;
 }
 impl ::autoresolve::BaseType<base_mod::Base> for base_mod::Base {
     fn insert_into(
@@ -38,22 +57,7 @@ impl ::autoresolve::BaseType<base_mod::Base> for base_mod::Base {
         __store.store_value(clock);
     }
 }
-#[doc(hidden)]
-#[allow(unused_macros)]
-macro_rules! Base {
-    (@ impls $base:path) => {
-        impl ::autoresolve::ResolveFrom < $base > for base_mod::__Part0 { type Inputs =
-        ::autoresolve::ResolutionDepsEnd; fn new(_ : ::autoresolve::ResolutionDepsEnd) ->
-        Self { unreachable!("root types are pre-inserted into the resolver") } } impl
-        ::autoresolve::ResolveFrom < $base > for base_mod::__Part1 { type Inputs =
-        ::autoresolve::ResolutionDepsEnd; fn new(_ : ::autoresolve::ResolutionDepsEnd) ->
-        Self { unreachable!("root types are pre-inserted into the resolver") } }
-    };
-    (@ insert $store:ident, $name:ident) => {
-        $store .store_value($name .scheduler); $store .store_value($name .clock);
-    };
-}
 const _: fn() = || {
-    _ = std::mem::size_of::<crate::base_mod::__Part0>();
-    _ = std::mem::size_of::<crate::base_mod::__Part1>();
+    _ = std::mem::size_of::<base_mod::__Part0>();
+    _ = std::mem::size_of::<base_mod::__Part1>();
 };

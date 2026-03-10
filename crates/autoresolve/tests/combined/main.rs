@@ -9,7 +9,6 @@ use autoresolve_macros::base;
 
 mod clock;
 mod http;
-#[macro_use]
 mod runtime;
 use runtime::builtins;
 mod scheduler;

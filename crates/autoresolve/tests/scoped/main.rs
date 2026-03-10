@@ -29,9 +29,8 @@ mod app_base {
 
 use app_base::AppBase;
 
-#[macro_use]
 mod http;
-use http::request_base;
+use http::request_base::RequestBase;
 mod task;
 use task::task_base;
 
@@ -55,7 +54,6 @@ mod task_handler;
 use client::Client;
 use correlation_vector::CorrelationVector;
 use http::request::Request;
-use http::request_base::RequestBase;
 use task::task::Task;
 use task::task_base::TaskBase;
 use task_client::TaskClient;

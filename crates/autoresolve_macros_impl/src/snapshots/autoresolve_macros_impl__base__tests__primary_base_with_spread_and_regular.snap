@@ -4,13 +4,13 @@ expression: pretty_print(result)
 ---
 mod app_base {
     struct Base {
-        builtins: Builtins,
+        builtins: builtins_mod::Builtins,
         telemetry: Telemetry,
     }
     #[doc(hidden)]
     pub(crate) use Telemetry as __Part0;
     #[allow(unused_imports)]
-    pub(crate) use Builtins as Builtins;
+    pub(crate) use builtins_mod::Builtins as Builtins;
     #[allow(unused_imports)]
     pub(crate) use Telemetry as Telemetry;
     impl ::autoresolve::ResolveFrom<Base> for Telemetry {
@@ -19,32 +19,38 @@ mod app_base {
             unreachable!("base types are pre-inserted into the resolver")
         }
     }
+    #[doc(hidden)]
+    pub(crate) use builtins_mod as __spread0;
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! __autoresolve_app_base {
+        (@ impls $base:path, $($self_mod:tt)*) => {
+            $($self_mod)* ::__spread0::Builtins!(@ impls $base, $($self_mod)*
+            ::__spread0); impl ::autoresolve::ResolveFrom < $base > for $($self_mod)*
+            ::__Part0 { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+            ::autoresolve::ResolutionDepsEnd) -> Self {
+            unreachable!("root types are pre-inserted into the resolver") } }
+        };
+        (@ insert $store:ident, $name:ident, $($self_mod:tt)*) => {
+            { let __spread = $name .builtins; $($self_mod)* ::__spread0::Builtins!(@
+            insert $store, __spread, $($self_mod)* ::__spread0); } $store
+            .store_value($name .telemetry);
+        };
+    }
+    #[doc(hidden)]
+    pub use __autoresolve_app_base as Base;
 }
-Builtins!(@ impls app_base::Base);
+app_base::__spread0::Builtins!(@ impls app_base::Base, app_base::__spread0);
 impl ::autoresolve::BaseType<app_base::Base> for app_base::Base {
     fn insert_into(
         self,
         __store: &mut impl ::autoresolve::ResolverStore<app_base::Base>,
     ) {
         let Self { builtins, telemetry } = self;
-        Builtins!(@ insert __store, builtins);
+        app_base::__spread0::Builtins!(@ insert __store, builtins, app_base::__spread0);
         __store.store_value(telemetry);
     }
 }
-#[doc(hidden)]
-#[allow(unused_macros)]
-macro_rules! Base {
-    (@ impls $base:path) => {
-        Builtins!(@ impls $base); impl ::autoresolve::ResolveFrom < $base > for
-        app_base::__Part0 { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
-        ::autoresolve::ResolutionDepsEnd) -> Self {
-        unreachable!("root types are pre-inserted into the resolver") } }
-    };
-    (@ insert $store:ident, $name:ident) => {
-        { let __spread = $name .builtins; Builtins!(@ insert $store, __spread); } $store
-        .store_value($name .telemetry);
-    };
-}
 const _: fn() = || {
-    _ = std::mem::size_of::<crate::app_base::__Part0>();
+    _ = std::mem::size_of::<app_base::__Part0>();
 };

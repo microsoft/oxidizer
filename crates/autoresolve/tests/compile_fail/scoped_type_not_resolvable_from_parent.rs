@@ -42,7 +42,7 @@ struct TaskHandler {
 
 #[resolvable]
 impl TaskHandler {
-    fn new(cv: &CorrelationVector, tp: &TaskProperties) -> Self {
+    fn new(_cv: &CorrelationVector, tp: &TaskProperties) -> Self {
         Self { task_id: tp.task_id }
     }
 }
@@ -56,23 +56,19 @@ mod app_base {
 
 use app_base::AppBase;
 
-#[base(scoped(super::app_base::AppBase))]
+#[base(scoped(app_base::AppBase))]
 mod request_base {
     pub struct RequestBase {
         pub request: super::Request,
     }
 }
 
-use request_base::RequestBase;
-
-#[base(scoped(super::request_base::RequestBase))]
+#[base(scoped(request_base::RequestBase))]
 mod task_base {
     pub struct TaskBase {
         pub task: super::Task,
     }
 }
-
-use task_base::TaskBase;
 
 fn main() {
     let mut parent = autoresolve::Resolver::new(AppBase { scheduler: Scheduler });
