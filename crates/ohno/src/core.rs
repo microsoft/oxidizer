@@ -184,7 +184,12 @@ where
         if is_string_error(&value) {
             Self::from_source(Source::Transparent(value.into().into()))
         } else {
-            Self::from_source(Source::Error(value.into().into()))
+            let boxed: Box<dyn StdError + Send + Sync> = value.into();
+            if is_boxed_string_error(&*boxed) {
+                Self::from_source(Source::Transparent(boxed.into()))
+            } else {
+                Self::from_source(Source::Error(boxed.into()))
+            }
         }
     }
 }
@@ -195,14 +200,37 @@ const STR_TYPE_IDS: [typeid::ConstTypeId; 3] = [
     typeid::ConstTypeId::of::<Cow<'_, str>>(),
 ];
 
-static BOX_STR_TYPE: std::sync::LazyLock<std::any::TypeId> = std::sync::LazyLock::new(|| {
-    let err: Box<dyn StdError + Send + Sync> = "a string error".into();
-    std::any::Any::type_id(&err)
-});
-
 fn is_string_error<T>(_: &T) -> bool {
     let typeid_of_t = typeid::of::<T>();
-    STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t) || *BOX_STR_TYPE == typeid_of_t
+    STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t)
+}
+
+/// Returns the vtable address from a trait object reference, for comparing
+/// whether two trait objects have the same concrete type.
+fn vtable_of(err: &(dyn StdError + Send + Sync)) -> usize {
+    let raw: *const (dyn StdError + Send + Sync) = err;
+    // SAFETY: *const dyn Trait is a fat pointer: (data_ptr, vtable_ptr).
+    // Transmuting to [usize; 2] extracts both pointer-sized components.
+    // This representation is documented in the Rustonomicon and relied upon
+    // by the Rust ecosystem. transmute also provides a compile-time size check.
+    let [_, vtable] = unsafe { std::mem::transmute::<*const (dyn StdError + Send + Sync), [usize; 2]>(raw) };
+    vtable
+}
+
+/// Returns the vtable address for std's private `StringError` type, produced
+/// when converting `&str`/`String` into `Box<dyn StdError + Send + Sync>`.
+fn string_error_vtable() -> usize {
+    static VTABLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VTABLE.get_or_init(|| {
+        let err: Box<dyn StdError + Send + Sync> = "probe".into();
+        vtable_of(&*err)
+    })
+}
+
+/// Checks at runtime whether a type-erased error is std's private `StringError`
+/// by comparing its vtable against the known `StringError` vtable.
+fn is_boxed_string_error(err: &(dyn StdError + Send + Sync)) -> bool {
+    vtable_of(err) == string_error_vtable()
 }
 
 /// Helper struct for formatting error messages in a consistent way.
@@ -276,7 +304,7 @@ mod tests {
         assert!(error.source().is_none());
         let Source::Transparent(source) = &error.data.source else {
             panic!("expected transparent source: found {:?}", error.data.source);
-        };        
+        };
         assert_eq!(source.to_string(), "a boxed string error");
     }
 
@@ -284,9 +312,6 @@ mod tests {
     fn test_from_boxed_io_error() {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
-        println!("{:?}", std::any::Any::type_id(&boxed));
-        println!("{:?}", std::any::Any::type_id(boxed.as_ref()));
-        println!("{:?}", *BOX_STR_TYPE);
         let error = OhnoCore::from(boxed);
         assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
@@ -399,5 +424,14 @@ mod tests {
         assert!(is_string_error(&Cow::Borrowed("a string slice")));
         assert!(is_string_error(&Cow::<'static, str>::Owned(String::from("a string"))));
         assert!(!is_string_error(&std::io::Error::other("an io error")));
+    }
+
+    #[test]
+    fn is_boxed_string_error_test() {
+        let string_err: Box<dyn StdError + Send + Sync> = "a string".into();
+        assert!(is_boxed_string_error(&*string_err));
+
+        let io_err: Box<dyn StdError + Send + Sync> = Box::new(std::io::Error::other("io"));
+        assert!(!is_boxed_string_error(&*io_err));
     }
 }
