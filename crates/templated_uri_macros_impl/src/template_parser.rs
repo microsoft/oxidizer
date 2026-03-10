@@ -117,7 +117,7 @@ impl<'a> ParamGroup<'a> {
 
     /// Checks if the parameter group allows restricted parameters.
     pub(crate) fn allows_restricted(&self) -> bool {
-        matches!(self.param_kind, ParamKind::Unfiltered | ParamKind::Fragment)
+        matches!(self.param_kind, ParamKind::Unfiltered)
     }
 
     /// Returns an iterator over the parameters in this group.
@@ -194,7 +194,6 @@ impl Prefix {
 enum ParamKind {
     Simple,
     Unfiltered,
-    Fragment,
     SemicolonKV,
     /// Form parameters, which can either start with '?' (`start_char = true`) or continue with '&'
     Form {
@@ -206,7 +205,12 @@ enum ParamKind {
 impl ParamKind {
     fn parser<'a>() -> impl Parser<'a, &'a str, Self, Error<'a>> {
         let unfiltered = just("+").to(Self::Unfiltered);
-        let fragment = just("#").to(Self::Fragment);
+        let fragment = just("#").try_map(|_, span| {
+            Err(Rich::custom(
+                span,
+                "fragment operator {#...} is not supported: URI fragments are stripped by the http crate and ignored by HTTP clients",
+            ))
+        });
         let semicolon_kv = just(";").to(Self::SemicolonKV);
         let form_start = just("?").to(Self::Form { start_char: true });
         let form_continue = just("&").to(Self::Form { start_char: false });
@@ -230,7 +234,7 @@ impl ParamKind {
     /// Returns the separator used between values of this kind of parameter when filling the template.
     fn separator(&self) -> &'static str {
         match self {
-            Self::Simple | Self::Unfiltered | Self::Fragment => ",",
+            Self::Simple | Self::Unfiltered => ",",
             Self::SemicolonKV => ";",
             Self::Form { .. } => "&",
             Self::Prefixed(prefix) => prefix.as_str(),
@@ -241,7 +245,6 @@ impl ParamKind {
     fn prefix(&self) -> Option<&'static str> {
         match self {
             Self::Simple | Self::Unfiltered => None,
-            Self::Fragment => Some("#"),
             Self::SemicolonKV => Some(";"),
             Self::Form { start_char } => {
                 if *start_char {
@@ -304,7 +307,7 @@ mod test {
 
     #[test]
     fn test_parser() {
-        let input = "/{first}/{+param1,param2}/{;param3,param4}/{?query2,query3}/{.dot1,dot2}{/slash1,slash2}{#fragment}";
+        let input = "/{first}/{+param1,param2}/{;param3,param4}/{?query2,query3}/{.dot1,dot2}{/slash1,slash2}";
         let result = UriTemplate::parse(input).unwrap();
         let params = result
             .template_parts
@@ -314,7 +317,7 @@ mod test {
             .collect::<Vec<_>>();
         assert_eq!(
             result.format_template(),
-            "/{first}/{param1},{param2}/;param3={param3};param4={param4}/?query2={query2}&query3={query3}/.{dot1}.{dot2}/{slash1}/{slash2}#{fragment}"
+            "/{first}/{param1},{param2}/;param3={param3};param4={param4}/?query2={query2}&query3={query3}/.{dot1}.{dot2}/{slash1}/{slash2}"
         );
         assert_eq!(
             params,
@@ -343,17 +346,13 @@ mod test {
                     param_kind: ParamKind::Prefixed(Prefix::Slash),
                     param_names: vec!["slash1", "slash2"]
                 }),
-                TemplatePart::ParamGroup(ParamGroup {
-                    param_kind: ParamKind::Fragment,
-                    param_names: vec!["fragment"]
-                })
             ]
         );
     }
 
     #[test]
     fn test_parser_err() {
-        let input = "/{first}/{+param1,param2}/{;param3,param4}/{^query2,query3}/{.dot1,dot2}{/slash1,slash2}{#fragment}";
+        let input = "/{first}/{+param1,param2}/{;param3,param4}/{^query2,query3}/{.dot1,dot2}{/slash1,slash2}";
         let result = UriTemplate::parse(input);
         assert_eq!(
             result.unwrap_err().message(),
@@ -385,6 +384,16 @@ mod test {
         assert_eq!(
             result.unwrap_err().message(),
             "Failed to parse URI: [template cannot be empty at 0..0]"
+        );
+    }
+
+    #[test]
+    fn fragment_operator_rejected() {
+        let input = "/{path}{#fragment}";
+        let result = UriTemplate::parse(input);
+        assert_eq!(
+            result.unwrap_err().message(),
+            "Failed to parse URI: [fragment operator {#...} is not supported: URI fragments are stripped by the http crate and ignored by HTTP clients at 8..9]"
         );
     }
 }
