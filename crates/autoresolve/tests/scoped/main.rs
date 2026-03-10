@@ -14,9 +14,26 @@ use autoresolve_macros::base;
 // Root types — one per scope level, each carrying a construction counter.
 // =============================================================================
 
-mod request;
 mod scheduler;
+
+// =============================================================================
+// Base types — three-level hierarchy: App → Request → Task.
+// =============================================================================
+
+#[base]
+mod app_base {
+    pub struct AppBase {
+        pub scheduler: super::scheduler::Scheduler,
+    }
+}
+
+use app_base::AppBase;
+
+#[macro_use]
+mod http;
+use http::request_base;
 mod task;
+use task::task_base;
 
 // =============================================================================
 // Single-scope dependencies — each captures the counter value at construction.
@@ -34,41 +51,13 @@ mod client;
 mod task_client;
 mod task_handler;
 
-// =============================================================================
-// Base types — three-level hierarchy: App → Request → Task.
-// =============================================================================
-
-#[base]
-mod app_base {
-    pub struct AppBase {
-        pub scheduler: super::scheduler::Scheduler,
-    }
-}
-
-use app_base::AppBase;
-
-#[base(scoped(super::app_base::AppBase))]
-mod request_base {
-    pub struct RequestBase {
-        pub request: super::request::Request,
-    }
-}
-
-use request_base::RequestBase;
-
-#[base(scoped(super::request_base::RequestBase))]
-mod task_base {
-    pub struct TaskBase {
-        pub task: super::task::Task,
-    }
-}
-
 // Convenience imports for test readability.
 use client::Client;
 use correlation_vector::CorrelationVector;
-use request::Request;
-use task::Task;
-use task_base::TaskBase;
+use http::request::Request;
+use http::request_base::RequestBase;
+use task::task::Task;
+use task::task_base::TaskBase;
 use task_client::TaskClient;
 use task_handler::TaskHandler;
 use validator::Validator;

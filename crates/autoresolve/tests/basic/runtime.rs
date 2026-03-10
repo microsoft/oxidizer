@@ -1,7 +1,6 @@
 use autoresolve_macros::base;
 
-pub mod clock;
-pub mod scheduler;
+use super::{clock, scheduler};
 
 #[base]
 pub mod builtins {

@@ -7,10 +7,12 @@ use autoresolve_macros::base;
 // `#[resolvable]` produce correct impls even when not all types are in scope at
 // the usage site.
 
+mod clock;
 mod http;
 #[macro_use]
 mod runtime;
 use runtime::builtins;
+mod scheduler;
 mod telemetry;
 
 mod client;
@@ -33,10 +35,10 @@ mod base {
 fn test_combined() {
     use base::Base;
     use builtins::Builtins;
+    use clock::Clock;
     use http::request::Request;
     use outbound_client::OutboundClient;
-    use runtime::clock::Clock;
-    use runtime::scheduler::Scheduler;
+    use scheduler::Scheduler;
     use telemetry::Telemetry;
 
     let builtins = Builtins {

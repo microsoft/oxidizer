@@ -1,7 +1,7 @@
 use autoresolve_macros::resolvable;
 
-use super::runtime::clock::Clock;
-use super::runtime::scheduler::Scheduler;
+use super::clock::Clock;
+use super::scheduler::Scheduler;
 
 #[derive(Clone)]
 pub struct Config {

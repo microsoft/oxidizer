@@ -1,6 +1,6 @@
 use autoresolve_macros::resolvable;
 
-use super::task::Task;
+use super::task::task::Task;
 
 /// Depends on Task (task-level). Captures the task id.
 #[derive(Clone)]

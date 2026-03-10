@@ -1,6 +1,6 @@
 use autoresolve_macros::resolvable;
 
-use super::runtime::scheduler::Scheduler;
+use super::scheduler::Scheduler;
 use super::telemetry::Telemetry;
 use super::validator::Validator;
 

@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use autoresolve_macros::resolvable;
 
-use super::request::Request;
+use super::http::request::Request;
 
 /// Depends on Request (request-level). `instance` records which construction this was.
 #[derive(Clone)]

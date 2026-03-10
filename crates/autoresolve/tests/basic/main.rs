@@ -9,6 +9,9 @@ use autoresolve_macros::base;
 mod runtime;
 use runtime::builtins;
 
+mod clock;
+mod scheduler;
+
 mod client;
 mod config;
 mod my_service;
@@ -25,10 +28,10 @@ mod my_base {
 #[test]
 fn test_autoresolve() {
     use builtins::Builtins;
+    use clock::Clock;
     use my_base::MyBase;
     use my_service::MyService;
-    use runtime::clock::Clock;
-    use runtime::scheduler::Scheduler;
+    use scheduler::Scheduler;
 
     let builtins = Builtins {
         scheduler: Scheduler,
