@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use super::Attempt;
+use crate::Attempt;
 use crate::RecoveryKind;
 
 /// The name of the hedging event for telemetry reporting.

@@ -212,7 +212,6 @@ mod layer;
 mod service;
 mod telemetry;
 
-pub use crate::attempt::Attempt;
 pub use args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
 pub use config::HedgingConfig;
 pub use layer::HedgingLayer;

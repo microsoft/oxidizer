@@ -205,8 +205,8 @@ pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 mod context;
 pub use context::ResilienceContext;
 
-#[cfg(any(feature = "retry", feature = "hedging", test))]
 pub(crate) mod attempt;
+pub use attempt::Attempt;
 
 pub mod typestates;
 
