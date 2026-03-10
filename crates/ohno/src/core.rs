@@ -292,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::redundant_type_annotations, reason = "this test intetionally uses explicit annotations")]
     fn from_boxed_string_error() {
         let err: &'static str = "a boxed string error";
         let boxed: Box<dyn StdError + Send + Sync> = err.into();
@@ -439,20 +440,21 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::redundant_type_annotations, reason = "this test intetionally uses explicit annotations")]
     fn is_boxed_string_error_test() {
         let err: &'static str = "a string slice";
         let string_err: Box<dyn StdError + Send + Sync> = err.into();
-        assert!(is_boxed_string_error(&*string_err), "{:?}", string_err);
+        assert!(is_boxed_string_error(&*string_err), "{string_err:?}");
 
         let err: String = "a string".to_string();
         let string_err: Box<dyn StdError + Send + Sync> = err.into();
-        assert!(is_boxed_string_error(&*string_err), "{:?}", string_err);
+        assert!(is_boxed_string_error(&*string_err), "{string_err:?}");
 
         let err: Cow<'static, str> = "a cow string".into();
         let string_err: Box<dyn StdError + Send + Sync> = err.into();
-        assert!(is_boxed_string_error(&*string_err), "{:?}", string_err);
+        assert!(is_boxed_string_error(&*string_err), "{string_err:?}");
 
         let io_err: Box<dyn StdError + Send + Sync> = Box::new(std::io::Error::other("io"));
-        assert!(!is_boxed_string_error(&*io_err), "{:?}", io_err);
+        assert!(!is_boxed_string_error(&*io_err), "{io_err:?}");
     }
 }
