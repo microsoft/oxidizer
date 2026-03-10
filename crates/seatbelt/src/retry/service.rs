@@ -16,7 +16,7 @@ use tick::Clock;
 use super::*;
 use crate::typestates::NotSet;
 use crate::utils::EnableIf;
-use crate::{Attempt, RecoveryInfo, RecoveryKind};
+use crate::{RecoveryInfo, RecoveryKind};
 
 /// Applies retry logic to service execution for transient error handling.
 ///
@@ -261,7 +261,7 @@ fn compute_retry_delay(recovery: &RecoveryInfo, delays: &mut impl Iterator<Item 
 /// State passed between retry attempts when continuing the retry loop.
 struct ContinueRetry<In> {
     input: In,
-    attempt: crate::Attempt,
+    attempt: Attempt,
     recovery: RecoveryInfo,
     delay: Duration,
 }

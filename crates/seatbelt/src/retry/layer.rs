@@ -513,7 +513,6 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]

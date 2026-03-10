@@ -213,6 +213,8 @@ mod service;
 mod telemetry;
 
 pub use args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
+#[deprecated(note = "import from `seatbelt::Attempt` instead")]
+pub use crate::attempt::Attempt;
 pub use config::HedgingConfig;
 pub use layer::HedgingLayer;
 pub use service::Hedging;

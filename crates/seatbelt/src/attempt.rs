@@ -19,7 +19,7 @@ pub(crate) const ATTEMPT_RECOVERY_KIND: &str = "resilience.attempt.recovery.kind
 ///
 /// Resilience middleware creates an `Attempt` for each execution of the inner service and
 /// passes it to user-provided callbacks. You can use the attempt information to vary behavior
-/// per attempt — for example, routing to a different endpoint or injecting the attempt into
+/// per attempt - for example, routing to a different endpoint or injecting the attempt into
 /// request extensions for downstream observability.
 ///
 /// # Default
