@@ -211,12 +211,18 @@ fn is_string_error<T>(_: &T) -> bool {
 /// This behavior is not guaranteed to be stable across Rust versions, so there might be cases where
 /// `StringError` is not detected and gets treated as a normal error source.
 fn is_boxed_string_error(err: &(dyn StdError + Send + Sync + 'static)) -> bool {
-    static VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
+    static STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
         let err: Box<dyn StdError + Send + Sync + 'static> = "probe".into();
         ptr_meta::metadata(&raw const *err)
     });
 
-    ptr_meta::metadata(err) == *VTABLE
+    // errors constructed from `Cow` have a different vtable
+    static COW_STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> = std::sync::LazyLock::new(|| {
+        let err: Box<dyn StdError + Send + Sync + 'static> = Cow::Borrowed("probe").into();
+        ptr_meta::metadata(&raw const *err)
+    });
+
+    ptr_meta::metadata(err) == *STRING_VTABLE || ptr_meta::metadata(err) == *COW_STRING_VTABLE
 }
 
 /// Helper struct for formatting error messages in a consistent way.
@@ -285,13 +291,32 @@ mod tests {
 
     #[test]
     fn from_boxed_string_error() {
-        let boxed: Box<dyn StdError + Send + Sync> = "a boxed string error".into();
+        let err: &'static str = "a boxed string error";
+        let boxed: Box<dyn StdError + Send + Sync> = err.into();
         let error = OhnoCore::from(boxed);
-        assert!(error.source().is_none());
+        assert!(error.source().is_none(), "{:?}", error.data.source);
         let Source::Transparent(source) = &error.data.source else {
             panic!("expected transparent source: found {:?}", error.data.source);
         };
         assert_eq!(source.to_string(), "a boxed string error");
+
+        let err: String = "a boxed owned string error".to_string();
+        let boxed: Box<dyn StdError + Send + Sync> = err.into();
+        let error = OhnoCore::from(boxed);
+        assert!(error.source().is_none(), "{:?}", error.data.source);
+        let Source::Transparent(source) = &error.data.source else {
+            panic!("expected transparent source: found {:?}", error.data.source);
+        };
+        assert_eq!(source.to_string(), "a boxed owned string error");
+
+        let err: Cow<'static, str> = Cow::Borrowed("a boxed cow string error");
+        let boxed: Box<dyn StdError + Send + Sync> = err.into();
+        let error = OhnoCore::from(boxed);
+        assert!(error.source().is_none(), "{:?}", error.data.source);
+        let Source::Transparent(source) = &error.data.source else {
+            panic!("expected transparent source: found {:?}", error.data.source);
+        };
+        assert_eq!(source.to_string(), "a boxed cow string error");
     }
 
     #[test]
@@ -413,10 +438,19 @@ mod tests {
 
     #[test]
     fn is_boxed_string_error_test() {
-        let string_err: Box<dyn StdError + Send + Sync> = "a string".into();
-        assert!(is_boxed_string_error(&*string_err));
+        let err: &'static str = "a string slice";
+        let string_err: Box<dyn StdError + Send + Sync> = err.into();
+        assert!(is_boxed_string_error(&*string_err), "{:?}", string_err);
+
+        let err: String = "a string".to_string();
+        let string_err: Box<dyn StdError + Send + Sync> = err.into();
+        assert!(is_boxed_string_error(&*string_err), "{:?}", string_err);
+
+        let err: Cow<'static, str> = "a cow string".into();
+        let string_err: Box<dyn StdError + Send + Sync> = err.into();
+        assert!(is_boxed_string_error(&*string_err), "{:?}", string_err);
 
         let io_err: Box<dyn StdError + Send + Sync> = Box::new(std::io::Error::other("io"));
-        assert!(!is_boxed_string_error(&*io_err));
+        assert!(!is_boxed_string_error(&*io_err), "{:?}", io_err);
     }
 }
