@@ -300,7 +300,8 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
     /// # Example
     ///
     /// ```rust
-    /// # use seatbelt::retry::{Retry, Attempt};
+    /// # use seatbelt::Attempt;
+    /// # use seatbelt::retry::Retry;
     /// # use seatbelt::{RecoveryInfo, ResilienceContext};
     /// # use tick::Clock;
     /// # fn example() {
@@ -512,6 +513,7 @@ mod tests {
     use tick::Clock;
 
     use super::*;
+    use crate::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]

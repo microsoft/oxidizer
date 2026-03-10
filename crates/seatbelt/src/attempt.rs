@@ -32,7 +32,7 @@ pub(crate) const ATTEMPT_RECOVERY_KIND: &str = "resilience.attempt.recovery.kind
 /// # Examples
 ///
 /// ```
-/// use seatbelt::retry::Attempt;
+/// use seatbelt::Attempt;
 ///
 /// // Create the first attempt (attempt 0)
 /// let attempt = Attempt::new(0, false);
@@ -70,7 +70,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::retry::Attempt;
+    /// use seatbelt::Attempt;
     ///
     /// let attempt = Attempt::new(0, false);
     /// assert_eq!(attempt.index(), 0);
@@ -85,7 +85,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::retry::Attempt;
+    /// use seatbelt::Attempt;
     ///
     /// let first_attempt = Attempt::new(0, false);
     /// assert!(first_attempt.is_first());
@@ -103,7 +103,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::retry::Attempt;
+    /// use seatbelt::Attempt;
     ///
     /// let not_last = Attempt::new(1, false);
     /// assert!(!not_last.is_last());
@@ -121,7 +121,7 @@ impl Attempt {
     /// # Examples
     ///
     /// ```
-    /// use seatbelt::retry::Attempt;
+    /// use seatbelt::Attempt;
     ///
     /// let attempt = Attempt::new(3, false);
     /// assert_eq!(attempt.index(), 3);

@@ -316,7 +316,7 @@ mod tests {
     use tick::Clock;
 
     use super::*;
-    use crate::hedging::Attempt;
+    use crate::Attempt;
     use crate::testing::RecoverableType;
 
     #[test]
