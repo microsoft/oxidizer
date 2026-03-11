@@ -26,6 +26,7 @@ impl Backtrace {
     #[cfg_attr(coverage_nightly, coverage(off))] // we can't create Unsupported backtraces in tests
     #[cfg_attr(test, mutants::skip)] // we can't create Unsupported backtraces in tests
     pub(crate) fn from_backtrace(bt: StdBacktrace) -> Self {
+        dbg!("meaningless change test");
         match bt.status() {
             BacktraceStatus::Disabled => Self::Disabled,
             BacktraceStatus::Unsupported => Self::Unsupported,
