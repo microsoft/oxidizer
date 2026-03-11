@@ -23,6 +23,12 @@ use std::{
 /// let entry = CacheEntry::new(42);
 /// assert_eq!(*entry.value(), 42);
 ///
+/// // CacheEntry<V> implements Deref<Target = V>, so you can call
+/// // methods on the inner value directly:
+/// let entry = CacheEntry::new("hello world".to_string());
+/// assert_eq!(entry.len(), 11); // calls String::len() via Deref
+/// assert!(entry.starts_with("hello")); // calls str::starts_with() via Deref
+///
 /// // Entry that expires after a duration from insert time
 /// let entry = CacheEntry::expires_after("data".to_string(), Duration::from_secs(60));
 /// assert_eq!(entry.ttl(), Some(Duration::from_secs(60)));

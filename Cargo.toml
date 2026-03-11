@@ -62,6 +62,7 @@ duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 futures = { version = "0.3.31", default-features = false }
+gungraun = { version = "0.17.2", default-features = false, features = ["default"] }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }

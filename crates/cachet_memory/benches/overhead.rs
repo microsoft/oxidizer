@@ -22,7 +22,7 @@ fn bench_get_hit(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_hit");
 
     group.bench_function("moka", |b| {
-        let cache: MokaCache<String, String> = MokaCache::builder().max_capacity(10_000).build();
+        let cache: MokaCache<String, String> = MokaCache::builder().build();
         rt.block_on(async {
             for i in 0..1000 {
                 cache.insert(format!("key_{i}"), format!("value_{i}")).await;
@@ -70,7 +70,7 @@ fn bench_get_miss(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_miss");
 
     group.bench_function("moka", |b| {
-        let cache: MokaCache<String, String> = MokaCache::builder().max_capacity(10_000).build();
+        let cache: MokaCache<String, String> = MokaCache::builder().build();
 
         b.iter_custom(|iters| {
             rt.block_on(async {
@@ -108,7 +108,7 @@ fn bench_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert");
 
     group.bench_function("moka", |b| {
-        let cache: MokaCache<String, String> = MokaCache::builder().max_capacity(10_000).build();
+        let cache: MokaCache<String, String> = MokaCache::builder().build();
 
         b.iter_custom(|iters| {
             rt.block_on(async {

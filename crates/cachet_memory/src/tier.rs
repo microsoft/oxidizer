@@ -168,7 +168,7 @@ where
     }
 
     async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.inner.insert(key.clone(), entry.clone()).await;
+        self.inner.insert(key.clone(), entry).await;
         Ok(())
     }
 
