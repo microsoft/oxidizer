@@ -40,7 +40,7 @@
 //! # Cache Stampede Protection
 //!
 //! A **cache stampede** (also called a thundering herd) occurs when many concurrent
-//! requests all miss the cache at the same time — for example, after a cold start or
+//! requests all miss the cache at the same time - for example, after a cold start or
 //! after a popular entry expires. Every request independently computes the value,
 //! spiking load on the backing store.
 //!

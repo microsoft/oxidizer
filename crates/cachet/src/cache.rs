@@ -8,8 +8,8 @@ use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 use tick::Clock;
 use uniflight::Merger;
 
-use crate::{Error, builder::CacheBuilder};
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, DynamicCacheExt};
+use crate::{builder::CacheBuilder, Error};
+use cachet_tier::{CacheEntry, CacheTier};
 
 /// Type alias for cache names used in telemetry.
 pub type CacheName = &'static str;

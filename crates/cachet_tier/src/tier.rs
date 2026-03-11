@@ -42,7 +42,7 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// The returned count may include entries that have logically expired but have
     /// not yet been evicted. Many implementations perform eviction lazily or on a
-    /// background schedule, so `len()` can temporarily overcount after TTL expiry
+    /// background schedule, so `len()` can temporarily over count after TTL expiry
     /// or after `invalidate` / `clear` calls that have not yet been fully applied.
     ///
     /// Do not use this value for exact bookkeeping or correctness decisions. It is

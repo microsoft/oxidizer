@@ -30,16 +30,11 @@ thread_aware = { workspace = true, features = ["derive"] }
 [dev-dependencies]
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-gungraun = { workspace = true }
 mutants = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [[bench]]
 name = "overhead"
-harness = false
-
-[[bench]]
-name = "overhead_iai"
 harness = false
 
 [lints]
