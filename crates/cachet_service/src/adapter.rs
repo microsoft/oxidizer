@@ -121,9 +121,9 @@ mod tests {
                         Ok(CacheResponse::Get(None))
                     }
                 }
-                CacheOperation::Insert(_) => Ok(CacheResponse::Insert()),
-                CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate()),
-                CacheOperation::Clear => Ok(CacheResponse::Clear()),
+                CacheOperation::Insert(_) => Ok(CacheResponse::Insert),
+                CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
+                CacheOperation::Clear => Ok(CacheResponse::Clear),
             }
         }
     }
@@ -189,9 +189,9 @@ mod tests {
         async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
             match input {
                 // Returns Clear response for Insert requests (wrong type)
-                CacheOperation::Insert(_) => Ok(CacheResponse::Clear()),
+                CacheOperation::Insert(_) => Ok(CacheResponse::Clear),
                 // Returns Insert response for Get/Invalidate requests (wrong type)
-                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert()),
+                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert),
                 // Returns Get response for Clear requests (wrong type)
                 CacheOperation::Clear => Ok(CacheResponse::Get(None)),
             }

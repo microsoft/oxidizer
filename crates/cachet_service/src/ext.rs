@@ -89,8 +89,8 @@ mod tests {
 
         async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
             match input {
-                CacheOperation::Insert(_) => Ok(CacheResponse::Clear()),
-                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert()),
+                CacheOperation::Insert(_) => Ok(CacheResponse::Clear),
+                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert),
                 CacheOperation::Clear => Ok(CacheResponse::Get(None)),
             }
         }

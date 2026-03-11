@@ -13,9 +13,9 @@
 //! caching layers fast, small caches in front of slower, larger ones:
 //!
 //!  - **L1 (primary)** - an in-process memory cache: microsecond latency, bounded
-//!   capacity, evicts under pressure.
+//!    capacity, evicts under pressure.
 //!  - **L2 (fallback)** - a remote or larger cache: millisecond latency, much larger
-//!   capacity, survives process restarts.
+//!    capacity, survives process restarts.
 //!
 //! On a miss in L1, `cachet` transparently queries L2 and optionally *promotes* the
 //! value back into L1 so the next request is fast again. The result is lower average
@@ -158,7 +158,7 @@
 //! ```no_run
 //! use cachet::{Cache, CacheEntry};
 //! use tick::Clock;
-//! # tokio::runtime::Runtime::new().unwrap().block_on(async {
+//! # async {
 //!
 //! let clock = Clock::new_tokio();
 //! let cache = Cache::builder::<String, i32>(clock)
@@ -169,7 +169,7 @@
 //! let value = cache.get("key").await?;
 //! assert_eq!(*value.unwrap().value(), 42);
 //! # Ok::<(), cachet::Error>(())
-//! # });
+//! # };
 //! ```
 //!
 //! ## Multi-Tier Cache with Fallback
@@ -178,7 +178,7 @@
 //! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
 //! use tick::Clock;
 //! use std::time::Duration;
-//! # tokio::runtime::Runtime::new().unwrap().block_on(async {
+//! # async {
 //!
 //! let clock = Clock::new_tokio();
 //! let l2 = Cache::builder::<String, String>(clock.clone()).memory();
@@ -189,7 +189,7 @@
 //!     .fallback(l2)
 //!     .promotion_policy(FallbackPromotionPolicy::always())
 //!     .build();
-//! # });
+//! # };
 //! ```
 //!
 //! # Telemetry

@@ -110,8 +110,11 @@ impl CacheTelemetry {
         not(any(feature = "logs", feature = "metrics", test)),
         expect(unused_variables, reason = "No-op when both logs and metrics are disabled")
     )]
+    #[cfg_attr(
+        not(any(feature = "logs", feature = "metrics", test)),
+        expect(clippy::unused_self, reason = "self is used under feature flags")
+    )]
     #[inline]
-    #[expect(clippy::unused_self, reason = "self is used under feature flags")]
     pub(crate) fn record(&self, cache_name: CacheName, operation: CacheOperation, activity: CacheActivity, duration: Duration) {
         #[cfg(any(feature = "metrics", test))]
         {

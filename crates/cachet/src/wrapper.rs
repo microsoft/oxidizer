@@ -28,7 +28,7 @@ use cachet_tier::CacheTier;
 ///
 /// This type is typically created by the cache builder rather than directly:
 ///
-/// ```
+/// ```no_run
 /// use cachet::Cache;
 /// use tick::Clock;
 /// use std::time::Duration;

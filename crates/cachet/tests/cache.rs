@@ -714,15 +714,15 @@ mod service_tests {
                 CacheOperation::Get(req) => Ok(CacheResponse::Get(self.data.lock().get(&req.key).cloned())),
                 CacheOperation::Insert(req) => {
                     self.data.lock().insert(req.key, req.entry);
-                    Ok(CacheResponse::Insert())
+                    Ok(CacheResponse::Insert)
                 }
                 CacheOperation::Invalidate(req) => {
                     self.data.lock().remove(&req.key);
-                    Ok(CacheResponse::Invalidate())
+                    Ok(CacheResponse::Invalidate)
                 }
                 CacheOperation::Clear => {
                     self.data.lock().clear();
-                    Ok(CacheResponse::Clear())
+                    Ok(CacheResponse::Clear)
                 }
             }
         }
@@ -787,7 +787,7 @@ mod service_tests {
             let response = cache
                 .execute(CacheOperation::Insert(InsertRequest::new("key".to_string(), CacheEntry::new(42))))
                 .await?;
-            assert!(matches!(response, CacheResponse::Insert()));
+            assert!(matches!(response, CacheResponse::Insert));
 
             // Verify the value was inserted
             let entry = cache.get(&"key".to_string()).await?.unwrap();
@@ -807,7 +807,7 @@ mod service_tests {
             let response = cache
                 .execute(CacheOperation::Invalidate(InvalidateRequest::new("key".to_string())))
                 .await?;
-            assert!(matches!(response, CacheResponse::Invalidate()));
+            assert!(matches!(response, CacheResponse::Invalidate));
 
             assert!(cache.get(&"key".to_string()).await?.is_none());
             Ok(())
@@ -823,7 +823,7 @@ mod service_tests {
             cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
 
             let response = cache.execute(CacheOperation::Clear).await?;
-            assert!(matches!(response, CacheResponse::Clear()));
+            assert!(matches!(response, CacheResponse::Clear));
 
             assert!(cache.get(&"key".to_string()).await?.is_none());
             Ok(())

@@ -8,7 +8,7 @@ use std::{borrow::Borrow, fmt::Debug, hash::Hash};
 use tick::Clock;
 use uniflight::Merger;
 
-use crate::{builder::CacheBuilder, Error};
+use crate::{Error, builder::CacheBuilder};
 use cachet_tier::{CacheEntry, CacheTier};
 
 /// Type alias for cache names used in telemetry.
@@ -66,7 +66,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// ```no_run
 /// use cachet::{Cache, CacheEntry};
 /// use tick::Clock;
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// # async {
 ///
 /// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock)
@@ -77,7 +77,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// let value = cache.get("key").await?;
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # Ok::<(), cachet::Error>(())
-/// # });
+/// # };
 /// ```
 ///
 /// ## Multi-Tier Cache
@@ -86,7 +86,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
 /// use std::time::Duration;
-/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// # async {
 ///
 /// let clock = Clock::new_tokio();
 /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
@@ -97,7 +97,7 @@ impl<K, V> Debug for Mergers<K, V> {
 ///     .fallback(l2)
 ///     .promotion_policy(FallbackPromotionPolicy::always())
 ///     .build();
-/// # });
+/// # };
 /// ```
 #[derive(Debug)]
 pub struct Cache<K, V, CT = ()> {
@@ -121,14 +121,12 @@ impl Cache<(), (), ()> {
     /// use cachet::Cache;
     /// use tick::Clock;
     /// use std::time::Duration;
-    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
     ///     .memory()
     ///     .ttl(Duration::from_secs(60))
     ///     .build();
-    /// # });
     /// ```
     #[must_use]
     pub fn builder<K, V>(clock: Clock) -> CacheBuilder<K, V> {
@@ -208,7 +206,7 @@ where
     /// ```no_run
     /// use cachet::{Cache, CacheEntry};
     /// use tick::Clock;
-    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// # async {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
@@ -216,7 +214,7 @@ where
     /// let result = cache.get("missing").await?;
     /// assert!(result.is_none());
     /// # Ok::<(), cachet::Error>(())
-    /// # });
+    /// # };
     /// ```
     pub async fn get<Q>(&self, key: &Q) -> Result<Option<CacheEntry<V>>, Error>
     where
@@ -251,14 +249,14 @@ where
     /// ```no_run
     /// use cachet::{Cache, CacheEntry};
     /// use tick::Clock;
-    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// # async {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// cache.insert("key", CacheEntry::new(42)).await?;
     /// # Ok::<(), cachet::Error>(())
-    /// # });
+    /// # };
     /// ```
     pub async fn insert<Q>(&self, key: &Q, entry: CacheEntry<V>) -> Result<(), Error>
     where
@@ -378,7 +376,7 @@ where
     /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// # async {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
@@ -386,7 +384,7 @@ where
     /// let entry = cache.get_or_insert("key", || async { 42 }).await?;
     /// assert_eq!(*entry.value(), 42);
     /// # Ok::<(), cachet::Error>(())
-    /// # });
+    /// # };
     /// ```
     pub async fn get_or_insert<Q, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
     where
@@ -444,7 +442,7 @@ where
     /// ```no_run
     /// use cachet::{Cache, Error};
     /// use tick::Clock;
-    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// # async {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
@@ -453,7 +451,7 @@ where
     ///     .try_get_or_insert("key", || async { Ok::<_, std::io::Error>(42) })
     ///     .await;
     /// assert!(result.is_ok());
-    /// # });
+    /// # };
     /// ```
     pub async fn try_get_or_insert<Q, E, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
     where
@@ -509,7 +507,7 @@ where
     /// ```no_run
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+    /// # async {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
@@ -526,7 +524,7 @@ where
     ///     .await?;
     /// assert_eq!(*result.unwrap().value(), 42);
     /// # Ok::<(), cachet::Error>(())
-    /// # });
+    /// # };
     /// ```
     pub async fn optionally_get_or_insert<Q, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<Option<CacheEntry<V>>, Error>
     where

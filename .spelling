@@ -222,6 +222,7 @@ proc
 Proc
 profiler
 PullRequest
+RAII
 RDME
 reallocation
 reallocations

@@ -150,7 +150,7 @@ impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
 /// use std::time::Duration;

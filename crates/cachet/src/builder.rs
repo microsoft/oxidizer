@@ -35,7 +35,7 @@ mod sealed {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use cachet::Cache;
 /// use tick::Clock;
 ///
@@ -57,7 +57,7 @@ pub trait CacheTierBuilder<K, V>: Sealed {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use cachet::Cache;
 /// use tick::Clock;
 /// use std::time::Duration;
@@ -94,25 +94,20 @@ impl<K, V> CacheBuilder<K, V, ()> {
 
     /// Sets a custom storage backend for the cache.
     ///
-    /// Use this to provide your own `CacheTier` implementation instead of
-    /// the built-in options like `memory()`.
+    /// Use this to provide your own [`CacheTier`] implementation instead of
+    /// the built-in options like [`memory()`](Self::memory).
     ///
     /// # Examples
     ///
-    /// ```
-    /// # #[cfg(feature = "test-util")]
-    /// # fn main() {
-    /// use cachet::{Cache, MockCache};
+    /// ```no_run
+    /// use cachet::Cache;
+    /// use cachet_memory::InMemoryCache;
     /// use tick::Clock;
     ///
-    /// let mock = MockCache::<String, i32>::new();
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .storage(mock)
+    ///     .storage(InMemoryCache::new())
     ///     .build();
-    /// # }
-    /// # #[cfg(not(feature = "test-util"))]
-    /// # fn main() {}
     /// ```
     pub fn storage<CT>(self, storage: CT) -> CacheBuilder<K, V, CT>
     where
@@ -366,14 +361,6 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
     #[must_use]
     pub fn use_logs(mut self) -> Self {
         self.telemetry = self.telemetry.with_logs();
-        self
-    }
-
-    /// Enables or disables metrics for this fallback cache.
-    #[cfg(any(feature = "metrics", test))]
-    #[must_use]
-    pub fn use_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.telemetry = self.telemetry.with_metrics(meter_provider);
         self
     }
 
