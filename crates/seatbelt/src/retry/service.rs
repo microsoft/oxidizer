@@ -352,16 +352,14 @@ where
 mod tests {
     use std::future::poll_fn;
 
-    use layered::Execute;
+    use layered::{Execute, Layer};
     use opentelemetry::KeyValue;
     use tick::ClockControl;
 
     use super::*;
     use crate::ResilienceContext;
-    use crate::testing::FailReadyService;
-    use crate::testing::MetricTester;
+    use crate::testing::{FailReadyService, MetricTester};
     use crate::typestates::Set;
-    use layered::Layer;
 
     #[cfg_attr(miri, ignore)]
     #[test]

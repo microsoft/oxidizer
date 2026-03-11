@@ -1789,7 +1789,6 @@ dependencies = [
  "serde",
  "serde_json",
  "static_assertions",
- "testing_aids",
  "thread_aware",
  "tick",
  "tokio",

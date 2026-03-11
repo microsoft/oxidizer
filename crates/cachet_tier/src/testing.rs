@@ -41,7 +41,7 @@ type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
 /// # Examples
 ///
 /// ```no_run
-/// use cachet_tier::{testing::{MockCache, CacheOp}, CacheTier, CacheEntry};
+/// use cachet_tier::{MockCache, CacheOp, CacheTier, CacheEntry};
 ///
 /// # async fn example() {
 /// let cache = MockCache::<String, i32>::new();
@@ -62,7 +62,7 @@ type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
 /// # Failure Injection
 ///
 /// ```no_run
-/// use cachet_tier::{testing::{MockCache, CacheOp}, CacheTier, CacheEntry};
+/// use cachet_tier::{MockCache, CacheOp, CacheTier, CacheEntry};
 ///
 /// # async fn example() {
 /// let cache: MockCache<String, i32> = MockCache::new();
