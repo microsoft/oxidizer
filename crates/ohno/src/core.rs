@@ -184,7 +184,12 @@ where
         if is_string_error(&value) {
             Self::from_source(Source::Transparent(value.into().into()))
         } else {
-            Self::from_source(Source::Error(value.into().into()))
+            let boxed: Box<dyn StdError + Send + Sync> = value.into();
+            if is_boxed_string_error(&*boxed) {
+                Self::from_source(Source::Transparent(boxed.into()))
+            } else {
+                Self::from_source(Source::Error(boxed.into()))
+            }
         }
     }
 }
@@ -198,6 +203,31 @@ const STR_TYPE_IDS: [typeid::ConstTypeId; 3] = [
 fn is_string_error<T>(_: &T) -> bool {
     let typeid_of_t = typeid::of::<T>();
     STR_TYPE_IDS.iter().any(|&id| id == typeid_of_t)
+}
+
+/// Checks at runtime whether a type-erased error is std's private `StringError`
+/// by comparing its vtable against the known `StringError` vtable.
+///
+/// This behavior is not guaranteed to be stable across Rust versions, so there might be cases where
+/// `StringError` is not detected and gets treated as a normal error source.
+///
+/// TODO: switch to [`std::ptr::metadata`](https://doc.rust-lang.org/std/ptr/fn.metadata.html) once
+/// it becomes stable: https://github.com/rust-lang/rust/issues/81513
+fn is_boxed_string_error(err: &(dyn StdError + Send + Sync + 'static)) -> bool {
+    static STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> =
+        std::sync::LazyLock::new(|| {
+            let err: Box<dyn StdError + Send + Sync + 'static> = "probe".into();
+            ptr_meta::metadata(&raw const *err)
+        });
+
+    // errors constructed from `Cow` have a different vtable
+    static COW_STRING_VTABLE: std::sync::LazyLock<ptr_meta::DynMetadata<dyn StdError + Send + Sync + 'static>> =
+        std::sync::LazyLock::new(|| {
+            let err: Box<dyn StdError + Send + Sync + 'static> = Cow::Borrowed("probe").into();
+            ptr_meta::metadata(&raw const *err)
+        });
+
+    ptr_meta::metadata(err) == *STRING_VTABLE || ptr_meta::metadata(err) == *COW_STRING_VTABLE
 }
 
 /// Helper struct for formatting error messages in a consistent way.
@@ -261,14 +291,55 @@ mod tests {
         if let Source::Transparent(source) = &error.data.source {
             assert_eq!(source.to_string(), "msg");
         }
-        assert!(matches!(&error.data.source, Source::Transparent(_)), "expected transparent source");
+        assert!(matches!(&error.data.source, Source::Transparent(_)), "{:?}", error.data.source);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // miri does not guarantee vtable deduplication
+    #[expect(clippy::redundant_type_annotations, reason = "this test intentionally uses explicit annotations")]
+    fn from_boxed_string_error() {
+        let err: &'static str = "a boxed string error";
+        let boxed: Box<dyn StdError + Send + Sync> = err.into();
+        let error = OhnoCore::from(boxed);
+        assert!(error.source().is_none(), "{:?}", error.data.source);
+        let Source::Transparent(source) = &error.data.source else {
+            panic!("expected transparent source: found {:?}", error.data.source);
+        };
+        assert_eq!(source.to_string(), "a boxed string error");
+
+        let err: String = "a boxed owned string error".to_string();
+        let boxed: Box<dyn StdError + Send + Sync> = err.into();
+        let error = OhnoCore::from(boxed);
+        assert!(error.source().is_none(), "{:?}", error.data.source);
+        let Source::Transparent(source) = &error.data.source else {
+            panic!("expected transparent source: found {:?}", error.data.source);
+        };
+        assert_eq!(source.to_string(), "a boxed owned string error");
+
+        let err: Cow<'static, str> = Cow::Borrowed("a boxed cow string error");
+        let boxed: Box<dyn StdError + Send + Sync> = err.into();
+        let error = OhnoCore::from(boxed);
+        assert!(error.source().is_none(), "{:?}", error.data.source);
+        let Source::Transparent(source) = &error.data.source else {
+            panic!("expected transparent source: found {:?}", error.data.source);
+        };
+        assert_eq!(source.to_string(), "a boxed cow string error");
+    }
+
+    #[test]
+    fn test_from_boxed_io_error() {
+        let io_error = std::io::Error::other("io error");
+        let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
+        let error = OhnoCore::from(boxed);
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
+        assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
 
     #[test]
     fn test_caused_by_without_backtrace() {
         let io_error = std::io::Error::other("io error");
         let error = OhnoCore::without_backtrace(io_error);
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(!error.has_backtrace());
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
@@ -277,25 +348,15 @@ mod tests {
     fn test_caused_by() {
         let io_error = std::io::Error::other("io error");
         let error = OhnoCore::from(io_error);
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
-
-    #[test]
-    fn test_from_boxed_error() {
-        let io_error = std::io::Error::other("io error");
-        let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
-        let error = OhnoCore::from(boxed);
-        assert!(matches!(error.data.source, Source::Error(_)));
-        assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
-    }
-
     #[test]
     fn test_from_boxed_error_2() {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
         let error: OhnoCore = boxed.into();
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
 
@@ -338,7 +399,7 @@ mod tests {
         let io_error = std::io::Error::other("io error");
         let boxed: Box<dyn StdError + Send + Sync> = Box::new(io_error);
         let error: OhnoCore = boxed.into();
-        assert!(matches!(error.data.source, Source::Error(_)));
+        assert!(matches!(error.data.source, Source::Error(_)), "{:?}", error.data.source);
         assert!(error.source().unwrap().downcast_ref::<std::io::Error>().is_some());
     }
 
@@ -380,5 +441,25 @@ mod tests {
         assert!(is_string_error(&Cow::Borrowed("a string slice")));
         assert!(is_string_error(&Cow::<'static, str>::Owned(String::from("a string"))));
         assert!(!is_string_error(&std::io::Error::other("an io error")));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)] // miri does not guarantee vtable deduplication
+    #[expect(clippy::redundant_type_annotations, reason = "this test intentionally uses explicit annotations")]
+    fn is_boxed_string_error_test() {
+        let err: &'static str = "a string slice";
+        let string_err: Box<dyn StdError + Send + Sync> = err.into();
+        assert!(is_boxed_string_error(&*string_err), "{string_err:?}");
+
+        let err: String = "a string".to_string();
+        let string_err: Box<dyn StdError + Send + Sync> = err.into();
+        assert!(is_boxed_string_error(&*string_err), "{string_err:?}");
+
+        let err: Cow<'static, str> = "a cow string".into();
+        let string_err: Box<dyn StdError + Send + Sync> = err.into();
+        assert!(is_boxed_string_error(&*string_err), "{string_err:?}");
+
+        let io_err: Box<dyn StdError + Send + Sync> = Box::new(std::io::Error::other("io"));
+        assert!(!is_boxed_string_error(&*io_err), "{io_err:?}");
     }
 }

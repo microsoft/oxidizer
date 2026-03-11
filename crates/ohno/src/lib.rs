@@ -8,6 +8,7 @@
     expect(rustdoc::broken_intra_doc_links, reason = "AppError is only available with the 'app-err' feature")
 )]
 #![expect(clippy::doc_markdown, reason = "AppError in header doesn't look good with backticks")]
+#![forbid(unsafe_code)]
 
 //! High-quality error handling for Rust.
 //!
