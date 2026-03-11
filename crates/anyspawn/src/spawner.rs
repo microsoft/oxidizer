@@ -96,6 +96,7 @@ use crate::handle::JoinHandleInner;
 /// # }
 /// ```
 #[derive(Clone)]
+#[must_use]
 pub struct Spawner(SpawnerKind);
 
 #[derive(Clone)]
@@ -125,7 +126,6 @@ impl Spawner {
     /// assert_eq!(result, 42);
     /// # }
     /// ```
-    #[must_use]
     #[cfg(feature = "tokio")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn new_tokio() -> Self {
