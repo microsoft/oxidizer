@@ -36,17 +36,10 @@ pub use templated_uri_macros::UriParam;
 /// # Example
 ///
 /// ```
-/// # use std::fmt::Display;
 /// use templated_uri::UriUnsafeParam;
 ///
 /// #[derive(UriUnsafeParam)]
 /// struct PathSegment(String);
-///
-/// impl Display for PathSegment {
-///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-///         write!(f, "{}", self.0)
-///     }
-/// }
 /// ```
 ///
 /// This allows `PathSegment` to be used in URI templates with `{+param}` syntax where

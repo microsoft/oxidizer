@@ -600,7 +600,7 @@ impl BaseUri {
         parts.authority = Some(self.authority().clone());
         parts.path_and_query = Some(full_path);
 
-        http::Uri::from_parts(parts).map_err(ValidationError::caused_by)
+        http::Uri::from_parts(parts).map_err(Into::into)
     }
 }
 

@@ -131,7 +131,7 @@ impl std::str::FromStr for Origin {
     /// Returns a [`ValidationError`] if the string is not a valid origin
     /// (missing scheme, unsupported scheme, or invalid authority).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let uri: http::Uri = s.parse().map_err(ValidationError::caused_by)?;
+        let uri: http::Uri = s.parse().map_err(ValidationError::from)?;
         let scheme = uri.scheme().ok_or_else(|| ValidationError::caused_by("missing scheme"))?.clone();
         let authority = uri
             .authority()
