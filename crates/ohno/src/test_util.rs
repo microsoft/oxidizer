@@ -29,7 +29,7 @@
 #[macro_export]
 macro_rules! assert_error_message {
     ($error:expr, $expected:expr) => {
-        $crate::test_util::assert_error_message_impl($error.to_string(), $expected)
+        $crate::test_util::assert_error_message_impl(&$error.to_string(), $expected)
     };
 }
 
@@ -40,7 +40,8 @@ macro_rules! assert_error_message {
 /// This is an implementation detail of the [`assert_error_message!`] macro. Do not call directly.
 #[doc(hidden)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub fn assert_error_message_impl(error_string: String, expected: &str) {
+#[expect(clippy::panic, reason = "test assertion helper — panicking is the intended behavior")]
+pub fn assert_error_message_impl(error_string: &str, expected: &str) {
     if error_string == expected {
         return;
     }
