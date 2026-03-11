@@ -165,7 +165,7 @@ impl Spawner {
     /// Creates a custom spawner with name and layer metadata for [`Debug`]
     /// output. Used internally by [`CustomSpawnerBuilder::build`](crate::CustomSpawnerBuilder::build).
     #[cfg(feature = "custom")]
-    pub(crate) fn new_with_layers<F>(name: &'static str, f: F, layer_names: Arc<[Box<str>]>) -> Self
+    pub(crate) fn new_custom_with_layers<F>(name: &'static str, f: F, layer_names: Arc<[Box<str>]>) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
