@@ -332,11 +332,11 @@ where
     ///
     /// The count is approximate for two reasons:
     ///
-    /// 1. **Lazy eviction** — entries that have passed their TTL may still be counted
+    /// 1. **Lazy eviction** - entries that have passed their TTL may still be counted
     ///    until the underlying store evicts them. Eviction typically happens lazily
     ///    during cache operations or on a background schedule, so the count can
-    ///    temporarily overcount after expiry.
-    /// 2. **Primary tier only** — for multi-tier (fallback) caches, only the primary
+    ///    temporarily over count after expiry.
+    /// 2. **Primary tier only** - for multi-tier (fallback) caches, only the primary
     ///    tier is counted. Entries that exist exclusively in the fallback tier are not
     ///    reflected here.
     ///

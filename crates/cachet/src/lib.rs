@@ -12,9 +12,9 @@
 //! A single cache is a single point of failure and a capacity ceiling. Multi-tier
 //! caching layers fast, small caches in front of slower, larger ones:
 //!
-//!  - **L1 (primary)**: an in-process memory cache: microsecond latency, bounded
+//!  - **L1 (primary)** - an in-process memory cache: microsecond latency, bounded
 //!   capacity, evicts under pressure.
-//!  - **L2 (fallback)**: a remote or larger cache: millisecond latency, much larger
+//!  - **L2 (fallback)** - a remote or larger cache: millisecond latency, much larger
 //!   capacity, survives process restarts.
 //!
 //! On a miss in L1, `cachet` transparently queries L2 and optionally *promotes* the
@@ -54,19 +54,19 @@
 //! `cachet` is designed to adapt to your infrastructure rather than the other way
 //! around:
 //!
-//! - **Any storage backend** — implement [`CacheTier`] to plug in Redis, Memcached,
+//! - **Any storage backend** - implement [`CacheTier`] to plug in Redis, Memcached,
 //!   a database, or any other store.
-//! - **Service middleware** — with the `service` feature, any
+//! - **Service middleware** - with the `service` feature, any
 //!   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
 //!   timeout, and circuit-breaker middleware around your storage using standard Tower
 //!   or `layered` patterns.
-//! - **Dynamic dispatch** — convert a concretely-typed `Cache<K, V, CT>` to
+//! - **Dynamic dispatch** - convert a concretely-typed `Cache<K, V, CT>` to
 //!   `Cache<K, V, DynamicCache<K, V>>` via [`Cache::into_dynamic`] to erase the
 //!   storage type, enabling heterogeneous tier composition at runtime.
-//! - **Configurable promotion** — choose whether, and under what conditions, values
+//! - **Configurable promotion** - choose whether, and under what conditions, values
 //!   found in a fallback tier are promoted back into the primary tier
 //!   ([`FallbackPromotionPolicy`]).
-//! - **Clock injection** — all time-based logic (TTL, TTR, timestamps) goes through
+//! - **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
 //!   a [`tick::Clock`], making caches fully controllable in tests without sleeping.
 //!
 //! # Why Use This Instead of Moka/Other Caches?
@@ -94,7 +94,7 @@
 //! | Type | Description |
 //! |---|---|
 //! | [`Cache`] | The user-facing cache. Wraps any `CacheTier` with `get`, `insert`, `invalidate`, `clear`, `get_or_insert`, `try_get_or_insert`, and `optionally_get_or_insert`. |
-//! | [`CacheBuilder`](builder::CacheBuilder) | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, promotion policy, stampede protection, and background refresh. |
+//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, promotion policy, stampede protection, and background refresh. |
 //! | [`CacheEntry<V>`] | A value together with an optional cached-at timestamp and TTL. Returned by all `get` operations. |
 //! | [`CacheTier`] | The core trait for storage backends. Implement this to add your own storage. |
 //! | [`FallbackPromotionPolicy`] | Decides whether a value found in a fallback tier is promoted to the primary tier. |
@@ -138,7 +138,7 @@
 //! | [`cachet_memory`] | In-process memory cache backed by [moka](https://docs.rs/moka) (`TinyLFU` eviction). |
 //! | [`cachet_service`] | Adapters between the `CacheTier` trait and the `layered::Service` / Tower service patterns. |
 //!
-//! You rarely need to depend on companion crates directly — `cachet` re-exports the
+//! You rarely need to depend on companion crates directly - `cachet` re-exports the
 //! most commonly used types from all of them.
 //!
 //! # Cargo Features
