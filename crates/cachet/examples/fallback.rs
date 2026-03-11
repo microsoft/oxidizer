@@ -41,6 +41,10 @@ async fn main() {
         None => println!("get({key}): not found"),
     }
 
-    // Invalidate only clears L1; L2 still has it
-    // (Next get would promote from L2 back to L1)
+    // Invalidate clears both L1 and L2 concurrently
+    cache.invalidate(&key).await.expect("invalidate failed");
+
+    // Confirm both tiers are empty
+    let value = cache.get(&key).await.expect("get failed");
+    assert!(value.is_none(), "entry should be gone from both tiers");
 }
