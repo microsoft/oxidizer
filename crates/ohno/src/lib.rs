@@ -262,7 +262,6 @@ mod enrichment_entry;
 mod error_ext;
 mod source;
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
 
