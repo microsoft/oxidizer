@@ -6,7 +6,6 @@ use autoresolve_macros::base;
 // the usage site.
 
 mod runtime;
-use runtime::builtins;
 
 mod clock;
 mod scheduler;
@@ -20,16 +19,16 @@ mod validator;
 mod my_base {
     pub struct MyBase {
         #[spread]
-        pub builtins: super::builtins::Builtins,
+        pub builtins: crate::runtime::builtins::Builtins,
     }
 }
 
 #[test]
 fn test_autoresolve() {
-    use builtins::Builtins;
     use clock::Clock;
     use my_base::MyBase;
     use my_service::MyService;
+    use runtime::builtins::Builtins;
     use scheduler::Scheduler;
 
     let builtins = Builtins {

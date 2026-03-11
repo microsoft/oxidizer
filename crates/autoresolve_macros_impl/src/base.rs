@@ -59,7 +59,21 @@ fn parse_mode(attr: TokenStream) -> syn::Result<BaseMode> {
         ));
     }
 
+    if !is_rooted_path(&parent) {
+        return Err(syn::Error::new_spanned(
+            &parent,
+            "scoped parent path must start with `super` or `crate`",
+        ));
+    }
+
     Ok(BaseMode::Scoped(parent))
+}
+
+/// Returns `true` if the path begins with `super` or `crate`.
+fn is_rooted_path(path: &syn::Path) -> bool {
+    path.segments
+        .first()
+        .is_some_and(|s| s.ident == "super" || s.ident == "crate")
 }
 
 pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
@@ -151,6 +165,12 @@ pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
                     return Err(syn::Error::new_spanned(
                         f.ty,
                         "#[spread] field type must be a module-qualified path (e.g., `module::Type`)",
+                    ));
+                }
+                if !is_rooted_path(&tp.path) {
+                    return Err(syn::Error::new_spanned(
+                        f.ty,
+                        "#[spread] field type path must start with `super` or `crate`",
                     ));
                 }
             }
@@ -265,6 +285,9 @@ fn strip_last_segment(path: &syn::Path) -> TokenStream {
 }
 
 /// Generates `__spread{N}` re-exports for `#[spread]` fields, pointing to each spread's module.
+///
+/// The re-export lives inside the same module where the struct is defined, so the field type
+/// path is resolved in the same scope — no adjustment needed.
 fn spread_reexports(fields: &[BaseField<'_>]) -> Vec<TokenStream> {
     fields
         .iter()
@@ -284,16 +307,23 @@ fn spread_reexports(fields: &[BaseField<'_>]) -> Vec<TokenStream> {
         .collect()
 }
 
-/// Computes the parent module path as seen from **inside** the generated module.
-/// Prepends `super::` for relative paths since the generated module is one level deeper.
-fn parent_module_path_for_inner(parent: &syn::Path) -> TokenStream {
-    let segs: Vec<&Ident> = parent.segments.iter().map(|s| &s.ident).collect();
+/// Strips the last segment from a rooted path and adjusts for the inner module scope.
+///
+/// `super`-prefixed paths get an extra `super::` prepended (the generated module is one level
+/// deeper). `crate`-prefixed paths are used as-is since `crate::` is absolute.
+fn strip_last_segment_for_inner(path: &syn::Path) -> TokenStream {
+    let segs: Vec<&Ident> = path.segments.iter().map(|s| &s.ident).collect();
     let module_segs = &segs[..segs.len() - 1];
     if module_segs.first().is_some_and(|s| *s == "crate") {
         quote! { #(#module_segs)::* }
     } else {
         quote! { super :: #(#module_segs)::* }
     }
+}
+
+/// Computes the parent module path as seen from **inside** the generated module.
+fn parent_module_path_for_inner(parent: &syn::Path) -> TokenStream {
+    strip_last_segment_for_inner(parent)
 }
 
 /// Computes the parent module path as seen from the **outer** scope (definition site).
@@ -627,7 +657,7 @@ mod tests {
             mod app_base {
                 struct Base {
                     #[spread]
-                    builtins: builtins_mod::Builtins,
+                    builtins: super::builtins_mod::Builtins,
                     telemetry: Telemetry,
                 }
             }
@@ -653,7 +683,7 @@ mod tests {
 
     #[test]
     fn scoped_base() {
-        let attr = quote! { scoped(base_mod::Base) };
+        let attr = quote! { scoped(super::base_mod::Base) };
         let input = quote! {
             mod scoped_mod {
                 struct ScopedRoots {
@@ -713,12 +743,12 @@ mod tests {
 
     #[test]
     fn scoped_base_with_spread() {
-        let attr = quote! { scoped(base_mod::Base) };
+        let attr = quote! { scoped(super::base_mod::Base) };
         let input = quote! {
             mod scoped_mod {
                 struct ScopedRoots {
                     #[spread]
-                    builtins: builtins_mod::Builtins,
+                    builtins: super::builtins_mod::Builtins,
                     request_context: RequestContext,
                 }
             }

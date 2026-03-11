@@ -23,4 +23,5 @@ fn compile_fail() {
 
     // Base macro validation errors
     t.compile_fail("tests/compile_fail/scoped_parent_not_module_qualified.rs");
+    t.compile_fail("tests/compile_fail/spread_not_rooted_path.rs");
 }

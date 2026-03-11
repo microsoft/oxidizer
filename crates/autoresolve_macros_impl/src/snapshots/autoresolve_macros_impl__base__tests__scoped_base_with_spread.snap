@@ -4,13 +4,13 @@ expression: pretty_print(result)
 ---
 mod scoped_mod {
     struct ScopedRoots {
-        builtins: builtins_mod::Builtins,
+        builtins: super::builtins_mod::Builtins,
         request_context: RequestContext,
     }
     #[doc(hidden)]
     pub(crate) use RequestContext as __Part0;
     #[allow(unused_imports)]
-    pub(crate) use builtins_mod::Builtins as Builtins;
+    pub(crate) use super::builtins_mod::Builtins as Builtins;
     #[allow(unused_imports)]
     pub(crate) use RequestContext as RequestContext;
     impl ::autoresolve::ResolveFrom<ScopedRoots> for RequestContext {
@@ -20,9 +20,9 @@ mod scoped_mod {
         }
     }
     #[doc(hidden)]
-    pub(crate) use builtins_mod as __spread0;
+    pub(crate) use super::builtins_mod as __spread0;
     #[doc(hidden)]
-    pub(crate) use super::base_mod as __parent;
+    pub(crate) use super::super::base_mod as __parent;
     #[doc(hidden)]
     #[macro_export]
     macro_rules! __autoresolve_scoped_mod {
@@ -44,9 +44,9 @@ mod scoped_mod {
     pub use __autoresolve_scoped_mod as ScopedRoots;
 }
 impl ::autoresolve::ScopedUnder for scoped_mod::ScopedRoots {
-    type Parent = base_mod::Base;
+    type Parent = super::base_mod::Base;
 }
-base_mod::Base!(@ impls scoped_mod::ScopedRoots, base_mod);
+super::base_mod::Base!(@ impls scoped_mod::ScopedRoots, super::base_mod);
 scoped_mod::__spread0::Builtins!(@ impls scoped_mod::ScopedRoots, scoped_mod::__spread0);
 impl ::autoresolve::BaseType<scoped_mod::ScopedRoots> for scoped_mod::ScopedRoots {
     fn insert_into(

@@ -17,7 +17,7 @@ mod scoped_mod {
         }
     }
     #[doc(hidden)]
-    pub(crate) use super::base_mod as __parent;
+    pub(crate) use super::super::base_mod as __parent;
     #[doc(hidden)]
     #[macro_export]
     macro_rules! __autoresolve_scoped_mod {
@@ -36,9 +36,9 @@ mod scoped_mod {
     pub use __autoresolve_scoped_mod as ScopedRoots;
 }
 impl ::autoresolve::ScopedUnder for scoped_mod::ScopedRoots {
-    type Parent = base_mod::Base;
+    type Parent = super::base_mod::Base;
 }
-base_mod::Base!(@ impls scoped_mod::ScopedRoots, base_mod);
+super::base_mod::Base!(@ impls scoped_mod::ScopedRoots, super::base_mod);
 impl ::autoresolve::BaseType<scoped_mod::ScopedRoots> for scoped_mod::ScopedRoots {
     fn insert_into(
         self,

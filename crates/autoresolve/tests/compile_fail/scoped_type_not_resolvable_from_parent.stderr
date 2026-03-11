@@ -14,14 +14,14 @@ help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
 help: the following other types implement trait `ResolveFrom<T>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:59:1
    |
-59 | #[base(scoped(app_base::AppBase))]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+59 | #[base(scoped(crate::app_base::AppBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    | |
    | `Request` implements `ResolveFrom<RequestBase>`
    | `Request` implements `ResolveFrom<TaskBase>`
 ...
-66 | #[base(scoped(request_base::RequestBase))]
-   | ------------------------------------------ in this attribute macro expansion
+66 | #[base(scoped(crate::request_base::RequestBase))]
+   | ------------------------------------------------- in this attribute macro expansion
 note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
    |
@@ -53,8 +53,8 @@ help: the trait `ResolveFrom<AppBase>` is not implemented for `Task`
       but trait `ResolveFrom<TaskBase>` is implemented for it
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:66:1
    |
-66 | #[base(scoped(request_base::RequestBase))]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+66 | #[base(scoped(crate::request_base::RequestBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = help: for that trait implementation, expected `TaskBase`, found `AppBase`
 note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:29:1

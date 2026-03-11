@@ -1,0 +1,11 @@
+error: #[spread] field type must be a module-qualified path (e.g., `module::Type`)
+ --> tests/compile_fail/spread_not_rooted_path.rs:8:23
+  |
+8 |         pub builtins: Builtins,
+  |                       ^^^^^^^^
+
+error: #[spread] field type path must start with `super` or `crate`
+  --> tests/compile_fail/spread_not_rooted_path.rs:17:23
+   |
+17 |         pub builtins: builtins_mod::builtins::Builtins,
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

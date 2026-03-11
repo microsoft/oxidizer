@@ -3,3 +3,9 @@ error: scoped parent must be a module-qualified path (e.g., `parent_mod::ParentT
    |
 14 | #[base(scoped(AppBase))]
    |               ^^^^^^^
+
+error: scoped parent path must start with `super` or `crate`
+  --> tests/compile_fail/scoped_parent_not_module_qualified.rs:20:15
+   |
+20 | #[base(scoped(app_base::AppBase))]
+   |               ^^^^^^^^^^^^^^^^^

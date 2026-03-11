@@ -10,8 +10,8 @@ help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
       but trait `ResolveFrom<RequestBase>` is implemented for it
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:28:1
    |
-28 | #[base(scoped(app_base::AppBase))]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+28 | #[base(scoped(crate::app_base::AppBase))]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = help: for that trait implementation, expected `RequestBase`, found `AppBase`
 note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:12:1

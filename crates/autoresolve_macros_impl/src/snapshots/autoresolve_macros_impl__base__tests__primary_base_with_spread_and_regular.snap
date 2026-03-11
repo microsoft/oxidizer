@@ -4,13 +4,13 @@ expression: pretty_print(result)
 ---
 mod app_base {
     struct Base {
-        builtins: builtins_mod::Builtins,
+        builtins: super::builtins_mod::Builtins,
         telemetry: Telemetry,
     }
     #[doc(hidden)]
     pub(crate) use Telemetry as __Part0;
     #[allow(unused_imports)]
-    pub(crate) use builtins_mod::Builtins as Builtins;
+    pub(crate) use super::builtins_mod::Builtins as Builtins;
     #[allow(unused_imports)]
     pub(crate) use Telemetry as Telemetry;
     impl ::autoresolve::ResolveFrom<Base> for Telemetry {
@@ -20,7 +20,7 @@ mod app_base {
         }
     }
     #[doc(hidden)]
-    pub(crate) use builtins_mod as __spread0;
+    pub(crate) use super::builtins_mod as __spread0;
     #[doc(hidden)]
     #[macro_export]
     macro_rules! __autoresolve_app_base {

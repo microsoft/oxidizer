@@ -16,4 +16,10 @@ mod request_base {
     pub struct RequestBase {}
 }
 
+// Error: scoped parent path must start with `super` or `crate`.
+#[base(scoped(app_base::AppBase))]
+mod request_base2 {
+    pub struct RequestBase2 {}
+}
+
 fn main() {}
