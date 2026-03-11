@@ -43,6 +43,7 @@ const TEST_GROUPS: &[&[&str]] = &[
     &["data_privacy", "data_privacy_macros", "data_privacy_macros_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
     &["ohno", "ohno_macros"],
+    &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
 ];
 

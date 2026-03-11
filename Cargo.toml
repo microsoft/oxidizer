@@ -37,6 +37,9 @@ ohno = { path = "crates/ohno", default-features = false, version = "0.3.1" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.1" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.4.1" }
+templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.1.0" }
+templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.0" }
+templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
@@ -52,7 +55,9 @@ async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
+chumsky = { version = "0.12.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
+darling = { version = "0.23.0", default-features = false }
 dashmap = { version = "6.1", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
@@ -78,6 +83,7 @@ opentelemetry = { version = "0.31.0", default-features = false }
 opentelemetry-stdout = { version = "0.31.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
+pct-str = { version = "3.0.1", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
@@ -105,6 +111,7 @@ tracing-subscriber = { version = "0.3.20", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
+uuid = { version = "1.21.0", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 xutex = { version = "0.2.0", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
