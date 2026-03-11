@@ -42,7 +42,7 @@ tick = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
-], default-features = false }
+] }
 
 [lints]
 workspace = true
