@@ -1,7 +1,17 @@
-error[E0599]: no method named `as_uri_safe` found for struct `String` in the current scope
+error[E0277]: the trait bound `String: UriParam` is not satisfied
  --> tests/ui/string_in_restricted_position.rs:9:1
   |
 9 | #[templated(template = "/users/{user_id}", unredacted)]
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `String`
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `UriParam` is not implemented for `String`
   |
+  = help: the following other types implement trait `UriParam`:
+            IpAddr
+            NonZero<u128>
+            NonZero<u16>
+            NonZero<u32>
+            NonZero<u64>
+            NonZero<u8>
+            NonZero<usize>
+            Sensitive<T>
+          and $N others
   = note: this error originates in the attribute macro `templated` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -137,9 +137,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
 
             // Restricted fields use .as_uri_safe(), unrestricted use .as_display()
             if is_restricted {
-                quote! { let #ident = self.#ident.as_uri_safe(); }
+                quote! { let #ident = ::templated_uri::UriParam::as_uri_safe(&self.#ident); }
             } else {
-                quote! { let #ident = self.#ident.as_display(); }
+                quote! { let #ident = ::templated_uri::UriUnsafeParam::as_display(&self.#ident); }
             }
         })
         .collect();
@@ -166,8 +166,6 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
 
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriParam;
-                use ::templated_uri::UriUnsafeParam;
                 #(#collect_params)*
 
                 ::std::format!(#format_template)
@@ -221,7 +219,7 @@ fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], 
         .flat_map(|part| match part {
             TemplatePart::Content(content) => {
                 // For static content, just write it to the formatter
-                vec![quote! { ::std::write!(f, "{}", #content)?; }]
+                vec![quote! { f.write_str(#content)?; }]
             }
             TemplatePart::ParamGroup(group) => {
                 let prefix = group.prefix().unwrap_or_default();
@@ -234,13 +232,13 @@ fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], 
                     // Emit prefix (first param) or separator (subsequent params)
                     let delim = if i == 0 { prefix } else { separator };
                     if !delim.is_empty() {
-                        stmts.push(quote! { ::std::write!(f, #delim)?; });
+                        stmts.push(quote! { f.write_str(#delim)?; });
                     }
 
                     // Emit key= for KV expansions (e.g. ?key=value, ;key=value)
                     if is_kv {
                         let key = *param_name;
-                        stmts.push(quote! { ::std::write!(f, "{}=", #key)?; });
+                        stmts.push(quote! { f.write_str(#key)?; f.write_str("=")?; });
                     }
 
                     let field = field_map.get(*param_name).expect("Field should exist (validated earlier)");

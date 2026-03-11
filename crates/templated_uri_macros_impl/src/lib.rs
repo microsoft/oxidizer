@@ -248,12 +248,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriParam;
-                use ::templated_uri::UriUnsafeParam;
-                let param = self.param.as_uri_safe();
-                let param2 = self.param2.as_display();
-                let param3 = self.param3.as_uri_safe();
-                let param4 = self.param4.as_uri_safe();
+                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
+                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -279,17 +277,17 @@ mod tests {
                 engine: &::data_privacy::RedactionEngine,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
-                ::std::write!(f, "{}", "/example.com/")?;
+                f.write_str("/example.com/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
-                ::std::write!(f, "{}", "/")?;
+                f.write_str("/")?;
                 <UriSafeString as ::data_privacy::RedactedDisplay>::fmt(
                     &self.param2,
                     engine,
                     f,
                 )?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
                 ::std::result::Result::Ok(())
             }
@@ -338,12 +336,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriParam;
-                use ::templated_uri::UriUnsafeParam;
-                let param = self.param.as_uri_safe();
-                let param2 = self.param2.as_display();
-                let param3 = self.param3.as_uri_safe();
-                let param4 = self.param4.as_uri_safe();
+                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
+                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -369,13 +365,13 @@ mod tests {
                 engine: &::data_privacy::RedactionEngine,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
-                ::std::write!(f, "{}", "/example.com/")?;
+                f.write_str("/example.com/")?;
                 ::std::write!(f, "{}", self.param)?;
-                ::std::write!(f, "{}", "/")?;
+                f.write_str("/")?;
                 ::std::write!(f, "{}", self.param2)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 ::std::write!(f, "{}", self.param3)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 ::std::write!(f, "{}", self.param4)?;
                 ::std::result::Result::Ok(())
             }
@@ -422,12 +418,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriParam;
-                use ::templated_uri::UriUnsafeParam;
-                let param = self.param.as_uri_safe();
-                let param2 = self.param2.as_display();
-                let param3 = self.param3.as_uri_safe();
-                let param4 = self.param4.as_uri_safe();
+                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
+                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -453,13 +447,13 @@ mod tests {
                 engine: &::data_privacy::RedactionEngine,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
-                ::std::write!(f, "{}", "/example.com/")?;
+                f.write_str("/example.com/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
-                ::std::write!(f, "{}", "/")?;
+                f.write_str("/")?;
                 ::std::write!(f, "{}", self.param2)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
                 ::std::result::Result::Ok(())
             }
@@ -506,12 +500,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriParam;
-                use ::templated_uri::UriUnsafeParam;
-                let param = self.param.as_uri_safe();
-                let param2 = self.param2.as_display();
-                let param3 = self.param3.as_uri_safe();
-                let param4 = self.param4.as_uri_safe();
+                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
+                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
@@ -537,13 +529,13 @@ mod tests {
                 engine: &::data_privacy::RedactionEngine,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
-                ::std::write!(f, "{}", "/example.com/")?;
+                f.write_str("/example.com/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
-                ::std::write!(f, "{}", "/")?;
+                f.write_str("/")?;
                 ::std::write!(f, "{}", self.param2)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
-                ::std::write!(f, "/")?;
+                f.write_str("/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
                 ::std::result::Result::Ok(())
             }
@@ -588,11 +580,9 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                use ::templated_uri::UriParam;
-                use ::templated_uri::UriUnsafeParam;
-                let resource = self.resource.as_uri_safe();
-                let page = self.page.as_uri_safe();
-                let limit = self.limit.as_uri_safe();
+                let resource = ::templated_uri::UriParam::as_uri_safe(&self.resource);
+                let page = ::templated_uri::UriParam::as_uri_safe(&self.page);
+                let limit = ::templated_uri::UriParam::as_uri_safe(&self.limit);
                 ::std::format!("/api/{resource}?page={page}&limit={limit}")
             }
             fn to_path_and_query(
@@ -616,13 +606,15 @@ mod tests {
                 engine: &::data_privacy::RedactionEngine,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
-                ::std::write!(f, "{}", "/api/")?;
+                f.write_str("/api/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, engine, f)?;
-                ::std::write!(f, "?")?;
-                ::std::write!(f, "{}=", "page")?;
+                f.write_str("?")?;
+                f.write_str("page")?;
+                f.write_str("=")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, engine, f)?;
-                ::std::write!(f, "&")?;
-                ::std::write!(f, "{}=", "limit")?;
+                f.write_str("&")?;
+                f.write_str("limit")?;
+                f.write_str("=")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, engine, f)?;
                 ::std::result::Result::Ok(())
             }

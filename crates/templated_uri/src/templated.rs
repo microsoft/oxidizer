@@ -14,7 +14,13 @@ use crate::{Uri, ValidationError};
 ///
 /// This trait is not meant to be implemented directly; use the `#[templated]` attribute macro instead.
 ///
-/// Templates follow [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) Level 3.
+/// Templates are based on [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) Level 3,
+/// with additional constraints for safe HTTP URI construction:
+///
+/// - Variable names must be valid Rust identifiers (ASCII letters, digits, underscores)
+/// - Templates must start with a leading `/`
+/// - Fragment expansion (`{#var}`) is not supported (fragments are ignored by HTTP clients)
+///
 /// All template values must implement [`UriParam`](crate::UriParam), except for
 /// unfiltered expansions (`{+foo}`). This ensures variables cannot contain reserved characters
 /// as defined by the RFC.

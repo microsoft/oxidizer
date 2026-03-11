@@ -26,14 +26,7 @@ impl<'a> UriTemplate<'a> {
                     return parts;
                 };
 
-                let first_part = if let TemplatePart::Content(first) = first_part {
-                    first.as_str()
-                } else {
-                    ""
-                };
-
-                // make sure the template starts with a slash
-                if !first_part.starts_with('/') {
+                if !first_part.starts_with_slash() {
                     em.emit(Rich::custom(e.span(), "template has to start with '/'"));
                 }
                 parts
@@ -91,6 +84,14 @@ impl<'a> TemplatePart<'a> {
             .at_least(1)
             .collect() // collect all characters that aren't part of a parameter group
             .map(|s: String| TemplatePart::Content(s)))
+    }
+
+    /// Returns whether this template part starts with a `/`.
+    fn starts_with_slash(&self) -> bool {
+        match self {
+            Self::Content(content) => content.starts_with('/'),
+            Self::ParamGroup(group) => matches!(group.param_kind, ParamKind::Prefixed(Prefix::Slash)),
+        }
     }
 }
 
@@ -369,12 +370,17 @@ mod test {
             "Failed to parse URI: [template has to start with '/' at 0..5]"
         );
 
-        let input = "{first}"; // The same with parameter group
+        let input = "{first}"; // Simple param group without slash prefix
         let result = UriTemplate::parse(input);
         assert_eq!(
             result.unwrap_err().message(),
             "Failed to parse URI: [template has to start with '/' at 0..7]"
         );
+
+        // {/first} should succeed — slash-prefixed param group starts with '/'
+        let input = "{/first}";
+        let result = UriTemplate::parse(input);
+        assert!(result.is_ok(), "Expected {{/first}} to parse: {result:?}");
     }
 
     #[test]
