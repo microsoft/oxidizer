@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, coverage(off))] // coverage doesn't handle panics well
-
 //! Test utilities for the ohno crate.
 //!
 //! This module is only available when the `test-util` feature is enabled.
@@ -50,6 +48,7 @@ macro_rules! assert_error_message {
     }};
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use crate::OhnoCore;
