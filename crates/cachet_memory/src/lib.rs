@@ -17,6 +17,8 @@
 //! use cachet_tier::{CacheEntry, CacheTier};
 //! use std::time::Duration;
 //!
+//! # async {
+//!
 //! let cache = InMemoryCacheBuilder::<String, i32>::new()
 //!     .max_capacity(1000)
 //!     .time_to_live(Duration::from_secs(300))
@@ -25,6 +27,7 @@
 //! cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 //! let value = cache.get(&"key".to_string()).await.unwrap();
 //! assert_eq!(*value.unwrap().value(), 42);
+//! # };
 //! ```
 //!
 //! # Features

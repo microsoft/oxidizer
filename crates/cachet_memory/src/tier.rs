@@ -28,11 +28,14 @@ use crate::builder::InMemoryCacheBuilder;
 /// use cachet_memory::InMemoryCache;
 /// use cachet_tier::{CacheEntry, CacheTier};
 ///
+/// # async {
+///
 /// let cache = InMemoryCache::<String, i32>::new();
 ///
 /// cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 /// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
+/// # };
 /// ```
 #[derive(Debug, Clone, ThreadAware)]
 pub struct InMemoryCache<K, V, H = RandomState>
