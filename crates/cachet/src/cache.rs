@@ -581,15 +581,15 @@ where
             }
             cachet_service::CacheOperation::Insert(req) => {
                 self.insert(&req.key, req.entry).await?;
-                Ok(cachet_service::CacheResponse::Insert())
+                Ok(cachet_service::CacheResponse::Insert)
             }
             cachet_service::CacheOperation::Invalidate(req) => {
                 self.invalidate(&req.key).await?;
-                Ok(cachet_service::CacheResponse::Invalidate())
+                Ok(cachet_service::CacheResponse::Invalidate)
             }
             cachet_service::CacheOperation::Clear => {
                 self.clear().await?;
-                Ok(cachet_service::CacheResponse::Clear())
+                Ok(cachet_service::CacheResponse::Clear)
             }
         }
     }

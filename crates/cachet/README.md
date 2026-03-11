@@ -21,9 +21,9 @@ refresh, and built-in OpenTelemetry telemetry.
 A single cache is a single point of failure and a capacity ceiling. Multi-tier
 caching layers fast, small caches in front of slower, larger ones:
 
-* **L1 (primary)**: an in-process memory cache: microsecond latency, bounded
+* **L1 (primary)** - an in-process memory cache: microsecond latency, bounded
   capacity, evicts under pressure.
-* **L2 (fallback)**: a remote or larger cache: millisecond latency, much larger
+* **L2 (fallback)** - a remote or larger cache: millisecond latency, much larger
   capacity, survives process restarts.
 
 On a miss in L1, `cachet` transparently queries L2 and optionally *promotes* the
@@ -49,7 +49,7 @@ Use [`TimeToRefresh`][__link0] together with a fallback tier to enable this patt
 ## Cache Stampede Protection
 
 A **cache stampede** (also called a thundering herd) occurs when many concurrent
-requests all miss the cache at the same time — for example, after a cold start or
+requests all miss the cache at the same time - for example, after a cold start or
 after a popular entry expires. Every request independently computes the value,
 spiking load on the backing store.
 
@@ -63,19 +63,19 @@ any error. Enable it with [`CacheBuilder::stampede_protection`][__link2].
 `cachet` is designed to adapt to your infrastructure rather than the other way
 around:
 
-* **Any storage backend** — implement [`CacheTier`][__link3] to plug in Redis, Memcached,
+* **Any storage backend** - implement [`CacheTier`][__link3] to plug in Redis, Memcached,
   a database, or any other store.
-* **Service middleware** — with the `service` feature, any
+* **Service middleware** - with the `service` feature, any
   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
   timeout, and circuit-breaker middleware around your storage using standard Tower
   or `layered` patterns.
-* **Dynamic dispatch** — convert a concretely-typed `Cache<K, V, CT>` to
+* **Dynamic dispatch** - convert a concretely-typed `Cache<K, V, CT>` to
   `Cache<K, V, DynamicCache<K, V>>` via [`Cache::into_dynamic`][__link4] to erase the
   storage type, enabling heterogeneous tier composition at runtime.
-* **Configurable promotion** — choose whether, and under what conditions, values
+* **Configurable promotion** - choose whether, and under what conditions, values
   found in a fallback tier are promoted back into the primary tier
   ([`FallbackPromotionPolicy`][__link5]).
-* **Clock injection** — all time-based logic (TTL, TTR, timestamps) goes through
+* **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
   a [`tick::Clock`][__link6], making caches fully controllable in tests without sleeping.
 
 ## Why Use This Instead of Moka/Other Caches?
@@ -148,7 +148,7 @@ Invalidation and clear are sent to **all** tiers concurrently.
 |[`cachet_memory`][__link15]|In-process memory cache backed by [moka][__link16] (`TinyLFU` eviction).|
 |[`cachet_service`][__link17]|Adapters between the `CacheTier` trait and the `layered::Service` / Tower service patterns.|
 
-You rarely need to depend on companion crates directly — `cachet` re-exports the
+You rarely need to depend on companion crates directly - `cachet` re-exports the
 most commonly used types from all of them.
 
 ## Cargo Features
@@ -230,7 +230,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_99ir80fD3ZG3Pa8NNDM50NG_PBZQEiKZq0GwBYAFaPSpkoYWSHgmdidWlsZGVy9oJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9yHa2r8RjpHG3wHY5mM6B8iG7sQcyfCaE32G1W5gjjfZZZpYWSGgmZjYWNoZXRlMC4xLjCCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMYJpdW5pZmxpZ2h0ZTAuMS4w
  [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
@@ -247,5 +247,5 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link5]: https://docs.rs/cachet/0.1.0/cachet/?search=FallbackPromotionPolicy
  [__link6]: https://docs.rs/tick/0.2.1/tick/?search=Clock
  [__link7]: https://docs.rs/cachet/0.1.0/cachet/?search=Cache
- [__link8]: https://docs.rs/builder/latest/builder/?search=CacheBuilder
+ [__link8]: https://docs.rs/cachet/0.1.0/cachet/?search=CacheBuilder
  [__link9]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry

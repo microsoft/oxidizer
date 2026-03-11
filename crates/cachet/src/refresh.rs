@@ -90,6 +90,17 @@ where
     }
 }
 
+/// A generic drop guard that runs a cleanup closure when dropped.
+///
+/// This ensures cleanup logic executes even during a panic unwind.
+struct DropGuard<F: FnMut()>(F);
+
+impl<F: FnMut()> Drop for DropGuard<F> {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
 impl<K, V, P> FallbackCache<K, V, P>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
@@ -112,14 +123,19 @@ where
             let inner = Arc::clone(&self.inner);
             let key = key.clone();
 
-            // Fire-and-forget: spawn the refresh task in the background, drop the JoinHandle
+            // Fire-and-forget: spawn the refresh task in the background, drop the JoinHandle.
+            // The guard ensures finish_refresh runs even if fetch_and_promote panics.
             drop(refresh.spawner.spawn(async move {
-                inner.fetch_and_promote(key.clone()).await;
-
-                // Mark as no longer in-flight
-                if let Some(refresh) = &inner.refresh {
-                    refresh.finish_refresh(&key);
-                }
+                let _guard = DropGuard({
+                    let inner = Arc::clone(&inner);
+                    let key = key.clone();
+                    move || {
+                        if let Some(refresh) = &inner.refresh {
+                            refresh.finish_refresh(&key);
+                        }
+                    }
+                });
+                inner.fetch_and_promote(key).await;
             }));
         }
     }
@@ -401,5 +417,53 @@ mod fetch_and_promote_tests {
             // Fallback hit, primary insert fails → promote_to_primary error path
             fc.inner.fetch_and_promote("key".to_string()).await;
         });
+    }
+
+    /// Regression test: if `fetch_and_promote` panics, the key must not remain
+    /// permanently stuck in the `in_flight` set. Without an RAII guard, the
+    /// `finish_refresh` call is skipped on panic, blocking all future refreshes
+    /// for that key.
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn panic_in_refresh_does_not_leave_key_stuck_in_flight() {
+        let primary = InMemoryCache::<String, i32>::new();
+        let fallback = MockCache::<String, i32>::new();
+        fallback.fail_when(|_| panic!("simulated panic in fallback get"));
+
+        let clock = Clock::new_frozen();
+        let telemetry = TelemetryConfig::new().build();
+        let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
+
+        let fc = FallbackCache::new(
+            "test",
+            primary,
+            fallback,
+            FallbackPromotionPolicy::always(),
+            clock,
+            Some(refresh),
+            telemetry,
+        );
+
+        let key = "panic_key".to_string();
+
+        // Trigger background refresh — spawns a task that will panic
+        fc.do_refresh(&key);
+
+        // Give the spawned task time to run and panic
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // The key should NOT be stuck in in_flight.
+        // try_start_refresh returns true if the key is NOT in the set.
+        let can_refresh_again = fc
+            .inner
+            .refresh
+            .as_ref()
+            .expect("refresh should be configured")
+            .try_start_refresh(&key);
+
+        assert!(
+            can_refresh_again,
+            "key should not be stuck in in_flight after a panic in fetch_and_promote"
+        );
     }
 }
