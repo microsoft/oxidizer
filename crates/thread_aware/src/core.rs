@@ -74,6 +74,7 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// Note that this trait is independent of the [`Send`] trait as there can be usages of isolated
 /// affinities with multiple affinities on a single thread. However, that
 /// is a fairly specific use case, so types that implement [`ThreadAware`] should generally also implement
+/// random change to check ci
 /// [`Send`].
 pub trait ThreadAware {
     /// Consume a value and return a value in the destination affinity.
