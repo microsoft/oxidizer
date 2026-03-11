@@ -159,23 +159,6 @@ where
     pub fn inner(&self) -> &CT {
         &self.storage
     }
-
-    /// Converts this cache into a dynamically-dispatched cache.
-    ///
-    /// This erases the concrete storage type, allowing caches with different
-    /// storage implementations to be used interchangeably at runtime.
-    #[must_use]
-    pub(crate) fn into_dynamic(self) -> Cache<K, V, DynamicCache<K, V>>
-    where
-        CT: DynamicCacheExt<K, V>,
-    {
-        Cache {
-            name: self.name,
-            storage: self.storage.into_dynamic(),
-            clock: self.clock,
-            mergers: self.mergers,
-        }
-    }
 }
 
 impl<K, V, CT> Cache<K, V, CT>

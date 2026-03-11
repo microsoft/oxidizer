@@ -480,7 +480,6 @@ where
 }
 
 #[expect(private_bounds, reason = "Buildable is an internal trait")]
-#[expect(clippy::type_complexity, reason = "complex type is unavoidable for builder pattern")]
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
@@ -612,5 +611,4 @@ mod tests {
         assert!(cache.inner().ttl.is_some());
         assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
     }
-
 }

@@ -103,6 +103,7 @@ impl TelemetryConfig {
         #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
         {
             _ = self;
+            #[expect(clippy::default_trait_access, reason = "CacheTelemetryInner is not in scope without feature flags")]
             CacheTelemetry { inner: Default::default() }
         }
     }

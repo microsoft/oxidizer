@@ -64,9 +64,8 @@ where
 
 ## Dynamic Dispatch
 
-Enable the `dynamic-cache` feature for [`DynamicCache`][__link5], which wraps any `CacheTier`
-in a type-erased container. This is useful for multi-tier caches with heterogeneous
-storage backends.
+[`DynamicCache`][__link5] wraps any `CacheTier` in a type-erased container. This is useful
+for multi-tier caches with heterogeneous storage backends.
 
 
 <hr/>
@@ -74,7 +73,7 @@ storage backends.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9x_W0gtWIXGG8Hn-Rfz85pbG019zTmIL6Q_G2OZScM_g-oTYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8VX-Kky_LNZG3z2xZBKpBj0G4xH_J9mY9xBG2zjGmL4bDbCYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error

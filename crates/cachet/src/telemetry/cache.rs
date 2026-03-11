@@ -45,7 +45,7 @@ pub struct CacheTelemetry {
     #[cfg(any(feature = "logs", feature = "metrics", test))]
     pub(crate) inner: Arc<CacheTelemetryInner, PerCore>,
     #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
-    #[allow(dead_code, reason = "No-op telemetry when features are disabled")]
+    #[expect(dead_code, reason = "No-op telemetry when features are disabled")]
     pub(crate) inner: CacheTelemetryInner,
 }
 
@@ -111,6 +111,7 @@ impl CacheTelemetry {
         expect(unused_variables, reason = "No-op when both logs and metrics are disabled")
     )]
     #[inline]
+    #[expect(clippy::unused_self, reason = "self is used under feature flags")]
     pub(crate) fn record(&self, cache_name: CacheName, operation: CacheOperation, activity: CacheActivity, duration: Duration) {
         #[cfg(any(feature = "metrics", test))]
         {
@@ -141,6 +142,7 @@ impl CacheTelemetry {
         expect(unused_variables, reason = "No-op when metrics are disabled")
     )]
     #[inline]
+    #[expect(clippy::unused_self, reason = "self is used under feature flags")]
     pub(crate) fn record_size(&self, cache_name: CacheName, size: u64) {
         #[cfg(any(feature = "metrics", test))]
         {

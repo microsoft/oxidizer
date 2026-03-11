@@ -12,9 +12,9 @@
 //! A single cache is a single point of failure and a capacity ceiling. Multi-tier
 //! caching layers fast, small caches in front of slower, larger ones:
 //!
-//! - **L1 (primary)** — an in-process memory cache: microsecond latency, bounded
+//!  - **L1 (primary)**: an in-process memory cache: microsecond latency, bounded
 //!   capacity, evicts under pressure.
-//! - **L2 (fallback)** — a remote or larger cache: millisecond latency, much larger
+//!  - **L2 (fallback)**: a remote or larger cache: millisecond latency, much larger
 //!   capacity, survives process restarts.
 //!
 //! On a miss in L1, `cachet` transparently queries L2 and optionally *promotes* the
@@ -135,7 +135,7 @@
 //! | Crate | Purpose |
 //! |---|---|
 //! | [`cachet_tier`] | Core `CacheTier` trait, `CacheEntry`, `Error`, and `MockCache` for testing. |
-//! | [`cachet_memory`] | In-process memory cache backed by [moka](https://docs.rs/moka) (TinyLFU eviction). |
+//! | [`cachet_memory`] | In-process memory cache backed by [moka](https://docs.rs/moka) (`TinyLFU` eviction). |
 //! | [`cachet_service`] | Adapters between the `CacheTier` trait and the `layered::Service` / Tower service patterns. |
 //!
 //! You rarely need to depend on companion crates directly — `cachet` re-exports the

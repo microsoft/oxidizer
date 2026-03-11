@@ -21,9 +21,9 @@ refresh, and built-in OpenTelemetry telemetry.
 A single cache is a single point of failure and a capacity ceiling. Multi-tier
 caching layers fast, small caches in front of slower, larger ones:
 
-* **L1 (primary)** — an in-process memory cache: microsecond latency, bounded
+* **L1 (primary)**: an in-process memory cache: microsecond latency, bounded
   capacity, evicts under pressure.
-* **L2 (fallback)** — a remote or larger cache: millisecond latency, much larger
+* **L2 (fallback)**: a remote or larger cache: millisecond latency, much larger
   capacity, survives process restarts.
 
 On a miss in L1, `cachet` transparently queries L2 and optionally *promotes* the
@@ -145,7 +145,7 @@ Invalidation and clear are sent to **all** tiers concurrently.
 |Crate|Purpose|
 |-----|-------|
 |[`cachet_tier`][__link14]|Core `CacheTier` trait, `CacheEntry`, `Error`, and `MockCache` for testing.|
-|[`cachet_memory`][__link15]|In-process memory cache backed by [moka][__link16] (TinyLFU eviction).|
+|[`cachet_memory`][__link15]|In-process memory cache backed by [moka][__link16] (`TinyLFU` eviction).|
 |[`cachet_service`][__link17]|Adapters between the `CacheTier` trait and the `layered::Service` / Tower service patterns.|
 
 You rarely need to depend on companion crates directly — `cachet` re-exports the
@@ -230,7 +230,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2MkiUjWNW0tG5WNjAa4lGHWG4qKw5ZOwmp_Gw-yD1BrKGbGYWSHgmdidWlsZGVy9oJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_99ir80fD3ZG3Pa8NNDM50NG_PBZQEiKZq0GwBYAFaPSpkoYWSHgmdidWlsZGVy9oJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

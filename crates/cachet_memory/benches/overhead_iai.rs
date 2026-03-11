@@ -45,9 +45,7 @@ fn setup_cachet() -> InMemoryCache<String, String> {
     let cache = InMemoryCache::<String, String>::new();
     rt.block_on(async {
         for i in 0..1000 {
-            let _ = cache
-                .insert(&format!("key_{i}"), CacheEntry::new(format!("value_{i}")))
-                .await;
+            let _ = cache.insert(&format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
         }
     });
     cache
@@ -118,9 +116,7 @@ fn insert_moka(cache: MokaCache<String, String>) {
     let rt = rt();
     rt.block_on(async {
         for i in 0..100 {
-            cache
-                .insert(format!("new_key_{i}"), format!("new_value_{i}"))
-                .await;
+            cache.insert(format!("new_key_{i}"), format!("new_value_{i}")).await;
         }
     });
 }
@@ -133,10 +129,7 @@ fn insert_cachet(cache: InMemoryCache<String, String>) {
     rt.block_on(async {
         for i in 0..100 {
             let _ = cache
-                .insert(
-                    &format!("new_key_{i}"),
-                    CacheEntry::new(format!("new_value_{i}")),
-                )
+                .insert(&format!("new_key_{i}"), CacheEntry::new(format!("new_value_{i}")))
                 .await;
         }
     });
