@@ -532,7 +532,12 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
         };
 
         if let MemoryAffinity::Pinned(source) = source {
-            guard.replace(source, self.value);
+            // Only restore the value to the source slot when source and destination differ.
+            // If they are the same slot, the replacement above already stored the new value
+            // there; overwriting it here would corrupt storage with the stale pre-relocation value.
+            if source != destination {
+                guard.replace(source, self.value);
+            }
         }
 
         drop(guard);

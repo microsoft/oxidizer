@@ -74,7 +74,7 @@ jobs:
         run: cargo sort --check --grouped --workspace
       - name: Readmes
         if: success() || failure()
-        run: cargo workspaces exec --ignore-private cargo doc2readme --expand-macros --all-features --check --lib --template ../README.j2
+        run: cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
         env:
           # Disable sccache: macro expansion (rustc -Zunpretty=expanded) does not
           # produce the artifact files sccache expects to cache, causing it to fail.

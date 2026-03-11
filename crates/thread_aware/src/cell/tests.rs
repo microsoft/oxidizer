@@ -458,3 +458,33 @@ fn test_strong_count_independent_across_affinities() {
     // arc_b on affinity2 is unaffected by the clone on affinity1
     assert_eq!(PerCore::strong_count(&arc_b), 1); // Still 1; unaffected by clone on affinity1
 }
+
+#[test]
+fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
+    // Regression test: when source == destination, Arc::relocated() must NOT overwrite the
+    // newly-created value in storage with the stale pre-relocation value.
+    let affinities = pinned_affinities(&[2]);
+    let affinity = affinities[0];
+
+    // Create an Arc whose Counter starts at zero, then advance it.
+    let arc = PerCore::new(Counter::new);
+    arc.increment_by(42);
+    assert_eq!(arc.value(), 42);
+
+    // Relocate with source == destination.  The ThreadAware impl always creates a *new*
+    // Counter (value resets to 0), so `relocated` must return 0 and must also leave
+    // storage holding 0 (not the stale 42).
+    let relocated = arc.relocated(affinity.into(), affinity);
+    assert_eq!(relocated.value(), 0, "relocated value should come from factory");
+
+    // A second relocation from the same slot must find the factory-created value (0) in
+    // storage, not the stale pre-relocation value (42).  Before the bug fix, the first
+    // relocated() call wrote the stale Arc<Counter(42)> back into the storage slot,
+    // so the second call's `get_clone` fast-path would return 42 instead of 0.
+    let relocated_again = relocated.relocated(affinity.into(), affinity);
+    assert_eq!(
+        relocated_again.value(),
+        0,
+        "subsequent relocation must not see stale pre-relocation value from storage"
+    );
+}
