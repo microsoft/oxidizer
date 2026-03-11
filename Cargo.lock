@@ -1169,7 +1169,6 @@ dependencies = [
  "futures",
  "mutants",
  "ohno_macros",
- "ptr_meta",
  "regex",
  "thiserror",
  "tokio",
@@ -1431,12 +1430,6 @@ checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
-
-[[package]]
-name = "ptr_meta"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b9a0cf95a1196af61d4f1cbdab967179516d9a4a4312af1f31948f8f6224a79"
 
 [[package]]
 name = "quote"
