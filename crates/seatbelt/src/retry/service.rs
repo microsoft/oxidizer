@@ -360,7 +360,7 @@ mod tests {
     use crate::testing::FailReadyService;
     use crate::typestates::Set;
     use layered::Layer;
-    use testing_aids::MetricTester;
+    use crate::testing::MetricTester;
 
     #[cfg_attr(miri, ignore)]
     #[test]
@@ -408,7 +408,7 @@ mod tests {
     async fn retry_emits_log() {
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use testing_aids::LogCapture;
+        use crate::testing::LogCapture;
 
         let log_capture = LogCapture::new();
         let _guard = log_capture.subscriber().set_default();

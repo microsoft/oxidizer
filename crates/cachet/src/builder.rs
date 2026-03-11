@@ -613,15 +613,4 @@ mod tests {
         assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
     }
 
-    #[cfg(feature = "memory")]
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn cache_builder_with_use_metrics() {
-        let tester = testing_aids::MetricTester::new();
-        let clock = Clock::new_frozen();
-        let _cache = Cache::builder::<String, i32>(clock)
-            .memory()
-            .use_metrics(tester.meter_provider())
-            .build();
-    }
 }

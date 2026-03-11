@@ -2083,8 +2083,6 @@ dependencies = [
  "futures",
  "mockall",
  "mutants",
- "opentelemetry",
- "opentelemetry_sdk",
  "tracing",
  "tracing-subscriber",
 ]

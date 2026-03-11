@@ -187,7 +187,7 @@ mod tests {
     use super::*;
     use crate::breaker::{EngineFake, HealthInfo, Stats};
     use crate::metrics::{create_meter, create_resilience_event_counter};
-    use testing_aids::MetricTester;
+    use crate::testing::MetricTester;
 
     #[test]
     #[cfg_attr(miri, ignore)]

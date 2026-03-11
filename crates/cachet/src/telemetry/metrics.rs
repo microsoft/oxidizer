@@ -7,7 +7,7 @@ use opentelemetry::{
 };
 
 const METER_NAME: &str = "cachet";
-const VERSION: &str = "v0.1.0";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SCHEMA_URL: &str = "https://opentelemetry.io/schemas/1.47.0";
 const CACHE_EVENT_COUNT_NAME: &str = "cache.event.count";
 const CACHE_OPERATION_DURATION_NAME: &str = "cache.operation.duration";

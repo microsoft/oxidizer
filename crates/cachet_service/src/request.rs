@@ -77,11 +77,11 @@ pub enum CacheResponse<V> {
     /// Response from a get operation
     Get(Option<CacheEntry<V>>),
     /// Response from an insert operation
-    Insert(),
+    Insert,
     /// Response from an invalidate operation
-    Invalidate(),
+    Invalidate,
     /// Response from a clear operation
-    Clear(),
+    Clear,
 }
 
 impl<V> CacheResponse<V> {
