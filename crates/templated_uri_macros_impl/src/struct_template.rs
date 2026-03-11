@@ -11,7 +11,8 @@ use std::collections::HashSet;
 
 use darling::{FromAttributes, FromField};
 use proc_macro2::{Ident, TokenStream};
-use quote::quote;
+use quote::{quote, quote_spanned};
+use syn::spanned::Spanned;
 use syn::{Attribute, DataStruct, Field};
 
 use crate::template_parser::{TemplatePart, UriTemplate};
@@ -134,12 +135,13 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         .map(|f| {
             let ident = f.ident.as_ref().expect("struct fields must be named");
             let is_restricted = is_restricted(ident);
+            let ty_span = f.ty.span();
 
             // Restricted fields use .as_uri_safe(), unrestricted use .as_display()
             if is_restricted {
-                quote! { let #ident = ::templated_uri::UriParam::as_uri_safe(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::UriParam::as_uri_safe(&self.#ident); }
             } else {
-                quote! { let #ident = ::templated_uri::UriUnsafeParam::as_display(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::UriUnsafeParam::as_display(&self.#ident); }
             }
         })
         .collect();
