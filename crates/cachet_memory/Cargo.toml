@@ -23,8 +23,8 @@ all-features = true
 allowed_external_types = ["cachet_tier::tier::CacheTier", "thread_aware::core::ThreadAware"]
 
 [dependencies]
-cachet_tier = { path = "../cachet_tier" }
-moka = { version = "0.12", features = ["future"] }
+cachet_tier = { workspace = true }
+moka = { workspace = true, features = ["future"] }
 thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]

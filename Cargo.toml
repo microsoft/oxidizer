@@ -73,6 +73,7 @@ jiff = { version = "0.2.16", default-features = false }
 libc = { version = "0.2.178", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
+moka = { version = "0.12.14", default-features = false }
 mutants = { version = "0.0.3", default-features = false }
 new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }

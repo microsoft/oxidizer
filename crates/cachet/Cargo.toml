@@ -43,9 +43,9 @@ service = ["dep:cachet_service", "dep:layered"]
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
-cachet_memory = { path = "../cachet_memory", optional = true }
-cachet_service = { path = "../cachet_service", optional = true }
-cachet_tier = { path = "../cachet_tier" }
+cachet_memory = { workspace = true, optional = true }
+cachet_service = { workspace = true, optional = true }
+cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
@@ -62,7 +62,7 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
+cachet_tier = { workspace = true, features = ["test-util"] }
 criterion = { workspace = true }
 dynosaur = { workspace = true }
 opentelemetry = { workspace = true, features = [
