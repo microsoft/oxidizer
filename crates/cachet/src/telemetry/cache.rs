@@ -195,6 +195,8 @@ impl CacheTelemetry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::telemetry::TelemetryConfig;
+    use testing_aids::{LogCapture, MetricTester};
 
     #[test]
     fn cache_operation_as_str() {
@@ -217,5 +219,95 @@ mod tests {
         assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
         assert_eq!(CacheActivity::FallbackPromotion.as_str(), "cache.fallback_promotion");
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn metrics_record_emits_correct_attributes() {
+        let tester = MetricTester::new();
+        let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
+
+        telemetry.record("my_cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(5));
+
+        tester.assert_attributes_contain(&[
+            opentelemetry::KeyValue::new(attributes::CACHE_NAME, "my_cache"),
+            opentelemetry::KeyValue::new(attributes::CACHE_OPERATION_NAME, CacheOperation::Get.as_str()),
+            opentelemetry::KeyValue::new(attributes::CACHE_ACTIVITY_NAME, CacheActivity::Hit.as_str()),
+        ]);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn metrics_record_size_emits_cache_name() {
+        let tester = MetricTester::new();
+        let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
+
+        telemetry.record_size("size_test_cache", 42);
+
+        tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_NAME, "size_test_cache")]);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn logs_emit_contains_all_fields_and_values() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        CacheTelemetry::emit(
+            "my_test_cache",
+            CacheOperation::Invalidate,
+            CacheActivity::Error,
+            Duration::from_nanos(12345),
+        );
+
+        // Verify field names
+        capture.assert_contains(attributes::CACHE_NAME);
+        capture.assert_contains(attributes::CACHE_OPERATION_NAME);
+        capture.assert_contains(attributes::CACHE_ACTIVITY_NAME);
+        capture.assert_contains("cache.duration_ns");
+        capture.assert_contains("cache.event");
+
+        // Verify values
+        capture.assert_contains("my_test_cache");
+        capture.assert_contains(CacheOperation::Invalidate.as_str());
+        capture.assert_contains(CacheActivity::Error.as_str());
+        capture.assert_contains("12345");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn logs_emit_at_correct_severity_levels() {
+        // Error level - should always be captured
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+        CacheTelemetry::emit("cache", CacheOperation::Get, CacheActivity::Error, Duration::ZERO);
+        capture.assert_contains("ERROR");
+
+        // Info level
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+        CacheTelemetry::emit("cache", CacheOperation::Get, CacheActivity::Expired, Duration::ZERO);
+        capture.assert_contains("INFO");
+
+        // Debug level
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+        CacheTelemetry::emit("cache", CacheOperation::Get, CacheActivity::Hit, Duration::ZERO);
+        capture.assert_contains("DEBUG");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn telemetry_disabled_emits_nothing() {
+        // No meter, no logs - telemetry still gets created but does nothing
+        let telemetry = TelemetryConfig::new().build();
+
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        // This should not panic and should not emit logs
+        telemetry.record("cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_secs(1));
+
+        assert!(capture.output().is_empty());
     }
 }

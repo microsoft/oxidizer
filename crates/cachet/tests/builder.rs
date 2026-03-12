@@ -101,6 +101,14 @@ fn cache_builder_clock() {
     assert_eq!(builder_clock.instant(), expected_instant);
 }
 
+#[test]
+fn cache_builder_name() -> TestResult {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().name("test_cache").build();
+    assert_eq!(cache.name(), "test_cache");
+    Ok(())
+}
+
 #[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_builder_basic() -> TestResult {

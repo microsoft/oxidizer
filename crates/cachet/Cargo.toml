@@ -76,7 +76,8 @@ testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true, features = ["std"] }
-tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+tracing-test = { workspace = true, features = ["no-env-filter"] }
+tracing-subscriber = { workspace = true }
 
 [[bench]]
 name = "operations"

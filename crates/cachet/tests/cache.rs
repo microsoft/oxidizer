@@ -829,4 +829,23 @@ mod service_tests {
             Ok(())
         })
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn cache_builder_use_metrics() -> TestResult {
+        block_on(async {
+            let tester = testing_aids::MetricTester::new();
+            let clock = Clock::new_frozen();
+            let cache = Cache::builder::<String, i32>(clock)
+                .memory()
+                .use_metrics(tester.meter_provider())
+                .build();
+
+            let key = "key".to_string();
+            cache.insert(&key, CacheEntry::new(42)).await?;
+            let entry = cache.get(&key).await?.expect("entry should exist");
+            assert_eq!(*entry.value(), 42);
+            Ok(())
+        })
+    }
 }

@@ -36,9 +36,9 @@ use thread_aware::Arc;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TelemetryConfig {
     #[cfg(any(feature = "logs", test))]
-    logs_enabled: bool,
+    pub(crate) logs_enabled: bool,
     #[cfg(any(feature = "metrics", test))]
-    meter: Option<Meter>,
+    pub(crate) meter: Option<Meter>,
 }
 
 impl TelemetryConfig {

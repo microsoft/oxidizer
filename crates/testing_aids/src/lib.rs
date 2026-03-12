@@ -11,10 +11,14 @@ use std::time::Duration;
 use std::{env, process, thread};
 
 mod log;
+mod log_capture;
 mod macros;
+mod metrics;
 mod yielding;
 
 pub use log::*;
+pub use log_capture::*;
+pub use metrics::*;
 pub use yielding::*;
 
 /// If something (whatever) does not happen in a test within this time, the test will fail.

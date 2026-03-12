@@ -7,8 +7,9 @@
 
 use cachet::{Cache, CacheEntry, Error};
 use cachet_tier::{CacheOp, MockCache};
+use std::ops::Add;
 use std::time::Duration;
-use tick::Clock;
+use tick::{Clock, ClockControl};
 
 type TestResult = Result<(), Error>;
 
@@ -267,22 +268,22 @@ fn wrapper_inner_returns_reference() {
 }
 
 #[cfg_attr(miri, ignore)]
-#[test]
-fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() -> TestResult {
+#[tokio::test]
+async fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() -> TestResult {
     block_on(async {
         // Entry has no per-entry TTL, but tier TTL is very short and entry is old
-        let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock.clone())
-            .memory()
-            .ttl(Duration::from_secs(10))
-            .build();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let ttl = Duration::from_secs(1);
+        let cache = Cache::builder::<String, i32>(clock.clone()).memory().ttl(ttl).build();
 
         let key = "key".to_string();
 
         // Insert an entry that looks very old (no per-entry TTL, just cached_at in the past)
-        let entry = CacheEntry::expires_at(42, Duration::from_secs(1), clock.system_time() - Duration::from_secs(100));
+        let entry = CacheEntry::new(42);
         cache.insert(&key, entry).await?;
 
+        control.advance(ttl.add(Duration::from_secs(1)));
         let result = cache.get(&key).await?;
         assert!(result.is_none(), "entry expired by tier TTL should return None");
         Ok(())

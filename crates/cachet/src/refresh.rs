@@ -332,10 +332,11 @@ mod tests {
 mod fetch_and_promote_tests {
     use super::*;
     use crate::fallback::FallbackPromotionPolicy;
-    use crate::telemetry::TelemetryConfig;
+    use crate::telemetry::{attributes, TelemetryConfig};
     use cachet_memory::InMemoryCache;
     use cachet_tier::MockCache;
     use tick::Clock;
+    use testing_aids::MetricTester;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
@@ -349,6 +350,24 @@ mod fetch_and_promote_tests {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
+    }
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[test]
+    fn fallback_miss_records_refresh_miss_telemetry() {
+        block_on(async {
+            let tester = MetricTester::new();
+            let clock = Clock::new_frozen();
+            let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
+            let primary = InMemoryCache::<String, i32>::new();
+            let fallback = InMemoryCache::<String, i32>::new();
+            let fc = FallbackCache::new("test", primary, fallback, FallbackPromotionPolicy::always(), clock, None, telemetry);
+
+            // Fallback is empty → handle_fallback_miss Ok(None) branch
+            fc.inner.fetch_and_promote("missing".to_string()).await;
+
+            tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_ACTIVITY_NAME, "cache.refresh_miss")]);
+        });
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri

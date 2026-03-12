@@ -377,6 +377,51 @@ fn fallback_builder_stampede_protection() -> TestResult {
 }
 
 #[cfg_attr(miri, ignore)]
+#[cfg(feature = "logs")]
+#[test]
+fn fallback_builder_use_logs_emits_logs() -> TestResult {
+    block_on(async {
+        let capture = testing_aids::LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        let clock = Clock::new_frozen();
+        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+
+        let cache = Cache::builder::<String, i32>(clock).memory().use_logs().fallback(fallback).build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        cache.get(&key).await?.expect("entry should exist");
+
+        // Verify logs were actually emitted
+        capture.assert_contains("cache.inserted");
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[cfg(feature = "logs")]
+#[test]
+fn cache_builder_use_logs_emits_logs() -> TestResult {
+    block_on(async {
+        let capture = testing_aids::LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().use_logs().build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        cache.get(&key).await?.expect("entry should exist");
+
+        // Verify logs were actually emitted (catches with_logs mutation to false)
+        capture.assert_contains("cache.inserted");
+        capture.assert_contains("cache.hit");
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_clock_returns_clock() {
     let clock = Clock::new_frozen();
@@ -501,6 +546,29 @@ fn do_refresh_without_time_to_refresh_is_noop() -> TestResult {
 
         // Calling do_refresh should silently return (exercise the else branch)
         cache.inner().do_refresh(&"key".to_string());
+        Ok(())
+    })
+}
+
+#[cfg_attr(miri, ignore)]
+#[cfg(feature = "metrics")]
+#[test]
+fn fallback_builder_use_metrics() -> TestResult {
+    block_on(async {
+        let tester = testing_aids::MetricTester::new();
+        let clock = Clock::new_frozen();
+        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .use_metrics(tester.meter_provider())
+            .fallback(fallback)
+            .build();
+
+        let key = "key".to_string();
+        cache.insert(&key, CacheEntry::new(42)).await?;
+        let entry = cache.get(&key).await?.expect("entry should exist");
+        assert_eq!(*entry.value(), 42);
         Ok(())
     })
 }

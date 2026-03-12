@@ -347,22 +347,6 @@ pub struct FallbackBuilder<K, V, PB, FB> {
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
-    /// Sets a human-readable name for this fallback cache, used in telemetry attributes.
-    ///
-    /// If not set, a name is derived from the storage types.
-    #[must_use]
-    pub fn name(mut self, name: &'static str) -> Self {
-        self.name = Some(name);
-        self
-    }
-
-    /// Enables logging for this fallback cache.
-    #[cfg(any(feature = "logs", test))]
-    #[must_use]
-    pub fn use_logs(mut self) -> Self {
-        self.telemetry = self.telemetry.with_logs();
-        self
-    }
 
     /// Sets the promotion policy for this fallback tier.
     ///
@@ -513,13 +497,14 @@ where
     type Output = CacheWrapper<K, V, CT>;
 
     fn build(self) -> Cache<K, V, Self::Output> {
+        let name = self.name;
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
 
         let tier = self.build_tier(clock.clone(), telemetry);
 
-        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(None), tier, clock, stampede_protection)
+        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(name), tier, clock, stampede_protection)
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
@@ -597,5 +582,22 @@ mod tests {
 
         assert!(cache.inner().ttl.is_some());
         assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
+    }
+
+    #[cfg(any(feature = "logs", test))]
+    #[test]
+    fn builder_use_logs() {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).memory().use_logs();
+        assert_eq!(cache.telemetry.logs_enabled, true);
+    }
+
+    #[cfg(any(feature = "metrics", test))]
+    #[test]
+    fn builder_use_metrics() {
+        let clock = Clock::new_frozen();
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
+        let cache = Cache::builder::<String, i32>(clock).memory().use_metrics(&provider);
+        assert!(cache.telemetry.meter.is_some());
     }
 }
