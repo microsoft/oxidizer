@@ -30,24 +30,30 @@
 /// ```
 #[macro_export]
 macro_rules! assert_error_message {
-    ($error:expr, $expected:expr) => {{
-        let error_string = $error.to_string();
-        let expected: &str = $expected;
+    ($error:expr, $expected:expr) => {
+        $crate::test_util::assert_error_message_impl(&$error.to_string(), $expected)
+    };
+}
 
-        let test = move || {
-            if error_string == expected {
-                return ();
-            }
-            if let Some(remainder) = error_string.strip_prefix(expected) {
-                // backtrace, caused by, or error trace indicators
-                if remainder.starts_with("\n\nBacktrace:\n") || remainder.starts_with("\ncaused by: ") || remainder.starts_with("\n> ") {
-                    return ();
-                }
-            }
-            panic!("left : {expected}\nright: {error_string}");
-        };
-        test();
-    }};
+/// Implementation helper for [`assert_error_message!`].
+///
+/// # Note
+///
+/// This is an implementation detail of the [`assert_error_message!`] macro. Do not call directly.
+#[doc(hidden)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[expect(clippy::panic, reason = "test assertion helper — panicking is the intended behavior")]
+pub fn assert_error_message_impl(error_string: &str, expected: &str) {
+    if error_string == expected {
+        return;
+    }
+    if let Some(remainder) = error_string.strip_prefix(expected) {
+        // backtrace, caused by, or error trace indicators
+        if remainder.starts_with("\n\nBacktrace:\n") || remainder.starts_with("\ncaused by: ") || remainder.starts_with("\n> ") {
+            return;
+        }
+    }
+    panic!("left : {expected}\nright: {error_string}");
 }
 
 #[cfg(test)]
