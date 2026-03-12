@@ -41,7 +41,7 @@ assert_eq!(result, 2);
 ```rust
 use anyspawn::Spawner;
 
-let spawner = Spawner::new_custom(|fut| {
+let spawner = Spawner::new_custom("threadpool", |fut| {
     std::thread::spawn(move || futures::executor::block_on(fut));
 });
 
@@ -52,7 +52,7 @@ let handle = spawner.spawn(async { 42 });
 ## Features
 
 * `tokio` (default): Enables the [`Spawner::new_tokio`][__link1] constructor
-* `custom`: Enables the [`Spawner::new_custom`][__link2] constructor
+* `custom`: Enables [`Spawner::new_custom`][__link2] and [`CustomSpawnerBuilder`][__link3]
 
 
 <hr/>
@@ -60,7 +60,8 @@ let handle = spawner.spawn(async { 42 });
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9dpP_3aSShKG7QXWKrXDfsoG1WHsvhBMNw7G0Heldai66RkYWSBgmhhbnlzcGF3bmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4kogXIVaWzIG_FIsBdF8WN2G2_j-q32s9sZG1ijNLpXv0lkYWSBgmhhbnlzcGF3bmUwLjEuMA
  [__link0]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner
  [__link1]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::new_tokio
  [__link2]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::new_custom
+ [__link3]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=CustomSpawnerBuilder
