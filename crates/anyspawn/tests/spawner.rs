@@ -36,7 +36,7 @@ async fn tokio_spawn_fire_and_forget() {
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawn_and_await() {
-    let spawner = Spawner::new_custom(|fut| {
+    let spawner = Spawner::new_custom("threadpool", |fut| {
         std::thread::spawn(move || futures::executor::block_on(fut));
     });
 
@@ -47,7 +47,7 @@ fn custom_spawn_and_await() {
 #[cfg(feature = "custom")]
 #[tokio::test]
 async fn custom_spawn_fire_and_forget() {
-    let spawner = Spawner::new_custom(|fut| {
+    let spawner = Spawner::new_custom("threadpool", |fut| {
         std::thread::spawn(move || futures::executor::block_on(fut));
     });
 
@@ -65,7 +65,7 @@ async fn custom_spawn_fire_and_forget() {
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawner_debug() {
-    let spawner = Spawner::new_custom(|_| {});
+    let spawner = Spawner::new_custom("noop", |_| {});
     let debug_str = format!("{spawner:?}");
-    assert!(debug_str.contains("CustomSpawner"));
+    assert!(debug_str.contains("noop"));
 }
