@@ -36,7 +36,7 @@
 //! ```rust,ignore
 //! use anyspawn::Spawner;
 //!
-//! let spawner = Spawner::new_custom(|fut| {
+//! let spawner = Spawner::new_custom("threadpool", |fut| {
 //!     std::thread::spawn(move || futures::executor::block_on(fut));
 //! });
 //!
@@ -47,11 +47,13 @@
 //! # Features
 //!
 //! - `tokio` (default): Enables the [`Spawner::new_tokio`] constructor
-//! - `custom`: Enables the [`Spawner::new_custom`] constructor
+//! - `custom`: Enables [`Spawner::new_custom`] and [`CustomSpawnerBuilder`]
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]
 
+#[cfg(feature = "custom")]
+mod builder;
 #[cfg(feature = "custom")]
 mod custom;
 #[cfg(any(feature = "tokio", feature = "custom"))]
@@ -59,6 +61,10 @@ mod handle;
 #[cfg(any(feature = "tokio", feature = "custom"))]
 mod spawner;
 
+#[cfg(feature = "custom")]
+pub use builder::CustomSpawnerBuilder;
+#[cfg(feature = "custom")]
+pub use custom::BoxedFuture;
 #[cfg(any(feature = "tokio", feature = "custom"))]
 pub use handle::JoinHandle;
 #[cfg(any(feature = "tokio", feature = "custom"))]

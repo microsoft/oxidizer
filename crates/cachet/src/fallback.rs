@@ -17,8 +17,8 @@ use tick::Clock;
 use crate::Error;
 use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
-use crate::telemetry::CacheTelemetry;
 use crate::telemetry::ext::ClockExt;
+use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 
 /// Type alias for promotion predicate functions.
 type PromotionPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
@@ -211,6 +211,9 @@ where
     /// This is a separate method so we can box just this path, keeping hits fast.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
+        self.inner
+            .telemetry
+            .record(self.inner.name, CacheOperation::Get, CacheActivity::Fallback, timed.duration);
 
         // Propagate any error from fallback
         let fallback_value = timed.result?;
@@ -218,7 +221,13 @@ where
         if let Some(ref v) = fallback_value
             && self.inner.policy.should_promote(v)
         {
-            let _timed_insert = self.inner.clock.timed_async(self.inner.primary.insert(key, v.clone())).await;
+            let timed_insert = self.inner.clock.timed_async(self.inner.primary.insert(key, v.clone())).await;
+            self.inner.telemetry.record(
+                self.inner.name,
+                CacheOperation::Insert,
+                CacheActivity::FallbackPromotion,
+                timed_insert.duration,
+            );
         }
 
         Ok(fallback_value)

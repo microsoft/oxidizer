@@ -79,7 +79,6 @@ pub(crate) enum CacheActivity {
     Inserted,
     Invalidated,
     Ok,
-    #[cfg_attr(not(test), expect(dead_code, reason = "activity variant for future use"))]
     Fallback,
     FallbackPromotion,
     Error,
