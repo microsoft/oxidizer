@@ -10,3 +10,5 @@ coverage:
         base: auto
 ignore:
 - "crates/testing_aids/**/*"
+# Macro expansion causes coverage to be inaccurate in these files, so we ignore them for now. We can re-enable them once we have a better solution for macro coverage.
+- "crates/ohno/src/test_util.rs"
