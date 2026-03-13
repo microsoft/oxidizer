@@ -7,11 +7,11 @@
 //! and `CacheTier`, enabling remote cache services (Redis, Memcached) to be used
 //! as cache storage backends.
 
-use std::{hash::Hash, marker::PhantomData};
-
-use layered::Service;
+use std::hash::Hash;
+use std::marker::PhantomData;
 
 use cachet_tier::{CacheEntry, CacheTier, Error};
+use layered::Service;
 
 use crate::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
 

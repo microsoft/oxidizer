@@ -3,13 +3,16 @@
 
 //! The main cache type with telemetry and stampede protection.
 
-use std::{borrow::Borrow, fmt::Debug, hash::Hash};
+use std::borrow::Borrow;
+use std::fmt::Debug;
+use std::hash::Hash;
 
+use cachet_tier::{CacheEntry, CacheTier};
 use tick::Clock;
 use uniflight::Merger;
 
-use crate::{Error, builder::CacheBuilder};
-use cachet_tier::{CacheEntry, CacheTier};
+use crate::Error;
+use crate::builder::CacheBuilder;
 
 /// Type alias for cache names used in telemetry.
 pub type CacheName = &'static str;
@@ -69,9 +72,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// # async {
 ///
 /// let clock = Clock::new_tokio();
-/// let cache = Cache::builder::<String, i32>(clock)
-///     .memory()
-///     .build();
+/// let cache = Cache::builder::<String, i32>(clock).memory().build();
 ///
 /// cache.insert("key", CacheEntry::new(42)).await?;
 /// let value = cache.get("key").await?;
@@ -83,9 +84,10 @@ impl<K, V> Debug for Mergers<K, V> {
 /// ## Multi-Tier Cache
 ///
 /// ```no_run
+/// use std::time::Duration;
+///
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
-/// use std::time::Duration;
 /// # async {
 ///
 /// let clock = Clock::new_tokio();
@@ -118,9 +120,10 @@ impl Cache<(), (), ()> {
     /// # Examples
     ///
     /// ```no_run
+    /// use std::time::Duration;
+    ///
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// use std::time::Duration;
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -590,5 +593,254 @@ where
                 Ok(cachet_service::CacheResponse::Clear)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cachet_tier::MockCache;
+
+    use super::*;
+
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        futures::executor::block_on(f)
+    }
+
+    fn build_cache() -> Cache<String, i32, crate::wrapper::CacheWrapper<String, i32, MockCache<String, i32>>> {
+        let clock = Clock::new_frozen();
+        Cache::builder::<String, i32>(clock).storage(MockCache::new()).build()
+    }
+
+    fn build_cache_with_stampede() -> Cache<String, i32, crate::wrapper::CacheWrapper<String, i32, MockCache<String, i32>>> {
+        let clock = Clock::new_frozen();
+        Cache::builder::<String, i32>(clock)
+            .storage(MockCache::new())
+            .stampede_protection()
+            .build()
+    }
+
+    #[test]
+    fn mergers_new_and_debug() {
+        let m = Mergers::<String, i32>::new();
+        let debug = format!("{m:?}");
+        assert!(debug.contains("Mergers"));
+    }
+
+    #[test]
+    fn cache_builder_creates_cache() {
+        let clock = Clock::new_frozen();
+        let _ = Cache::builder::<String, i32>(clock);
+    }
+
+    #[test]
+    fn cache_new_and_accessors() {
+        let cache = build_cache();
+        assert!(!cache.name().is_empty());
+        let _ = cache.clock();
+        let _ = cache.inner();
+    }
+
+    #[test]
+    fn cache_get_miss() {
+        block_on(async {
+            let cache = build_cache();
+            let result = cache.get("missing").await.unwrap();
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn cache_insert_and_get() {
+        block_on(async {
+            let cache = build_cache();
+            cache.insert("key", CacheEntry::new(42)).await.unwrap();
+            let entry = cache.get("key").await.unwrap().expect("should exist");
+            assert_eq!(*entry.value(), 42);
+        });
+    }
+
+    #[test]
+    fn cache_invalidate_no_stampede() {
+        block_on(async {
+            let cache = build_cache();
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.invalidate("key").await.unwrap();
+            assert!(cache.get("key").await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn cache_invalidate_with_stampede() {
+        block_on(async {
+            let cache = build_cache_with_stampede();
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.invalidate("key").await.unwrap();
+            assert!(cache.get("key").await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn cache_contains() {
+        block_on(async {
+            let cache = build_cache();
+            assert!(!cache.contains("key").await.unwrap());
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            assert!(cache.contains("key").await.unwrap());
+        });
+    }
+
+    #[test]
+    fn cache_clear() {
+        block_on(async {
+            let cache = build_cache();
+            cache.insert("a", CacheEntry::new(1)).await.unwrap();
+            cache.clear().await.unwrap();
+            assert!(cache.get("a").await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn cache_len_and_is_empty() {
+        block_on(async {
+            let cache = build_cache();
+            assert_eq!(cache.len(), Some(0));
+            assert_eq!(cache.is_empty(), Some(true));
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            assert_eq!(cache.len(), Some(1));
+            assert_eq!(cache.is_empty(), Some(false));
+        });
+    }
+
+    #[test]
+    fn cache_get_with_stampede() {
+        block_on(async {
+            let cache = build_cache_with_stampede();
+            cache.insert("key", CacheEntry::new(99)).await.unwrap();
+            let entry = cache.get("key").await.unwrap().expect("should exist");
+            assert_eq!(*entry.value(), 99);
+        });
+    }
+
+    #[test]
+    fn cache_get_miss_with_stampede() {
+        block_on(async {
+            let cache = build_cache_with_stampede();
+            assert!(cache.get("missing").await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn cache_get_or_insert_miss() {
+        block_on(async {
+            let cache = build_cache();
+            let entry = cache.get_or_insert("key", || async { 42 }).await.unwrap();
+            assert_eq!(*entry.value(), 42);
+        });
+    }
+
+    #[test]
+    fn cache_get_or_insert_hit() {
+        block_on(async {
+            let cache = build_cache();
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            let entry = cache.get_or_insert("key", || async { 99 }).await.unwrap();
+            assert_eq!(*entry.value(), 1);
+        });
+    }
+
+    #[test]
+    fn cache_get_or_insert_with_stampede() {
+        block_on(async {
+            let cache = build_cache_with_stampede();
+            let entry = cache.get_or_insert("key", || async { 42 }).await.unwrap();
+            assert_eq!(*entry.value(), 42);
+        });
+    }
+
+    #[test]
+    fn cache_try_get_or_insert_ok() {
+        block_on(async {
+            let cache = build_cache();
+            let entry = cache
+                .try_get_or_insert("key", || async { Ok::<_, std::io::Error>(42) })
+                .await
+                .unwrap();
+            assert_eq!(*entry.value(), 42);
+        });
+    }
+
+    #[test]
+    fn cache_try_get_or_insert_hit() {
+        block_on(async {
+            let cache = build_cache();
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            let entry = cache
+                .try_get_or_insert("key", || async { Ok::<_, std::io::Error>(99) })
+                .await
+                .unwrap();
+            assert_eq!(*entry.value(), 1);
+        });
+    }
+
+    #[test]
+    fn cache_try_get_or_insert_err() {
+        block_on(async {
+            let cache = build_cache();
+            let result = cache
+                .try_get_or_insert("key", || async {
+                    Err::<i32, _>(std::io::Error::new(std::io::ErrorKind::Other, "fail"))
+                })
+                .await;
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn cache_try_get_or_insert_with_stampede() {
+        block_on(async {
+            let cache = build_cache_with_stampede();
+            let entry = cache
+                .try_get_or_insert("key", || async { Ok::<_, std::io::Error>(42) })
+                .await
+                .unwrap();
+            assert_eq!(*entry.value(), 42);
+        });
+    }
+
+    #[test]
+    fn cache_optionally_get_or_insert_some() {
+        block_on(async {
+            let cache = build_cache();
+            let entry = cache.optionally_get_or_insert("key", || async { Some(42) }).await.unwrap();
+            assert_eq!(*entry.unwrap().value(), 42);
+        });
+    }
+
+    #[test]
+    fn cache_optionally_get_or_insert_none() {
+        block_on(async {
+            let cache = build_cache();
+            let result = cache.optionally_get_or_insert("key", || async { None }).await.unwrap();
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn cache_optionally_get_or_insert_hit() {
+        block_on(async {
+            let cache = build_cache();
+            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            let entry = cache.optionally_get_or_insert("key", || async { Some(99) }).await.unwrap();
+            assert_eq!(*entry.unwrap().value(), 1);
+        });
+    }
+
+    #[test]
+    fn cache_optionally_get_or_insert_with_stampede() {
+        block_on(async {
+            let cache = build_cache_with_stampede();
+            let entry = cache.optionally_get_or_insert("key", || async { Some(42) }).await.unwrap();
+            assert_eq!(*entry.unwrap().value(), 42);
+        });
     }
 }

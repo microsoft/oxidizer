@@ -6,7 +6,9 @@
 //! This module provides `MockCache`, a configurable in-memory cache that
 //! records all operations and supports failure injection for testing error paths.
 
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 
@@ -41,21 +43,30 @@ type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
 /// # Examples
 ///
 /// ```no_run
-/// use cachet_tier::{MockCache, CacheOp, CacheTier, CacheEntry};
+/// use cachet_tier::{CacheEntry, CacheOp, CacheTier, MockCache};
 ///
 /// # async fn example() {
 /// let cache = MockCache::<String, i32>::new();
 ///
 /// // Insert and retrieve
-/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+/// cache
+///     .insert(&"key".to_string(), CacheEntry::new(42))
+///     .await
+///     .unwrap();
 /// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 ///
 /// // Verify operations
-/// assert_eq!(cache.operations(), vec![
-///     CacheOp::Insert { key: "key".to_string(), entry: CacheEntry::new(42) },
-///     CacheOp::Get("key".to_string()),
-/// ]);
+/// assert_eq!(
+///     cache.operations(),
+///     vec![
+///         CacheOp::Insert {
+///             key: "key".to_string(),
+///             entry: CacheEntry::new(42)
+///         },
+///         CacheOp::Get("key".to_string()),
+///     ]
+/// );
 /// # }
 /// ```
 ///
@@ -263,5 +274,34 @@ where
 
     fn len(&self) -> Option<u64> {
         Some(self.data.lock().len() as u64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn insert_failure() {
+        let cache = MockCache::<String, i32>::new();
+        cache.fail_when(|op| matches!(op, CacheOp::Insert { .. }));
+        let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn invalidate_failure() {
+        let cache = MockCache::<String, i32>::new();
+        cache.fail_when(|op| matches!(op, CacheOp::Invalidate(_)));
+        let result = cache.invalidate(&"key".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn clear_failure() {
+        let cache = MockCache::<String, i32>::new();
+        cache.fail_when(|op| matches!(op, CacheOp::Clear));
+        let result = cache.clear().await;
+        assert!(result.is_err());
     }
 }

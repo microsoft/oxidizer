@@ -22,8 +22,9 @@ use crate::tier::InMemoryCache;
 /// # Examples
 ///
 /// ```
-/// use cachet_memory::InMemoryCache;
 /// use std::time::Duration;
+///
+/// use cachet_memory::InMemoryCache;
 ///
 /// let cache = InMemoryCache::<String, i32>::builder()
 ///     .max_capacity(1000)
@@ -126,8 +127,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    ///
+    /// use cachet_memory::InMemoryCache;
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .time_to_live(Duration::from_secs(300))
@@ -150,8 +152,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    ///
+    /// use cachet_memory::InMemoryCache;
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .time_to_idle(Duration::from_secs(60))
@@ -192,8 +195,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet_memory::InMemoryCache;
     /// use std::collections::hash_map::RandomState;
+    ///
+    /// use cachet_memory::InMemoryCache;
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .hasher(RandomState::new())
@@ -218,8 +222,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    ///
+    /// use cachet_memory::InMemoryCache;
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(1000)

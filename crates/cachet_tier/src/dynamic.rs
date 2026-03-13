@@ -3,9 +3,11 @@
 
 //! Dynamic cache tier wrapper for type erasure.
 
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
+use std::sync::Arc;
 
-use crate::{CacheEntry, CacheTier, Error, tier::DynCacheTier};
+use crate::tier::DynCacheTier;
+use crate::{CacheEntry, CacheTier, Error};
 
 /// Extension trait for converting any `CacheTier` into a `DynamicCache`.
 ///
@@ -95,5 +97,23 @@ impl<K: Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
 
     fn len(&self) -> Option<u64> {
         self.0.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MockCache;
+
+    #[tokio::test]
+    async fn clone_shares_state() {
+        let cache = MockCache::<String, i32>::new();
+        let dynamic = cache.into_dynamic();
+        let clone = dynamic.clone();
+
+        dynamic.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+        let entry = clone.get(&"key".to_string()).await.unwrap().unwrap();
+        assert_eq!(*entry.value(), 42);
     }
 }

@@ -102,8 +102,7 @@ impl Error {
     /// use cachet_tier::Error;
     /// use recoverable::RecoveryInfo;
     ///
-    /// let error = Error::from_message("temporary failure")
-    ///     .with_recovery(RecoveryInfo::retry());
+    /// let error = Error::from_message("temporary failure").with_recovery(RecoveryInfo::retry());
     /// ```
     #[must_use]
     pub fn with_recovery(self, recovery_info: RecoveryInfo) -> Self {
@@ -162,8 +161,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::{self, ErrorKind};
+
+    use super::*;
 
     #[test]
     fn error_debug_contains_cause_message() {

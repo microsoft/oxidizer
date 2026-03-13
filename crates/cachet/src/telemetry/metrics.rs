@@ -1,10 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use opentelemetry::{
-    InstrumentationScope,
-    metrics::{Counter, Gauge, Histogram, Meter, MeterProvider},
-};
+use opentelemetry::InstrumentationScope;
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter, MeterProvider};
 
 const METER_NAME: &str = "cachet";
 const VERSION: &str = env!("CARGO_PKG_VERSION");

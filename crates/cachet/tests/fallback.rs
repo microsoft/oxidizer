@@ -8,10 +8,11 @@
 
 #![cfg(feature = "memory")]
 
+use std::time::Duration;
+
 use anyspawn::Spawner;
 use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, TimeToRefresh};
 use cachet_tier::MockCache;
-use std::time::Duration;
 use tick::Clock;
 
 type TestResult = Result<(), Error>;

@@ -3,9 +3,10 @@
 
 //! Integration tests for `InMemoryCache`.
 
+use std::time::Duration;
+
 use cachet_memory::{InMemoryCache, InMemoryCacheBuilder};
 use cachet_tier::{CacheEntry, CacheTier};
-use std::time::Duration;
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
@@ -207,40 +208,6 @@ fn clone_shares_underlying_cache() {
 fn builder_default_creates_unbounded_cache() {
     let cache = InMemoryCacheBuilder::<String, i32>::default().build();
     assert_eq!(cache.len(), Some(0));
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn builder_max_capacity_sets_limit() {
-    let _cache = InMemoryCacheBuilder::<String, i32>::new().max_capacity(100).build();
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn builder_initial_capacity_preallocates() {
-    let _cache = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(50).build();
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn builder_time_to_live_sets_ttl() {
-    let _cache = InMemoryCacheBuilder::<String, i32>::new()
-        .time_to_live(Duration::from_secs(300))
-        .build();
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn builder_time_to_idle_sets_tti() {
-    let _cache = InMemoryCacheBuilder::<String, i32>::new()
-        .time_to_idle(Duration::from_secs(60))
-        .build();
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn builder_name_sets_cache_name() {
-    let _cache = InMemoryCacheBuilder::<String, i32>::new().name("test-cache").build();
 }
 
 #[cfg_attr(miri, ignore)]

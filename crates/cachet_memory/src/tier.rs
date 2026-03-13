@@ -32,7 +32,10 @@ use crate::builder::InMemoryCacheBuilder;
 ///
 /// let cache = InMemoryCache::<String, i32>::new();
 ///
-/// cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+/// cache
+///     .insert(&"key".to_string(), CacheEntry::new(42))
+///     .await
+///     .unwrap();
 /// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # };
@@ -105,8 +108,9 @@ where
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet_memory::InMemoryCache;
     /// use std::time::Duration;
+    ///
+    /// use cachet_memory::InMemoryCache;
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(1000)
@@ -192,6 +196,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
@@ -237,5 +243,50 @@ mod tests {
             let value = cache.get(&"key".to_string()).await.unwrap();
             assert!(value.is_none());
         });
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_max_capacity_sets_limit() {
+        let expected_max_capacity = 100;
+        let builder = InMemoryCacheBuilder::<String, i32>::new().max_capacity(expected_max_capacity);
+
+        assert_eq!(builder.max_capacity, Some(expected_max_capacity));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_initial_capacity_sets_initial_capacity() {
+        let expected_initial_capacity = 50;
+        let builder = InMemoryCacheBuilder::<String, i32>::new().initial_capacity(expected_initial_capacity);
+
+        assert_eq!(builder.initial_capacity, Some(50));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_time_to_live_sets_ttl() {
+        let expected_ttl = Duration::from_secs(300);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(expected_ttl);
+
+        assert_eq!(builder.time_to_live, Some(expected_ttl));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_time_to_idle_sets_tti() {
+        let expected_tti = Duration::from_secs(60);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(expected_tti);
+
+        assert_eq!(builder.time_to_idle, Some(expected_tti));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn builder_name_sets_cache_name() {
+        let expected_name = "test-cache".to_string();
+        let builder = InMemoryCacheBuilder::<String, i32>::new().name(expected_name);
+
+        assert_eq!(builder.name.as_deref(), Some("test-cache"));
     }
 }

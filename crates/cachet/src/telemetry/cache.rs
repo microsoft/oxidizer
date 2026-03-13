@@ -10,12 +10,12 @@ use opentelemetry::{
     KeyValue,
     metrics::{Counter, Gauge, Histogram},
 };
+#[cfg(any(feature = "logs", feature = "metrics", test))]
+use thread_aware::{Arc, PerCore};
 
 use crate::cache::CacheName;
 #[cfg(any(feature = "metrics", test))]
 use crate::telemetry::attributes;
-#[cfg(any(feature = "logs", feature = "metrics", test))]
-use thread_aware::{Arc, PerCore};
 
 /// Internal state for cache telemetry when features are enabled.
 #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -194,9 +194,10 @@ impl CacheTelemetry {
 
 #[cfg(test)]
 mod tests {
+    use testing_aids::{LogCapture, MetricTester};
+
     use super::*;
     use crate::telemetry::TelemetryConfig;
-    use testing_aids::{LogCapture, MetricTester};
 
     #[test]
     fn cache_operation_as_str() {
@@ -253,7 +254,8 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        CacheTelemetry::emit(
+        let telemetry = TelemetryConfig::new().with_logs().build();
+        telemetry.record(
             "my_test_cache",
             CacheOperation::Invalidate,
             CacheActivity::Error,

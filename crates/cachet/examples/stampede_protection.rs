@@ -4,10 +4,8 @@
 //! Stampede protection prevents multiple concurrent requests for the same key
 //! from all hitting the backend. Only one request fetches; others wait and share the result.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU32, Ordering},
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use cachet::{Cache, CacheEntry, CacheTier, Error};
 use tick::Clock;

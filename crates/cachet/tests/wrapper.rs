@@ -5,10 +5,11 @@
 
 #![cfg(feature = "memory")]
 
-use cachet::{Cache, CacheEntry, Error};
-use cachet_tier::{CacheOp, MockCache};
 use std::ops::Add;
 use std::time::Duration;
+
+use cachet::{Cache, CacheEntry, Error};
+use cachet_tier::{CacheOp, MockCache};
 use tick::{Clock, ClockControl};
 
 type TestResult = Result<(), Error>;

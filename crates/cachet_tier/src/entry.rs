@@ -3,10 +3,8 @@
 
 //! Cache entry type with value and metadata.
 
-use std::{
-    ops::Deref,
-    time::{Duration, SystemTime},
-};
+use std::ops::Deref;
+use std::time::{Duration, SystemTime};
 
 /// A cached value with associated metadata.
 ///
@@ -16,8 +14,9 @@ use std::{
 /// # Examples
 ///
 /// ```
-/// use cachet_tier::CacheEntry;
 /// use std::time::Duration;
+///
+/// use cachet_tier::CacheEntry;
 ///
 /// // Simple entry with just a value (no expiration)
 /// let entry = CacheEntry::new(42);

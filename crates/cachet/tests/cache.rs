@@ -453,9 +453,10 @@ fn stampede_protection_propagates_storage_errors() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_converts_panic_to_error() {
-    use cachet::CacheTier;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    use cachet::CacheTier;
     use uniflight::LeaderPanicked;
 
     /// A cache tier that panics on the first get.
@@ -688,9 +689,10 @@ fn borrow_stampede_protection_with_str_key() -> TestResult {
 
 #[cfg(feature = "service")]
 mod service_tests {
-    use super::*;
     use cachet::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
     use layered::Service;
+
+    use super::*;
 
     /// Simple in-memory service implementing Service<CacheOperation>
     #[derive(Clone)]

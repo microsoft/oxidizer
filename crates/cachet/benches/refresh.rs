@@ -5,7 +5,9 @@
 
 #![allow(missing_docs, reason = "Benchmark code")]
 
-use std::{collections::HashMap, hint::black_box, time::Duration, time::Instant};
+use std::collections::HashMap;
+use std::hint::black_box;
+use std::time::{Duration, Instant};
 
 use anyspawn::Spawner;
 use cachet::{Cache, CacheEntry, FallbackPromotionPolicy, TimeToRefresh};

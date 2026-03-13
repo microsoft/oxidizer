@@ -7,23 +7,19 @@
 //! allowing stale entries to be refreshed from the fallback tier without
 //! blocking the primary cache path.
 
-use std::{
-    collections::HashSet,
-    fmt::Debug,
-    hash::Hash,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::collections::HashSet;
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use anyspawn::Spawner;
+use cachet_tier::{CacheEntry, CacheTier};
 use parking_lot::Mutex;
 
-use crate::{
-    fallback::{FallbackCache, FallbackCacheInner},
-    telemetry::{CacheActivity, CacheOperation, ext::ClockExt},
-};
-
-use cachet_tier::{CacheEntry, CacheTier};
+use crate::fallback::{FallbackCache, FallbackCacheInner};
+use crate::telemetry::ext::ClockExt;
+use crate::telemetry::{CacheActivity, CacheOperation};
 
 /// Configuration for background cache refresh.
 ///
@@ -188,8 +184,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tick::Clock;
+
+    use super::*;
 
     fn create_refresh() -> TimeToRefresh<String> {
         TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio())
@@ -328,15 +325,15 @@ mod tests {
 }
 
 #[cfg(test)]
-#[cfg(feature = "memory")]
 mod fetch_and_promote_tests {
+    use cachet_tier::MockCache;
+    use testing_aids::MetricTester;
+    use tick::Clock;
+
     use super::*;
     use crate::fallback::FallbackPromotionPolicy;
-    use crate::telemetry::{attributes, TelemetryConfig};
-    use cachet_memory::InMemoryCache;
-    use cachet_tier::MockCache;
-    use tick::Clock;
-    use testing_aids::MetricTester;
+    use crate::telemetry::{TelemetryConfig, attributes};
+    use crate::wrapper::CacheWrapper;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
@@ -352,15 +349,14 @@ mod fetch_and_promote_tests {
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
     }
 
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_miss_records_refresh_miss_telemetry() {
         block_on(async {
             let tester = MetricTester::new();
             let clock = Clock::new_frozen();
             let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
-            let primary = InMemoryCache::<String, i32>::new();
-            let fallback = InMemoryCache::<String, i32>::new();
+            let primary = MockCache::<String, i32>::new();
+            let fallback = MockCache::<String, i32>::new();
             let fc = FallbackCache::new("test", primary, fallback, FallbackPromotionPolicy::always(), clock, None, telemetry);
 
             // Fallback is empty → handle_fallback_miss Ok(None) branch
@@ -370,11 +366,10 @@ mod fetch_and_promote_tests {
         });
     }
 
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_error() {
         block_on(async {
-            let primary = InMemoryCache::<String, i32>::new();
+            let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
             fallback.fail_when(|_| true);
             let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
@@ -384,12 +379,11 @@ mod fetch_and_promote_tests {
         });
     }
 
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn hit_no_promote() {
         block_on(async {
-            let primary = InMemoryCache::<String, i32>::new();
-            let fallback = InMemoryCache::<String, i32>::new();
+            let primary = MockCache::<String, i32>::new();
+            let fallback = MockCache::<String, i32>::new();
             fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::never());
@@ -402,12 +396,11 @@ mod fetch_and_promote_tests {
         });
     }
 
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn hit_with_promote() {
         block_on(async {
-            let primary = InMemoryCache::<String, i32>::new();
-            let fallback = InMemoryCache::<String, i32>::new();
+            let primary = MockCache::<String, i32>::new();
+            let fallback = MockCache::<String, i32>::new();
             fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::always());
@@ -422,13 +415,12 @@ mod fetch_and_promote_tests {
         });
     }
 
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn promote_error() {
         block_on(async {
             let primary = MockCache::<String, i32>::new();
             primary.fail_when(|_| true);
-            let fallback = InMemoryCache::<String, i32>::new();
+            let fallback = MockCache::<String, i32>::new();
             fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
@@ -442,10 +434,9 @@ mod fetch_and_promote_tests {
     /// permanently stuck in the `in_flight` set. Without an RAII guard, the
     /// `finish_refresh` call is skipped on panic, blocking all future refreshes
     /// for that key.
-    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn panic_in_refresh_does_not_leave_key_stuck_in_flight() {
-        let primary = InMemoryCache::<String, i32>::new();
+        let primary = MockCache::<String, i32>::new();
         let fallback = MockCache::<String, i32>::new();
         fallback.fail_when(|_| panic!("simulated panic in fallback get"));
 
@@ -484,5 +475,76 @@ mod fetch_and_promote_tests {
             can_refresh_again,
             "key should not be stuck in in_flight after a panic in fetch_and_promote"
         );
+    }
+
+    type MockWrapper = CacheWrapper<String, i32, MockCache<String, i32>>;
+
+    fn make_wrapper(mock: MockCache<String, i32>) -> MockWrapper {
+        let clock = Clock::new_frozen();
+        let telemetry = TelemetryConfig::new().build();
+        CacheWrapper::new("test_primary", mock, clock, None, telemetry)
+    }
+
+    fn build_mock_fallback_cache(
+        primary: MockWrapper,
+        fallback: MockCache<String, i32>,
+        policy: FallbackPromotionPolicy<i32>,
+    ) -> FallbackCache<String, i32, MockWrapper> {
+        let clock = Clock::new_frozen();
+        let telemetry = TelemetryConfig::new().build();
+        FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
+    }
+
+    #[test]
+    fn do_refresh_no_refresh_configured() {
+        let primary = make_wrapper(MockCache::new());
+        let fallback = MockCache::<String, i32>::new();
+        let fc = build_mock_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+        // do_refresh with no refresh configured should be a no-op
+        fc.do_refresh(&"key".to_string());
+    }
+
+    /// Exercises the early return when a refresh is already in-flight for the
+    /// same key (line `if !refresh.try_start_refresh(key) { return; }`).
+    #[tokio::test]
+    async fn do_refresh_already_in_flight_returns_early() {
+        let primary = MockCache::<String, i32>::new();
+        let fallback = MockCache::<String, i32>::new();
+        let clock = Clock::new_frozen();
+        let telemetry = TelemetryConfig::new().build();
+        let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
+
+        let primary_wrapper = CacheWrapper::new("primary", primary, clock.clone(), None, telemetry.clone());
+        let fc = FallbackCache::new(
+            "test",
+            primary_wrapper,
+            fallback,
+            FallbackPromotionPolicy::always(),
+            clock,
+            Some(refresh),
+            telemetry,
+        );
+
+        let key = "key".to_string();
+        // First refresh adds key to in_flight set
+        fc.do_refresh(&key);
+        // Second refresh should hit early return since key is already in-flight
+        fc.do_refresh(&key);
+
+        // Give spawned tasks time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[test]
+    fn drop_guard_runs_on_drop() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let ran = Arc::new(AtomicBool::new(false));
+        let ran_clone = Arc::clone(&ran);
+        {
+            let _guard = DropGuard(move || {
+                ran_clone.store(true, Ordering::SeqCst);
+            });
+        }
+        assert!(ran.load(Ordering::SeqCst));
     }
 }

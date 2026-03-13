@@ -5,12 +5,12 @@
 
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::metrics::{Meter, MeterProvider};
+#[cfg(any(feature = "logs", feature = "metrics", test))]
+use thread_aware::Arc;
 
 use crate::telemetry::CacheTelemetry;
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 use crate::telemetry::cache::CacheTelemetryInner;
-#[cfg(any(feature = "logs", feature = "metrics", test))]
-use thread_aware::Arc;
 
 /// Configuration for cache telemetry.
 ///

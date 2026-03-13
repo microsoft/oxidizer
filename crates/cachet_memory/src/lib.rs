@@ -13,9 +13,10 @@
 //! # Quick Start
 //!
 //! ```no_run
+//! use std::time::Duration;
+//!
 //! use cachet_memory::InMemoryCacheBuilder;
 //! use cachet_tier::{CacheEntry, CacheTier};
-//! use std::time::Duration;
 //!
 //! # async {
 //!
@@ -24,7 +25,10 @@
 //!     .time_to_live(Duration::from_secs(300))
 //!     .build();
 //!
-//! cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+//! cache
+//!     .insert(&"key".to_string(), CacheEntry::new(42))
+//!     .await
+//!     .unwrap();
 //! let value = cache.get(&"key".to_string()).await.unwrap();
 //! assert_eq!(*value.unwrap().value(), 42);
 //! # };

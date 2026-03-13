@@ -4,7 +4,9 @@
 //! Multi-tier cache with conditional promotion policies.
 //! Example: only promote "not found" results to avoid repeated backend queries.
 
-use std::{fmt, sync::Arc, time::Duration};
+use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
 
 use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
 use parking_lot::Mutex;

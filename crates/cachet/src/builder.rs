@@ -6,22 +6,22 @@
 //! This module provides the builder pattern infrastructure for creating
 //! caches with configurable storage, TTL, telemetry, and fallback tiers.
 
-#[cfg(any(feature = "metrics", test))]
-use opentelemetry::metrics::MeterProvider;
-use std::{hash::Hash, marker::PhantomData, time::Duration};
-use tick::Clock;
+use std::hash::Hash;
+use std::marker::PhantomData;
+use std::time::Duration;
 
-use crate::refresh::TimeToRefresh;
-use crate::{
-    Cache, CacheTier,
-    builder::sealed::Sealed,
-    fallback::{FallbackCache, FallbackPromotionPolicy},
-    wrapper::CacheWrapper,
-};
-
-use crate::telemetry::{CacheTelemetry, TelemetryConfig};
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
+#[cfg(any(feature = "metrics", test))]
+use opentelemetry::metrics::MeterProvider;
+use tick::Clock;
+
+use crate::builder::sealed::Sealed;
+use crate::fallback::{FallbackCache, FallbackPromotionPolicy};
+use crate::refresh::TimeToRefresh;
+use crate::telemetry::{CacheTelemetry, TelemetryConfig};
+use crate::wrapper::CacheWrapper;
+use crate::{Cache, CacheTier};
 
 mod sealed {
     pub(crate) trait Sealed {}
@@ -40,9 +40,7 @@ mod sealed {
 /// use tick::Clock;
 ///
 /// let clock = Clock::new_tokio();
-/// let cache = Cache::builder::<String, i32>(clock)
-///     .memory()
-///     .build();
+/// let cache = Cache::builder::<String, i32>(clock).memory().build();
 /// ```
 #[expect(private_bounds, reason = "intentionally sealed trait pattern")]
 pub trait CacheTierBuilder<K, V>: Sealed {
@@ -58,9 +56,10 @@ pub trait CacheTierBuilder<K, V>: Sealed {
 /// # Examples
 ///
 /// ```no_run
+/// use std::time::Duration;
+///
 /// use cachet::Cache;
 /// use tick::Clock;
-/// use std::time::Duration;
 ///
 /// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock)
@@ -136,9 +135,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// use tick::Clock;
     ///
     /// let clock = Clock::new_tokio();
-    /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .memory()
-    ///     .build();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     /// ```
     #[cfg(feature = "memory")]
     #[must_use]
@@ -244,9 +241,10 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// # Examples
     ///
     /// ```no_run
+    /// use std::time::Duration;
+    ///
     /// use cachet::Cache;
     /// use tick::Clock;
-    /// use std::time::Duration;
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
@@ -308,9 +306,7 @@ where
     /// use tick::Clock;
     ///
     /// let clock = Clock::new_tokio();
-    /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .memory()
-    ///     .build();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     /// ```
     pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, CT>> {
         <Self as Buildable<K, V>>::build(self)
@@ -347,7 +343,6 @@ pub struct FallbackBuilder<K, V, PB, FB> {
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
-
     /// Sets the promotion policy for this fallback tier.
     ///
     /// The policy determines when values from the fallback tier should be
@@ -573,31 +568,150 @@ mod tests {
         assert_eq!(name, "String");
     }
 
-    #[cfg(feature = "memory")]
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn cache_builder_with_ttl() {
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().ttl(Duration::from_secs(300)).build();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .ttl(Duration::from_secs(300))
+            .build();
 
         assert!(cache.inner().ttl.is_some());
         assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
     }
 
-    #[cfg(any(feature = "logs", test))]
     #[test]
     fn builder_use_logs() {
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().use_logs();
-        assert_eq!(cache.telemetry.logs_enabled, true);
+        let builder = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .use_logs();
+        assert_eq!(builder.telemetry.logs_enabled, true);
     }
 
-    #[cfg(any(feature = "metrics", test))]
     #[test]
     fn builder_use_metrics() {
         let clock = Clock::new_frozen();
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-        let cache = Cache::builder::<String, i32>(clock).memory().use_metrics(&provider);
-        assert!(cache.telemetry.meter.is_some());
+        let builder = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .use_metrics(&provider);
+        assert!(builder.telemetry.meter.is_some());
+    }
+
+    #[test]
+    fn mock_builder_new_and_storage() {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock).storage(cachet_tier::MockCache::new()).build();
+        assert!(!cache.name().is_empty());
+    }
+
+    #[test]
+    fn mock_builder_name() {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .name("my_cache")
+            .build();
+        assert_eq!(cache.name(), "my_cache");
+    }
+
+    #[test]
+    fn mock_builder_stampede_protection() {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .stampede_protection()
+            .build();
+        // Stampede protection is internal; just verify it builds
+        assert!(!cache.name().is_empty());
+    }
+
+    #[test]
+    fn mock_builder_clock() {
+        let clock = Clock::new_frozen();
+        let builder = Cache::builder::<String, i32>(clock).storage(cachet_tier::MockCache::new());
+        let _ = builder.clock();
+    }
+
+    #[test]
+    fn mock_builder_fallback_and_build() {
+        let clock = Clock::new_frozen();
+        let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .fallback(fb)
+            .build();
+        assert!(!cache.name().is_empty());
+    }
+
+    #[test]
+    fn mock_builder_fallback_promotion_policy() {
+        let clock = Clock::new_frozen();
+        let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .fallback(fb)
+            .promotion_policy(FallbackPromotionPolicy::never())
+            .build();
+        assert!(!cache.name().is_empty());
+    }
+
+    #[test]
+    fn mock_builder_fallback_time_to_refresh() {
+        let clock = Clock::new_frozen();
+        let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
+        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .fallback(fb)
+            .time_to_refresh(refresh)
+            .build();
+        assert!(!cache.name().is_empty());
+    }
+
+    #[test]
+    fn mock_builder_fallback_stampede_protection() {
+        let clock = Clock::new_frozen();
+        let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .fallback(fb)
+            .stampede_protection()
+            .build();
+        assert!(!cache.name().is_empty());
+    }
+
+    #[test]
+    fn mock_builder_nested_fallback() {
+        let clock = Clock::new_frozen();
+        let l3 = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
+        let l2 = Cache::builder::<String, i32>(clock.clone())
+            .storage(cachet_tier::MockCache::new())
+            .fallback(l3);
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .fallback(l2)
+            .build();
+        assert!(!cache.name().is_empty());
+    }
+
+    /// Tests `FallbackBuilder::fallback()` — chaining `.fallback()` on a
+    /// `FallbackBuilder` (not just `CacheBuilder`).
+    #[test]
+    fn fallback_builder_fallback() {
+        let clock = Clock::new_frozen();
+        let l3 = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
+        // l2 is a FallbackBuilder
+        let l2 = Cache::builder::<String, i32>(clock.clone())
+            .storage(cachet_tier::MockCache::new())
+            .fallback(l3);
+        // Call fallback() on FallbackBuilder to exercise FallbackBuilder::fallback
+        let l1 = l2.fallback(Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new()));
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .fallback(l1)
+            .build();
+        assert!(!cache.name().is_empty());
     }
 }

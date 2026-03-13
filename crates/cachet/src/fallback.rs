@@ -6,15 +6,19 @@
 //! This module provides fallback cache tiers that check a primary cache first,
 //! then query a fallback tier on miss with configurable promotion policies.
 
-use std::{hash::Hash, marker::PhantomData, sync::Arc};
+use std::hash::Hash;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, DynamicCacheExt};
 use futures::join;
 use tick::Clock;
 
+use crate::Error;
+use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
 use crate::telemetry::CacheTelemetry;
-use crate::{Error, cache::CacheName, telemetry::ext::ClockExt};
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, DynamicCacheExt};
+use crate::telemetry::ext::ClockExt;
 
 /// Type alias for promotion predicate functions.
 type PromotionPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
@@ -100,7 +104,7 @@ impl<V> FallbackPromotionPolicy<V> {
     ///     .memory()
     ///     .fallback(l2)
     ///     .promotion_policy(FallbackPromotionPolicy::when(
-    ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len
+    ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len,
     ///     ))
     ///     .build();
     /// ```
@@ -151,9 +155,10 @@ impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
 /// # Examples
 ///
 /// ```no_run
+/// use std::time::Duration;
+///
 /// use cachet::{Cache, FallbackPromotionPolicy};
 /// use tick::Clock;
-/// use std::time::Duration;
 ///
 /// let clock = Clock::new_tokio();
 /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
@@ -280,26 +285,46 @@ where
 ///
 /// Public API tests are in `tests/fallback.rs`.
 #[cfg(test)]
-#[cfg(feature = "memory")]
 mod tests {
+    use std::time::Duration;
+
+    use cachet_tier::MockCache;
+
     use super::*;
     use crate::Cache;
+    use crate::telemetry::TelemetryConfig;
+    use crate::wrapper::CacheWrapper;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
     }
 
+    fn make_primary() -> CacheWrapper<String, i32, MockCache<String, i32>> {
+        let clock = Clock::new_frozen();
+        let telemetry = TelemetryConfig::new().build();
+        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry)
+    }
+
+    fn make_fallback_cache(
+        policy: FallbackPromotionPolicy<i32>,
+    ) -> FallbackCache<String, i32, CacheWrapper<String, i32, MockCache<String, i32>>> {
+        let clock = Clock::new_frozen();
+        let primary = make_primary();
+        let fallback_mock = MockCache::<String, i32>::new();
+        let telemetry = TelemetryConfig::new().build();
+        FallbackCache::new("fallback", primary, fallback_mock, policy, clock, None, telemetry)
+    }
+
     /// Tests that promotion from fallback to primary works correctly.
     /// This test accesses internal state to verify promotion behavior.
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachet_promotes_from_fallback_to_primary() {
         block_on(async {
             let clock = Clock::new_frozen();
 
-            let primary_storage = cachet_memory::InMemoryCache::<String, i32>::new();
-            let primary_check = primary_storage.clone(); // Clone to check state directly
-            let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
+            let primary_storage = MockCache::<String, i32>::new();
+            let primary_check = primary_storage.clone();
+            let fallback_storage = MockCache::<String, i32>::new();
 
             fallback_storage
                 .insert(&"key".to_string(), CacheEntry::new(42))
@@ -331,15 +356,14 @@ mod tests {
 
     /// Tests that Never promotion policy prevents promotion to primary.
     /// This test accesses internal state to verify no promotion occurs.
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachet_never_policy_does_not_promote() {
         block_on(async {
             let clock = Clock::new_frozen();
 
-            let primary_storage = cachet_memory::InMemoryCache::<String, i32>::new();
+            let primary_storage = MockCache::<String, i32>::new();
             let primary_check = primary_storage.clone();
-            let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
+            let fallback_storage = MockCache::<String, i32>::new();
 
             fallback_storage
                 .insert(&"key".to_string(), CacheEntry::new(42))
@@ -366,14 +390,16 @@ mod tests {
     }
 
     /// Tests that `FallbackCacheInner` Debug output is correct.
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachet_inner_debug() {
         let clock = Clock::new_frozen();
 
-        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(MockCache::new());
 
-        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(MockCache::new())
+            .fallback(fallback)
+            .build();
 
         let inner = cache.inner();
         let debug_str = format!("{:?}", inner.inner);
@@ -382,7 +408,6 @@ mod tests {
 
     /// Tests that conditional promotion policy only promotes matching entries.
     /// This test accesses internal state to verify selective promotion.
-    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn fallback_cachet_when_policy_conditional_promotion() {
         block_on(async {
@@ -392,9 +417,9 @@ mod tests {
 
             let clock = Clock::new_frozen();
 
-            let primary_storage = cachet_memory::InMemoryCache::<String, i32>::new();
+            let primary_storage = MockCache::<String, i32>::new();
             let primary_check = primary_storage.clone();
-            let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
+            let fallback_storage = MockCache::<String, i32>::new();
 
             fallback_storage
                 .insert(&"positive".to_string(), CacheEntry::new(42))
@@ -444,5 +469,118 @@ mod tests {
         assert!(always_str.contains("Always"), "got: {always_str}");
         assert!(never_str.contains("Never"), "got: {never_str}");
         assert!(when_str.contains("WhenBoxed"), "got: {when_str}");
+    }
+
+    #[test]
+    fn promotion_policy_always() {
+        let policy = FallbackPromotionPolicy::<i32>::always();
+        let entry = CacheEntry::new(42);
+        assert!(policy.should_promote(&entry));
+    }
+
+    #[test]
+    fn promotion_policy_never() {
+        let policy = FallbackPromotionPolicy::<i32>::never();
+        let entry = CacheEntry::new(42);
+        assert!(!policy.should_promote(&entry));
+    }
+
+    #[test]
+    fn promotion_policy_when() {
+        let policy = FallbackPromotionPolicy::<i32>::when(|e| *e.value() > 10);
+        assert!(policy.should_promote(&CacheEntry::new(42)));
+        assert!(!policy.should_promote(&CacheEntry::new(5)));
+    }
+
+    #[test]
+    fn fallback_cache_new_constructs() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        assert_eq!(cache.inner.name, "fallback");
+    }
+
+    #[test]
+    fn fallback_get_miss_both() {
+        block_on(async {
+            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+            let result = cache.get(&"key".to_string()).await.unwrap();
+            assert!(result.is_none());
+        });
+    }
+
+    #[test]
+    fn fallback_insert_writes_both() {
+        block_on(async {
+            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            // Both tiers should have the value
+            let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
+            assert_eq!(*entry.value(), 42);
+        });
+    }
+
+    #[test]
+    fn fallback_invalidate() {
+        block_on(async {
+            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.invalidate(&"key".to_string()).await.unwrap();
+            assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn fallback_clear() {
+        block_on(async {
+            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.clear().await.unwrap();
+            assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn fallback_len() {
+        block_on(async {
+            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+            assert_eq!(cache.len(), Some(0));
+            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            assert_eq!(cache.len(), Some(1));
+        });
+    }
+
+    /// Exercises the background-refresh-on-get path: when a primary hit has a
+    /// stale `cached_at`, `FallbackCache::get` should trigger `do_refresh`.
+    #[tokio::test]
+    async fn fallback_get_triggers_background_refresh() {
+        let clock = Clock::new_frozen();
+        let primary_mock = MockCache::<String, i32>::new();
+
+        // Insert an entry with an old cached_at so should_refresh returns true
+        let old_time = clock.system_time() - Duration::from_secs(120);
+        let entry = CacheEntry::expires_at(42, Duration::from_secs(300), old_time);
+        primary_mock.insert(&"key".to_string(), entry).await.unwrap();
+
+        let fallback_mock = MockCache::<String, i32>::new();
+        let telemetry = TelemetryConfig::new().build();
+        let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
+
+        let primary = CacheWrapper::new("primary", primary_mock, clock.clone(), None, telemetry.clone());
+        let fc = FallbackCache::new(
+            "test",
+            primary,
+            fallback_mock,
+            FallbackPromotionPolicy::always(),
+            clock,
+            Some(refresh),
+            telemetry,
+        );
+
+        // Primary hit with stale cached_at should trigger background refresh
+        let result = fc.get(&"key".to_string()).await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
+
+        // Give the spawned refresh task time to run
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

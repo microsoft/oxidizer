@@ -5,7 +5,9 @@
 
 #![allow(missing_docs, reason = "Benchmark code")]
 
-use std::{hint::black_box, sync::Arc, time::Instant};
+use std::hint::black_box;
+use std::sync::Arc;
+use std::time::Instant;
 
 use cachet::{Cache, CacheEntry, CacheTier};
 use cachet_memory::InMemoryCache;

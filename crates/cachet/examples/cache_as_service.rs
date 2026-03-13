@@ -10,7 +10,8 @@
 
 use cachet::{Cache, CacheEntry, CacheServiceExt};
 use layered::Layer;
-use seatbelt::{RecoveryInfo, ResilienceContext, retry::Retry};
+use seatbelt::retry::Retry;
+use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 
 #[tokio::main]

@@ -3,11 +3,12 @@
 
 //! Integration tests for `ServiceAdapter`.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use cachet_service::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
 use cachet_tier::{CacheEntry, CacheTier, Error};
 use layered::Service;
-use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// A simple in-memory cache service for testing.
 #[derive(Debug)]

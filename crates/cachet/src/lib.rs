@@ -161,9 +161,7 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let cache = Cache::builder::<String, i32>(clock)
-//!     .memory()
-//!     .build();
+//! let cache = Cache::builder::<String, i32>(clock).memory().build();
 //!
 //! cache.insert("key", CacheEntry::new(42)).await?;
 //! let value = cache.get("key").await?;
@@ -175,9 +173,10 @@
 //! ## Multi-Tier Cache with Fallback
 //!
 //! ```no_run
+//! use std::time::Duration;
+//!
 //! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
 //! use tick::Clock;
-//! use std::time::Duration;
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
@@ -238,13 +237,12 @@ pub use cachet_memory::InMemoryCache;
 pub use cachet_service::{CacheOperation, CacheResponse, CacheServiceExt, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
 #[doc(inline)]
 pub use cachet_tier::{CacheEntry, CacheTier, Error, Result};
+#[cfg(any(feature = "test-util", test))]
+#[doc(inline)]
+pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
 pub use cachet_tier::{DynamicCache, DynamicCacheExt};
 #[doc(inline)]
 pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
-
-#[cfg(any(feature = "test-util", test))]
-#[doc(inline)]
-pub use cachet_tier::{CacheOp, MockCache};

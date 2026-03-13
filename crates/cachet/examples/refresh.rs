@@ -4,13 +4,9 @@
 //! Time-to-refresh: return stale data immediately, refresh in background.
 //! Keeps cache warm and avoids latency spikes from cache misses.
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicU32, Ordering},
-    },
-    time::Duration,
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use anyspawn::Spawner;
 use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, TimeToRefresh};

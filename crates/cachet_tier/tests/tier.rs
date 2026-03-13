@@ -3,10 +3,12 @@
 
 //! Integration tests for `CacheTier` trait default implementations.
 
-use cachet_tier::MockCache;
-use cachet_tier::{CacheEntry, CacheTier, Error};
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+#[cfg(feature = "test-util")]
+use cachet_tier::MockCache;
+use cachet_tier::{CacheEntry, CacheTier, Error};
 
 /// Minimal implementation that only provides required methods
 struct MinimalCache<K, V> {
@@ -176,12 +178,14 @@ async fn is_empty_returns_false_for_non_empty_cache() {
 
 // MockCache tests
 
+#[cfg(feature = "test-util")]
 #[test]
 fn mock_cache_len_empty() {
     let cache = MockCache::<String, i32>::new();
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_len_after_insert() {
     let cache = MockCache::<String, i32>::new();
@@ -189,6 +193,7 @@ async fn mock_cache_len_after_insert() {
     assert_eq!(cache.len(), Some(1));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_len_after_multiple_inserts() {
     let cache = MockCache::<String, i32>::new();
@@ -197,6 +202,7 @@ async fn mock_cache_len_after_multiple_inserts() {
     assert_eq!(cache.len(), Some(2));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_is_empty_delegates_to_len() {
     let cache = MockCache::<String, i32>::new();
@@ -206,6 +212,7 @@ async fn mock_cache_is_empty_delegates_to_len() {
     assert_eq!(cache.is_empty(), Some(false));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_entry_count() {
     let cache = MockCache::<String, i32>::new();
@@ -215,6 +222,7 @@ async fn mock_cache_entry_count() {
     assert_eq!(cache.entry_count(), 1);
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_contains_key() {
     let cache = MockCache::<String, i32>::new();
@@ -224,6 +232,7 @@ async fn mock_cache_contains_key() {
     assert!(cache.contains_key(&"key".to_string()));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_clear_failures() {
     let cache = MockCache::<String, i32>::new();
@@ -234,6 +243,7 @@ async fn mock_cache_clear_failures() {
     cache.get(&"key".to_string()).await.unwrap();
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_operations_recording() {
     use cachet_tier::CacheOp;
@@ -251,6 +261,7 @@ async fn mock_cache_operations_recording() {
     assert!(cache.operations().is_empty());
 }
 
+#[cfg(feature = "test-util")]
 #[test]
 fn mock_cache_debug_contains_name() {
     let cache = MockCache::<String, i32>::new();
@@ -258,6 +269,7 @@ fn mock_cache_debug_contains_name() {
     assert!(debug.contains("MockCache"));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_clone_shares_state() {
     let cache = MockCache::<String, i32>::new();
@@ -268,12 +280,14 @@ async fn mock_cache_clone_shares_state() {
     assert_eq!(*entry.value(), 42);
 }
 
+#[cfg(feature = "test-util")]
 #[test]
 fn mock_cache_default_creates_empty() {
     let cache = MockCache::<String, i32>::default();
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_with_data_prepopulates() {
     let mut data = HashMap::new();
@@ -283,6 +297,7 @@ async fn mock_cache_with_data_prepopulates() {
     assert_eq!(*entry.value(), 42);
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_invalidate_removes_entry() {
     let cache = MockCache::<String, i32>::new();
@@ -293,6 +308,7 @@ async fn mock_cache_invalidate_removes_entry() {
     assert!(!cache.contains_key(&"key".to_string()));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn mock_cache_clear_removes_all() {
     let cache = MockCache::<String, i32>::new();
@@ -306,6 +322,7 @@ async fn mock_cache_clear_removes_all() {
 
 // DynamicCache tests
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_debug() {
     use cachet_tier::DynamicCacheExt;
@@ -315,6 +332,7 @@ async fn dynamic_cache_debug() {
     assert!(debug.contains("DynamicCache"));
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_clone_shares_state() {
     use cachet_tier::DynamicCacheExt;
@@ -328,6 +346,7 @@ async fn dynamic_cache_clone_shares_state() {
     assert_eq!(*entry.value(), 42);
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_invalidate() {
     use cachet_tier::DynamicCacheExt;
@@ -340,6 +359,7 @@ async fn dynamic_cache_invalidate() {
     assert!(dynamic.get(&"key".to_string()).await.unwrap().is_none());
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_clear() {
     use cachet_tier::DynamicCacheExt;
@@ -355,6 +375,7 @@ async fn dynamic_cache_clear() {
     assert!(dynamic.get(&"b".to_string()).await.unwrap().is_none());
 }
 
+#[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_len() {
     use cachet_tier::DynamicCacheExt;

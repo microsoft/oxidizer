@@ -27,13 +27,13 @@ impl Service<CacheOperation<String, String>> for RemoteCache {
             CacheOperation::Insert(InsertRequest { key, entry }) => {
                 // Note: simplified - real impl would mutate
                 let _ = (key, entry);
-                Ok(CacheResponse::Insert())
+                Ok(CacheResponse::Insert)
             }
             CacheOperation::Invalidate(InvalidateRequest { key }) => {
                 let _ = key;
-                Ok(CacheResponse::Invalidate())
+                Ok(CacheResponse::Invalidate)
             }
-            CacheOperation::Clear => Ok(CacheResponse::Clear()),
+            CacheOperation::Clear => Ok(CacheResponse::Clear),
         }
     }
 }

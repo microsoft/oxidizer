@@ -21,9 +21,10 @@
 //! Implement all required methods of [`CacheTier`]:
 //!
 //! ```
-//! use cachet_tier::{CacheEntry, CacheTier, Error};
 //! use std::collections::HashMap;
 //! use std::sync::RwLock;
+//!
+//! use cachet_tier::{CacheEntry, CacheTier, Error};
 //!
 //! struct SimpleCache<K, V>(RwLock<HashMap<K, CacheEntry<V>>>);
 //!
