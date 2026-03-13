@@ -30,9 +30,10 @@ multi-tier fallback, and other features on top.
 Implement all required methods of [`CacheTier`][__link4]:
 
 ```rust
-use cachet_tier::{CacheEntry, CacheTier, Error};
 use std::collections::HashMap;
 use std::sync::RwLock;
+
+use cachet_tier::{CacheEntry, CacheTier, Error};
 
 struct SimpleCache<K, V>(RwLock<HashMap<K, CacheEntry<V>>>);
 
@@ -73,7 +74,7 @@ for multi-tier caches with heterogeneous storage backends.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8VX-Kky_LNZG3z2xZBKpBj0G4xH_J9mY9xBG2zjGmL4bDbCYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3sa6UxTwNGoG1W6bVxnFLoSG1OFZYSD3W1cG9bNTF3YfeuvYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error

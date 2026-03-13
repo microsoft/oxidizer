@@ -170,9 +170,7 @@ use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
 let clock = Clock::new_tokio();
-let cache = Cache::builder::<String, i32>(clock)
-    .memory()
-    .build();
+let cache = Cache::builder::<String, i32>(clock).memory().build();
 
 cache.insert("key", CacheEntry::new(42)).await?;
 let value = cache.get("key").await?;
@@ -182,9 +180,10 @@ assert_eq!(*value.unwrap().value(), 42);
 ### Multi-Tier Cache with Fallback
 
 ```rust
+use std::time::Duration;
+
 use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
 use tick::Clock;
-use std::time::Duration;
 
 let clock = Clock::new_tokio();
 let l2 = Cache::builder::<String, String>(clock.clone()).memory();
@@ -230,7 +229,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3ejAdIZLsb_GwZgi6EYEwxxG9yhuVfxLZgeG1uVNJAMwXeBYWSGgmZjYWNoZXRlMC4xLjCCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMYJpdW5pZmxpZ2h0ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG12AfQcM6lmUG-ItZ4CPczZzG_2-ZgGsE8vOG7CJce5h9EDQYWSGgmZjYWNoZXRlMC4xLjCCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMYJpdW5pZmxpZ2h0ZTAuMS4w
  [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

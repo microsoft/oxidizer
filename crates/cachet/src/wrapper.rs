@@ -137,11 +137,6 @@ where
 
     async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
-        if entry.ttl().is_none()
-            && let Some(ttl) = self.ttl
-        {
-            entry.set_ttl(ttl);
-        }
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
@@ -236,46 +231,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_entry_ttl_takes_precedence_over_tier_ttl() {
-        let clock = Clock::new_frozen();
-        let inner = MockCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
-            "test",
-            inner,
-            clock.clone(),
-            Some(Duration::from_secs(60)), // tier TTL: 60 seconds
-            telemetry,
-        );
-
-        // Entry with per-entry TTL should use entry TTL
-        let entry = CacheEntry::expires_at(42, Duration::from_secs(120), clock.system_time()); // entry TTL: 120 seconds
-
-        // Entry TTL is longer than tier TTL, so entry should not be expired
-        assert!(!wrapper.is_expired(&entry));
-    }
-
-    #[test]
-    fn insert_sets_tier_ttl_when_entry_has_no_ttl() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            let inner_check = inner.clone();
-            let telemetry = TelemetryConfig::new().build();
-            let tier_ttl = Duration::from_secs(60);
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
-
-            let entry = CacheEntry::new(42);
-            assert!(entry.ttl().is_none());
-
-            wrapper.insert(&"key".to_string(), entry).await.unwrap();
-
-            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
-            assert_eq!(stored.ttl(), Some(tier_ttl));
-        });
-    }
-
-    #[test]
     fn insert_preserves_per_entry_ttl_over_tier_ttl() {
         block_on(async {
             let clock = Clock::new_frozen();
@@ -303,6 +258,24 @@ mod tests {
             let inner_check = inner.clone();
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+
+            let entry = CacheEntry::new(42);
+            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+
+            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+            assert!(stored.ttl().is_none());
+        });
+    }
+
+    #[test]
+    fn insert_with_tier_ttl_leaves_entry_ttl_unset() {
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let inner = MockCache::<String, i32>::new();
+            let inner_check = inner.clone();
+            let telemetry = TelemetryConfig::new().build();
+            let tier_ttl = Duration::from_secs(60);
+            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
 
             let entry = CacheEntry::new(42);
             wrapper.insert(&"key".to_string(), entry).await.unwrap();

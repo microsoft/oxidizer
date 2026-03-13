@@ -12,6 +12,7 @@ use std::time::Duration;
 
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
+use cachet_tier::{DynamicCache, DynamicCacheExt};
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::metrics::MeterProvider;
 use tick::Clock;
@@ -43,10 +44,7 @@ mod sealed {
 /// let cache = Cache::builder::<String, i32>(clock).memory().build();
 /// ```
 #[expect(private_bounds, reason = "intentionally sealed trait pattern")]
-pub trait CacheTierBuilder<K, V>: Sealed {
-    /// The output tier type produced by this builder.
-    type Tier;
-}
+pub trait CacheTierBuilder<K, V>: Sealed {}
 
 /// Builder for constructing a cache with a single tier.
 ///
@@ -321,7 +319,6 @@ where
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
-    type Tier = CacheWrapper<K, V, CT>;
 }
 
 /// Builder for a cache with fallback tiers.
@@ -442,7 +439,6 @@ where
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
-    type Tier = FallbackCache<K, V, PB::Tier>;
 }
 
 #[expect(private_bounds, reason = "Buildable is an internal trait")]
@@ -450,8 +446,8 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    PB: CacheTierBuilder<K, V> + Buildable<K, V, Output = PB::Tier>,
-    FB: CacheTierBuilder<K, V> + Buildable<K, V, Output = FB::Tier>,
+    PB: CacheTierBuilder<K, V> + Buildable<K, V>,
+    FB: CacheTierBuilder<K, V> + Buildable<K, V>,
 {
     /// Builds the multi-tier cache hierarchy.
     ///
@@ -469,7 +465,7 @@ where
     ///     .fallback(l2)
     ///     .build();
     /// ```
-    pub fn build(self) -> Cache<K, V, FallbackCache<K, V, PB::Tier>> {
+    pub fn build(self) -> Cache<K, V, DynamicCache<K, V>> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -477,10 +473,11 @@ where
 /// Internal trait for building cache hierarchies.
 pub(crate) trait Buildable<K, V> {
     type Output: CacheTier<K, V> + Send + Sync + 'static;
+    type TierOutput: CacheTier<K, V> + Send + Sync + 'static;
 
     fn build(self) -> Cache<K, V, Self::Output>;
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output;
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput;
 }
 
 impl<K, V, CT> Buildable<K, V> for CacheBuilder<K, V, CT>
@@ -490,6 +487,7 @@ where
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     type Output = CacheWrapper<K, V, CT>;
+    type TierOutput = Self::Output;
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let name = self.name;
@@ -499,11 +497,11 @@ where
 
         let tier = self.build_tier(clock.clone(), telemetry);
 
-        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(name), tier, clock, stampede_protection)
+        Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        CacheWrapper::new(short_type_name::<CT>(self.name), self.storage, clock, self.ttl, telemetry)
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
+        CacheWrapper::new(type_name::<CT>(self.name), self.storage, clock, self.ttl, telemetry)
     }
 }
 
@@ -514,7 +512,8 @@ where
     PB: Buildable<K, V>,
     FB: Buildable<K, V>,
 {
-    type Output = FallbackCache<K, V, PB::Output>;
+    type Output = DynamicCache<K, V>;
+    type TierOutput = FallbackCache<K, V, PB::TierOutput, FB::TierOutput>;
 
     fn build(self) -> Cache<K, V, Self::Output> {
         let name = self.name;
@@ -522,17 +521,17 @@ where
         let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
 
-        let tier = self.build_tier(clock.clone(), telemetry);
+        let tier = self.build_tier(clock.clone(), telemetry).into_dynamic();
 
-        Cache::new(short_type_name::<Cache<K, V, Self::Output>>(name), tier, clock, stampede_protection)
+        Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
         let primary = self.primary_builder.build_tier(clock.clone(), telemetry.clone());
         let fallback = self.fallback_builder.build_tier(clock.clone(), telemetry.clone());
 
         FallbackCache::new(
-            short_type_name::<Self::Output>(self.name),
+            type_name::<Self::TierOutput>(self.name),
             primary,
             fallback,
             self.policy,
@@ -543,12 +542,11 @@ where
     }
 }
 
-fn short_type_name<S>(user_name: Option<&'static str>) -> &'static str {
+fn type_name<S>(user_name: Option<&'static str>) -> &'static str {
     if let Some(name) = user_name {
         name
     } else {
-        let full = std::any::type_name::<S>();
-        full.rsplit("::").next().unwrap_or(full)
+        std::any::type_name::<S>()
     }
 }
 
@@ -557,15 +555,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn short_type_name_with_user_name() {
-        let name = short_type_name::<String>(Some("custom_name"));
+    fn type_name_with_user_name() {
+        let name = type_name::<String>(Some("custom_name"));
         assert_eq!(name, "custom_name");
     }
 
     #[test]
-    fn short_type_name_without_user_name() {
-        let name = short_type_name::<String>(None);
-        assert_eq!(name, "String");
+    fn type_name_without_user_name() {
+        let name = type_name::<String>(None);
+        assert_eq!(name, "alloc::string::String");
     }
 
     #[test]
@@ -696,7 +694,7 @@ mod tests {
         assert!(!cache.name().is_empty());
     }
 
-    /// Tests `FallbackBuilder::fallback()` — chaining `.fallback()` on a
+    /// Tests `FallbackBuilder::fallback()` - chaining `.fallback()` on a
     /// `FallbackBuilder` (not just `CacheBuilder`).
     #[test]
     fn fallback_builder_fallback() {

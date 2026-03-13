@@ -38,8 +38,24 @@
 //!
 //! - **Capacity limits**: Set maximum entry count with automatic eviction
 //! - **TTL/TTI**: Configure time-to-live and time-to-idle expiration
+//! - **Per-entry TTL**: Honors [`CacheEntry::expires_after`][cachet_tier::CacheEntry::expires_after]
+//!   for per-entry expiration
 //! - **Thread-safe**: Safe for concurrent access from multiple tasks
 //! - **Zero external types**: Builder API keeps implementation details private
+//!
+//! # Expiration Behavior
+//!
+//! This tier supports three independent expiration mechanisms. When multiple are
+//! active, the **shortest duration wins** — an entry is evicted at the earliest of:
+//!
+//! 1. The per-entry TTL from [`CacheEntry::expires_after`][cachet_tier::CacheEntry::expires_after]
+//! 2. The cache-wide TTL from [`InMemoryCacheBuilder::time_to_live`]
+//! 3. The cache-wide TTI from [`InMemoryCacheBuilder::time_to_idle`]
+//!
+//! This means the builder-level TTL/TTI acts as an **upper bound** on per-entry
+//! TTL. A per-entry TTL longer than the builder TTL will be silently clamped to the
+//! builder value. To give per-entry TTL full control, either leave the builder-level
+//! TTL/TTI unset or set them to a sufficiently high ceiling.
 
 mod builder;
 mod tier;

@@ -22,16 +22,21 @@ to configure capacity, TTL, and TTI.
 ## Quick Start
 
 ```rust
+use std::time::Duration;
+
 use cachet_memory::InMemoryCacheBuilder;
 use cachet_tier::{CacheEntry, CacheTier};
-use std::time::Duration;
+
 
 let cache = InMemoryCacheBuilder::<String, i32>::new()
     .max_capacity(1000)
     .time_to_live(Duration::from_secs(300))
     .build();
 
-cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+cache
+    .insert(&"key".to_string(), CacheEntry::new(42))
+    .await
+    .unwrap();
 let value = cache.get(&"key".to_string()).await.unwrap();
 assert_eq!(*value.unwrap().value(), 42);
 ```
@@ -40,8 +45,24 @@ assert_eq!(*value.unwrap().value(), 42);
 
 * **Capacity limits**: Set maximum entry count with automatic eviction
 * **TTL/TTI**: Configure time-to-live and time-to-idle expiration
+* **Per-entry TTL**: Honors [`CacheEntry::expires_after`][__link2]
+  for per-entry expiration
 * **Thread-safe**: Safe for concurrent access from multiple tasks
 * **Zero external types**: Builder API keeps implementation details private
+
+## Expiration Behavior
+
+This tier supports three independent expiration mechanisms. When multiple are
+active, the **shortest duration wins** — an entry is evicted at the earliest of:
+
+1. The per-entry TTL from [`CacheEntry::expires_after`][__link3]
+1. The cache-wide TTL from [`InMemoryCacheBuilder::time_to_live`][__link4]
+1. The cache-wide TTI from [`InMemoryCacheBuilder::time_to_idle`][__link5]
+
+This means the builder-level TTL/TTI acts as an **upper bound** on per-entry
+TTL. A per-entry TTL longer than the builder TTL will be silently clamped to the
+builder value. To give per-entry TTL full control, either leave the builder-level
+TTL/TTI unset or set them to a sufficiently high ceiling.
 
 
 <hr/>
@@ -49,6 +70,10 @@ assert_eq!(*value.unwrap().value(), 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGz_PLStTuO9KG_5Ob2y2SxTfG6qRMWmCSKFKG9EtNWxx1SieYWSBgm1jYWNoZXRfbWVtb3J5ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_Td1Z7N1r4qGy2qYvn4afeSGyxJ9fBr48uFGyURaip_YyZIYWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder
+ [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry::expires_after
+ [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry::expires_after
+ [__link4]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder::time_to_live
+ [__link5]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder::time_to_idle

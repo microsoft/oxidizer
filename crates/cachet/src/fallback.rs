@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, DynamicCacheExt};
+use cachet_tier::{CacheEntry, CacheTier};
 use futures::join;
 use tick::Clock;
 
@@ -126,10 +126,10 @@ impl<V> FallbackPromotionPolicy<V> {
     }
 }
 
-pub(crate) struct FallbackCacheInner<K, V, P> {
+pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) name: CacheName,
     pub(crate) primary: P,
-    pub(crate) fallback: DynamicCache<K, V>,
+    pub(crate) fallback: F,
     pub(crate) policy: FallbackPromotionPolicy<V>,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
@@ -137,7 +137,7 @@ pub(crate) struct FallbackCacheInner<K, V, P> {
     _phantom: PhantomData<K>,
 }
 
-impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
+impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FallbackCacheInner")
             .field("name", &self.name)
@@ -171,16 +171,16 @@ impl<K, V, P> std::fmt::Debug for FallbackCacheInner<K, V, P> {
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct FallbackCache<K, V, P> {
-    pub(crate) inner: Arc<FallbackCacheInner<K, V, P>>,
+pub struct FallbackCache<K, V, P, F> {
+    pub(crate) inner: Arc<FallbackCacheInner<K, V, P, F>>,
 }
 
-impl<K, V, P> FallbackCache<K, V, P> {
+impl<K, V, P, F> FallbackCache<K, V, P, F> {
     /// Creates a new fallback cache with a primary and type-erased fallback tier.
     pub(crate) fn new(
         name: CacheName,
         primary: P,
-        fallback: impl CacheTier<K, V> + 'static,
+        fallback: F,
         policy: FallbackPromotionPolicy<V>,
         clock: Clock,
         refresh: Option<TimeToRefresh<K>>,
@@ -190,7 +190,7 @@ impl<K, V, P> FallbackCache<K, V, P> {
             inner: Arc::new(FallbackCacheInner {
                 name,
                 primary,
-                fallback: fallback.into_dynamic(),
+                fallback,
                 policy,
                 clock,
                 refresh,
@@ -201,11 +201,12 @@ impl<K, V, P> FallbackCache<K, V, P> {
     }
 }
 
-impl<K, V, P> FallbackCache<K, V, P>
+impl<K, V, P, F> FallbackCache<K, V, P, F>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
+    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Handles the fallback path when primary cache misses.
     /// This is a separate method so we can box just this path, keeping hits fast.
@@ -234,11 +235,12 @@ where
     }
 }
 
-impl<K, V, P> CacheTier<K, V> for FallbackCache<K, V, P>
+impl<K, V, P, F> CacheTier<K, V> for FallbackCache<K, V, P, F>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
+    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         // Primary lookup is not boxed to avoid allocation on the hot path (hits).
@@ -316,7 +318,7 @@ mod tests {
 
     fn make_fallback_cache(
         policy: FallbackPromotionPolicy<i32>,
-    ) -> FallbackCache<String, i32, CacheWrapper<String, i32, MockCache<String, i32>>> {
+    ) -> FallbackCache<String, i32, CacheWrapper<String, i32, MockCache<String, i32>>, MockCache<String, i32>> {
         let clock = Clock::new_frozen();
         let primary = make_primary();
         let fallback_mock = MockCache::<String, i32>::new();
@@ -401,18 +403,10 @@ mod tests {
     /// Tests that `FallbackCacheInner` Debug output is correct.
     #[test]
     fn fallback_cachet_inner_debug() {
-        let clock = Clock::new_frozen();
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
 
-        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(MockCache::new());
-
-        let cache = Cache::builder::<String, i32>(clock)
-            .storage(MockCache::new())
-            .fallback(fallback)
-            .build();
-
-        let inner = cache.inner();
-        let debug_str = format!("{:?}", inner.inner);
-        assert!(debug_str.contains("FallbackCacheInner"));
+        let debug_str = format!("{:?}", cache);
+        assert_eq!(debug_str, "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", .. } }");
     }
 
     /// Tests that conditional promotion policy only promotes matching entries.
@@ -591,5 +585,13 @@ mod tests {
 
         // Give the spawned refresh task time to run
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[test]
+    fn do_refresh_without_time_to_refresh_is_noop() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+
+        // Calling do_refresh should silently return (exercise the else branch)
+        cache.do_refresh(&"key".to_string());
     }
 }

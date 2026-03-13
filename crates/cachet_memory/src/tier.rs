@@ -6,11 +6,12 @@
 //! This module provides a high-performance concurrent in-memory cache tier
 //! with automatic eviction and optional time-based expiration.
 
+use cachet_tier::{CacheEntry, CacheTier, Error};
+use moka::Expiry;
+use moka::future::Cache;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
-
-use cachet_tier::{CacheEntry, CacheTier, Error};
-use moka::future::Cache;
+use std::time::{Duration, Instant};
 use thread_aware::{Arc, PerProcess, ThreadAware};
 
 use crate::builder::InMemoryCacheBuilder;
@@ -159,7 +160,7 @@ where
         }
 
         Self {
-            inner: Arc::from_unaware(moka_builder.build_with_hasher(builder.hasher.clone())),
+            inner: Arc::from_unaware(moka_builder.expire_after(EntryExpiry).build_with_hasher(builder.hasher.clone())),
         }
     }
 }
@@ -194,11 +195,29 @@ where
     }
 }
 
+struct EntryExpiry;
+
+impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
+    fn expire_after_create(&self, _key: &K, value: &CacheEntry<V>, _created_at: Instant) -> Option<Duration> {
+        value.ttl()
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &K,
+        value: &CacheEntry<V>,
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        value.ttl()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+    use futures::executor::block_on;
+    use std::time::SystemTime;
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
@@ -288,5 +307,162 @@ mod tests {
         let builder = InMemoryCacheBuilder::<String, i32>::new().name(expected_name);
 
         assert_eq!(builder.name.as_deref(), Some("test-cache"));
+    }
+
+    #[test]
+    fn insert_and_get_returns_value() {
+        let cache = InMemoryCache::<String, i32>::new();
+        block_on(async {
+            cache
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
+            assert_eq!(*value.unwrap().value(), 42);
+        })
+    }
+
+    #[test]
+    fn get_returns_none_after_per_entry_ttl() {
+        let cache = InMemoryCache::<String, i32>::new();
+        block_on(async {
+            cache
+                .insert(&"key".to_string(), CacheEntry::expires_at(42, Duration::ZERO, SystemTime::now()))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+            assert!(value.is_none());
+        });
+    }
+
+    #[test]
+    fn get_returns_none_after_cache_ttl() {
+        let cache = InMemoryCache::<String, i32>::builder().time_to_live(Duration::ZERO).build();
+        block_on(async {
+            cache
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+            assert!(value.is_none());
+        });
+    }
+
+    #[test]
+    fn get_returns_none_after_cache_tti() {
+        let cache = InMemoryCache::<String, i32>::builder().time_to_idle(Duration::ZERO).build();
+        block_on(async {
+            cache
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+            assert!(value.is_none());
+        });
+    }
+
+    #[test]
+    fn invalidate_removes_entry() {
+        let cache = InMemoryCache::<String, i32>::new();
+        block_on(async {
+            cache
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            cache.invalidate(&"key".to_string()).await.expect("Invalidate should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+            assert!(value.is_none());
+        });
+    }
+
+    #[test]
+    fn clear_removes_all_entries() {
+        let cache = InMemoryCache::<String, i32>::new();
+        block_on(async {
+            cache
+                .insert(&"key1".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache
+                .insert(&"key2".to_string(), CacheEntry::new(43))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            cache.clear().await.expect("Clear should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value1 = cache.get(&"key1".to_string()).await.expect("Get should return none");
+            let value2 = cache.get(&"key2".to_string()).await.expect("Get should return none");
+            assert!(value1.is_none());
+            assert!(value2.is_none());
+        });
+    }
+
+    #[test]
+    fn len_returns_correct_count() {
+        let cache = InMemoryCache::<String, i32>::new();
+        block_on(async {
+            assert_eq!(cache.len(), Some(0));
+
+            cache
+                .insert(&"key1".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache
+                .insert(&"key2".to_string(), CacheEntry::new(43))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            assert_eq!(cache.len(), Some(2));
+
+            cache.invalidate(&"key1".to_string()).await.expect("Invalidate should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            assert_eq!(cache.len(), Some(1));
+
+            cache.clear().await.expect("Clear should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            assert_eq!(cache.len(), Some(0));
+        });
+    }
+
+    #[test]
+    fn max_capacity_evicts_at_capacity() {
+        let capacity = 5;
+        let cache = InMemoryCache::<String, i32>::builder().max_capacity(capacity).build();
+        block_on(async {
+            for i in 0..=capacity {
+                cache
+                    .insert(&format!("key{}", i), CacheEntry::new(i as i32))
+                    .await
+                    .expect("Insert should succeed");
+            }
+            cache.inner.run_pending_tasks().await;
+
+            // Insert one more entry to trigger eviction
+            cache
+                .insert(&format!("key{}", capacity), CacheEntry::new(capacity as i32))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            // The cache should only have max_capacity entries
+            assert_eq!(cache.len(), Some(capacity));
+        });
     }
 }

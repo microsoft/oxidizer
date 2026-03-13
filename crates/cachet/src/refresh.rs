@@ -97,11 +97,12 @@ impl<F: FnMut()> Drop for DropGuard<F> {
     }
 }
 
-impl<K, V, P> FallbackCache<K, V, P>
+impl<K, V, P, F> FallbackCache<K, V, P, F>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
+    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Triggers a background refresh for the given key.
     ///
@@ -137,11 +138,12 @@ where
     }
 }
 
-impl<K, V, P> FallbackCacheInner<K, V, P>
+impl<K, V, P, F> FallbackCacheInner<K, V, P, F>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     P: CacheTier<K, V> + Send + Sync + 'static,
+    F: CacheTier<K, V> + Send + Sync + 'static,
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
         let timed = self.clock.timed_async(self.fallback.get(&key)).await;
@@ -343,7 +345,7 @@ mod fetch_and_promote_tests {
         primary: P,
         fallback: F,
         policy: FallbackPromotionPolicy<i32>,
-    ) -> FallbackCache<String, i32, P> {
+    ) -> FallbackCache<String, i32, P, F> {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
@@ -489,7 +491,7 @@ mod fetch_and_promote_tests {
         primary: MockWrapper,
         fallback: MockCache<String, i32>,
         policy: FallbackPromotionPolicy<i32>,
-    ) -> FallbackCache<String, i32, MockWrapper> {
+    ) -> FallbackCache<String, i32, MockWrapper, MockCache<String, i32>> {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)

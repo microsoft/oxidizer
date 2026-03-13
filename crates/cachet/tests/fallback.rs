@@ -536,22 +536,6 @@ async fn do_refresh_deduplicates_in_flight() -> TestResult {
 }
 
 #[cfg_attr(miri, ignore)]
-#[test]
-fn do_refresh_without_time_to_refresh_is_noop() -> TestResult {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
-
-        // Build WITHOUT time_to_refresh — inner.refresh is None
-        let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
-
-        // Calling do_refresh should silently return (exercise the else branch)
-        cache.inner().do_refresh(&"key".to_string());
-        Ok(())
-    })
-}
-
-#[cfg_attr(miri, ignore)]
 #[cfg(feature = "metrics")]
 #[test]
 fn fallback_builder_use_metrics() -> TestResult {
