@@ -340,6 +340,29 @@ mod tests {
     }
 
     #[test]
+    fn update_with_per_entry_ttl_expires_entry() {
+        let cache = InMemoryCache::<String, i32>::new();
+        block_on(async {
+            // Insert entry without per-entry TTL (will not expire on its own)
+            cache
+                .insert(&"key".to_string(), CacheEntry::new(42))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            // Re-insert same key with zero TTL (should expire immediately via expire_after_update)
+            cache
+                .insert(&"key".to_string(), CacheEntry::expires_at(99, Duration::ZERO, SystemTime::now()))
+                .await
+                .expect("Update should succeed");
+            cache.inner.run_pending_tasks().await;
+
+            let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
+            assert!(value.is_none(), "Entry should expire after update with zero TTL");
+        });
+    }
+
+    #[test]
     fn get_returns_none_after_cache_ttl() {
         let cache = InMemoryCache::<String, i32>::builder().time_to_live(Duration::ZERO).build();
         block_on(async {
