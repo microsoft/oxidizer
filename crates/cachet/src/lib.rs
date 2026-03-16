@@ -60,9 +60,9 @@
 //!   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
 //!   timeout, and circuit-breaker middleware around your storage using standard Tower
 //!   or `layered` patterns.
-//! - **Dynamic dispatch** - convert a concretely-typed `Cache<K, V, CT>` to
-//!   `Cache<K, V, DynamicCache<K, V>>` via [`Cache::into_dynamic`] to erase the
-//!   storage type, enabling heterogeneous tier composition at runtime.
+//! - **Dynamic dispatch** - when a fallback tier is configured, the builder
+//!   automatically type-erases both tiers into a [`DynamicCache<K, V>`] so
+//!   the primary and fallback don't need to be the same concrete type.
 //! - **Configurable promotion** - choose whether, and under what conditions, values
 //!   found in a fallback tier are promoted back into the primary tier
 //!   ([`FallbackPromotionPolicy`]).
@@ -209,14 +209,18 @@
 //!
 //! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
 //! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-//! `cache.fallback_promotion`, `cache.error`, `cache.ok`
+//! `cache.fallback`, `cache.fallback_promotion`, `cache.error`, `cache.ok`
 //!
 //! ## Logs (tracing)
 //!
 //! Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 //! `cache.activity`, `cache.duration_ns`.
 //!
-//! **Levels:** DEBUG (hit/miss/ok), INFO (expired/inserted/invalidated/refresh), ERROR (error)
+//! | Level | Activities |
+//! |-------|-----------|
+//! | ERROR | `cache.error` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.fallback_promotion` |
+//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok` |
 
 mod builder;
 mod cache;
@@ -241,7 +245,7 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result};
 #[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
-pub use cachet_tier::{DynamicCache, DynamicCacheExt};
+pub use cachet_tier::DynamicCache;
 #[doc(inline)]
 pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]

@@ -46,7 +46,7 @@
 //! # Expiration Behavior
 //!
 //! This tier supports three independent expiration mechanisms. When multiple are
-//! active, the **shortest duration wins** — an entry is evicted at the earliest of:
+//! active, the **shortest duration wins** - an entry is evicted at the earliest of:
 //!
 //! 1. The per-entry TTL from [`CacheEntry::expires_after`][cachet_tier::CacheEntry::expires_after]
 //! 2. The cache-wide TTL from [`InMemoryCacheBuilder::time_to_live`]

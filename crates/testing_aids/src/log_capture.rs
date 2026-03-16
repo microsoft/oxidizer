@@ -27,12 +27,20 @@ impl LogCapture {
     }
 
     /// Returns the captured log output as a string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the captured log output is not valid UTF-8.
     #[must_use]
     pub fn output(&self) -> String {
         String::from_utf8_lossy(&self.buffer.lock().unwrap()).to_string()
     }
 
     /// Asserts that the captured log output contains the given string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the captured log output does not contain the given string.
     pub fn assert_contains(&self, expected: &str) {
         let output = self.output();
         assert!(
