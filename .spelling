@@ -1,4 +1,4 @@
-307
+331
 →
 0.X.Y
 100k
@@ -127,6 +127,7 @@ Hardcoded
 hasher
 hashers
 hedges
+hostname
 hotfix
 hotfixes
 How-tos
@@ -279,6 +280,9 @@ sys
 syscall
 sysinfo
 tdnf
+templated
+Templated
+templating
 testability
 timestamp
 timestamps
@@ -313,6 +317,15 @@ unregistered
 unregisters
 unsized
 untrusted
+Uri
+UriParam
+URI
+URIs
+UriSafe
+UriSafeString
+UriUnsafeParam
+URL
+URLs
 UTC
 UTF-8
 v4
