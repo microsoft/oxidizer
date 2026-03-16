@@ -115,7 +115,7 @@
 //!             .ttl(Duration::from_secs(300))
 //!     )
 //!     .promotion_policy(FallbackPromotionPolicy::always())  // promote L2 hits into L1
-//!     .refresh(TimeToRefresh::new(Duration::from_secs(20), spawner))  // refresh L1 in background
+//!     .time_to_refresh(TimeToRefresh::new(Duration::from_secs(20), spawner))  // refresh L1 in background
 //!     .build()
 //! ```
 //!
@@ -123,8 +123,15 @@
 //! 1. Check L1. If hit and not stale, return immediately.
 //! 2. If hit but stale (TTR elapsed), return the stale value *and* spawn a background
 //!    task to fetch from L2 and repopulate L1.
-//! 3. If miss, check L2. If found, optionally promote to L1, then return.
+//! 3. If miss or expired (TTL elapsed), check L2. If found, optionally promote to L1,
+//!    then return.
 //! 4. If both miss, return `Ok(None)`.
+//!
+//! **Note:** expired entries are not automatically removed from storage. The wrapper
+//! uses lazy expiration — it returns `None` but leaves cleanup to the storage
+//! backend (e.g. moka's built-in eviction).
+//!
+//! TODO add an `ExpirationPolicy` that would make this configurable.
 //!
 //! Invalidation and clear are sent to **all** tiers concurrently.
 //!

@@ -31,7 +31,7 @@ impl LogCapture {
     ///
     /// # Panics
     ///
-    /// Panics if the captured log output is not valid UTF-8.
+    /// Panics if the buffer cannot be locked for reading.
     #[must_use]
     pub fn output(&self) -> String {
         String::from_utf8_lossy(&self.buffer.lock().unwrap()).to_string()
