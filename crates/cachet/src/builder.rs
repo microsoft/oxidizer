@@ -12,7 +12,7 @@ use std::time::Duration;
 
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
-use cachet_tier::{DynamicCache, DynamicCacheExt};
+use cachet_tier::DynamicCache;
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::metrics::MeterProvider;
 use tick::Clock;
@@ -521,7 +521,7 @@ where
         let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
 
-        let tier = self.build_tier(clock.clone(), telemetry).into_dynamic();
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
 
         Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
     }

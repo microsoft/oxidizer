@@ -53,7 +53,7 @@ assert_eq!(*value.unwrap().value(), 42);
 ## Expiration Behavior
 
 This tier supports three independent expiration mechanisms. When multiple are
-active, the **shortest duration wins** — an entry is evicted at the earliest of:
+active, the **shortest duration wins** - an entry is evicted at the earliest of:
 
 1. The per-entry TTL from [`CacheEntry::expires_after`][__link3]
 1. The cache-wide TTL from [`InMemoryCacheBuilder::time_to_live`][__link4]
@@ -70,7 +70,7 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_Td1Z7N1r4qGy2qYvn4afeSGyxJ9fBr48uFGyURaip_YyZIYWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7_27Ahfr-pHG8_Pd57maYSAG5D_97tsPExiGypY3608Fqt7YWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder
  [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry::expires_after

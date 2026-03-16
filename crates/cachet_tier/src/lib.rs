@@ -68,7 +68,7 @@ mod tier;
 mod dynamic;
 
 #[doc(inline)]
-pub use dynamic::{DynamicCache, DynamicCacheExt};
+pub use dynamic::DynamicCache;
 #[doc(inline)]
 pub use entry::CacheEntry;
 #[doc(inline)]

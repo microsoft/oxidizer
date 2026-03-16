@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use alloc_tracker::{Allocator, Session};
 use cachet::{Cache, CacheEntry};
-use cachet_tier::{DynamicCache, DynamicCacheExt, MockCache};
+use cachet_tier::{DynamicCache, MockCache};
 use criterion::{Criterion, criterion_group, criterion_main};
 use tick::Clock;
 use tokio::runtime::Runtime;
@@ -57,7 +57,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         let cache = rt.block_on(async {
             let clock = Clock::new_tokio();
             let mock = MockCache::<String, String>::new();
-            let dynamic: DynamicCache<String, String> = mock.into_dynamic();
+            let dynamic: DynamicCache<String, String> = DynamicCache::new(mock);
             Cache::builder(clock).storage(dynamic).build()
         });
         let key = "key".to_string();
@@ -102,7 +102,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         let cache = rt.block_on(async {
             let clock = Clock::new_tokio();
             let mock = MockCache::<String, String>::new();
-            let dynamic: DynamicCache<String, String> = mock.into_dynamic();
+            let dynamic: DynamicCache<String, String> = DynamicCache::new(mock);
             Cache::builder(clock).storage(dynamic).build()
         });
 

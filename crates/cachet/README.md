@@ -69,9 +69,9 @@ around:
   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
   timeout, and circuit-breaker middleware around your storage using standard Tower
   or `layered` patterns.
-* **Dynamic dispatch** - convert a concretely-typed `Cache<K, V, CT>` to
-  `Cache<K, V, DynamicCache<K, V>>` via [`Cache::into_dynamic`][__link4] to erase the
-  storage type, enabling heterogeneous tier composition at runtime.
+* **Dynamic dispatch** - when a fallback tier is configured, the builder
+  automatically type-erases both tiers into a [`DynamicCache<K, V>`][__link4] so
+  the primary and fallback don’t need to be the same concrete type.
 * **Configurable promotion** - choose whether, and under what conditions, values
   found in a fallback tier are promoted back into the primary tier
   ([`FallbackPromotionPolicy`][__link5]).
@@ -214,14 +214,18 @@ Enable with `metrics` and/or `logs` features. Configure via `.use_metrics()` and
 
 **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
 `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-`cache.fallback_promotion`, `cache.error`, `cache.ok`
+`cache.fallback`, `cache.fallback_promotion`, `cache.error`, `cache.ok`
 
 ### Logs (tracing)
 
 Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 `cache.activity`, `cache.duration_ns`.
 
-**Levels:** DEBUG (hit/miss/ok), INFO (expired/inserted/invalidated/refresh), ERROR (error)
+|Level|Activities|
+|-----|----------|
+|ERROR|`cache.error`|
+|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.fallback_promotion`|
+|DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok`|
 
 
 <hr/>
@@ -229,7 +233,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG12AfQcM6lmUG-ItZ4CPczZzG_2-ZgGsE8vOG7CJce5h9EDQYWSGgmZjYWNoZXRlMC4xLjCCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMYJpdW5pZmxpZ2h0ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-tlj1eH-Zh2G4aa4s_Dsa8xGwhFCngrzf3BG_HTA5XJWMaRYWSGgmZjYWNoZXRlMC4xLjCCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMYJpdW5pZmxpZ2h0ZTAuMS4w
  [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
@@ -242,7 +246,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link17]: https://crates.io/crates/cachet_service/0.1.0
  [__link2]: https://docs.rs/cachet/0.1.0/cachet/?search=CacheBuilder::stampede_protection
  [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
- [__link4]: https://docs.rs/cachet/0.1.0/cachet/?search=Cache::into_dynamic
+ [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=DynamicCache
  [__link5]: https://docs.rs/cachet/0.1.0/cachet/?search=FallbackPromotionPolicy
  [__link6]: https://docs.rs/tick/0.2.1/tick/?search=Clock
  [__link7]: https://docs.rs/cachet/0.1.0/cachet/?search=Cache

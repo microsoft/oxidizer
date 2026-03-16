@@ -9,37 +9,6 @@ use std::sync::Arc;
 use crate::tier::DynCacheTier;
 use crate::{CacheEntry, CacheTier, Error};
 
-/// Extension trait for converting any `CacheTier` into a `DynamicCache`.
-///
-/// This trait is automatically implemented for all types that implement `CacheTier`.
-///
-/// # Examples
-///
-/// ```
-/// use cachet_tier::{CacheTier, DynamicCache, DynamicCacheExt};
-/// # use cachet_tier::CacheEntry;
-///
-/// async fn example<T>(tier: T) -> DynamicCache<String, i32>
-/// where
-///     T: CacheTier<String, i32> + 'static,
-/// {
-///     tier.into_dynamic()
-/// }
-/// ```
-pub trait DynamicCacheExt<K, V>: Sized {
-    /// Converts this cache tier into a `DynamicCache`.
-    fn into_dynamic(self) -> DynamicCache<K, V>;
-}
-
-impl<T, K, V> DynamicCacheExt<K, V> for T
-where
-    T: CacheTier<K, V> + 'static,
-{
-    fn into_dynamic(self) -> DynamicCache<K, V> {
-        DynamicCache::new(self)
-    }
-}
-
 /// A clonable dynamic cache tier with type erasure.
 ///
 /// `DynamicCache` wraps a trait object in an `Arc` to enable cloning while maintaining
@@ -49,7 +18,7 @@ where
 /// # Examples
 ///
 /// ```ignore
-/// let dynamic: DynamicCache<String, i32> = some_tier.into_dynamic();
+/// let dynamic = DynamicCache::new(some_tier);
 ///
 /// // DynamicCache is Clone
 /// let clone = dynamic.clone();
@@ -58,7 +27,7 @@ pub struct DynamicCache<K, V>(Arc<DynCacheTier<'static, K, V>>);
 
 impl<K, V> DynamicCache<K, V> {
     /// Creates a new dynamic cache from any `CacheTier` implementation.
-    pub(crate) fn new<T>(strategy: T) -> Self
+    pub fn new<T>(strategy: T) -> Self
     where
         T: CacheTier<K, V> + Send + Sync + 'static,
     {
@@ -108,7 +77,7 @@ mod tests {
     #[tokio::test]
     async fn clone_shares_state() {
         let cache = MockCache::<String, i32>::new();
-        let dynamic = cache.into_dynamic();
+        let dynamic = DynamicCache::new(cache);
         let clone = dynamic.clone();
 
         dynamic.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();

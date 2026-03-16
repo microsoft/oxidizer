@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 #[cfg(feature = "test-util")]
 use cachet_tier::MockCache;
-use cachet_tier::{CacheEntry, CacheTier, Error};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error};
 
 /// Minimal implementation that only provides required methods
 struct MinimalCache<K, V> {
@@ -325,9 +325,8 @@ async fn mock_cache_clear_removes_all() {
 #[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_debug() {
-    use cachet_tier::DynamicCacheExt;
     let cache = MockCache::<String, i32>::new();
-    let dynamic = cache.into_dynamic();
+    let dynamic = DynamicCache::new(cache);
     let debug = format!("{dynamic:?}");
     assert!(debug.contains("DynamicCache"));
 }
@@ -335,9 +334,8 @@ async fn dynamic_cache_debug() {
 #[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_clone_shares_state() {
-    use cachet_tier::DynamicCacheExt;
     let cache = MockCache::<String, i32>::new();
-    let dynamic = cache.into_dynamic();
+    let dynamic = DynamicCache::new(cache);
     let clone = dynamic.clone();
 
     dynamic.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
@@ -349,9 +347,8 @@ async fn dynamic_cache_clone_shares_state() {
 #[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_invalidate() {
-    use cachet_tier::DynamicCacheExt;
     let cache = MockCache::<String, i32>::new();
-    let dynamic = cache.into_dynamic();
+    let dynamic = DynamicCache::new(cache);
 
     dynamic.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
     dynamic.invalidate(&"key".to_string()).await.unwrap();
@@ -362,9 +359,8 @@ async fn dynamic_cache_invalidate() {
 #[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_clear() {
-    use cachet_tier::DynamicCacheExt;
     let cache = MockCache::<String, i32>::new();
-    let dynamic = cache.into_dynamic();
+    let dynamic = DynamicCache::new(cache);
 
     dynamic.insert(&"a".to_string(), CacheEntry::new(1)).await.unwrap();
     dynamic.insert(&"b".to_string(), CacheEntry::new(2)).await.unwrap();
@@ -378,9 +374,8 @@ async fn dynamic_cache_clear() {
 #[cfg(feature = "test-util")]
 #[tokio::test]
 async fn dynamic_cache_len() {
-    use cachet_tier::DynamicCacheExt;
     let cache = MockCache::<String, i32>::new();
-    let dynamic = cache.into_dynamic();
+    let dynamic = DynamicCache::new(cache);
 
     assert_eq!(dynamic.len(), Some(0));
     dynamic.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
