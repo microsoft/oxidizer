@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Thread-local log capture buffer for testing.
+//! Log capture buffer for testing.
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -9,10 +9,11 @@ use std::sync::Mutex;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 
-/// Thread-local log capture buffer for testing.
+/// Log capture buffer for testing.
 ///
 /// Uses `tracing_subscriber::fmt::MakeWriter` to capture formatted log output
-/// into a thread-local buffer that can be inspected in tests.
+/// into a shared buffer that can be inspected in tests. Pair with
+/// [`tracing::subscriber::set_default`] to scope capture to the current thread.
 #[derive(Debug, Clone, Default)]
 pub struct LogCapture {
     buffer: std::sync::Arc<Mutex<Vec<u8>>>,
@@ -50,7 +51,9 @@ impl LogCapture {
     }
 
     /// Creates a `tracing_subscriber` that writes to this capture buffer.
-    /// Use with `set_default()` for thread-local capture.
+    ///
+    /// Use with [`tracing::subscriber::set_default`] to scope capture to the
+    /// current thread so parallel tests don't interfere with each other.
     #[must_use]
     pub fn subscriber(&self) -> impl tracing::Subscriber {
         tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))

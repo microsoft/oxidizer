@@ -269,8 +269,8 @@ fn wrapper_inner_returns_reference() {
 }
 
 #[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() -> TestResult {
+#[test]
+fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() -> TestResult {
     block_on(async {
         // Entry has no per-entry TTL, but tier TTL is very short and entry is old
         let control = ClockControl::new();

@@ -14,25 +14,10 @@ use crate::telemetry::cache::CacheTelemetryInner;
 
 /// Configuration for cache telemetry.
 ///
-/// Use the builder methods to enable logs and/or metrics, then pass
-/// this to your cache builder via `.telemetry()`.
-///
-/// # Examples
-///
-/// ```ignore
-/// use cachet::TelemetryConfig;
-///
-/// // Enable logging only
-/// let config = TelemetryConfig::new().with_logs();
-///
-/// // Enable metrics only
-/// let config = TelemetryConfig::new().with_metrics(&meter_provider);
-///
-/// // Enable both
-/// let config = TelemetryConfig::new()
-///     .with_logs()
-///     .with_metrics(&meter_provider);
-/// ```
+/// This is an internal builder used by [`CacheBuilder`](crate::CacheBuilder) to
+/// collect telemetry settings. Users configure telemetry through the cache
+/// builder's [`use_logs()`](crate::CacheBuilder::use_logs) and
+/// [`use_metrics()`](crate::CacheBuilder::use_metrics) methods.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TelemetryConfig {
     #[cfg(any(feature = "logs", test))]

@@ -163,7 +163,7 @@ impl CacheTelemetry {
         let duration_ns = duration.as_nanos();
 
         // Tracing level must be constant, so we use a macro to select the appropriate level.
-        // Field names must match constants in attributes.rs - see attribute_names_match_tracing_fields test.
+        // Field names must match constants in attributes.rs - see logs_emit_contains_all_fields_and_values test.
         macro_rules! emit_event {
             ($level:ident) => {
                 tracing::$level!(

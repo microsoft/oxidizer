@@ -208,8 +208,9 @@ where
     P: CacheTier<K, V> + Send + Sync + 'static,
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
-    /// Handles the fallback path when primary cache misses.
-    /// This is a separate method so we can box just this path, keeping hits fast.
+    /// Handles the fallback path when the primary cache misses.
+    ///
+    /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
         self.inner
@@ -223,12 +224,17 @@ where
             && self.inner.policy.should_promote(v)
         {
             let timed_insert = self.inner.clock.timed_async(self.inner.primary.insert(key, v.clone())).await;
-            self.inner.telemetry.record(
-                self.inner.name,
-                CacheOperation::Insert,
-                CacheActivity::FallbackPromotion,
-                timed_insert.duration,
-            );
+            // Insert errors are intentionally swallowed — a failed promotion should not
+            // fail the overall get. The CacheWrapper around the primary tier already
+            // records an Error activity on insert failure.
+            if timed_insert.result.is_ok() {
+                self.inner.telemetry.record(
+                    self.inner.name,
+                    CacheOperation::Insert,
+                    CacheActivity::FallbackPromotion,
+                    timed_insert.duration,
+                );
+            }
         }
 
         Ok(fallback_value)
@@ -243,8 +249,7 @@ where
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        // Primary lookup is not boxed to avoid allocation on the hot path (hits).
-        // The fallback path is boxed to bound future size for deeply nested caches.
+        // The fallback path is in a separate method to keep the primary hit path small.
         // Primary errors are already logged by the inner CacheWrapper.
         if let Ok(Some(value)) = self.inner.primary.get(key).await {
             // Check if background refresh is needed
@@ -257,7 +262,6 @@ where
             return Ok(Some(value));
         }
 
-        // Fallback lookup - unboxed for benchmarking
         self.get_from_fallback(key).await
     }
 
