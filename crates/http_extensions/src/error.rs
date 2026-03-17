@@ -130,11 +130,7 @@ impl HttpError {
     /// - `error`: Any error that can become a boxed error trait object
     /// - `recovery`: Recovery information for this error
     /// - `label`: A low-cardinality label for this error (for metrics/logging)
-    pub fn other(
-        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
-        recovery: RecoveryInfo,
-        label: &'static str,
-    ) -> Self {
+    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: &'static str) -> Self {
         Self::caused_by(label, recovery, None, error)
     }
 
@@ -164,10 +160,7 @@ impl HttpError {
     #[must_use]
     pub fn invalid_status_code(code: StatusCode, recovery: RecoveryInfo) -> Self {
         Self::other(
-            format!(
-                "the response was not successful, status code: {}",
-                code.as_u16()
-            ),
+            format!("the response was not successful, status code: {}", code.as_u16()),
             recovery,
             "invalid_status_code",
         )
@@ -290,10 +283,7 @@ mod tests {
     fn invalid_status_code_ok() {
         let error = HttpError::invalid_status_code(StatusCode::NOT_FOUND, RecoveryInfo::unknown());
 
-        assert_eq!(
-            error.message(),
-            "the response was not successful, status code: 404"
-        );
+        assert_eq!(error.message(), "the response was not successful, status code: 404");
         assert_eq!(error.label(), "invalid_status_code");
         assert_eq!(error.recovery(), RecoveryInfo::unknown());
     }
@@ -379,17 +369,11 @@ mod tests {
 
     #[test]
     fn rejected_request_ok() {
-        let request = HttpRequestBuilder::new_fake()
-            .uri("https://dummy")
-            .build()
-            .unwrap();
+        let request = HttpRequestBuilder::new_fake().uri("https://dummy").build().unwrap();
 
         let mut error = HttpError::validation("rejection").with_request(request);
 
-        assert_eq!(
-            error.take_request().unwrap().uri().to_string(),
-            "https://dummy/"
-        );
+        assert_eq!(error.take_request().unwrap().uri().to_string(), "https://dummy/");
 
         // Later calls should return None
         assert!(error.take_request().is_none());

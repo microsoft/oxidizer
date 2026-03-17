@@ -10,9 +10,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
 use templated_uri::Uri;
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
-use crate::{
-    HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result,
-};
+use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
 
 /// A fluent builder for creating HTTP requests.
 ///
@@ -305,10 +303,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// - The URI is missing, or invalid
     /// - Body processing failed
     pub fn build(mut self) -> Result<HttpRequest> {
-        let body = self
-            .body
-            .take()
-            .unwrap_or_else(|| Ok(self.body_builder.empty()))?;
+        let body = self.body.take().unwrap_or_else(|| Ok(self.body_builder.empty()))?;
 
         if let Some(length) = body.content_length() {
             try_content_length_header(&mut self.builder, length);
@@ -525,9 +520,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The response body isn't valid UTF-8
     /// - JSON deserialization failed
     #[cfg(any(feature = "json", test))]
-    pub async fn fetch_json_owned<J: serde_core::de::DeserializeOwned>(
-        self,
-    ) -> Result<Response<J>> {
+    pub async fn fetch_json_owned<J: serde_core::de::DeserializeOwned>(self) -> Result<Response<J>> {
         let (parts, body) = self.fetch().await?.into_parts();
         let body = body.into_json_owned().await?;
 
@@ -578,9 +571,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The network request failed
     /// - The response body isn't valid UTF-8
     #[cfg(any(feature = "json", test))]
-    pub async fn fetch_json<'de, J: serde_core::de::Deserialize<'de>>(
-        self,
-    ) -> Result<Response<crate::Json<J>>> {
+    pub async fn fetch_json<'de, J: serde_core::de::Deserialize<'de>>(self) -> Result<Response<crate::Json<J>>> {
         let (parts, body) = self.fetch().await?.into_parts();
         let body = body.into_json().await?;
 
@@ -625,14 +616,8 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 9);
-        assert_eq!(
-            request.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "application/json"
-        );
-        assert_eq!(
-            block_on(request.into_body().into_text()).unwrap(),
-            "{\"id\":42}"
-        );
+        assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "{\"id\":42}");
     }
 
     #[test]
@@ -645,10 +630,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            request.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "application/custom"
-        );
+        assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/custom");
     }
 
     #[test]
@@ -660,10 +642,7 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 5);
-        assert_eq!(
-            request.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "text/plain"
-        );
+        assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "text/plain");
         assert_eq!(block_on(request.into_body().into_text()).unwrap(), "hello");
     }
 
@@ -677,10 +656,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            request.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "text/custom"
-        );
+        assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "text/custom");
     }
 
     #[test]
@@ -716,10 +692,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            request.headers().get("X-Custom-Header").unwrap(),
-            "custom-value"
-        );
+        assert_eq!(request.headers().get("X-Custom-Header").unwrap(), "custom-value");
     }
 
     #[test]
@@ -783,10 +756,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            block_on(request.into_body().into_text()).unwrap(),
-            "direct body"
-        );
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "direct body");
     }
 
     #[test]
@@ -804,26 +774,16 @@ mod tests {
         assert_eq!(request.method(), Method::POST);
         assert_eq!(request.version(), Version::HTTP_11);
         assert_eq!(request.headers().get("X-Custom").unwrap(), "value");
-        assert_eq!(
-            request.headers().get(CONTENT_TYPE).unwrap(),
-            "application/custom"
-        );
-        assert_eq!(
-            block_on(request.into_body().into_text()).unwrap(),
-            "chained"
-        );
+        assert_eq!(request.headers().get(CONTENT_TYPE).unwrap(), "application/custom");
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "chained");
     }
 
     #[test]
     fn external_functionality() {
-        let chunks = [
-            b"custom".as_slice(),
-            b" body".as_slice(),
-            b" content".as_slice(),
-        ]
-        .into_iter()
-        .map(|item| BytesView::copied_from_slice(item, &HttpBodyBuilder::new_fake()))
-        .map(|data| Ok::<_, HttpError>(Frame::data(data)));
+        let chunks = [b"custom".as_slice(), b" body".as_slice(), b" content".as_slice()]
+            .into_iter()
+            .map(|item| BytesView::copied_from_slice(item, &HttpBodyBuilder::new_fake()))
+            .map(|data| Ok::<_, HttpError>(Frame::data(data)));
 
         let body = StreamBody::new(futures::stream::iter(chunks));
 
@@ -834,10 +794,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            block_on(request.into_body().into_text()).unwrap(),
-            "custom body content"
-        );
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "custom body content");
     }
 
     #[test]
@@ -853,10 +810,7 @@ mod tests {
 
         assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 5);
         assert!(request.headers().get(CONTENT_TYPE).is_none());
-        assert_eq!(
-            block_on(request.into_body().into_bytes()).unwrap(),
-            b"hello"
-        );
+        assert_eq!(block_on(request.into_body().into_bytes()).unwrap(), b"hello");
     }
 
     #[test]
@@ -933,10 +887,7 @@ mod tests {
 
         // Both Content-Length and Content-Type should be set
         assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 9);
-        assert_eq!(
-            request.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "application/json"
-        );
+        assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
     }
 
     #[test]
@@ -1016,27 +967,13 @@ mod tests {
 
     #[test]
     fn fetch_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .text("response body")
-                .build()
-        });
+        let client =
+            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("response body").build());
 
-        let response = block_on(
-            client
-                .request_builder()
-                .uri("https://example.com")
-                .method(Method::GET)
-                .fetch(),
-        )
-        .unwrap();
+        let response = block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch()).unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            block_on(response.into_body().into_text()).unwrap(),
-            "response body"
-        );
+        assert_eq!(block_on(response.into_body().into_text()).unwrap(), "response body");
     }
 
     #[test]
@@ -1058,29 +995,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            block_on(response.into_body().into_text()).unwrap(),
-            "buffered response"
-        );
+        assert_eq!(block_on(response.into_body().into_text()).unwrap(), "buffered response");
     }
 
     #[test]
     fn fetch_text_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .text("text response")
-                .build()
-        });
+        let client =
+            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text response").build());
 
-        let response = block_on(
-            client
-                .request_builder()
-                .uri("https://example.com")
-                .method(Method::GET)
-                .fetch_text(),
-        )
-        .unwrap();
+        let response = block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch_text()).unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.into_body(), "text response");
@@ -1091,10 +1014,7 @@ mod tests {
         let client = FakeHandler::from_sync_handler(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
-                .bytes(BytesView::copied_from_slice(
-                    b"BytesView response",
-                    &HttpBodyBuilder::new_fake(),
-                ))
+                .bytes(BytesView::copied_from_slice(b"BytesView response", &HttpBodyBuilder::new_fake()))
                 .build()
         });
 
@@ -1164,14 +1084,9 @@ mod tests {
                 assert_eq!(request.method(), Method::POST);
                 assert_eq!(request.headers().get_str_value_or("x-test", ""), "chained");
                 assert_eq!(request.version(), http::Version::HTTP_2);
-                assert_eq!(
-                    request.into_body().into_text().await.unwrap(),
-                    "chained body"
-                );
+                assert_eq!(request.into_body().into_text().await.unwrap(), "chained body");
 
-                HttpResponseBuilder::new_fake()
-                    .status(StatusCode::CREATED)
-                    .build()
+                HttpResponseBuilder::new_fake().status(StatusCode::CREATED).build()
             }
         });
 
@@ -1198,19 +1113,10 @@ mod tests {
             let body_len = request.into_body().into_bytes().await.unwrap().len();
             assert_eq!(body_len, 0);
 
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .build()
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
         });
 
-        block_on(
-            client
-                .request_builder()
-                .uri("https://example.com")
-                .method(Method::GET)
-                .fetch(),
-        )
-        .unwrap();
+        block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch()).unwrap();
     }
 
     #[test]
@@ -1218,14 +1124,9 @@ mod tests {
         let client = FakeHandler::from_sync_handler(|request| {
             // Both Content-Length and Content-Type should be set
             assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 9);
-            assert_eq!(
-                request.headers().get_str_value_or(CONTENT_TYPE, ""),
-                "application/json"
-            );
+            assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
 
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .build()
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
         });
 
         block_on(
@@ -1246,9 +1147,7 @@ mod tests {
             assert_eq!(request.headers().get_str_value_or("x-second", ""), "second");
             assert_eq!(request.version(), http::Version::HTTP_11);
 
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .build()
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).build()
         });
 
         block_on(
@@ -1266,10 +1165,7 @@ mod tests {
 
     #[test]
     fn get_method_sets_uri_and_method() {
-        let request = HttpRequestBuilder::new_fake()
-            .get("https://example.com/api")
-            .build()
-            .unwrap();
+        let request = HttpRequestBuilder::new_fake().get("https://example.com/api").build().unwrap();
 
         assert_eq!(request.method(), Method::GET);
         assert_eq!(request.uri(), "https://example.com/api");
@@ -1324,10 +1220,7 @@ mod tests {
 
     #[test]
     fn head_method_sets_uri_and_method() {
-        let request = HttpRequestBuilder::new_fake()
-            .head("https://example.com/api")
-            .build()
-            .unwrap();
+        let request = HttpRequestBuilder::new_fake().head("https://example.com/api").build().unwrap();
 
         assert_eq!(request.method(), Method::HEAD);
         assert_eq!(request.uri(), "https://example.com/api");
@@ -1345,14 +1238,8 @@ mod tests {
 
         assert_eq!(request.method(), Method::POST);
         assert_eq!(request.uri(), "https://example.com/api");
-        assert_eq!(
-            request.headers().get_str_value_or("Authorization", ""),
-            "Bearer token"
-        );
-        assert_eq!(
-            block_on(request.into_body().into_text()).unwrap(),
-            "{\"id\":42}"
-        );
+        assert_eq!(request.headers().get_str_value_or("Authorization", ""), "Bearer token");
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "{\"id\":42}");
     }
 
     #[test]
@@ -1361,19 +1248,10 @@ mod tests {
             assert_eq!(request.method(), Method::POST);
             assert_eq!(request.uri(), "https://example.com/api");
 
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::CREATED)
-                .build()
+            HttpResponseBuilder::new_fake().status(StatusCode::CREATED).build()
         });
 
-        let response = block_on(
-            client
-                .request_builder()
-                .post("https://example.com/api")
-                .text("test data")
-                .fetch(),
-        )
-        .unwrap();
+        let response = block_on(client.request_builder().post("https://example.com/api").text("test data").fetch()).unwrap();
 
         assert_eq!(response.status(), StatusCode::CREATED);
     }
@@ -1388,10 +1266,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let label = request
-            .extensions()
-            .get::<UrlTemplateLabel>()
-            .expect("extension should be present");
+        let label = request.extensions().get::<UrlTemplateLabel>().expect("extension should be present");
         assert_eq!(label.as_str(), "/api/users/{id}");
     }
 
@@ -1406,10 +1281,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let id = request
-            .extensions()
-            .get::<RequestId>()
-            .expect("extension should be present");
+        let id = request.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
     }
 }

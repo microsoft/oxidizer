@@ -143,9 +143,7 @@ impl FakeHandler {
     /// let handler = FakeHandler::from_http_error(|_request: HttpRequest| {
     ///    HttpError::validation("simulated error")
     /// });
-    pub fn from_http_error(
-        error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static,
-    ) -> Self {
+    pub fn from_http_error(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {
         Self::from_sync_handler(move |req| Err(error(req)))
     }
 
@@ -328,15 +326,10 @@ impl Inner {
                 .lock()
                 .expect("mutex poisoned")
                 .pop_front()
-                .ok_or_else(|| {
-                    HttpError::validation("all responses used by fake handler are already consumed")
-                }),
+                .ok_or_else(|| HttpError::validation("all responses used by fake handler are already consumed")),
             Self::Custom(handler) => handler(request).await,
             Self::NeverCompletes => std::future::pending().await,
-            Self::StatusCode(code, creator) => Ok(Response::builder()
-                .status(code)
-                .body(creator.empty())
-                .expect("works")),
+            Self::StatusCode(code, creator) => Ok(Response::builder().status(code).body(creator.empty()).expect("works")),
         }
     }
 }
@@ -361,11 +354,7 @@ impl MaybeUnbufferedBody {
             .lock()
             .expect(ERR_POISONED_LOCK)
             .try_clone()
-            .ok_or_else(|| {
-                HttpError::validation(
-                    "the HTTP response body must be buffered to be reused in FakeHandler",
-                )
-            })?;
+            .ok_or_else(|| HttpError::validation("the HTTP response body must be buffered to be reused in FakeHandler"))?;
         Ok(body)
     }
 }
@@ -391,10 +380,7 @@ mod tests {
 
         for _ in 0..3 {
             // Providing status code works indefinitely
-            assert_eq!(
-                get_response(&handler)?.status(),
-                StatusCode::NOT_IMPLEMENTED
-            );
+            assert_eq!(get_response(&handler)?.status(), StatusCode::NOT_IMPLEMENTED);
         }
 
         Ok(())
@@ -404,10 +390,7 @@ mod tests {
     fn from_status_codes_ok() -> std::result::Result<(), ohno::AppError> {
         let handler = FakeHandler::from(vec![StatusCode::NOT_IMPLEMENTED, StatusCode::BAD_REQUEST]);
 
-        assert_eq!(
-            get_response(&handler)?.status(),
-            StatusCode::NOT_IMPLEMENTED
-        );
+        assert_eq!(get_response(&handler)?.status(), StatusCode::NOT_IMPLEMENTED);
         assert_eq!(get_response(&handler)?.status(), StatusCode::BAD_REQUEST);
         assert!(
             get_response(&handler)
@@ -422,14 +405,8 @@ mod tests {
     #[test]
     fn from_responses_ok() -> std::result::Result<(), ohno::AppError> {
         let handler = FakeHandler::from(vec![
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .text("Response 1")
-                .build()?,
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .text("Response 2")
-                .build()?,
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Response 1").build()?,
+            HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Response 2").build()?,
         ]);
 
         assert_eq!(get_response_text(&handler)?, "Response 1");
@@ -446,12 +423,8 @@ mod tests {
 
     #[test]
     fn from_sync_handler_ok() -> std::result::Result<(), ohno::AppError> {
-        let handler = FakeHandler::from_sync_handler(|_request| {
-            HttpResponseBuilder::new_fake()
-                .status(StatusCode::OK)
-                .text("Sync response")
-                .build()
-        });
+        let handler =
+            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Sync response").build());
 
         assert_eq!(get_response_text(&handler)?, "Sync response");
 
@@ -522,11 +495,8 @@ mod tests {
 
     #[test]
     fn async_handler_returns_error() {
-        let handler = FakeHandler::from_async_handler(|_request| async {
-            Err(HttpError::validation(
-                "this is a test error from async handler",
-            ))
-        });
+        let handler =
+            FakeHandler::from_async_handler(|_request| async { Err(HttpError::validation("this is a test error from async handler")) });
 
         // Next call should produce a specific error message
         let error = get_response(&handler).unwrap_err();
@@ -573,8 +543,7 @@ mod tests {
 
     #[test]
     fn from_http_error() {
-        let handler =
-            FakeHandler::from_http_error(|_request| HttpError::validation("simulated error"));
+        let handler = FakeHandler::from_http_error(|_request| HttpError::validation("simulated error"));
 
         let error = get_response(&handler).unwrap_err();
         assert_eq!(error.message(), "simulated error");

@@ -135,11 +135,7 @@ impl StatusExt for StatusCode {
     where
         F: FnOnce(Self) -> E,
     {
-        if self.is_success() {
-            Ok(self)
-        } else {
-            Err(factory(self))
-        }
+        if self.is_success() { Ok(self) } else { Err(factory(self)) }
     }
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeouts, but it's well tested.
@@ -193,18 +189,9 @@ mod tests {
     #[test]
     fn test_ensure_success_with_2xx_status_returns_ok() {
         assert_eq!(StatusCode::OK.ensure_success().unwrap(), StatusCode::OK);
-        assert_eq!(
-            StatusCode::CREATED.ensure_success().unwrap(),
-            StatusCode::CREATED
-        );
-        assert_eq!(
-            StatusCode::ACCEPTED.ensure_success().unwrap(),
-            StatusCode::ACCEPTED
-        );
-        assert_eq!(
-            StatusCode::NO_CONTENT.ensure_success().unwrap(),
-            StatusCode::NO_CONTENT
-        );
+        assert_eq!(StatusCode::CREATED.ensure_success().unwrap(), StatusCode::CREATED);
+        assert_eq!(StatusCode::ACCEPTED.ensure_success().unwrap(), StatusCode::ACCEPTED);
+        assert_eq!(StatusCode::NO_CONTENT.ensure_success().unwrap(), StatusCode::NO_CONTENT);
     }
 
     #[test]
@@ -216,9 +203,7 @@ mod tests {
 
     #[test]
     fn test_ensure_success_with_5xx_status_fails() {
-        let error = StatusCode::INTERNAL_SERVER_ERROR
-            .ensure_success()
-            .unwrap_err();
+        let error = StatusCode::INTERNAL_SERVER_ERROR.ensure_success().unwrap_err();
         assert!(format!("{error}").contains("500"));
         assert_eq!(error.recovery(), RecoveryInfo::never());
     }
@@ -239,26 +224,19 @@ mod tests {
         #[derive(Debug, PartialEq)]
         struct CustomError(StatusCode);
 
-        let error = StatusCode::BAD_REQUEST
-            .ensure_success_with(CustomError)
-            .unwrap_err();
+        let error = StatusCode::BAD_REQUEST.ensure_success_with(CustomError).unwrap_err();
         assert_eq!(error, CustomError(StatusCode::BAD_REQUEST));
     }
 
     #[test]
     fn test_ensure_success_with_string_error_fails() {
-        let error = StatusCode::NOT_FOUND
-            .ensure_success_with(|s| format!("Status {s}"))
-            .unwrap_err();
+        let error = StatusCode::NOT_FOUND.ensure_success_with(|s| format!("Status {s}")).unwrap_err();
         assert_eq!(error, "Status 404 Not Found");
     }
 
     #[test]
     fn test_response_ensure_success_with_2xx_returns_response() {
-        let response = Response::builder()
-            .status(StatusCode::OK)
-            .body("success")
-            .unwrap();
+        let response = Response::builder().status(StatusCode::OK).body("success").unwrap();
         let result = response.ensure_success().unwrap();
         assert_eq!(result.status(), StatusCode::OK);
         assert_eq!(result.body(), &"success");
@@ -266,10 +244,7 @@ mod tests {
 
     #[test]
     fn test_response_ensure_success_with_4xx_fails() {
-        let response = Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(())
-            .unwrap();
+        let response = Response::builder().status(StatusCode::BAD_REQUEST).body(()).unwrap();
         let error = response.ensure_success().unwrap_err();
         assert!(format!("{error}").contains("400"));
     }
@@ -286,13 +261,8 @@ mod tests {
 
     #[test]
     fn test_response_ensure_success_with_custom_error_succeeds() {
-        let response = Response::builder()
-            .status(StatusCode::ACCEPTED)
-            .body("accepted")
-            .unwrap();
-        let result = response
-            .ensure_success_with(|s| format!("Failed: {s}"))
-            .unwrap();
+        let response = Response::builder().status(StatusCode::ACCEPTED).body("accepted").unwrap();
+        let result = response.ensure_success_with(|s| format!("Failed: {s}")).unwrap();
         assert_eq!(result.status(), StatusCode::ACCEPTED);
         assert_eq!(result.body(), &"accepted");
     }
@@ -302,10 +272,7 @@ mod tests {
         #[derive(Debug, PartialEq)]
         struct ResponseError(StatusCode);
 
-        let response = Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body("forbidden")
-            .unwrap();
+        let response = Response::builder().status(StatusCode::FORBIDDEN).body("forbidden").unwrap();
         let error = response.ensure_success_with(ResponseError).unwrap_err();
         assert_eq!(error, ResponseError(StatusCode::FORBIDDEN));
     }
@@ -319,10 +286,7 @@ mod tests {
     fn test_ensure_success_with_boundary_2xx_statuses() {
         StatusCode::from_u16(200).unwrap().ensure_success().unwrap();
         StatusCode::from_u16(299).unwrap().ensure_success().unwrap();
-        StatusCode::from_u16(300)
-            .unwrap()
-            .ensure_success()
-            .unwrap_err();
+        StatusCode::from_u16(300).unwrap().ensure_success().unwrap_err();
     }
 
     #[test]
@@ -334,10 +298,7 @@ mod tests {
             .body("test")
             .unwrap();
         let result = response.ensure_success().unwrap();
-        assert_eq!(
-            result.headers().get("Content-Type").unwrap(),
-            "application/json"
-        );
+        assert_eq!(result.headers().get("Content-Type").unwrap(), "application/json");
         assert_eq!(result.headers().get("X-Custom").unwrap(), "test");
     }
 
@@ -351,25 +312,17 @@ mod tests {
 
     #[test]
     fn test_ensure_success_with_boundary_status_codes() {
-        StatusCode::from_u16(199)
-            .unwrap()
-            .ensure_success()
-            .unwrap_err();
+        StatusCode::from_u16(199).unwrap().ensure_success().unwrap_err();
         StatusCode::from_u16(200).unwrap().ensure_success().unwrap();
         StatusCode::from_u16(299).unwrap().ensure_success().unwrap();
-        StatusCode::from_u16(300)
-            .unwrap()
-            .ensure_success()
-            .unwrap_err();
+        StatusCode::from_u16(300).unwrap().ensure_success().unwrap_err();
     }
 
     #[test]
     fn test_ensure_success_with_uncommon_status_codes() {
         StatusCode::IM_A_TEAPOT.ensure_success().unwrap_err();
         StatusCode::UPGRADE_REQUIRED.ensure_success().unwrap_err();
-        StatusCode::NETWORK_AUTHENTICATION_REQUIRED
-            .ensure_success()
-            .unwrap_err();
+        StatusCode::NETWORK_AUTHENTICATION_REQUIRED.ensure_success().unwrap_err();
     }
 
     #[test]
@@ -378,34 +331,23 @@ mod tests {
             format!("Error: {status}")
         }
 
-        let error = StatusCode::UNAUTHORIZED
-            .ensure_success_with(create_error)
-            .unwrap_err();
+        let error = StatusCode::UNAUTHORIZED.ensure_success_with(create_error).unwrap_err();
         assert_eq!(error, "Error: 401 Unauthorized");
     }
 
     #[test]
     fn test_response_ensure_success_with_different_body_types() {
-        let json_response = Response::builder()
-            .status(StatusCode::OK)
-            .body(b"[1,2,3]".to_vec())
-            .unwrap();
+        let json_response = Response::builder().status(StatusCode::OK).body(b"[1,2,3]".to_vec()).unwrap();
         let result = json_response.ensure_success().unwrap();
         assert_eq!(result.body(), &vec![91, 49, 44, 50, 44, 51, 93]);
 
-        let bytes_response = Response::builder()
-            .status(StatusCode::ACCEPTED)
-            .body(&b"binary data"[..])
-            .unwrap();
+        let bytes_response = Response::builder().status(StatusCode::ACCEPTED).body(&b"binary data"[..]).unwrap();
         bytes_response.ensure_success().unwrap();
     }
 
     #[test]
     fn test_response_ensure_success_with_empty_body() {
-        let response = Response::builder()
-            .status(StatusCode::NO_CONTENT)
-            .body(Vec::<u8>::new())
-            .unwrap();
+        let response = Response::builder().status(StatusCode::NO_CONTENT).body(Vec::<u8>::new()).unwrap();
         let result = response.ensure_success().unwrap();
         assert!(result.body().is_empty());
     }
@@ -424,42 +366,18 @@ mod tests {
         use recoverable::RecoveryKind;
 
         // 5xx are transient
-        assert_eq!(
-            StatusCode::INTERNAL_SERVER_ERROR.recovery().kind(),
-            RecoveryKind::Retry
-        );
-        assert_eq!(
-            StatusCode::BAD_GATEWAY.recovery().kind(),
-            RecoveryKind::Retry
-        );
-        assert_eq!(
-            StatusCode::SERVICE_UNAVAILABLE.recovery().kind(),
-            RecoveryKind::Retry
-        );
-        assert_eq!(
-            StatusCode::GATEWAY_TIMEOUT.recovery().kind(),
-            RecoveryKind::Retry
-        );
+        assert_eq!(StatusCode::INTERNAL_SERVER_ERROR.recovery().kind(), RecoveryKind::Retry);
+        assert_eq!(StatusCode::BAD_GATEWAY.recovery().kind(), RecoveryKind::Retry);
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE.recovery().kind(), RecoveryKind::Retry);
+        assert_eq!(StatusCode::GATEWAY_TIMEOUT.recovery().kind(), RecoveryKind::Retry);
 
         // Specific 4xx
-        assert_eq!(
-            StatusCode::TOO_MANY_REQUESTS.recovery().kind(),
-            RecoveryKind::Retry
-        );
-        assert_eq!(
-            StatusCode::REQUEST_TIMEOUT.recovery().kind(),
-            RecoveryKind::Retry
-        );
+        assert_eq!(StatusCode::TOO_MANY_REQUESTS.recovery().kind(), RecoveryKind::Retry);
+        assert_eq!(StatusCode::REQUEST_TIMEOUT.recovery().kind(), RecoveryKind::Retry);
 
         // Common non-transient cases
-        assert_eq!(
-            StatusCode::BAD_REQUEST.recovery().kind(),
-            RecoveryKind::Never
-        );
-        assert_eq!(
-            StatusCode::UNAUTHORIZED.recovery().kind(),
-            RecoveryKind::Never
-        );
+        assert_eq!(StatusCode::BAD_REQUEST.recovery().kind(), RecoveryKind::Never);
+        assert_eq!(StatusCode::UNAUTHORIZED.recovery().kind(), RecoveryKind::Never);
         assert_eq!(StatusCode::FORBIDDEN.recovery().kind(), RecoveryKind::Never);
         assert_eq!(StatusCode::NOT_FOUND.recovery().kind(), RecoveryKind::Never);
         assert_eq!(StatusCode::OK.recovery().kind(), RecoveryKind::Never);
@@ -482,16 +400,10 @@ mod tests {
     fn test_response_is_transient_delegates() {
         use recoverable::RecoveryKind;
 
-        let resp = Response::builder()
-            .status(StatusCode::SERVICE_UNAVAILABLE)
-            .body(())
-            .unwrap();
+        let resp = Response::builder().status(StatusCode::SERVICE_UNAVAILABLE).body(()).unwrap();
         assert_eq!(resp.recovery().kind(), RecoveryKind::Retry);
 
-        let resp = Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(())
-            .unwrap();
+        let resp = Response::builder().status(StatusCode::BAD_REQUEST).body(()).unwrap();
         assert_eq!(resp.recovery().kind(), RecoveryKind::Never);
     }
 }

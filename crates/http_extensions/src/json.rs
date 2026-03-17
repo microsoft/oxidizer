@@ -133,9 +133,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
 
         // Now we can safely borrow from the bytes
         match &self.state {
-            JsonState::Bytes(bytes) => {
-                serde_json::from_slice(bytes).map_err(JsonError::deserialization)
-            }
+            JsonState::Bytes(bytes) => serde_json::from_slice(bytes).map_err(JsonError::deserialization),
             JsonState::BytesView(_) => {
                 unreachable!("BytesView should have been converted to bytes")
             }
@@ -176,12 +174,8 @@ impl<T: DeserializeOwned> Json<T> {
     /// Returns an error if the JSON deserialization fails.
     pub fn read_owned(self) -> Result<T, JsonError> {
         match self.state {
-            JsonState::BytesView(bytes) => {
-                serde_json::from_reader(bytes).map_err(JsonError::deserialization)
-            }
-            JsonState::Bytes(bytes) => {
-                serde_json::from_reader(bytes.reader()).map_err(JsonError::deserialization)
-            }
+            JsonState::BytesView(bytes) => serde_json::from_reader(bytes).map_err(JsonError::deserialization),
+            JsonState::Bytes(bytes) => serde_json::from_reader(bytes.reader()).map_err(JsonError::deserialization),
         }
     }
 }
@@ -316,41 +310,26 @@ mod tests {
 
     #[test]
     fn json_error_deserialization() {
-        let error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other(
-            "json de error",
-        )));
+        let error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("json de error")));
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(
-            error.message(),
-            "JSON deserialization error\ncaused by: json de error"
-        );
+        assert_eq!(error.message(), "JSON deserialization error\ncaused by: json de error");
     }
 
     #[test]
     fn json_error_serialization() {
-        let error = JsonError::serialization(serde_json::Error::io(std::io::Error::other(
-            "json se error",
-        )));
+        let error = JsonError::serialization(serde_json::Error::io(std::io::Error::other("json se error")));
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(
-            error.message(),
-            "JSON serialization error\ncaused by: json se error"
-        );
+        assert_eq!(error.message(), "JSON serialization error\ncaused by: json se error");
     }
 
     #[test]
     fn http_error_from_json_error() {
         use ohno::assert_error_message;
 
-        let json_error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other(
-            "json de error",
-        )));
+        let json_error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("json de error")));
         let http_error: crate::HttpError = json_error.into();
         assert_eq!(http_error.recovery(), RecoveryInfo::never());
         assert_eq!(http_error.label(), "json");
-        assert_error_message!(
-            http_error,
-            "JSON deserialization error\ncaused by: json de error"
-        );
+        assert_error_message!(http_error, "JSON deserialization error\ncaused by: json de error");
     }
 }

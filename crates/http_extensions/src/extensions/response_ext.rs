@@ -29,8 +29,9 @@ impl<B> ResponseExt for Response<B> {
         let recovery = self.recovery();
 
         match recovery.kind() {
-            RecoveryKind::Retry => get_retry_after_duration(self.headers(), clock)
-                .map_or_else(|| recovery, |d| RecoveryInfo::retry().delay(d)),
+            RecoveryKind::Retry => {
+                get_retry_after_duration(self.headers(), clock).map_or_else(|| recovery, |d| RecoveryInfo::retry().delay(d))
+            }
             _ => recovery,
         }
     }
@@ -47,11 +48,7 @@ fn get_retry_after_duration(headers: &HeaderMap, clock: &Clock) -> Option<Durati
     if let Ok(timestamp) = retry_after_raw.parse::<Rfc2822>() {
         let timestamp: SystemTime = timestamp.into();
 
-        return Some(
-            timestamp
-                .duration_since(clock.system_time())
-                .unwrap_or(Duration::ZERO),
-        );
+        return Some(timestamp.duration_since(clock.system_time()).unwrap_or(Duration::ZERO));
     }
 
     None
@@ -131,26 +128,16 @@ mod tests {
     fn recovery_with_clock() {
         // Transient status without Retry-After
         let response = Response::builder().status(500).body(()).unwrap();
-        assert_eq!(
-            response.recovery_with_clock(&Clock::new_frozen()).kind(),
-            RecoveryKind::Retry
-        );
+        assert_eq!(response.recovery_with_clock(&Clock::new_frozen()).kind(), RecoveryKind::Retry);
 
         // Transient status with Retry-After seconds
-        let response = Response::builder()
-            .status(503)
-            .header(RETRY_AFTER, "60")
-            .body(())
-            .unwrap();
+        let response = Response::builder().status(503).header(RETRY_AFTER, "60").body(()).unwrap();
         let recovery = response.recovery_with_clock(&Clock::new_frozen());
         assert_eq!(recovery.kind(), RecoveryKind::Retry);
         assert_eq!(recovery.get_delay(), Some(Duration::from_secs(60)));
 
         // Non-transient status
         let response = Response::builder().status(400).body(()).unwrap();
-        assert_eq!(
-            response.recovery_with_clock(&Clock::new_frozen()).kind(),
-            RecoveryKind::Never
-        );
+        assert_eq!(response.recovery_with_clock(&Clock::new_frozen()).kind(), RecoveryKind::Never);
     }
 }

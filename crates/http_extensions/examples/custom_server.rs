@@ -10,9 +10,7 @@ use std::sync::Arc;
 
 use bytesbuf::mem::GlobalPool;
 use http::Request;
-use http_extensions::{
-    HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler,
-};
+use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
@@ -30,19 +28,15 @@ async fn main() -> Result<(), ohno::AppError> {
     let stack = (
         Intercept::layer()
             .on_input(|req: &HttpRequest| println!("received request, uri: {}", req.uri()))
-            .on_output(
-                |result: &http_extensions::Result<HttpResponse>| match result {
-                    Ok(response) => println!("response produced, status: {}", response.status()),
-                    Err(error) => println!("response error, message: {}", error.message()),
-                },
-            ),
+            .on_output(|result: &http_extensions::Result<HttpResponse>| match result {
+                Ok(response) => println!("response produced, status: {}", response.status()),
+                Err(error) => println!("response error, message: {}", error.message()),
+            }),
         Execute::new(move |_req: HttpRequest| {
             let clone = body_builder.clone();
             async move {
                 // create a response builder and produce a response
-                HttpResponseBuilder::new(&clone)
-                    .text("Hello, World!")
-                    .build()
+                HttpResponseBuilder::new(&clone).text("Hello, World!").build()
             }
         }),
     );
@@ -52,10 +46,7 @@ async fn main() -> Result<(), ohno::AppError> {
     Ok(())
 }
 
-async fn serve_with_hyper<T: RequestHandler + 'static>(
-    service: T,
-    body_builder: HttpBodyBuilder,
-) -> Result<(), ohno::AppError> {
+async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder) -> Result<(), ohno::AppError> {
     let service = Arc::new(service);
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
 
@@ -79,10 +70,7 @@ async fn serve_with_hyper<T: RequestHandler + 'static>(
 
             let socket = TokioIo::new(socket);
             // Serve the connection with upgrades
-            if let Err(e) = builder
-                .serve_connection_with_upgrades(socket, hyper_service)
-                .await
-            {
+            if let Err(e) = builder.serve_connection_with_upgrades(socket, hyper_service).await {
                 eprintln!("failed to serve connection: {e}");
             }
         });

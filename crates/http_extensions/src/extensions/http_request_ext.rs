@@ -57,9 +57,7 @@ mod tests {
         *request.method_mut() = http::Method::POST;
         *request.uri_mut() = Uri::from_static("https://example.com/path");
         *request.version_mut() = http::Version::HTTP_11;
-        request
-            .headers_mut()
-            .insert("x-test", "value".parse().unwrap());
+        request.headers_mut().insert("x-test", "value".parse().unwrap());
         request.extensions_mut().insert(42_u32);
 
         let cloned = request.try_clone().unwrap();

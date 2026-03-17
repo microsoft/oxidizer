@@ -27,10 +27,7 @@ impl HeadersBuilder for http::response::Builder {
 }
 
 #[cfg_attr(test, mutants::skip)] // One match arm is for optimization, so mutation has no testable effect.
-pub(crate) fn try_content_length_header(
-    builder: &mut impl HeadersBuilder,
-    content_length: u64,
-) -> bool {
+pub(crate) fn try_content_length_header(builder: &mut impl HeadersBuilder, content_length: u64) -> bool {
     if content_length == 0 {
         try_header(builder, http::header::CONTENT_LENGTH, CONTENT_LENGTH_ZERO)
     } else {
@@ -41,11 +38,7 @@ pub(crate) fn try_content_length_header(
 /// Tries to set a header on the given request builder if headers is not yet set.
 ///
 /// Returns true if the header was set, false otherwise.
-pub(crate) fn try_header(
-    builder: &mut impl HeadersBuilder,
-    key: HeaderName,
-    value: impl Into<HeaderValue>,
-) -> bool {
+pub(crate) fn try_header(builder: &mut impl HeadersBuilder, key: HeaderName, value: impl Into<HeaderValue>) -> bool {
     if let Some(headers) = builder.headers_mut()
         && let http::header::Entry::Vacant(vacant_entry) = headers.entry(key)
     {

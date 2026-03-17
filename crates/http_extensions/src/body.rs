@@ -194,10 +194,7 @@ impl HttpBody {
         self.into_buffered()
             .await?
             .into_bytes_no_buffering()
-            .map_or_else(
-                || unreachable!("once body is buffered, it must be a view over a byte sequence"),
-                Ok,
-            )
+            .map_or_else(|| unreachable!("once body is buffered, it must be a view over a byte sequence"), Ok)
     }
 
     pub(crate) fn into_bytes_no_buffering(self) -> Option<BytesView> {
@@ -227,10 +224,7 @@ impl HttpBody {
     ///     Ok(())
     /// }
     /// ```
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "size_hint is used for capacity, not exact size"
-    )]
+    #[expect(clippy::cast_possible_truncation, reason = "size_hint is used for capacity, not exact size")]
     pub async fn into_text(self) -> Result<String> {
         let mut text = String::with_capacity(self.size_hint().lower() as usize);
 
@@ -286,9 +280,7 @@ impl HttpBody {
                 Ok(builder.bytes(data))
             }
             Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
-            Kind::Bytes(None) => Err(HttpError::validation(
-                "body cannot be buffered because it is already consumed",
-            )),
+            Kind::Bytes(None) => Err(HttpError::validation("body cannot be buffered because it is already consumed")),
             Kind::Empty => Ok(builder.empty()),
             Kind::Body(b) => {
                 let data = collect_with_limit(b.into_data_stream(), limit).await?;
@@ -382,9 +374,7 @@ impl HttpBody {
     ///
     /// For types that don't need borrowing, prefer [`into_json_owned`][HttpBody::into_json_owned] for simpler usage.
     #[cfg(any(feature = "json", test))]
-    pub async fn into_json<'a, T: serde_core::de::Deserialize<'a>>(
-        self,
-    ) -> Result<crate::json::Json<T>> {
+    pub async fn into_json<'a, T: serde_core::de::Deserialize<'a>>(self) -> Result<crate::json::Json<T>> {
         Ok(crate::json::Json::<T>::new(self.into_bytes().await?))
     }
 
@@ -460,10 +450,7 @@ impl Body for HttpBody {
     type Data = BytesView;
     type Error = HttpError;
 
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>>>> {
+    fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
         let this = self.project();
 
         match this.kind.project() {
@@ -471,19 +458,14 @@ impl Body for HttpBody {
             BodyInnerProj::Incoming(inner) => match inner.poll_frame(cx) {
                 Ready(Some(res)) => Ready(Some(match res {
                     Ok(frame) => Ok(frame.map_data(Into::into)),
-                    Err(e) => Err(HttpError::other(
-                        e,
-                        recoverable::RecoveryInfo::unknown(),
-                        "hyper",
-                    )),
+                    Err(e) => Err(HttpError::other(e, recoverable::RecoveryInfo::unknown(), "hyper")),
                 })),
                 Ready(None) => Ready(None),
                 Poll::Pending => Poll::Pending,
             },
-            BodyInnerProj::Bytes(bytes) => bytes.take().map_or_else(
-                || Ready(None),
-                |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes)))),
-            ),
+            BodyInnerProj::Bytes(bytes) => bytes
+                .take()
+                .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
             BodyInnerProj::Empty => Ready(None),
             BodyInnerProj::Body(body) => body.as_mut().poll_frame(cx),
         }
@@ -724,10 +706,7 @@ impl HttpBodyBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn json<T: serde_core::ser::Serialize>(
-        &self,
-        data: &T,
-    ) -> std::result::Result<HttpBody, JsonError> {
+    pub fn json<T: serde_core::ser::Serialize>(&self, data: &T) -> std::result::Result<HttpBody, JsonError> {
         let builder = BytesBuf::new();
         let mut writer = builder.into_writer(&self);
 
@@ -782,10 +761,7 @@ fn map_incoming_stream(incoming: Incoming) -> impl Stream<Item = Result<BytesVie
         .map_ok(Into::into)
 }
 
-async fn collect_with_limit(
-    mut data: impl Stream<Item = Result<BytesView>> + Send + Unpin,
-    limit: Option<usize>,
-) -> Result<BytesView> {
+async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Send + Unpin, limit: Option<usize>) -> Result<BytesView> {
     let mut total_size = 0;
     let mut fragments = Vec::new();
     let limit = limit.unwrap_or(DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES);
@@ -795,9 +771,7 @@ async fn collect_with_limit(
         total_size += bytes_len;
 
         if total_size > limit {
-            return Err(HttpError::validation(format!(
-                "body size exceeds the limit of {limit} bytes"
-            )));
+            return Err(HttpError::validation(format!("body size exceeds the limit of {limit} bytes")));
         }
 
         fragments.push(bytes);
@@ -893,8 +867,7 @@ mod tests {
             is_active: bool,
         }
 
-        let json_data =
-            r#"{"id": 42, "name": "Alice Smith", "email": "alice@example.com", "is_active": true}"#;
+        let json_data = r#"{"id": 42, "name": "Alice Smith", "email": "alice@example.com", "is_active": true}"#;
         let builder = HttpBodyBuilder::new_fake();
         let body = builder.text(json_data);
 
@@ -916,10 +889,7 @@ mod tests {
 
         let cloned = body.try_clone().unwrap();
 
-        assert_eq!(
-            block_on(body.into_text()).unwrap(),
-            block_on(cloned.into_text()).unwrap()
-        );
+        assert_eq!(block_on(body.into_text()).unwrap(), block_on(cloned.into_text()).unwrap());
     }
 
     #[test]

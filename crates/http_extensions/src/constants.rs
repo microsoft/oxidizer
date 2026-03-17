@@ -8,7 +8,8 @@
 pub(crate) const DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 #[cfg(any(feature = "test-util", test))]
-pub(crate) const ERR_POISONED_LOCK: &str = "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
+pub(crate) const ERR_POISONED_LOCK: &str =
+    "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
 
 #[cfg(test)]
 mod tests {

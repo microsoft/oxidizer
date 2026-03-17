@@ -198,9 +198,7 @@ mod request_handler;
 pub use request_handler::{RequestHandler, RequestHandlerExt};
 
 mod extensions;
-pub use extensions::{
-    HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt,
-};
+pub use extensions::{HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
 
 mod url_template_label;
 pub use url_template_label::UrlTemplateLabel;

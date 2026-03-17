@@ -6,9 +6,7 @@
 //! data it receives.
 
 use bytesbuf::mem::GlobalPool;
-use http_extensions::{
-    HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandlerExt, StatusExt,
-};
+use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandlerExt, StatusExt};
 use layered::Service;
 
 #[tokio::main]
@@ -25,11 +23,7 @@ async fn main() -> Result<(), ohno::AppError> {
         .await?
         .ensure_success()?;
 
-    println!(
-        "response received, status {}, body: {}",
-        response.status(),
-        response.body()
-    );
+    println!("response received, status {}, body: {}", response.status(), response.body());
 
     Ok(())
 }
@@ -62,9 +56,6 @@ impl Service<HttpRequest> for CustomClient {
         let data = input.into_body().into_bytes().await?;
 
         // echo back the data we received
-        HttpResponseBuilder::new(&self.builder)
-            .status(200)
-            .bytes(data)
-            .build()
+        HttpResponseBuilder::new(&self.builder).status(200).bytes(data).build()
     }
 }

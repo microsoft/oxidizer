@@ -27,14 +27,10 @@ impl<B> RequestExt for Request<B> {
     }
 
     fn url_template_label(&self) -> Option<UrlTemplateLabel> {
-        self.extensions()
-            .get::<UrlTemplateLabel>()
-            .cloned()
-            .or_else(|| {
-                self.path_and_query().map(|path| {
-                    UrlTemplateLabel::new(path.label().unwrap_or_else(|| path.template()))
-                })
-            })
+        self.extensions().get::<UrlTemplateLabel>().cloned().or_else(|| {
+            self.path_and_query()
+                .map(|path| UrlTemplateLabel::new(path.label().unwrap_or_else(|| path.template())))
+        })
     }
 }
 
@@ -59,9 +55,7 @@ mod tests {
         let mut request = crate::Request::builder().uri(uri.clone()).body(()).unwrap();
         request
             .extensions_mut()
-            .insert(TargetPathAndQuery::from_path_and_query(
-                uri.path_and_query().cloned().unwrap(),
-            ));
+            .insert(TargetPathAndQuery::from_path_and_query(uri.path_and_query().cloned().unwrap()));
 
         assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/path");
     }
@@ -71,15 +65,10 @@ mod tests {
         let mut request = http::Request::get("https://example.com/api/users/123")
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
-        request
-            .extensions_mut()
-            .insert(UrlTemplateLabel::new("/api/users/{id}"));
+        request.extensions_mut().insert(UrlTemplateLabel::new("/api/users/{id}"));
 
         let result = request.url_template_label();
-        assert_eq!(
-            result.as_ref().map(UrlTemplateLabel::as_str),
-            Some("/api/users/{id}")
-        );
+        assert_eq!(result.as_ref().map(UrlTemplateLabel::as_str), Some("/api/users/{id}"));
     }
 
     #[test]

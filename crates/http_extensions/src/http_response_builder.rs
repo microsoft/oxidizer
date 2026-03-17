@@ -191,10 +191,7 @@ impl HttpResponseBuilder<'_> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn status(
-        mut self,
-        status: impl TryInto<http::StatusCode, Error: Into<http::Error>>,
-    ) -> Self {
+    pub fn status(mut self, status: impl TryInto<http::StatusCode, Error: Into<http::Error>>) -> Self {
         self.builder = self.builder.status(status);
         self
     }
@@ -358,10 +355,7 @@ impl HttpResponseBuilder<'_> {
     /// - The response couldn't be built because of errors
     /// - Body processing failed
     pub fn build(mut self) -> Result<HttpResponse> {
-        let body = self
-            .body
-            .take()
-            .unwrap_or_else(|| Ok(self.creator.empty()))?;
+        let body = self.body.take().unwrap_or_else(|| Ok(self.creator.empty()))?;
 
         if let Some(length) = body.content_length() {
             try_content_length_header(&mut self.builder, length);
@@ -446,19 +440,10 @@ mod tests {
 
     #[test]
     fn json_body_ok() {
-        let response = HttpResponseBuilder::new_fake()
-            .json(&JsonData { id: 42 })
-            .build()
-            .unwrap();
+        let response = HttpResponseBuilder::new_fake().json(&JsonData { id: 42 }).build().unwrap();
         assert_eq!(response.headers().get_value_or(CONTENT_LENGTH, 0), 9);
-        assert_eq!(
-            response.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "application/json"
-        );
-        assert_eq!(
-            block_on(response.into_body().into_text()).unwrap(),
-            "{\"id\":42}"
-        );
+        assert_eq!(response.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
+        assert_eq!(block_on(response.into_body().into_text()).unwrap(), "{\"id\":42}");
     }
 
     #[test]
@@ -469,23 +454,14 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            response.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "application/custom"
-        );
+        assert_eq!(response.headers().get_str_value_or(CONTENT_TYPE, ""), "application/custom");
     }
 
     #[test]
     fn text_body_ok() {
-        let response = HttpResponseBuilder::new_fake()
-            .text("hello")
-            .build()
-            .unwrap();
+        let response = HttpResponseBuilder::new_fake().text("hello").build().unwrap();
         assert_eq!(response.headers().get_value_or(CONTENT_LENGTH, 0), 5);
-        assert_eq!(
-            response.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "text/plain"
-        );
+        assert_eq!(response.headers().get_str_value_or(CONTENT_TYPE, ""), "text/plain");
         assert_eq!(block_on(response.into_body().into_text()).unwrap(), "hello");
     }
 
@@ -497,10 +473,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            response.headers().get_str_value_or(CONTENT_TYPE, ""),
-            "text/custom"
-        );
+        assert_eq!(response.headers().get_str_value_or(CONTENT_TYPE, ""), "text/custom");
     }
 
     #[test]
@@ -531,10 +504,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(
-            response.headers().get("X-Custom-Header").unwrap(),
-            "custom-value"
-        );
+        assert_eq!(response.headers().get("X-Custom-Header").unwrap(), "custom-value");
     }
 
     #[test]
@@ -584,10 +554,7 @@ mod tests {
         let body = HttpBodyBuilder::new_fake().text("direct body");
         let response = HttpResponseBuilder::new_fake().body(body).build().unwrap();
 
-        assert_eq!(
-            block_on(response.into_body().into_text()).unwrap(),
-            "direct body"
-        );
+        assert_eq!(block_on(response.into_body().into_text()).unwrap(), "direct body");
     }
 
     #[test]
@@ -604,38 +571,22 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(response.version(), Version::HTTP_11);
         assert_eq!(response.headers().get("X-Custom").unwrap(), "value");
-        assert_eq!(
-            response.headers().get(CONTENT_TYPE).unwrap(),
-            "application/custom"
-        );
-        assert_eq!(
-            block_on(response.into_body().into_text()).unwrap(),
-            "chained"
-        );
+        assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "application/custom");
+        assert_eq!(block_on(response.into_body().into_text()).unwrap(), "chained");
     }
 
     #[test]
     fn external_functionality() {
-        let chunks = [
-            b"custom".as_slice(),
-            b" body".as_slice(),
-            b" content".as_slice(),
-        ]
-        .into_iter()
-        .map(|item| BytesView::copied_from_slice(item, &HttpBodyBuilder::new_fake()))
-        .map(|data| Ok::<_, HttpError>(Frame::data(data)));
+        let chunks = [b"custom".as_slice(), b" body".as_slice(), b" content".as_slice()]
+            .into_iter()
+            .map(|item| BytesView::copied_from_slice(item, &HttpBodyBuilder::new_fake()))
+            .map(|data| Ok::<_, HttpError>(Frame::data(data)));
 
         let body = StreamBody::new(futures::stream::iter(chunks));
 
-        let response = HttpResponseBuilder::new_fake()
-            .external(body)
-            .build()
-            .unwrap();
+        let response = HttpResponseBuilder::new_fake().external(body).build().unwrap();
 
-        assert_eq!(
-            block_on(response.into_body().into_text()).unwrap(),
-            "custom body content"
-        );
+        assert_eq!(block_on(response.into_body().into_text()).unwrap(), "custom body content");
     }
 
     #[test]
@@ -649,10 +600,7 @@ mod tests {
 
         assert_eq!(response.headers().get_value_or(CONTENT_LENGTH, 0), 5);
         assert!(response.headers().get(CONTENT_TYPE).is_none());
-        assert_eq!(
-            block_on(response.into_body().into_bytes()).unwrap(),
-            b"hello"
-        );
+        assert_eq!(block_on(response.into_body().into_bytes()).unwrap(), b"hello");
     }
 
     #[test]
@@ -661,10 +609,7 @@ mod tests {
 
         assert_eq!(response.headers().get_value_or(CONTENT_LENGTH, -1), 0);
         assert!(response.headers().get(CONTENT_TYPE).is_none());
-        assert_eq!(
-            block_on(response.into_body().into_bytes()).unwrap().len(),
-            0,
-        );
+        assert_eq!(block_on(response.into_body().into_bytes()).unwrap().len(), 0,);
     }
 
     #[test]
@@ -682,15 +627,9 @@ mod tests {
         let data = b"binary data";
         let payload = BytesView::copied_from_slice(data, &HttpBodyBuilder::new_fake());
 
-        let response = HttpResponseBuilder::new_fake()
-            .bytes(payload)
-            .build()
-            .unwrap();
+        let response = HttpResponseBuilder::new_fake().bytes(payload).build().unwrap();
 
-        assert_eq!(
-            response.headers().get_value_or(CONTENT_LENGTH, 0),
-            data.len() as u64
-        );
+        assert_eq!(response.headers().get_value_or(CONTENT_LENGTH, 0), data.len() as u64);
     }
 
     #[derive(Serialize, Debug)]
@@ -709,10 +648,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let id = response
-            .extensions()
-            .get::<RequestId>()
-            .expect("extension should be present");
+        let id = response.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
     }
 

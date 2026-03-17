@@ -121,9 +121,7 @@ impl HeaderMapExt for HeaderMap {
     }
 
     fn get_value<T: FromStr>(&self, header_name: impl AsHeaderName) -> Option<T> {
-        self.get(header_name)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|str| str.parse().ok())
+        self.get(header_name).and_then(|v| v.to_str().ok()).and_then(|str| str.parse().ok())
     }
 }
 
