@@ -128,10 +128,10 @@
 //! 4. If both miss, return `Ok(None)`.
 //!
 //! **Note:** expired entries are not automatically removed from storage. The wrapper
-//! uses lazy expiration — it returns `None` but leaves cleanup to the storage
-//! backend (e.g. moka's built-in eviction).
+//! uses lazy expiration - it returns `None` but leaves cleanup to the storage
+//! backend (e.g. moka built-in eviction).
 //!
-//! TODO add an `ExpirationPolicy` that would make this configurable.
+//! TO-DO add an `ExpirationPolicy` that would make this configurable.
 //!
 //! Invalidation and clear are sent to **all** tiers concurrently.
 //!
