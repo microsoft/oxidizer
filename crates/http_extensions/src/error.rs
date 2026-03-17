@@ -73,7 +73,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// ## Custom Errors
 ///
-/// Got a custom error? No problem! Use `Error::other()` to wrap it.
+/// Custom errors can be wrapped using [`HttpError::other()`]:
 ///
 /// ```
 /// # use http_extensions::{HttpError};
@@ -155,7 +155,7 @@ impl HttpError {
 
     /// Creates a new Error with a specific HTTP status code.
     ///
-    /// Perfect for when you got a bad HTTP status code as a response.
+    /// Use this when you receive an unsuccessful HTTP status code as a response.
     ///
     /// # Parameters
     ///

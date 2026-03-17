@@ -173,7 +173,7 @@ impl HttpBody {
 
     /// Converts the body into a memory-efficient view over a byte sequence.
     ///
-    /// Great when you need direct access to the raw bytes without extra conversions.
+    /// Useful when you need direct access to the raw bytes without extra conversions.
     ///
     /// # Errors
     ///
@@ -210,7 +210,7 @@ impl HttpBody {
 
     /// Consumes the body and converts it to a UTF-8 string.
     ///
-    /// Great for when you're dealing with text-based responses like HTML or plain text.
+    /// Useful for text-based responses like HTML or plain text.
     ///
     /// # Errors
     ///
@@ -244,18 +244,18 @@ impl HttpBody {
 
     /// Loads the entire body into memory for easier handling.
     ///
-    /// Great when you need to:
+    /// Useful when you need to:
     ///
     /// - Read a streaming body multiple times
     /// - Clone a body that couldn't be cloned before
     /// - Preload data to avoid connection issues later
     ///
-    /// Want to change the memory limit? Use [`HttpBodyBuilder::with_response_buffer_limit`].
+    /// To change the memory limit, use [`HttpBodyBuilder::with_response_buffer_limit`].
     /// By default, it's capped at 2GB to prevent memory issues.
     ///
-    /// # Watch Out For
+    /// # Caveats
     ///
-    /// Be careful with large bodies - this loads everything into memory at once!
+    /// Be careful with large bodies; this loads everything into memory at once.
     ///
     /// # Errors
     ///
@@ -299,8 +299,7 @@ impl HttpBody {
 
     /// Consumes the body and converts it to JSON.
     ///
-    /// Need to parse JSON data? This method makes it easy to convert the body directly
-    /// to your desired type. Available with the `json` feature.
+    /// Converts the body directly to your desired type. Available with the `json` feature.
     ///
     /// # Errors
     ///
@@ -514,8 +513,8 @@ impl Body for HttpBody {
 impl HttpBodyBuilder {
     /// Creates a test-friendly [`HttpBodyBuilder`] instance.
     ///
-    /// Great for unit tests! Available with the `test-util` feature, this lets you create and
-    /// work with HTTP bodies without any real network or server setup.
+    /// Useful for unit tests. Available with the `test-util` feature, this allows creating and
+    /// working with HTTP bodies without any real network or server setup.
     ///
     /// # Examples
     ///
@@ -570,7 +569,7 @@ impl HttpBodyBuilder {
     /// Creates an `HttpBody` from any custom body implementation.
     ///
     /// Use this to integrate custom types that implement `http_body::Body` with the `HttpBody` system.
-    /// Great for third-party libraries or your own custom body implementations.
+    /// Useful for third-party libraries or your own custom body implementations.
     ///
     /// # Examples
     ///
@@ -612,7 +611,7 @@ impl HttpBodyBuilder {
 
     /// Creates a body from text.
     ///
-    /// Works with both string literals and `String` types - simply pass in your text!
+    /// Works with both string literals and `String` types.
     ///
     /// # Examples
     ///
@@ -632,7 +631,7 @@ impl HttpBodyBuilder {
 
     /// Creates a body from a slice of bytes.
     ///
-    /// Great when you have a single slice of raw bytes that need to be sent in a request or
+    /// Use this when you have a single slice of raw bytes that needs to be sent in a request or
     /// response.
     ///
     /// # Performance
@@ -661,7 +660,7 @@ impl HttpBodyBuilder {
 
     /// Creates a body from an existing `BytesView`.
     ///
-    /// Great when you already have a `BytesView` and want to use it as an HTTP body.
+    /// Use this when you already have a `BytesView` and want to use it as an HTTP body.
     ///
     /// # Performance
     ///
@@ -686,7 +685,7 @@ impl HttpBodyBuilder {
 
     /// Creates an empty body (zero bytes).
     ///
-    /// Great for HTTP methods that don't need a body like GET or HEAD requests,
+    /// Use this for HTTP methods that don't need a body like GET or HEAD requests,
     /// or for responses that only need status codes or headers.
     pub fn empty(&self) -> HttpBody {
         HttpBody::new(Kind::Empty, self.clone())
@@ -695,8 +694,8 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "json", test))]
     /// Creates a body from a JSON-serializable value.
     ///
-    /// Need to send JSON data? This method automatically handles serialization and
-    /// creates an HTTP body ready to send. Available with the `json` feature.
+    /// Automatically handles serialization and creates an HTTP body ready to send.
+    /// Available with the `json` feature.
     ///
     /// # Errors
     ///

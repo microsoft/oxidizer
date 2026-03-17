@@ -59,6 +59,7 @@ C-ITER-TY
 clippt
 clippy
 Clippy
+cloneable
 clonable
 C-MACRO-ATTR
 C-MACRO-VIS
@@ -90,6 +91,10 @@ deque
 Deque
 dereferenced
 deserialization
+deserialize
+deserialized
+deserializes
+deserializing
 destructors
 Destructors
 dev
@@ -131,6 +136,7 @@ hotfix
 hotfixes
 How-tos
 HRESULT
+hyper
 https
 i.e.
 impl
@@ -202,9 +208,11 @@ OpenSource
 openssl-devel
 OpenTelemetry
 parameterless
+parser
 passthrough
 performant
 PII
+Preload
 PowerShell
 pre-approved
 pre-generate
@@ -222,6 +230,7 @@ relocations
 repo
 repos
 Reqwest
+retryable
 Reusability
 RPC
 runtime

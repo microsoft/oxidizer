@@ -151,7 +151,7 @@ impl FakeHandler {
 
     /// Creates a handler from an asynchronous function.
     ///
-    /// Great for complex async scenarios like simulating network delays or
+    /// Useful for complex async scenarios like simulating network delays or
     /// other asynchronous behavior in your tests.
     ///
     /// # Examples
@@ -256,7 +256,7 @@ impl FakeHandler {
 
     /// Creates a handler that never completes requests.
     ///
-    /// Great for testing timeout handling in your code.
+    /// Useful for testing timeout handling in your code.
     pub fn never_completes() -> Self {
         Self::new(Inner::NeverCompletes)
     }

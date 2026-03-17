@@ -42,7 +42,6 @@ templated_uri = { path = "crates/templated_uri", default-features = false, versi
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.1.0" }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }

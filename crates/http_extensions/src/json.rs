@@ -123,7 +123,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///
     /// # Errors
     ///
-    /// Returns error if the JSON deserialization fails.
+    /// Returns an error if the JSON deserialization fails.
     pub fn read(&'a mut self) -> Result<T, JsonError> {
         // Convert a sequence to bytes if we haven't already
         if let JsonState::BytesView(bytes) = &mut self.state {
@@ -173,7 +173,7 @@ impl<T: DeserializeOwned> Json<T> {
     ///
     /// # Errors
     ///
-    /// Returns error if the JSON deserialization fails.
+    /// Returns an error if the JSON deserialization fails.
     pub fn read_owned(self) -> Result<T, JsonError> {
         match self.state {
             JsonState::BytesView(bytes) => {
