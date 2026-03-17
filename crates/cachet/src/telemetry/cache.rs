@@ -145,7 +145,7 @@ impl CacheTelemetry {
     )]
     #[cfg_attr(
         not(any(feature = "metrics", test)),
-        #[expect(clippy::unused_self, reason = "self is used under feature flags")]
+        expect(clippy::unused_self, reason = "self is used under feature flags")
     )]
     #[inline]
     pub(crate) fn record_size(&self, cache_name: CacheName, size: u64) {
