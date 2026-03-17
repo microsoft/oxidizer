@@ -584,7 +584,7 @@ mod tests {
         let builder = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
             .use_logs();
-        assert_eq!(builder.telemetry.logs_enabled, true);
+        assert!(builder.telemetry.logs_enabled);
     }
 
     #[test]

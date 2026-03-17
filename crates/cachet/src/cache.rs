@@ -787,11 +787,9 @@ mod tests {
         block_on(async {
             let cache = build_cache();
             let result = cache
-                .try_get_or_insert("key", || async {
-                    Err::<i32, _>(std::io::Error::new(std::io::ErrorKind::Other, "fail"))
-                })
+                .try_get_or_insert("key", || async { Err::<i32, _>(std::io::Error::other("fail")) })
                 .await;
-            assert!(result.is_err());
+            result.unwrap_err();
         });
     }
 

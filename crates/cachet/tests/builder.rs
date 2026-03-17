@@ -7,11 +7,9 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, Error, FallbackPromotionPolicy};
+use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
 use cachet_tier::{CacheOp, MockCache};
 use tick::Clock;
-
-type TestResult = Result<(), Error>;
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
@@ -19,33 +17,31 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn cache_builder_with_storage() -> TestResult {
+fn cache_builder_with_storage() {
     let clock = Clock::new_frozen();
     let storage = MockCache::<String, i32>::new();
     let cache = Cache::builder::<String, i32>(clock).storage(storage).build();
 
     block_on(async {
-        assert!(cache.get(&"key".to_string()).await?.is_none());
-        Ok(())
+        assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
     })
 }
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn mock_cache_with_storage() -> TestResult {
+fn mock_cache_with_storage() {
     block_on(async {
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();
         let cache = Cache::builder(clock).storage(mock.clone()).build();
 
         // Cache operations work
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-        let value = cache.get(&"key".to_string()).await?;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let value = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*value.unwrap().value(), 42);
 
         // Mock handle records operations
         assert_eq!(mock.operations().len(), 2);
-        Ok(())
     })
 }
 
@@ -73,19 +69,18 @@ fn mock_cache_failure_injection() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn mock_cache_shares_state_with_handle() -> TestResult {
+fn mock_cache_shares_state_with_handle() {
     block_on(async {
         let clock = Clock::new_frozen();
         let mock = MockCache::<String, i32>::new();
         let cache = Cache::builder(clock).storage(mock.clone()).build();
 
         // Insert via cache
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         // Mock handle sees the data
         assert!(mock.contains_key(&"key".to_string()));
         assert_eq!(mock.entry_count(), 1);
-        Ok(())
     })
 }
 
@@ -102,16 +97,15 @@ fn cache_builder_clock() {
 }
 
 #[test]
-fn cache_builder_name() -> TestResult {
+fn cache_builder_name() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().name("test_cache").build();
     assert_eq!(cache.name(), "test_cache");
-    Ok(())
 }
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn fallback_builder_basic() -> TestResult {
+fn fallback_builder_basic() {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory().ttl(Duration::from_secs(3600));
@@ -124,16 +118,15 @@ fn fallback_builder_basic() -> TestResult {
 
     block_on(async {
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await?;
-        let entry = cache.get(&key).await?;
+        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-        Ok(())
     })
 }
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn fallback_builder_promotion_policy() -> TestResult {
+fn fallback_builder_promotion_policy() {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
@@ -145,16 +138,15 @@ fn fallback_builder_promotion_policy() -> TestResult {
         .build();
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-        let entry = cache.get(&"key".to_string()).await?;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let entry = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-        Ok(())
     })
 }
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn fallback_builder_nested_fallback() -> TestResult {
+fn fallback_builder_nested_fallback() {
     let clock = Clock::new_frozen();
 
     // L3 (deepest)
@@ -174,9 +166,8 @@ fn fallback_builder_nested_fallback() -> TestResult {
         .build();
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await?;
-        let entry = cache.get(&"key".to_string()).await?;
+        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let entry = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-        Ok(())
     })
 }

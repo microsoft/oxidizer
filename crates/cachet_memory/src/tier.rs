@@ -6,12 +6,13 @@
 //! This module provides a high-performance concurrent in-memory cache tier
 //! with automatic eviction and optional time-based expiration.
 
-use cachet_tier::{CacheEntry, CacheTier, Error};
-use moka::Expiry;
-use moka::future::Cache;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
+
+use cachet_tier::{CacheEntry, CacheTier, Error};
+use moka::Expiry;
+use moka::future::Cache;
 use thread_aware::{Arc, PerProcess, ThreadAware};
 
 use crate::builder::InMemoryCacheBuilder;
@@ -215,9 +216,11 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use futures::executor::block_on;
     use std::time::SystemTime;
+
+    use futures::executor::block_on;
+
+    use super::*;
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
@@ -471,7 +474,7 @@ mod tests {
         block_on(async {
             for i in 0..=capacity {
                 cache
-                    .insert(&format!("key{}", i), CacheEntry::new(i as i32))
+                    .insert(&format!("key{i}"), CacheEntry::new(i as i32))
                     .await
                     .expect("Insert should succeed");
             }
@@ -479,7 +482,7 @@ mod tests {
 
             // Insert one more entry to trigger eviction
             cache
-                .insert(&format!("key{}", capacity), CacheEntry::new(capacity as i32))
+                .insert(&format!("key{capacity}"), CacheEntry::new(capacity as i32))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;

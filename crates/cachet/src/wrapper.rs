@@ -403,7 +403,7 @@ mod tests {
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
             let result = wrapper.get(&"key".to_string()).await;
-            assert!(result.is_err());
+            result.unwrap_err();
         });
     }
 
@@ -416,7 +416,7 @@ mod tests {
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
             let result = wrapper.insert(&"key".to_string(), CacheEntry::new(1)).await;
-            assert!(result.is_err());
+            result.unwrap_err();
         });
     }
 
@@ -429,7 +429,7 @@ mod tests {
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
             let result = wrapper.invalidate(&"key".to_string()).await;
-            assert!(result.is_err());
+            result.unwrap_err();
         });
     }
 
@@ -442,7 +442,7 @@ mod tests {
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
             let result = wrapper.clear().await;
-            assert!(result.is_err());
+            result.unwrap_err();
         });
     }
 }

@@ -320,14 +320,20 @@ mod tests {
         CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry)
     }
 
-    fn make_fallback_cache(
-        policy: FallbackPromotionPolicy<i32>,
-    ) -> FallbackCache<String, i32, CacheWrapper<String, i32, MockCache<String, i32>>, MockCache<String, i32>> {
+    fn make_fallback_cache(policy: FallbackPromotionPolicy<i32>) -> DynamicCache<String, i32> {
         let clock = Clock::new_frozen();
         let primary = make_primary();
         let fallback_mock = MockCache::<String, i32>::new();
         let telemetry = TelemetryConfig::new().build();
-        FallbackCache::new("fallback", primary, fallback_mock, policy, clock, None, telemetry)
+        DynamicCache::new(FallbackCache::new(
+            "fallback",
+            primary,
+            fallback_mock,
+            policy,
+            clock,
+            None,
+            telemetry,
+        ))
     }
 
     /// Tests that promotion from fallback to primary works correctly.
@@ -409,7 +415,7 @@ mod tests {
     fn fallback_cachet_inner_debug() {
         let cache = make_fallback_cache(FallbackPromotionPolicy::always());
 
-        let debug_str = format!("{:?}", cache);
+        let debug_str = format!("{cache:?}");
         assert_eq!(debug_str, "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", .. } }");
     }
 
