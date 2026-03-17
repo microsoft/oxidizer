@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! An example of a custom HTTP client using `http_extensions`.
 //!

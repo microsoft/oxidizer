@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use http::Request;
 use templated_uri::uri::TargetPathAndQuery;

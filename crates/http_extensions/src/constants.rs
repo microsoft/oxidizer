@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// Default response buffer limit of 2GB. This follows the defaults in .NET:
 ///

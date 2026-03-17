@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use http::{Response, StatusCode};
 use recoverable::RecoveryInfo;

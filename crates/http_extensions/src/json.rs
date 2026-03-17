@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Lazy JSON parsing utilities for HTTP responses.
 //!

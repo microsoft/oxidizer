@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! A simple HTTP server using `http_extensions` and `hyper` with a custom execution stack.
 //!
