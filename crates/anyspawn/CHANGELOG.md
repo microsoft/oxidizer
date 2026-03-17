@@ -4,7 +4,7 @@
 
 - ⚠️ Breaking
 
-  - add `CustomSpawnerBuilder` for composing multilayered spawner ([#308](https://github.com/microsoft/oxidizer/pull/308))
+  - add `CustomSpawnerBuilder` for composing multi-layer spawners ([#308](https://github.com/microsoft/oxidizer/pull/308))
 
 ## 0.1.0
 
