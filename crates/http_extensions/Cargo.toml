@@ -17,20 +17,31 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extens
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "bytes::bytes::Bytes",
+    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::has_memory::HasMemory",
+    "bytesbuf::mem::memory::Memory",
+    "bytesbuf::mem::memory_shared::MemoryShared",
+    "bytesbuf::view::BytesView",
+    "http::*",
+    "http_body::Body",
+    "hyper::body::incoming::Incoming",
     "layered::layer::stack::Stack",
     "layered::service::Service",
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
     "recoverable::RecoveryKind",
     "serde_core::de::*",
     "serde_core::ser::*",
-    "tick::clock::Clock",
-    "thread_aware::core::ThreadAware",
+    "templated_uri::error::ValidationError",
+    "templated_uri::uri::TargetPathAndQuery",
+    "templated_uri::uri::Uri",
     "thread_aware::affinity::MemoryAffinity",
     "thread_aware::affinity::PinnedAffinity",
-    "http::status::StatusCode",
-    "http::status::HeaderValue",
-    "http::status::HeaderMap",
+    "thread_aware::core::ThreadAware",
+    "tick::clock::Clock",
 ]
 
 [package.metadata.docs.rs]
