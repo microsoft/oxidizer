@@ -1,0 +1,27 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_extensions"
+description = "Extensions for the 'http' crate that can be used by clients and servers."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "http", "oxidizer", "extensions", "client", "server"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true
