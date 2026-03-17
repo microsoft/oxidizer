@@ -15,10 +15,9 @@ where
 {
     /// Ensures that the status code is a successful status code (2xx range).
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// - `Ok(self)` if the status code indicates success
-    /// - `Err(Error)` if the status code indicates failure
+    /// Returns an error if the status code is not in the 2xx range.
     ///
     /// # Examples
     ///
@@ -39,6 +38,11 @@ where
     /// and returns a custom error if it is not.
     ///
     /// This allows you to provide your own error type and construction logic.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error created by the `factory` function if the status code
+    /// is not in the 2xx range.
     ///
     /// # Examples
     ///
