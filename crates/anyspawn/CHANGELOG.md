@@ -6,14 +6,6 @@
 
   - add `CustomSpawnerBuilder` for composing multilayered spawner ([#308](https://github.com/microsoft/oxidizer/pull/308))
 
-- ✨ Features
-
-  - improve ergonomics of BytesView::as_read() ([#272](https://github.com/microsoft/oxidizer/pull/272))
-
-- ✔️ Tasks
-
-  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
-
 ## 0.1.0
 
 Initial release.
