@@ -4,8 +4,7 @@
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, Uri, UriParam, UriSafeString};
-use templated_uri_macros::templated;
+use templated_uri::{BaseUri, Uri, UriParam, UriSafeString, templated};
 
 // Example taxonomy for demonstration purposes
 #[taxonomy(example_taxonomy)]
