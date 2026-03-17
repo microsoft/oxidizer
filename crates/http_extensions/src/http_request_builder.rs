@@ -1286,4 +1286,24 @@ mod tests {
         let id = request.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
     }
+
+    #[test]
+    fn fetch_returns_error_when_build_fails() {
+        let handler = FakeHandler::from_sync_handler(|_request| {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .text("should not reach")
+                .build()
+        });
+
+        let result = block_on(handler.request_builder().method(Method::GET).fetch());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.message().contains("URI is required"),
+            "expected 'URI is required' but got: {}",
+            err.message()
+        );
+    }
 }

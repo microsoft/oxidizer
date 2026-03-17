@@ -133,12 +133,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
         }
 
         // Now we can safely borrow from the bytes
-        match &self.state {
-            JsonState::Bytes(bytes) => serde_json::from_slice(bytes).map_err(JsonError::deserialization),
-            JsonState::BytesView(_) => {
-                unreachable!("BytesView should have been converted to bytes")
-            }
-        }
+        serde_json::from_slice(self.state.as_bytes()).map_err(JsonError::deserialization)
     }
 }
 
@@ -189,6 +184,22 @@ impl<T: DeserializeOwned> Json<T> {
 enum JsonState {
     BytesView(BytesView),
     Bytes(Bytes),
+}
+
+impl JsonState {
+    /// Returns a reference to the underlying bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called when the state is still `BytesView`, which indicates
+    /// a programming error since `read()` always converts to `Bytes` first.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Bytes(bytes) => bytes,
+            Self::BytesView(_) => unreachable!("guarded by the BytesView-to-Bytes conversion in read()"),
+        }
+    }
 }
 
 #[cfg(test)]

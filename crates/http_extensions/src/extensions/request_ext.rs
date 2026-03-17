@@ -82,4 +82,22 @@ mod tests {
         let result = request.url_template_label();
         assert!(result.is_none());
     }
+
+    #[test]
+    fn url_template_label_falls_back_to_path_and_query_template() {
+        let uri = Uri::from_static("https://example.com/api/users");
+        let mut request = http::Request::get("https://example.com/api/users")
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+
+        // Attach a TargetPathAndQuery but no UrlTemplateLabel.
+        // For a plain PathAndQuery, label() returns None so the fallback
+        // to template() is exercised.
+        request
+            .extensions_mut()
+            .insert(TargetPathAndQuery::from_path_and_query(uri.path_and_query().cloned().unwrap()));
+
+        let result = request.url_template_label();
+        assert_eq!(result.as_ref().map(UrlTemplateLabel::as_str), Some("/api/users"));
+    }
 }

@@ -260,6 +260,7 @@ mod tests {
 
     use ohno::ErrorExt;
     use recoverable::RecoveryKind;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::HttpRequestBuilder;
@@ -379,5 +380,16 @@ mod tests {
 
         // Later calls should return None
         assert!(error.take_request().is_none());
+    }
+
+    #[test]
+    fn relocated_preserves_error() {
+        let affinity = pinned_affinities(&[1])[0];
+        let error = HttpError::validation("relocated test");
+
+        let relocated = error.relocated(MemoryAffinity::Unknown, affinity);
+
+        assert_eq!(relocated.message(), "relocated test");
+        assert_eq!(relocated.label(), "validation");
     }
 }
