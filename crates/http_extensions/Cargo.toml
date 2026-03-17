@@ -6,8 +6,8 @@ name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers"
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "http", "extensions", "middleware"]
-categories = ["web-programming::http-client", "web-programming::http-server"]
+keywords = ["oxidizer", "http", "oxidizer", "extensions", "client", "server"]
+categories = ["network-programming"]
 
 edition.workspace = true
 rust-version.workspace = true
