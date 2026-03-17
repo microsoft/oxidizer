@@ -60,8 +60,8 @@ let handle = spawner.spawn(async { 42 });
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4kogXIVaWzIG_FIsBdF8WN2G2_j-q32s9sZG1ijNLpXv0lkYWSBgmhhbnlzcGF3bmUwLjEuMA
- [__link0]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::new_tokio
- [__link2]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=Spawner::new_custom
- [__link3]: https://docs.rs/anyspawn/0.1.0/anyspawn/?search=CustomSpawnerBuilder
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4kogXIVaWzIG_FIsBdF8WN2G2_j-q32s9sZG1ijNLpXv0lkYWSBgmhhbnlzcGF3bmUwLjIuMA
+ [__link0]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner
+ [__link1]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_tokio
+ [__link2]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_custom
+ [__link3]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=CustomSpawnerBuilder
