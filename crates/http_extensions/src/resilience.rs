@@ -29,6 +29,7 @@ pub fn detect_io_recovery(kind: ErrorKind) -> RecoveryInfo {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

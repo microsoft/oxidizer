@@ -581,6 +581,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;

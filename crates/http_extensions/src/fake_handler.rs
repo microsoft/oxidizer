@@ -361,6 +361,7 @@ impl MaybeUnbufferedBody {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::Duration;
     use std::vec;

@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_extensions/logo.png")]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_extensions/favicon.ico"
+)]
+
 //! Shared HTTP types and extension traits for clients and servers.
 //!
 //! This crate provides common HTTP functionality built on the popular [`http`] crate,

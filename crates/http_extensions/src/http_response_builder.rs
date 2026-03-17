@@ -419,6 +419,7 @@ impl HttpResponseBuilder<'_> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;

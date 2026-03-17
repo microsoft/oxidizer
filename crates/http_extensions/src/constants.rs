@@ -13,6 +13,7 @@ pub(crate) const ERR_POISONED_LOCK: &str =
     "poisoned lock - cannot continue execution because security and privacy guarantees can no longer be upheld";
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

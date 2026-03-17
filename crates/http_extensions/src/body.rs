@@ -797,6 +797,7 @@ impl Memory for MemoryWrapper {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::pin;
     use std::task::Waker;

@@ -44,6 +44,7 @@ pub(crate) mod sealed {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::Uri;
 

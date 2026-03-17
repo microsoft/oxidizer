@@ -182,6 +182,7 @@ impl<B> StatusExt for Response<B> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use recoverable::Recovery;
 
