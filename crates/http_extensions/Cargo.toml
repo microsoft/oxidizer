@@ -26,40 +26,40 @@ hyper = ["dep:hyper"]
 test-util = []
 
 [dependencies]
-ohno = { workspace = true }
-recoverable = { workspace = true }
-templated_uri = { workspace = true }
-layered = { workspace = true, features = ["dynamic-service"] }
-tick = { workspace = true, features = ["fmt"] }
-http = { workspace = true }
-bytesbuf = { workspace = true, features = ["bytes-compat"] }
 bytes = { workspace = true }
-pin-project = { workspace = true }
+bytesbuf = { workspace = true, features = ["bytes-compat"] }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-futures = { workspace = true, features = ["std"] }
 hyper = { workspace = true, features = ["client"], optional = true }
+layered = { workspace = true, features = ["dynamic-service"] }
+ohno = { workspace = true }
+pin-project = { workspace = true }
+recoverable = { workspace = true }
 serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
+templated_uri = { workspace = true }
 thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
-uuid = { workspace = true }
+alloc_tracker = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
+criterion = { workspace = true }
+futures = { workspace = true, features = ["std", "executor"] }
+hyper = { workspace = true, features = ["client"] }
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
+layered = { workspace = true, features = ["intercept"] }
 mutants = { workspace = true }
 ohno = { workspace = true, features = ["test-util", "app-err"] }
-static_assertions = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-hyper = { workspace = true, features = ["client"] }
 serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
-futures = { workspace = true, features = ["std", "executor"] }
+static_assertions = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
-hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
-layered = { workspace = true, features = ["intercept"] }
-alloc_tracker = { workspace = true }
-criterion = { workspace = true }
+uuid = { workspace = true }
 
 [lints]
 workspace = true
