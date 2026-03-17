@@ -310,22 +310,25 @@ mod tests {
     use crate::telemetry::TelemetryConfig;
     use crate::wrapper::CacheWrapper;
 
+    type TestPrimary = CacheWrapper<String, i32, MockCache<String, i32>>;
+    type TestFallbackCache = FallbackCache<String, i32, TestPrimary, MockCache<String, i32>>;
+
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
     }
 
-    fn make_primary() -> CacheWrapper<String, i32, MockCache<String, i32>> {
+    fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
         CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry)
     }
 
-    fn make_fallback_cache(policy: FallbackPromotionPolicy<i32>) -> DynamicCache<String, i32> {
+    fn make_fallback_cache(policy: FallbackPromotionPolicy<i32>) -> TestFallbackCache {
         let clock = Clock::new_frozen();
         let primary = make_primary();
         let fallback_mock = MockCache::<String, i32>::new();
         let telemetry = TelemetryConfig::new().build();
-        DynamicCache::new(FallbackCache::new(
+        FallbackCache::new(
             "fallback",
             primary,
             fallback_mock,
@@ -333,7 +336,7 @@ mod tests {
             clock,
             None,
             telemetry,
-        ))
+        )
     }
 
     /// Tests that promotion from fallback to primary works correctly.
