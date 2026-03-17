@@ -14,11 +14,11 @@ pub trait StatusExt: sealed::Sealed
 where
     Self: Sized,
 {
-    /// Ensures that the status code is a successful status code (2xx range).
+    /// Ensures that the status code is a successful status code (`2xx` range).
     ///
     /// # Errors
     ///
-    /// Returns an error if the status code is not in the 2xx range.
+    /// Returns an error if the status code is not in the `2xx` range.
     ///
     /// # Examples
     ///
@@ -35,7 +35,7 @@ where
     /// ```
     fn ensure_success(self) -> Result<Self>;
 
-    /// Ensures that the status code is a successful status code (2xx range)
+    /// Ensures that the status code is a successful status code (`2xx` range)
     /// and returns a custom error if it is not.
     ///
     /// This allows you to provide your own error type and construction logic.
@@ -43,7 +43,7 @@ where
     /// # Errors
     ///
     /// Returns an error created by the `factory` function if the status code
-    /// is not in the 2xx range.
+    /// is not in the `2xx` range.
     ///
     /// # Examples
     ///

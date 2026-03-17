@@ -66,7 +66,7 @@ let response = handler
     .fetch()
     .await?;
 
-// Validate that the response succeeded (returns error for 4xx/5xx status codes)
+// Validate that the response succeeded (returns error for `4xx/5xx` status codes)
 let validated_response = response.ensure_success()?;
 
 println!("response status: {}", validated_response.status());

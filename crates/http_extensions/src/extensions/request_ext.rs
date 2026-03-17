@@ -15,8 +15,8 @@ pub trait RequestExt: sealed::Sealed {
     ///
     /// This method checks for a template label in the following order:
     /// 1. From an explicit [`UrlTemplateLabel`] extension attached to the request
-    /// 2. From a templated URI's label (if set via `#[templated(label = "...")]`)
-    /// 3. From a templated URI's template string
+    /// 2. From a templated URIs label (if set via `#[templated(label = "...")]`)
+    /// 3. From a templated URIs template string
     ///
     /// Returns `None` if no template information is available.
     fn url_template_label(&self) -> Option<UrlTemplateLabel>;

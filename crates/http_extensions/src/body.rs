@@ -246,7 +246,7 @@ impl HttpBody {
     /// - Preload data to avoid connection issues later
     ///
     /// To change the memory limit, use [`HttpBodyBuilder::with_response_buffer_limit`].
-    /// By default, it's capped at 2GB to prevent memory issues.
+    /// By default, it's capped at `2GB` to prevent memory issues.
     ///
     /// # Caveats
     ///
@@ -509,7 +509,7 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        // We use a default response buffer limit of 2GB for fake instances.
+        // We use a default response buffer limit of `2GB` for fake instances.
         Self::new(GlobalPool::new())
     }
 
