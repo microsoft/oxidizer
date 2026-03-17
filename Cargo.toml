@@ -41,6 +41,7 @@ templated_uri = { path = "crates/templated_uri", default-features = false, versi
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
+http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.1.0" }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
@@ -68,6 +69,10 @@ futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 http = { version = "1.2.0", default-features = false, features = ["std"] }
+http-body = { version = "1.0.1", default-features = false }
+http-body-util = { version = "0.1.3", default-features = false }
+hyper = { version = "1.6.0", default-features = false }
+hyper-util = { version = "0.1.16", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 jiff = { version = "0.2.21", default-features = false }
@@ -84,6 +89,7 @@ opentelemetry-stdout = { version = "0.31.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
 pct-str = { version = "3.0.1", default-features = false }
+pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
