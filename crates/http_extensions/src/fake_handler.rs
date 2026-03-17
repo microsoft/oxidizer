@@ -562,6 +562,20 @@ mod tests {
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 
+    #[test]
+    fn debug_contains_variant_name() {
+        assert!(format!("{:?}", FakeHandler::from(StatusCode::NOT_FOUND)).contains("StatusCode(404 Not Found)"));
+        assert!(format!("{:?}", FakeHandler::from(vec![StatusCode::OK])).contains("Multiple"));
+        assert!(
+            format!(
+                "{:?}",
+                FakeHandler::from_sync_handler(|_| Ok(Response::new(HttpBodyBuilder::new_fake().empty())))
+            )
+            .contains("Custom")
+        );
+        assert!(format!("{:?}", FakeHandler::never_completes()).contains("NeverCompletes"));
+    }
+
     fn get_response(client: &FakeHandler) -> Result<HttpResponse> {
         block_on(client.request_builder().get("https://dummy").fetch())
     }
