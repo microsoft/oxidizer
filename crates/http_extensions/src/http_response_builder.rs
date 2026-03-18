@@ -17,7 +17,7 @@ use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Result};
 /// response handling patterns.
 ///
 /// > **Note**: While useful in application code, `HttpResponseBuilder` is primarily designed for testing HTTP handlers
-/// > and middleware. The `HttpResponseBuilder::fake` method makes it particularly easy to create test responses
+/// > and middleware. The `HttpResponseBuilder::new_fake` method makes it particularly easy to create test responses
 /// > without needing a real HTTP context.
 ///
 /// # Examples
