@@ -202,27 +202,27 @@ mod tests {
     async fn adapter_get_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
         let result = adapter.get(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
     async fn adapter_insert_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
         let result = adapter.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
     async fn adapter_invalidate_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
         let result = adapter.invalidate(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
     async fn adapter_clear_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
         let result = adapter.clear().await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

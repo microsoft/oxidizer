@@ -286,7 +286,7 @@ mod tests {
         let cache = MockCache::<String, i32>::new();
         cache.fail_when(|op| matches!(op, CacheOp::Insert { .. }));
         let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
@@ -294,7 +294,7 @@ mod tests {
         let cache = MockCache::<String, i32>::new();
         cache.fail_when(|op| matches!(op, CacheOp::Invalidate(_)));
         let result = cache.invalidate(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[tokio::test]
@@ -302,6 +302,6 @@ mod tests {
         let cache = MockCache::<String, i32>::new();
         cache.fail_when(|op| matches!(op, CacheOp::Clear));
         let result = cache.clear().await;
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

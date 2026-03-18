@@ -469,8 +469,8 @@ mod tests {
 
     #[test]
     fn max_capacity_evicts_at_capacity() {
-        let capacity: i32 = 5;
-        let cache = InMemoryCache::<String, i32>::builder().max_capacity(capacity).build();
+        let capacity = 5;
+        let cache = InMemoryCache::<String, u64>::builder().max_capacity(capacity).build();
         block_on(async {
             for i in 0..=capacity {
                 cache

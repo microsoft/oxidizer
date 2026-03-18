@@ -152,7 +152,7 @@ fn fallback_cache_insert_error_propagation() {
             .build();
 
         let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
@@ -173,7 +173,7 @@ fn fallback_cache_invalidate_error_propagation() {
             .build();
 
         let result = cache.invalidate(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
@@ -194,7 +194,7 @@ fn fallback_cache_clear_error_propagation() {
             .build();
 
         let result = cache.clear().await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 

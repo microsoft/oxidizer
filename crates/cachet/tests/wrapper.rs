@@ -189,7 +189,7 @@ fn wrapper_insert_error_is_recorded() {
         let cache = Cache::builder(clock).storage(mock).build();
 
         let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
@@ -202,7 +202,7 @@ fn wrapper_invalidate_error_is_recorded() {
         let cache = Cache::builder(clock).storage(mock).build();
 
         let result = cache.invalidate(&"key".to_string()).await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
@@ -215,7 +215,7 @@ fn wrapper_clear_error_is_recorded() {
         let cache = Cache::builder(clock).storage(mock).build();
 
         let result = cache.clear().await;
-        assert!(result.is_err());
+        result.unwrap_err();
     });
 }
 
