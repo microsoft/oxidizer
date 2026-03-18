@@ -18,7 +18,7 @@
 //! The crate centers around several key abstractions:
 //!
 //! - [`Uri`] - Flexible URI type with endpoint and path/query components
-//! - [`BaseUri`] - Lightweight type representing scheme and authority (no path/query)
+//! - [`BaseUri`] - Lightweight type representing scheme, authority, and optional path prefix
 //! - [`TemplatedPathAndQuery`] - RFC 6570 Level 3 compliant URI templating
 //! - [`UriSafe`] and [`UriSafeString`] - Generic newtype wrapper proving a value is safe for URI components
 //!   by not containing any reserved characters

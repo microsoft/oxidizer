@@ -15,12 +15,11 @@ mod origin;
 pub use base_path::BasePath;
 pub use origin::Origin;
 
-/// An HTTP or HTTPS [`BaseUri`] representing a target location without path information.
+/// An HTTP or HTTPS [`BaseUri`] representing a target location with an optional path prefix.
 ///
-/// [`BaseUri`] is a lightweight type that stores only the scheme and authority portions
-/// of a URI, making it ideal for representing target destinations in HTTP scenarios.
-/// It deliberately omits path, query string, and fragment components, focusing solely on
-/// the remote target information.
+/// [`BaseUri`] is a lightweight type that stores the scheme, authority, and an optional
+/// path prefix of a URI, making it ideal for representing target destinations in HTTP scenarios.
+/// It omits query string and fragment components, focusing on the base location information.
 ///
 /// Use [`BaseUri`] when you need to:
 ///
@@ -656,7 +655,7 @@ impl From<BaseUri> for http::Uri {
 }
 
 impl Display for BaseUri {
-    /// Formats the `base_uri` as a string in the form `scheme://authority`.
+    /// Formats the `base_uri` as a string in the form `scheme://authority/path`.
     ///
     /// Default ports (80 for HTTP, 443 for HTTPS) are omitted from the display string.
     /// Custom ports are included when present.

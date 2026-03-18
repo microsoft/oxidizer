@@ -25,7 +25,7 @@ capabilities, and data classification features.
 The crate centers around several key abstractions:
 
 * [`Uri`][__link0] - Flexible URI type with endpoint and path/query components
-* [`BaseUri`][__link1] - Lightweight type representing scheme and authority (no path/query)
+* [`BaseUri`][__link1] - Lightweight type representing scheme, authority, and optional path prefix
 * [`TemplatedPathAndQuery`][__link2] - RFC 6570 Level 3 compliant URI templating
 * [`UriSafe`][__link3] and [`UriSafeString`][__link4] - Generic newtype wrapper proving a value is safe for URI components
   by not containing any reserved characters
@@ -168,7 +168,7 @@ and servers based on [`hyper`][__link12] like [`reqwest`][__link13].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyIZu7e6bvFMG9_SXWN1Sb-DG00_3R3OA9lRG1_XMNG8hlcrYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2KYRqACl85YGxlt9y4LuLoIG2MkMtP0QJUIG1Nhzo1naOztYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
  [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
