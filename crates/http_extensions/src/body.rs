@@ -1292,6 +1292,12 @@ mod tests {
 
         let debug_str = format!("{:?}", Kind::Empty);
         assert_eq!("Empty", debug_str);
+
+        let builder = HttpBodyBuilder::new_fake();
+        let stream = futures::stream::iter(Vec::<Result<BytesView>>::new());
+        let body = builder.stream(stream);
+        let debug_str = format!("{body:?}");
+        assert!(debug_str.contains("Body"), "{debug_str}");
     }
 
     #[test]
@@ -1650,5 +1656,15 @@ mod tests {
         let chunks: Vec<_> = block_on(body.into_stream().try_collect()).unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0], b"stream test");
+    }
+
+    #[test]
+    fn has_memory_returns_usable_provider() {
+        let builder = HttpBodyBuilder::new_fake();
+
+        let memory = builder.memory();
+        let buf = memory.reserve(64);
+
+        assert!(buf.capacity() >= 64);
     }
 }
