@@ -236,7 +236,7 @@ impl<R> HttpRequestBuilder<'_, R> {
 
     /// Sets a plain text body for the request.
     ///
-    /// Automatically sets the `Content-Type` header to `text/plain; charset=utf-8`.
+    /// Automatically sets the `Content-Type` header to `text/plain`.
     /// If the `Content-Type` header is already set, it will not override it.
     ///
     /// This method always encodes the provided string as UTF-8.
@@ -259,7 +259,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     ///
     /// Takes any type that implements `serde::Serialize` and converts it to JSON with the following rules:
     ///
-    /// - The `Content-Type` header is set to `application/json; charset=utf-8` if not already set.
+    /// - The `Content-Type` header is set to `application/json` if not already set.
     /// - The data is always encoded as UTF-8.
     ///
     /// This method requires the `json` feature to be enabled.
