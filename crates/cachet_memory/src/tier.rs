@@ -312,6 +312,7 @@ mod tests {
         assert_eq!(builder.name.as_deref(), Some("test-cache"));
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn insert_and_get_returns_value() {
         let cache = InMemoryCache::<String, i32>::new();
@@ -327,6 +328,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn get_returns_none_after_per_entry_ttl() {
         let cache = InMemoryCache::<String, i32>::new();
@@ -342,6 +344,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn update_with_per_entry_ttl_expires_entry() {
         let cache = InMemoryCache::<String, i32>::new();
@@ -365,6 +368,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn get_returns_none_after_cache_ttl() {
         let cache = InMemoryCache::<String, i32>::builder().time_to_live(Duration::ZERO).build();
@@ -380,6 +384,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn get_returns_none_after_cache_tti() {
         let cache = InMemoryCache::<String, i32>::builder().time_to_idle(Duration::ZERO).build();
@@ -395,6 +400,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn invalidate_removes_entry() {
         let cache = InMemoryCache::<String, i32>::new();
@@ -413,6 +419,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn clear_removes_all_entries() {
         let cache = InMemoryCache::<String, i32>::new();
@@ -437,6 +444,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn len_returns_correct_count() {
         let cache = InMemoryCache::<String, i32>::new();
@@ -467,6 +475,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn max_capacity_evicts_at_capacity() {
         let capacity = 5;
