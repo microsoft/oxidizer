@@ -324,7 +324,7 @@ mod tests {
 
             let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
             assert_eq!(*value.unwrap().value(), 42);
-        })
+        });
     }
 
     #[test]
@@ -469,12 +469,12 @@ mod tests {
 
     #[test]
     fn max_capacity_evicts_at_capacity() {
-        let capacity = 5;
+        let capacity: i32 = 5;
         let cache = InMemoryCache::<String, i32>::builder().max_capacity(capacity).build();
         block_on(async {
             for i in 0..=capacity {
                 cache
-                    .insert(&format!("key{i}"), CacheEntry::new(i as i32))
+                    .insert(&format!("key{i}"), CacheEntry::new(i))
                     .await
                     .expect("Insert should succeed");
             }
@@ -482,7 +482,7 @@ mod tests {
 
             // Insert one more entry to trigger eviction
             cache
-                .insert(&format!("key{capacity}"), CacheEntry::new(capacity as i32))
+                .insert(&format!("key{capacity}"), CacheEntry::new(capacity))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;

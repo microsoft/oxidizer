@@ -328,15 +328,7 @@ mod tests {
         let primary = make_primary();
         let fallback_mock = MockCache::<String, i32>::new();
         let telemetry = TelemetryConfig::new().build();
-        FallbackCache::new(
-            "fallback",
-            primary,
-            fallback_mock,
-            policy,
-            clock,
-            None,
-            telemetry,
-        )
+        FallbackCache::new("fallback", primary, fallback_mock, policy, clock, None, telemetry)
     }
 
     /// Tests that promotion from fallback to primary works correctly.
