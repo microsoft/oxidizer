@@ -147,7 +147,7 @@ impl HttpResponseBuilder<'_> {
     ///
     /// Takes any type that implements `serde::Serialize` and converts it to JSON with the following rules:
     ///
-    /// - The `Content-Type` header is set to `application/json; charset=utf-8` if not already set.
+    /// - The `Content-Type` header is set to `application/json` if not already set.
     /// - The data is always encoded as UTF-8.
     ///
     /// This method requires the `json` feature to be enabled.
