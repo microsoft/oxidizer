@@ -80,7 +80,7 @@ use crate::{HttpError, Result};
 /// - Clone a streaming body that would otherwise be consumed
 /// - Keep data available after the network connection would close
 ///
-/// Buffering has a configurable memory limit (default: 2GB) to prevent out-of-memory issues
+/// Buffering has a configurable memory limit (default: 2 GB) to prevent out-of-memory issues
 /// with extremely large responses. If a response exceeds this limit, you'll get an error.
 /// You can customize this limit via [`HttpBodyBuilder::with_response_buffer_limit`].
 ///

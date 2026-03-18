@@ -50,7 +50,7 @@
 //! let body_builder = HttpBodyBuilder::new_fake();
 //!
 //! // Create a fake handler that returns a successful response
-// (This uses the `test-util` feature for testing; similar workflow applies to real clients)
+//! // (This uses the `test-util` feature for testing; similar workflow applies to real clients)
 //! let handler = FakeHandler::from(
 //!     HttpResponseBuilder::new(&body_builder)
 //!         .status(200)
@@ -167,7 +167,7 @@
 //! # Features
 //!
 //! - `json` - Enables JSON serialization/deserialization support via `Json` type
-//! - `hyper` - Enables compatibility with hyper's `Incoming` body type
+//! - `hyper` - Enables compatibility with the [`hyper`] `Incoming` body type
 //! - `test-util` - Enables fake implementations for testing
 //!
 //! # Memory Management

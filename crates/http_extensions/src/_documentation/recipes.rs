@@ -11,7 +11,7 @@
 //! zero-allocation patterns that `String` cannot.
 //!
 //! This is just a specialization of [`M-STRONG-TYPES`](https://microsoft.github.io/rust-guidelines/guidelines/libs/resilience/index.html?highlight=strong#M-STRONG-TYPES)
-//! rule for http related types.
+//! rule for HTTP-related types.
 //!
 //! ## URI family
 //!
@@ -60,7 +60,7 @@
 //! processing without copying.
 //!
 //! [`BytesView`](bytesbuf::BytesView) is useful when you need to pass raw
-//! data around outside the HTTP layer — it stores non-contiguous chunks
+//! data around outside the HTTP layer. It stores non-contiguous chunks
 //! backed by a memory pool, so buffers are recycled rather than
 //! individually allocated and freed.
 //!
@@ -68,7 +68,7 @@
 //!
 //! [`http::HeaderMap`] is purpose-built for HTTP headers. Unlike
 //! `HashMap<String, String>`, it can represent headers with **zero
-//! allocations** by interning ~90 standard names as enum variants and
+//! allocations** by interning about 90 standard names as enum variants and
 //! wrapping static strings via [`HeaderName::from_static`] /
 //! [`HeaderValue::from_static`]. Owned `String` and `Vec<u8>` values
 //! are reused without copying through `TryFrom`.
@@ -133,7 +133,7 @@
 //! reuse it. Passing a `&str` each time re-parses and re-allocates on every
 //! call; [`Uri::clone`] is cheap by comparison.
 //!
-//! **Avoid** — parsing the same string on every request:
+//! **Avoid** parsing the same string on every request:
 //!
 //! ```
 //! use http_extensions::HttpRequestBuilder;
@@ -149,7 +149,7 @@
 //! # }
 //! ```
 //!
-//! **Prefer** — parse once, clone per request:
+//! **Prefer** to parse once, clone per request:
 //!
 //! ```
 //! use http_extensions::HttpRequestBuilder;
@@ -171,7 +171,7 @@
 //! Prefer [`templated`] URI types over raw `format!` strings.
 //! Templated URIs are **safer** ([`UriSafeString`] rejects
 //! reserved characters), **RFC 6570 compliant**, and **faster** (fewer allocations
-//! than `format!`-based construction). They also **enhance telemetry** — the template string is
+//! than `format!`-based construction). They also **enhance telemetry**: the template string is
 //! automatically attached to every request so logging and metrics handlers can group
 //! traffic by route instead of by unique URL.
 //!
@@ -179,7 +179,7 @@
 //! [`post`](HttpRequestBuilder::post), and [`uri`](HttpRequestBuilder::uri) accept
 //! any `impl TryInto<Uri>`, which includes `#[templated]` structs out of the box.
 //!
-//! **Avoid** — raw string formatting loses the template and bypasses validation:
+//! **Avoid** raw string formatting, which loses the template and bypasses validation:
 //!
 //! ```
 //! use http_extensions::HttpRequestBuilder;
@@ -192,7 +192,7 @@
 //! # }
 //! ```
 //!
-//! **Prefer** — a templated URI struct that is validated, low-allocation, and telemetry-ready:
+//! **Prefer** a templated URI struct that is validated, low-allocation, and telemetry-ready:
 //!
 //! ```
 //! use http_extensions::HttpRequestBuilder;
@@ -213,7 +213,7 @@
 //! # }
 //! ```
 //!
-//! Templated paths are relative — set a base URI on the client so the final
+//! Templated paths are relative; set a base URI on the client so the final
 //! request URL is complete.
 //!
 //! > **Note:** Real HTTP clients that implement [`RequestHandler`] follow the
@@ -223,13 +223,13 @@
 //!
 //! # Authorization Tokens
 //!
-//! Bearer tokens and JWTs are often over 1 KB. Building a [`HeaderValue`]
+//! Bearer tokens and JSON Web Tokens are often over 1 KB. Building a [`HeaderValue`]
 //! from `&str` on every request copies the entire token each time.
-//! **Build once, clone many** — construct a [`HeaderValue`] via
+//! **Build once, clone many.** Construct a [`HeaderValue`] via
 //! [`HeaderValueExt::from_shared`] and `.clone()` it per request
 //! (clone is a ref-count bump, zero copy).
 //!
-//! **Avoid** — `format!` + `from_str` allocates and copies on every call:
+//! **Avoid** combining `format!` and `from_str`, which allocates and copies on every call:
 //!
 //! ```
 //! use http::header::HeaderValue;
@@ -239,7 +239,7 @@
 //! let value = HeaderValue::from_str(&format!("Bearer {token}")).unwrap();
 //! ```
 //!
-//! **Prefer** — build once from [`Bytes`](bytes::Bytes), then clone cheaply:
+//! **Prefer** to build once from [`Bytes`](bytes::Bytes), then clone cheaply:
 //!
 //! ```
 //! use bytes::Bytes;

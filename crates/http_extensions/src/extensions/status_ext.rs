@@ -74,7 +74,7 @@ where
     ///
     /// A status is considered recoverable when:
     ///
-    /// - It is in the 5xx range (server errors), or
+    /// - It is in the `5xx` range (server errors), or
     /// - It is `429 Too Many Requests`, or
     /// - It is `408 Request Timeout`.
     ///

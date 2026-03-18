@@ -95,7 +95,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///
     /// This method can deserialize both borrowed and owned data. When deserializing
     /// strings and byte arrays, it can borrow directly from the JSON buffer for
-    /// better performance. For other types like numbers, booleans, and owned
+    /// better performance. For other types like numbers, Boolean values, and owned
     /// containers, it creates new values as needed.
     ///
     /// The returned value is tied to the lifetime of this parser, but that doesn't
@@ -141,7 +141,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// Parses the JSON data into owned values, consuming the parser.
     ///
     /// This method creates owned strings and collections, making the returned value
-    /// independent of the parser's lifetime. Use this when you need to store the
+    /// independent of the parser lifetime. Use this when you need to store the
     /// parsed data beyond the scope of the JSON parser.
     ///
     /// This method consumes the parser, so you can only call it once.

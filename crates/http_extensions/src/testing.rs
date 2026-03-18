@@ -38,8 +38,8 @@ pub async fn create_incoming(body: impl AsRef<[u8]>) -> Incoming {
         .into_body()
 }
 
-/// In-memory IO type implementing hyper's [`Read`](hyper::rt::Read) and
-/// [`Write`](hyper::rt::Write) traits.
+/// In-memory IO type implementing the [`Read`](hyper::rt::Read) and
+/// [`Write`](hyper::rt::Write) traits from [`hyper`].
 #[derive(Debug)]
 pub struct MockIo {
     read_buf: std::io::Cursor<Vec<u8>>,

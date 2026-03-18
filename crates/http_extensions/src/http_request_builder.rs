@@ -399,7 +399,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The request couldn't be built because of errors
     /// - The network request failed
     /// - Body processing failed
-    /// - The response content exceeds the size limit (default is 2GB)
+    /// - The response content exceeds the size limit (default is 2 GB)
     pub async fn fetch_buffered(self) -> Result<HttpResponse> {
         let response = self.fetch().await?;
 
