@@ -810,8 +810,6 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use static_assertions::assert_impl_all;
 
-    use crate::{FakeHandler, RequestHandlerExt};
-
     use super::*;
 
     // Model for JSON serialization/deserialization tests

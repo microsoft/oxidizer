@@ -74,9 +74,8 @@ tick = { workspace = true, features = ["fmt"] }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
-data_privacy = { workspace = true }
 criterion = { workspace = true }
-templated_uri = { workspace = true, features = ["uuid"] }
+data_privacy = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
@@ -87,6 +86,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
+templated_uri = { workspace = true, features = ["uuid"] }
 tick = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
