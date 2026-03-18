@@ -128,7 +128,7 @@ impl StatusExt for StatusCode {
         if self.is_success() {
             Ok(self)
         } else {
-            Err(HttpError::invalid_status_code(self, RecoveryInfo::never()))
+            Err(HttpError::invalid_status_code(self, self.recovery()))
         }
     }
 
@@ -207,7 +207,7 @@ mod tests {
     fn test_ensure_success_with_5xx_status_fails() {
         let error = StatusCode::INTERNAL_SERVER_ERROR.ensure_success().unwrap_err();
         assert!(format!("{error}").contains("500"));
-        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
     }
 
     #[test]

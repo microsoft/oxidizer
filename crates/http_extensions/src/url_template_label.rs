@@ -56,6 +56,18 @@ impl UrlTemplateLabel {
     }
 }
 
+impl std::fmt::Display for UrlTemplateLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for UrlTemplateLabel {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 impl From<&'static str> for UrlTemplateLabel {
     fn from(label: &'static str) -> Self {
         Self::new_static(label)
@@ -122,5 +134,18 @@ mod tests {
     fn from_string() {
         let label: UrlTemplateLabel = "/api/users/{id}".to_string().into();
         assert_eq!(label.as_str(), "/api/users/{id}");
+    }
+
+    #[test]
+    fn display_impl() {
+        let label = UrlTemplateLabel::new("/api/users/{id}");
+        assert_eq!(format!("{label}"), "/api/users/{id}");
+    }
+
+    #[test]
+    fn as_ref_str_impl() {
+        let label = UrlTemplateLabel::new("/api/users/{id}");
+        let s: &str = label.as_ref();
+        assert_eq!(s, "/api/users/{id}");
     }
 }

@@ -339,6 +339,11 @@ mod tests {
     }
 
     #[test]
+    fn assert_from_infallible() {
+        static_assertions::assert_impl_all!(HttpError: From<std::convert::Infallible>);
+    }
+
+    #[test]
     fn timeout_error() {
         let duration = Duration::from_millis(1500);
         let timeout_error = HttpError::timeout(duration);

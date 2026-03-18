@@ -409,6 +409,28 @@ impl HttpBody {
         }
     }
 
+    /// Returns `true` if the body is known to be empty (zero bytes).
+    ///
+    /// This checks whether the body's content length is exactly zero.
+    /// For streaming bodies with unknown length, this returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use http_extensions::HttpBodyBuilder;
+    /// # fn example(create_body: &HttpBodyBuilder) {
+    /// let empty_body = create_body.empty();
+    /// assert!(empty_body.is_empty());
+    ///
+    /// let text_body = create_body.text("Hello");
+    /// assert!(!text_body.is_empty());
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.content_length() == Some(0)
+    }
+
     /// Attempts to clone the body if possible.
     ///
     /// This is only supported for bodies created from static data like text or byte slices.
@@ -426,6 +448,32 @@ impl HttpBody {
             Kind::Incoming(_) => None,
             Kind::Body(_) | Kind::Bytes(None) => None,
         }
+    }
+
+    /// Converts this body into a stream of byte chunks.
+    ///
+    /// This is a convenience wrapper around
+    /// [`BodyExt::into_data_stream()`][http_body_util::BodyExt::into_data_stream],
+    /// eliminating the need to import `http_body_util::BodyExt` directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use futures::TryStreamExt;
+    /// use http_extensions::{HttpBody, HttpError};
+    ///
+    /// async fn process_body(body: HttpBody) -> Result<(), HttpError> {
+    ///     let mut stream = body.into_stream();
+    ///
+    ///     while let Some(chunk) = stream.try_next().await? {
+    ///         println!("received {} bytes", chunk.len());
+    ///     }
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn into_stream(self) -> impl Stream<Item = Result<BytesView>> {
+        self.into_data_stream()
     }
 }
 
@@ -590,6 +638,37 @@ impl HttpBodyBuilder {
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
         HttpBody::new(Kind::Body(Box::pin(body.map_err(Into::into))), self.clone())
+    }
+
+    /// Creates a body from a stream of byte chunks.
+    ///
+    /// This is a convenience wrapper around [`external`][Self::external] that accepts
+    /// a [`Stream`][futures::Stream] of [`BytesView`] chunks. It avoids the need to
+    /// manually wrap the stream in a [`StreamBody`][http_body_util::StreamBody].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use http_extensions::{HttpBodyBuilder, HttpError};
+    /// # use bytesbuf::BytesView;
+    /// # fn example(create_body: &HttpBodyBuilder) {
+    /// let chunks = vec![
+    ///     Ok(BytesView::copied_from_slice(b"hello ", create_body)),
+    ///     Ok(BytesView::copied_from_slice(b"world", create_body)),
+    /// ];
+    /// let body = create_body.stream(futures::stream::iter(chunks));
+    ///
+    /// assert_eq!(body.content_length(), None); // unknown length for streams
+    /// # }
+    /// ```
+    pub fn stream<S>(&self, stream: S) -> HttpBody
+    where
+        S: Stream<Item = Result<BytesView>> + Send + 'static,
+    {
+        use http_body_util::StreamBody;
+
+        let framed = stream.map_ok(Frame::data);
+        self.external(StreamBody::new(framed))
     }
 
     /// Creates a body from text.
@@ -1518,5 +1597,58 @@ mod tests {
         } else {
             panic!("expected a data frame");
         }
+    }
+
+    #[test]
+    fn is_empty_for_empty_body() {
+        let builder = HttpBodyBuilder::new_fake();
+        assert!(builder.empty().is_empty());
+    }
+
+    #[test]
+    fn is_empty_for_text_body() {
+        let builder = HttpBodyBuilder::new_fake();
+        assert!(!builder.text("hello").is_empty());
+    }
+
+    #[test]
+    fn is_empty_for_zero_length_bytes() {
+        let builder = HttpBodyBuilder::new_fake();
+        assert!(builder.bytes(BytesView::new()).is_empty());
+    }
+
+    #[test]
+    fn stream_body_creation() {
+        let builder = HttpBodyBuilder::new_fake();
+        let chunks = vec![
+            Ok(BytesView::copied_from_slice(b"hello ", &builder)),
+            Ok(BytesView::copied_from_slice(b"world", &builder)),
+        ];
+        let body = builder.stream(futures::stream::iter(chunks));
+
+        // Streams don't have a known content length
+        assert_eq!(body.content_length(), None);
+
+        let text = block_on(body.into_text()).unwrap();
+        assert_eq!(text, "hello world");
+    }
+
+    #[test]
+    fn stream_body_empty() {
+        let builder = HttpBodyBuilder::new_fake();
+        let body = builder.stream(futures::stream::iter(Vec::<Result<BytesView>>::new()));
+
+        let bytes = block_on(body.into_bytes()).unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn into_stream_produces_chunks() {
+        let builder = HttpBodyBuilder::new_fake();
+        let body = builder.text("stream test");
+
+        let chunks: Vec<_> = block_on(body.into_stream().try_collect()).unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], b"stream test");
     }
 }
