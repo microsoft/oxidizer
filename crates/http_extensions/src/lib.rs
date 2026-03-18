@@ -205,6 +205,9 @@ mod constants;
 mod request_handler;
 pub use request_handler::RequestHandler;
 
+mod request_handler_ext;
+pub use request_handler_ext::RequestHandlerExt;
+
 mod http_request_builder_ext;
 pub use http_request_builder_ext::HttpRequestBuilderExt;
 
