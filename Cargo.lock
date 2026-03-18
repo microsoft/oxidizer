@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alloc_tracker",
  "bytes",
