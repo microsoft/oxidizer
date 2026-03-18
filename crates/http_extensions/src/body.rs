@@ -1408,7 +1408,7 @@ mod tests {
             "expected ~30 KB JSON, got {expected_size} bytes"
         );
 
-        let builder = HttpBodyBuilder::new(GlobalPool::new());
+        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new());
         let body = builder.json(&payload).unwrap();
 
         let bytes_view = body.into_bytes_no_buffering().unwrap();
