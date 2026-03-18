@@ -103,7 +103,7 @@
 //!
 //! When you already have a [`BytesView`](bytesbuf::BytesView) (e.g. from a response body or a
 //! memory pool), use [`HeaderValueExt::from_shared`] to convert it into a
-//! [`HeaderValue`] without an extra allocations.
+//! [`HeaderValue`] without extra allocations.
 //!
 //! ```
 //! use bytes::Bytes;
