@@ -58,7 +58,7 @@ fn get_insert_operations() {
 
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -75,7 +75,7 @@ fn invalidate_removes_entry() {
 
         cache.invalidate(&key).await.unwrap();
         assert!(cache.get(&key).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -92,7 +92,7 @@ fn contains_checks_existence() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
 
         assert!(cache.contains(&key).await.unwrap());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -113,7 +113,7 @@ fn clear_removes_all_entries() {
 
         assert!(cache.get(&"k1".to_string()).await.unwrap().is_none());
         assert!(cache.get(&"k2".to_string()).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -129,7 +129,7 @@ fn len_returns_correct_count() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.len(), Some(1));
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -146,7 +146,7 @@ fn get_or_insert_returns_cached() {
 
         let entry = cache.get_or_insert(&key, || async { 100 }).await.unwrap();
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -164,7 +164,7 @@ fn try_get_or_insert_success() {
         // Verify caching: second call should return cached value, not 100
         let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await.unwrap();
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -199,7 +199,7 @@ fn stampede_protection_returns_cached() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -215,7 +215,7 @@ fn is_empty_returns_correct_value() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.is_empty(), Some(false));
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -231,7 +231,7 @@ fn stampede_protection_invalidate() {
 
         cache.invalidate(&key).await.unwrap();
         assert!(cache.get(&key).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -249,7 +249,7 @@ fn stampede_protection_get_or_insert() {
         // Second call returns cached value
         let entry = cache.get_or_insert(&key, || async { 100 }).await.unwrap();
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -267,7 +267,7 @@ fn stampede_protection_try_get_or_insert_success() {
         // Cached on second call
         let entry = cache.try_get_or_insert(&key, || async { Ok::<_, Error>(100) }).await.unwrap();
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -302,7 +302,7 @@ fn stampede_protection_optionally_get_or_insert_some() {
         // Cached on second call
         let entry = cache.optionally_get_or_insert(&key, || async { Some(100) }).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -321,7 +321,7 @@ fn stampede_protection_optionally_get_or_insert_none() {
         // Not cached, so second call still invokes factory
         let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await.unwrap();
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -340,7 +340,7 @@ fn optionally_get_or_insert_none_not_cached() {
         // Not cached, so second call still invokes factory
         let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await.unwrap();
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -356,7 +356,7 @@ fn optionally_get_or_insert_hit_returns_cached() {
         // Should return cached value without calling factory
         let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await.unwrap();
         assert_eq!(*result.unwrap().value(), 99);
-    })
+    });
 }
 
 // =============================================================================
@@ -504,7 +504,7 @@ fn stampede_protection_invalidate_removes_entry() {
 
         cache.invalidate(&key).await.unwrap();
         assert!(cache.get(&key).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -578,7 +578,7 @@ fn borrow_get_insert_with_str_key() {
         assert_eq!(*entry.value(), 42);
 
         assert!(cache.get("missing").await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -593,7 +593,7 @@ fn borrow_invalidate_with_str_key() {
 
         cache.invalidate("key").await.unwrap();
         assert!(!cache.contains("key").await.unwrap());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -609,7 +609,7 @@ fn borrow_get_or_insert_with_str_key() {
         // Second call returns cached value
         let entry = cache.get_or_insert("key", || async { 100 }).await.unwrap();
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -621,7 +621,7 @@ fn borrow_try_get_or_insert_with_str_key() {
 
         let entry = cache.try_get_or_insert("key", || async { Ok::<_, Error>(42) }).await.unwrap();
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -636,7 +636,7 @@ fn borrow_optionally_get_or_insert_with_str_key() {
 
         let result = cache.optionally_get_or_insert("key", || async { Some(42) }).await.unwrap();
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -655,7 +655,7 @@ fn borrow_stampede_protection_with_str_key() {
 
         let entry = cache.get_or_insert("new", || async { 77 }).await.unwrap();
         assert_eq!(*entry.value(), 77);
-    })
+    });
 }
 
 // =============================================================================
@@ -717,7 +717,7 @@ mod service_tests {
             cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
             let entry = cache.get(&"key".to_string()).await.unwrap().expect("entry should exist");
             assert_eq!(*entry.value(), 42);
-        })
+        });
     }
 
     #[cfg_attr(miri, ignore)]
@@ -736,7 +736,7 @@ mod service_tests {
                 CacheResponse::Get(Some(entry)) => assert_eq!(*entry.value(), 42),
                 other => panic!("expected Get(Some), got {other:?}"),
             }
-        })
+        });
     }
 
     #[cfg_attr(miri, ignore)]
@@ -754,7 +754,7 @@ mod service_tests {
                 CacheResponse::Get(None) => {}
                 other => panic!("expected Get(None), got {other:?}"),
             }
-        })
+        });
     }
 
     #[cfg_attr(miri, ignore)]
@@ -773,7 +773,7 @@ mod service_tests {
             // Verify the value was inserted
             let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
             assert_eq!(*entry.value(), 42);
-        })
+        });
     }
 
     #[cfg_attr(miri, ignore)]
@@ -791,7 +791,7 @@ mod service_tests {
             assert!(matches!(response, CacheResponse::Invalidate));
 
             assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-        })
+        });
     }
 
     #[cfg_attr(miri, ignore)]
@@ -806,7 +806,7 @@ mod service_tests {
             assert!(matches!(response, CacheResponse::Clear));
 
             assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-        })
+        });
     }
 
     #[cfg_attr(miri, ignore)]
@@ -824,6 +824,6 @@ mod service_tests {
             cache.insert(&key, CacheEntry::new(42)).await.unwrap();
             let entry = cache.get(&key).await.unwrap().expect("entry should exist");
             assert_eq!(*entry.value(), 42);
-        })
+        });
     }
 }

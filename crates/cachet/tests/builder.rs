@@ -24,7 +24,7 @@ fn cache_builder_with_storage() {
 
     block_on(async {
         assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -42,7 +42,7 @@ fn mock_cache_with_storage() {
 
         // Mock handle records operations
         assert_eq!(mock.operations().len(), 2);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -81,7 +81,7 @@ fn mock_cache_shares_state_with_handle() {
         // Mock handle sees the data
         assert!(mock.contains_key(&"key".to_string()));
         assert_eq!(mock.entry_count(), 1);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -121,7 +121,7 @@ fn fallback_builder_basic() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -141,7 +141,7 @@ fn fallback_builder_promotion_policy() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -169,5 +169,5 @@ fn fallback_builder_nested_fallback() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }

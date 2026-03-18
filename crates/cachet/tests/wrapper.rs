@@ -34,7 +34,7 @@ fn wrapper_get_miss() {
 
         let result = cache.get(&"nonexistent".to_string()).await.unwrap();
         assert!(result.is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -50,7 +50,7 @@ fn wrapper_get_hit() {
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -64,7 +64,7 @@ fn wrapper_insert() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_some());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -79,7 +79,7 @@ fn wrapper_invalidate() {
         cache.invalidate(&key).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -96,7 +96,7 @@ fn wrapper_clear() {
 
         assert!(cache.get(&"k1".to_string()).await.unwrap().is_none());
         assert!(cache.get(&"k2".to_string()).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -112,7 +112,7 @@ fn wrapper_len_returns_correct_count() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.len(), Some(1));
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -129,7 +129,7 @@ fn wrapper_with_ttl_configured() {
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -148,7 +148,7 @@ fn wrapper_entry_with_ttl() {
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -165,7 +165,7 @@ fn wrapper_no_ttl_configured() {
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -244,7 +244,7 @@ fn wrapper_expired_entry_returns_none() {
         // Entry should be treated as expired
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_none(), "expired entry should return None");
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -275,7 +275,7 @@ fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() {
         control.advance(ttl.add(Duration::from_secs(1)));
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_none(), "entry expired by tier TTL should return None");
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -298,5 +298,5 @@ fn wrapper_tier_ttl_expires_entry_without_per_entry_ttl() {
         // Tier TTL of 10s should expire this entry (100s old)
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_none(), "entry should be expired by tier TTL alone");
-    })
+    });
 }

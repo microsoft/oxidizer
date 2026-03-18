@@ -31,7 +31,7 @@ fn fallback_cache_miss_in_both() {
 
         let result = cache.get(&"nonexistent".to_string()).await.unwrap();
         assert!(result.is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -50,7 +50,7 @@ fn fallback_cache_hit_in_primary() {
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -67,7 +67,7 @@ fn fallback_cache_insert_goes_to_both() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_some());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -85,7 +85,7 @@ fn fallback_cache_invalidate_clears_both() {
         cache.invalidate(&key).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -105,7 +105,7 @@ fn fallback_cache_clear() {
 
         assert!(cache.get(&"k1".to_string()).await.unwrap().is_none());
         assert!(cache.get(&"k2".to_string()).await.unwrap().is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -127,7 +127,7 @@ fn fallback_cache_len_returns_correct_count() {
         cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.len(), Some(1));
-    })
+    });
 }
 
 fn failing_cache() -> MockCache<String, i32> {
@@ -218,7 +218,7 @@ fn fallback_cache_get_falls_back_on_primary_error() {
         // When primary fails, fallback is checked (returns None since key doesn't exist there)
         let result = cache.get(&"key".to_string()).await.unwrap();
         assert!(result.is_none());
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -239,7 +239,7 @@ fn fallback_builder_with_promotion_policy_always() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -260,7 +260,7 @@ fn fallback_builder_with_promotion_policy_never() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -285,7 +285,7 @@ fn fallback_builder_with_promotion_policy_when_boxed() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -314,7 +314,7 @@ fn nested_fallback_builder() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -339,7 +339,7 @@ fn fallback_get_triggers_promotion() {
         let result = cache.get(&"key".to_string()).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -359,7 +359,7 @@ fn fallback_builder_stampede_protection() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -381,7 +381,7 @@ fn fallback_builder_use_logs_emits_logs() {
 
         // Verify logs were actually emitted
         capture.assert_contains("cache.inserted");
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -402,7 +402,7 @@ fn cache_builder_use_logs_emits_logs() {
         // Verify logs were actually emitted (catches with_logs mutation to false)
         capture.assert_contains("cache.inserted");
         capture.assert_contains("cache.hit");
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -533,7 +533,7 @@ fn fallback_builder_use_metrics() {
         cache.insert(&key, CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -582,7 +582,7 @@ fn fallback_get_promotion_failure_still_returns_value() {
         let result = cache.get(&"key".to_string()).await.unwrap();
         assert!(result.is_some());
         assert_eq!(*result.unwrap().value(), 42);
-    })
+    });
 }
 
 #[cfg_attr(miri, ignore)]
@@ -672,5 +672,5 @@ fn nested_fallback_three_tier_chain() {
         // Clear and verify
         cache.clear().await.unwrap();
         assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-    })
+    });
 }
