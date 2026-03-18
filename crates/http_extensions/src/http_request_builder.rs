@@ -463,7 +463,8 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};    /// #
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
+    /// #
     /// # use bytesbuf::BytesView;
     /// async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
     /// let response: Response<BytesView> = request_builder.get("https://example.com").fetch_bytes().await?;

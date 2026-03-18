@@ -96,7 +96,7 @@ impl<'a> HttpResponseBuilder<'a> {
 impl HttpResponseBuilder<'_> {
     /// Sets a plain text body for the response.
     ///
-    /// Automatically sets the `Content-Type` header to `text/plain; charset=utf-8`.
+    /// Automatically sets the `Content-Type` header to `text/plain`.
     /// If the `Content-Type` header is already set, it will not override it.
     ///
     /// This method always encodes the provided string as UTF-8.
