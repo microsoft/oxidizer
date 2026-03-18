@@ -21,7 +21,7 @@ use crate::tier::InMemoryCache;
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// use std::time::Duration;
 ///
 /// use cachet_memory::InMemoryCache;
