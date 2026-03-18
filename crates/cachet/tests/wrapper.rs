@@ -99,7 +99,6 @@ fn wrapper_clear() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_len_returns_correct_count() {
     block_on(async {
@@ -168,7 +167,6 @@ fn wrapper_no_ttl_configured() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_get_error_is_recorded() {
     block_on(async {
@@ -182,7 +180,6 @@ fn wrapper_get_error_is_recorded() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_insert_error_is_recorded() {
     block_on(async {
@@ -196,7 +193,6 @@ fn wrapper_insert_error_is_recorded() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_invalidate_error_is_recorded() {
     block_on(async {
@@ -210,7 +206,6 @@ fn wrapper_invalidate_error_is_recorded() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_clear_error_is_recorded() {
     block_on(async {

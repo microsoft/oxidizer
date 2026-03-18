@@ -108,7 +108,6 @@ fn fallback_cache_clear() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn fallback_cache_len_returns_correct_count() {
     block_on(async {

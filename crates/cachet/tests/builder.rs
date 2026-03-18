@@ -15,7 +15,6 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     futures::executor::block_on(f)
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_with_storage() {
     let clock = Clock::new_frozen();
@@ -27,7 +26,6 @@ fn cache_builder_with_storage() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn mock_cache_with_storage() {
     block_on(async {
@@ -45,7 +43,6 @@ fn mock_cache_with_storage() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn mock_cache_failure_injection() {
     block_on(async {
@@ -67,7 +64,6 @@ fn mock_cache_failure_injection() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn mock_cache_shares_state_with_handle() {
     block_on(async {
@@ -84,7 +80,6 @@ fn mock_cache_shares_state_with_handle() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_clock() {
     let clock = Clock::new_frozen();
@@ -96,6 +91,7 @@ fn cache_builder_clock() {
     assert_eq!(builder_clock.instant(), expected_instant);
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_builder_name() {
     let clock = Clock::new_frozen();

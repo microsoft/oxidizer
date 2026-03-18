@@ -116,7 +116,6 @@ fn clear_removes_all_entries() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn len_returns_correct_count() {
     block_on(async {
@@ -202,7 +201,6 @@ fn stampede_protection_returns_cached() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn is_empty_returns_correct_value() {
     block_on(async {
@@ -380,7 +378,6 @@ fn cache_with_memory_is_sync() {
 }
 
 /// Verifies that `CacheEntry` is Send.
-#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_entry_is_send() {
     fn assert_send<T: Send>() {}
@@ -389,7 +386,6 @@ fn cache_entry_is_send() {
 }
 
 /// Verifies that `CacheEntry` is Sync.
-#[cfg_attr(miri, ignore)]
 #[test]
 fn cache_entry_is_sync() {
     fn assert_sync<T: Sync>() {}
@@ -398,7 +394,6 @@ fn cache_entry_is_sync() {
 }
 
 /// Verifies that Error is Send.
-#[cfg_attr(miri, ignore)]
 #[test]
 fn error_is_send() {
     fn assert_send<T: Send>() {}
@@ -406,7 +401,6 @@ fn error_is_send() {
 }
 
 /// Verifies that Error is Sync.
-#[cfg_attr(miri, ignore)]
 #[test]
 fn error_is_sync() {
     fn assert_sync<T: Sync>() {}
@@ -414,7 +408,6 @@ fn error_is_sync() {
 }
 
 /// Verifies that with stampede protection, storage errors are propagated (not hidden).
-#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_propagates_storage_errors() {
     use cachet_tier::{CacheOp, MockCache};
@@ -432,7 +425,6 @@ fn stampede_protection_propagates_storage_errors() {
 }
 
 /// Verifies that with stampede protection, panics are converted to errors (not hidden as misses).
-#[cfg_attr(miri, ignore)]
 #[test]
 fn stampede_protection_converts_panic_to_error() {
     use std::sync::Arc;
@@ -507,7 +499,6 @@ fn stampede_protection_invalidate_removes_entry() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn try_get_or_insert_with_storage_error_propagates() {
     block_on(async {
@@ -526,7 +517,6 @@ fn try_get_or_insert_with_storage_error_propagates() {
     });
 }
 
-#[cfg_attr(miri, ignore)]
 #[test]
 fn optionally_get_or_insert_with_storage_error_propagates() {
     block_on(async {
