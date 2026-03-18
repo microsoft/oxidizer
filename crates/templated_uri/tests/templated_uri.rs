@@ -11,8 +11,7 @@ use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
 #[cfg(feature = "uuid")]
 use templated_uri::uri::DATA_CLASS_UNKNOWN_URI;
-use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriParam, UriSafeString, UriUnsafeParam};
-use templated_uri_macros::templated;
+use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriParam, UriSafeString, UriUnsafeParam, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
 #[taxonomy(test_taxonomy)]

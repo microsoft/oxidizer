@@ -2,8 +2,7 @@
 // Licensed under the MIT License.
 
 //! Example demonstrating the basic usage of templated URI in `fetch`
-use templated_uri::{BaseUri, Uri, UriSafeString};
-use templated_uri_macros::templated;
+use templated_uri::{BaseUri, Uri, UriSafeString, templated};
 
 #[templated(template = "/{org_id}/user/{user_id}/{item}", unredacted)]
 #[derive(Clone)]
