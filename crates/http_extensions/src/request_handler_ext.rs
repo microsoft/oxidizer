@@ -5,7 +5,7 @@ use layered::{DynamicService, DynamicServiceExt, Service};
 
 use crate::{HttpRequest, HttpResponse, Result};
 
-/// Extension trait for [`RequestHandler`] that provides type erasure.
+/// Extension trait for [`RequestHandler`][crate::RequestHandler] that provides type erasure.
 pub trait RequestHandlerExt: crate::RequestHandler + 'static {
     /// Converts this handler into a type-erased [`DynamicService`].
     fn into_dynamic_service(self) -> DynamicService<HttpRequest, Result<HttpResponse>>;
