@@ -1348,4 +1348,175 @@ mod tests {
             "expected at most 5 memory blocks for ~30 KB JSON serialization, got {block_count}"
         );
     }
+
+    // ── Incoming (real hyper body) tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn incoming_into_bytes() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"raw bytes").await;
+        let body = builder.incoming(incoming);
+        let bytes = body.into_bytes().await.unwrap();
+        assert_eq!(bytes, b"raw bytes");
+    }
+
+    #[tokio::test]
+    async fn incoming_empty_into_bytes() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"").await;
+        let body = builder.incoming(incoming);
+        let bytes = body.into_bytes().await.unwrap();
+        assert!(bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn incoming_into_json_owned() {
+        let builder = HttpBodyBuilder::new_fake();
+        let json_bytes = br#"{"id":42,"name":"alice"}"#;
+        let incoming = crate::testing::create_incoming(json_bytes).await;
+        let body = builder.incoming(incoming);
+        let model: Model = body.into_json_owned().await.unwrap();
+        assert_eq!(
+            model,
+            Model {
+                id: 42,
+                name: "alice".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn incoming_into_json_zero_copy() {
+        use std::borrow::Cow;
+
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Msg<'a> {
+            #[serde(borrow)]
+            text: Cow<'a, str>,
+        }
+
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(br#"{"text":"hello"}"#).await;
+        let body = builder.incoming(incoming);
+        let mut json = body.into_json::<Msg>().await.unwrap();
+        let msg = json.read().unwrap();
+        assert_eq!(msg.text, "hello");
+    }
+
+    #[tokio::test]
+    async fn incoming_try_clone_returns_none() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"no clone").await;
+        let body = builder.incoming(incoming);
+        assert!(body.try_clone().is_none());
+    }
+
+    #[tokio::test]
+    async fn incoming_into_bytes_view_fails() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"not buffered").await;
+        let body = builder.incoming(incoming);
+        BytesView::try_from(body).unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn incoming_into_bytes_no_buffering_returns_none() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"data").await;
+        let body = builder.incoming(incoming);
+        assert!(body.into_bytes_no_buffering().is_none());
+    }
+
+    #[tokio::test]
+    async fn incoming_size_hint() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"twelve bytes").await;
+        let body = builder.incoming(incoming);
+        let hint = body.size_hint();
+        // Incoming bodies from hyper report a size hint based on Content-Length.
+        assert_eq!(hint.lower(), 12);
+    }
+
+    #[tokio::test]
+    async fn incoming_content_length() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"len").await;
+        let body = builder.incoming(incoming);
+        assert_eq!(body.content_length(), Some(3));
+    }
+
+    #[tokio::test]
+    async fn incoming_debug_format() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"dbg").await;
+        let body = builder.incoming(incoming);
+        let debug = format!("{body:?}");
+        assert!(debug.contains("Incoming"));
+    }
+
+    #[tokio::test]
+    async fn incoming_buffered_then_clone() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"clone me").await;
+        let body = builder.incoming(incoming);
+
+        let buffered = body.into_buffered().await.unwrap();
+        let cloned = buffered.try_clone().unwrap();
+
+        assert_eq!(buffered.into_text().await.unwrap(), "clone me");
+        assert_eq!(cloned.into_text().await.unwrap(), "clone me");
+    }
+
+    #[tokio::test]
+    async fn incoming_with_buffer_limit_exceeded() {
+        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(5));
+        let incoming = crate::testing::create_incoming(b"this exceeds the limit").await;
+        let body = builder.incoming(incoming);
+
+        let err = body.into_buffered().await.unwrap_err();
+        assert!(err.to_string().contains("body size exceeds the limit"));
+    }
+
+    #[tokio::test]
+    async fn incoming_with_buffer_limit_ok() {
+        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
+        let incoming = crate::testing::create_incoming(b"fits").await;
+        let body = builder.incoming(incoming);
+
+        let text = body.into_text().await.unwrap();
+        assert_eq!(text, "fits");
+    }
+
+    #[tokio::test]
+    async fn incoming_is_end_stream_before_consume() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"data").await;
+        let body = builder.incoming(incoming);
+        // A fresh incoming body with content is not at end-of-stream.
+        assert!(!body.is_end_stream());
+    }
+
+    #[tokio::test]
+    async fn incoming_empty_is_end_stream() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"").await;
+        let body = builder.incoming(incoming);
+        // An empty incoming body should signal end-of-stream.
+        assert!(body.is_end_stream());
+    }
+
+    #[tokio::test]
+    async fn incoming_poll_frame_yields_correct_data() {
+        let builder = HttpBodyBuilder::new_fake();
+        let incoming = crate::testing::create_incoming(b"exact").await;
+        let mut body = pin!(builder.incoming(incoming));
+        let mut cx = Context::from_waker(Waker::noop());
+
+        if let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) {
+            let data = frame.into_data().unwrap();
+            assert_eq!(data, b"exact");
+        } else {
+            panic!("expected a data frame");
+        }
+    }
 }

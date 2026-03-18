@@ -225,3 +225,7 @@ pub use http_request_builder::HttpRequestBuilder;
 mod fake_handler;
 #[cfg(any(feature = "test-util", test))]
 pub use fake_handler::FakeHandler;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) mod testing;

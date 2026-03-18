@@ -60,7 +60,7 @@ futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-hyper = { workspace = true, features = ["client"], optional = true }
+hyper = { workspace = true, features = ["client", "http1"], optional = true }
 layered = { workspace = true, features = ["dynamic-service"] }
 ohno = { workspace = true }
 pin-project = { workspace = true }
@@ -76,7 +76,7 @@ alloc_tracker = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
-hyper = { workspace = true, features = ["client"] }
+hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 layered = { workspace = true, features = ["intercept"] }
 mutants = { workspace = true }
