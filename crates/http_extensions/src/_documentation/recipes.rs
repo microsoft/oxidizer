@@ -170,25 +170,29 @@
 //! automatically attached to every request so logging and metrics handlers can group
 //! traffic by route instead of by unique URL.
 //!
+//! [`HttpRequestBuilder`] methods like [`get`](HttpRequestBuilder::get),
+//! [`post`](HttpRequestBuilder::post), and [`uri`](HttpRequestBuilder::uri) accept
+//! any `impl TryInto<Uri>`, which includes `#[templated]` structs out of the box.
+//!
 //! **Avoid** — raw string formatting loses the template and bypasses validation:
 //!
-//! ```ignore
-//! # use fetch::HttpClient;
-//! # async fn example(client: &HttpClient, user_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-//! client
+//! ```
+//! use http_extensions::HttpRequestBuilder;
+//!
+//! # fn example(user_id: &str) -> Result<(), http_extensions::HttpError> {
+//! let request = HttpRequestBuilder::new_fake()
 //!     .get(format!("https://api.example.com/users/{user_id}/profile"))
-//!     .fetch()
-//!     .await?;
+//!     .build()?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! **Prefer** — a templated URI struct that is validated, low-allocation, and telemetry-ready:
 //!
-//! ```ignore
-//! # use fetch::HttpClient;
-//! # use uuid::Uuid;
-//! use templated_uri::{BaseUri, Uri, UriSafeString, templated};
+//! ```
+//! use http_extensions::HttpRequestBuilder;
+//! use uuid::Uuid;
+//! use templated_uri::templated;
 //!
 //! #[templated(template = "/users/{user_id}/profile", unredacted)]
 //! #[derive(Clone)]
@@ -196,17 +200,21 @@
 //!     user_id: Uuid,
 //! }
 //!
-//! # async fn example(client: &HttpClient, user_id: Uuid) -> Result<(), Box<dyn std::error::Error>> {
-//! client
+//! # fn example(user_id: Uuid) -> Result<(), http_extensions::HttpError> {
+//! let request = HttpRequestBuilder::new_fake()
 //!     .get(UserProfilePath { user_id })
-//!     .fetch()
-//!     .await?;
+//!     .build()?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! Templated paths are relative — set a base URI on the client so the final
 //! request URL is complete.
+//!
+//! > **Note:** Real HTTP clients that implement [`RequestHandler`] follow the
+//! > same pattern via [`RequestHandlerExt::request_builder`], which returns an
+//! > [`HttpRequestBuilder`] already wired up for sending. The builder API
+//! > (including `.get()`, `.post()`, `.fetch()`, etc.) is identical.
 //!
 //! # Authorization Tokens
 //!

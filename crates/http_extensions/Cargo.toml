@@ -74,7 +74,9 @@ tick = { workspace = true, features = ["fmt"] }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
+data_privacy = { workspace = true }
 criterion = { workspace = true }
+templated_uri = { workspace = true, features = ["uuid"] }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }

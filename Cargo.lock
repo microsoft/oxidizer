@@ -1017,6 +1017,7 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "criterion",
+ "data_privacy",
  "futures",
  "http",
  "http-body",
