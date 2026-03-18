@@ -1,11 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::future::Future;
-
 use layered::Service;
 
-use crate::{HttpBodyBuilder, HttpRequest, HttpRequestBuilder, HttpResponse, Result};
+use crate::{HttpRequest, HttpResponse, Result};
 
 /// A type alias for HTTP request handlers in the middleware pipeline.
 ///
@@ -51,24 +49,6 @@ where
 {
     fn execute(&self, request: HttpRequest) -> impl Future<Output = S::Out> + Send {
         Service::execute(self, request)
-    }
-}
-
-/// Extension trait for types that implement `RequestHandler`.
-pub trait RequestHandlerExt: RequestHandler
-where
-    Self: Sized,
-{
-    /// Creates a new HTTP request builder associated with this handler.
-    fn request_builder(&self) -> HttpRequestBuilder<'_, Self>;
-}
-
-impl<T> RequestHandlerExt for T
-where
-    T: RequestHandler + AsRef<HttpBodyBuilder>,
-{
-    fn request_builder(&self) -> HttpRequestBuilder<'_, Self> {
-        HttpRequestBuilder::with_request_handler(self, self.as_ref())
     }
 }
 

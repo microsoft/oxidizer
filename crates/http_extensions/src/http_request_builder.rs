@@ -594,7 +594,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
-    use crate::request_handler::RequestHandlerExt;
+    use crate::http_request_builder_ext::HttpRequestBuilderExt;
     use crate::{FakeHandler, HeaderMapExt, HttpResponseBuilder, RequestExt};
 
     #[test]

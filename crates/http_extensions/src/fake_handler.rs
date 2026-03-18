@@ -375,7 +375,7 @@ mod tests {
 
     use super::*;
     use crate::HttpResponseBuilder;
-    use crate::request_handler::RequestHandlerExt;
+    use crate::http_request_builder_ext::HttpRequestBuilderExt;
 
     #[test]
     fn from_status_code_ok() -> std::result::Result<(), ohno::AppError> {

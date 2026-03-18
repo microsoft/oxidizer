@@ -7,7 +7,7 @@
 //! data it receives.
 
 use bytesbuf::mem::GlobalPool;
-use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandlerExt, StatusExt};
+use http_extensions::{HttpBodyBuilder, HttpRequest, HttpRequestBuilderExt, HttpResponse, HttpResponseBuilder, StatusExt};
 use layered::Service;
 
 #[tokio::main]

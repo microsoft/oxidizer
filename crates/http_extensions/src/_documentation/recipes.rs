@@ -217,7 +217,7 @@
 //! request URL is complete.
 //!
 //! > **Note:** Real HTTP clients that implement [`RequestHandler`] follow the
-//! > same pattern via [`RequestHandlerExt::request_builder`], which returns an
+//! > same pattern via [`HttpRequestBuilderExt::request_builder`], which returns an
 //! > [`HttpRequestBuilder`] already wired up for sending. The builder API
 //! > (including `.get()`, `.post()`, `.fetch()`, etc.) is identical.
 //!

@@ -42,7 +42,7 @@
 //!
 //! ```rust
 //! # use http_extensions::{
-//! #     HttpRequestBuilder, HttpResponseBuilder, HttpBodyBuilder, RequestHandlerExt,
+//! #     HttpRequestBuilder, HttpResponseBuilder, HttpBodyBuilder, HttpRequestBuilderExt,
 //! #     FakeHandler, StatusExt, Result,
 //! # };
 //! # async fn example() -> Result<()> {
@@ -203,7 +203,10 @@ pub use json::{Json, JsonError};
 mod constants;
 
 mod request_handler;
-pub use request_handler::{RequestHandler, RequestHandlerExt};
+pub use request_handler::RequestHandler;
+
+mod http_request_builder_ext;
+pub use http_request_builder_ext::HttpRequestBuilderExt;
 
 mod extensions;
 pub use extensions::{HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
