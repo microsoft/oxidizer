@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Recipes and patterns for common HTTP workloads.
 //!

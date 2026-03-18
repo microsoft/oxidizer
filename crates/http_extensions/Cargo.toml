@@ -17,6 +17,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extens
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "futures_core::stream::Stream",
     "bytes::bytes::Bytes",
     "bytesbuf::mem::global::GlobalPool",
     "bytesbuf::mem::has_memory::HasMemory",
@@ -28,6 +29,7 @@ allowed_external_types = [
     "hyper::body::incoming::Incoming",
     "layered::layer::stack::Stack",
     "layered::service::Service",
+    "layered::dynamic::DynamicService",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
     "recoverable::Recovery",
