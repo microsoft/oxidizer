@@ -135,12 +135,15 @@
 //!
 //! **Avoid** — parsing the same string on every request:
 //!
-//! ```ignore
-//! # use fetch::HttpClient;
-//! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! ```
+//! use http_extensions::HttpRequestBuilder;
+//!
+//! # fn example() -> Result<(), http_extensions::HttpError> {
 //! for _ in 0..100 {
 //!     // Parses and allocates a new Uri each iteration.
-//!     client.get("https://api.example.com/health").fetch().await?;
+//!     let request = HttpRequestBuilder::new_fake()
+//!         .get("https://api.example.com/health")
+//!         .build()?;
 //! }
 //! # Ok(())
 //! # }
@@ -148,14 +151,16 @@
 //!
 //! **Prefer** — parse once, clone per request:
 //!
-//! ```ignore
-//! # use fetch::HttpClient;
+//! ```
+//! use http_extensions::HttpRequestBuilder;
 //! use templated_uri::Uri;
 //!
-//! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! # fn example() -> Result<(), http_extensions::HttpError> {
 //! let uri: Uri = "https://api.example.com/health".try_into()?;
 //! for _ in 0..100 {
-//!     client.get(uri.clone()).fetch().await?;
+//!     let request = HttpRequestBuilder::new_fake()
+//!         .get(uri.clone())
+//!         .build()?;
 //! }
 //! # Ok(())
 //! # }
