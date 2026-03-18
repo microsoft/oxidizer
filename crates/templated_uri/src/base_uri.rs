@@ -655,7 +655,10 @@ impl From<BaseUri> for http::Uri {
 }
 
 impl Display for BaseUri {
-    /// Formats the `base_uri` as a string in the form `scheme://authority/path`.
+    /// Formats the `base_uri` as a string in the form `scheme://authority/base_path/`.
+    ///
+    /// The [`BasePath`] always starts and ends with `/`, so the minimal form is
+    /// `scheme://authority/` when no path prefix is set.
     ///
     /// Default ports (80 for HTTP, 443 for HTTPS) are omitted from the display string.
     /// Custom ports are included when present.
