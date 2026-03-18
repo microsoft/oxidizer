@@ -351,6 +351,7 @@ mod fetch_and_promote_tests {
         FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
     }
 
+    #[cfg_attr(miri, ignore)] // OTel SDK calls SystemTime::now() which miri blocks under isolation
     #[test]
     fn fallback_miss_records_refresh_miss_telemetry() {
         block_on(async {
