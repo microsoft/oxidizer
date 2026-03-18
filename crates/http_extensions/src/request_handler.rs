@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::future::Future;
+
 use layered::Service;
 
 use crate::{HttpBodyBuilder, HttpRequest, HttpRequestBuilder, HttpResponse, Result};
@@ -48,7 +50,7 @@ where
     S: Service<HttpRequest, Out = Result<HttpResponse>>,
 {
     fn execute(&self, request: HttpRequest) -> impl Future<Output = S::Out> + Send {
-        self.execute(request)
+        Service::execute(self, request)
     }
 }
 
