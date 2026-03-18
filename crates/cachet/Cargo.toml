@@ -35,10 +35,10 @@ allowed_external_types = [
 
 [features]
 default = ["memory"]
-logs = ["dep:opentelemetry", "dep:tracing"]
+logs = ["dep:opentelemetry", "opentelemetry/logs", "dep:tracing"]
 test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
-metrics = ["dep:opentelemetry"]
+metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 service = ["dep:cachet_service", "dep:layered"]
 
 [dependencies]
@@ -49,10 +49,7 @@ cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
-opentelemetry = { workspace = true, optional = true, features = [
-    "metrics",
-    "logs",
-] }
+opentelemetry = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 thread_aware = { workspace = true }
