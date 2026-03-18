@@ -2,7 +2,7 @@
 
 //! Recipes and patterns for common HTTP workloads.
 //!
-//! A cookbook of practical examples for using [`fetch`](crate) effectively.
+//! A cookbook of practical examples for using [`http_extensions`](crate) effectively.
 //!
 //! # Use dedicated types
 //!
@@ -54,7 +54,7 @@
 //! | [`HttpBody`] | an HTTP body — text, binary, JSON, or streaming content |
 //! | [`BytesView`](bytesbuf::BytesView) | a non-contiguous byte buffer with pooled memory and zero-copy slicing |
 //!
-//! [`HttpBody`] is the body type used throughout `fetch` requests and
+//! [`HttpBody`] is the body type used throughout `http_extensions` requests and
 //! responses. It is created via [`HttpBodyBuilder`] and can be converted
 //! into a [`BytesView`](bytesbuf::BytesView) for efficient downstream
 //! processing without copying.

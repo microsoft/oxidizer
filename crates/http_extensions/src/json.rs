@@ -73,7 +73,7 @@ impl Recovery for JsonError {
 /// - **Owned parsing** via [`read_owned`](Self::read_owned): For types that own their data, the parser consumes itself
 ///   and returns an owned deserialized value.
 ///
-/// See the `JSON Support` section in `fetch` documentation for more details and examples on
+/// See the `JSON Support` section in `http_extensions` documentation for more details and examples on
 /// how to use this type.
 #[derive(Debug)]
 pub struct Json<T> {
