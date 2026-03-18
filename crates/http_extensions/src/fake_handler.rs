@@ -86,7 +86,7 @@ pub struct FakeHandler {
 impl ThreadAware for FakeHandler {
     fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
         // No thread awareness needed for fake handler, we want the same behavior
-        // event after relocation.
+        // even after relocation.
         self
     }
 }
@@ -326,7 +326,7 @@ impl Inner {
         match self {
             Self::Multiple(responses) => responses
                 .lock()
-                .expect("mutex poisoned")
+                .expect(ERR_POISONED_LOCK)
                 .pop_front()
                 .ok_or_else(|| HttpError::validation("all responses used by fake handler are already consumed")),
             Self::Custom(handler) => handler(request).await,
