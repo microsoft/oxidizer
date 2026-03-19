@@ -167,7 +167,6 @@
 //! # Features
 //!
 //! - `json` - Enables JSON serialization/deserialization support via `Json` type
-//! - `hyper` - Enables compatibility with the [`hyper`] `Incoming` body type
 //! - `test-util` - Enables fake implementations for testing
 //!
 //! # Memory Management

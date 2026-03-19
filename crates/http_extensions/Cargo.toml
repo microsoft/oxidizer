@@ -26,7 +26,6 @@ allowed_external_types = [
     "bytesbuf::view::BytesView",
     "http::*",
     "http_body::Body",
-    "hyper::body::incoming::Incoming",
     "layered::layer::stack::Stack",
     "layered::service::Service",
     "layered::dynamic::DynamicService",
@@ -52,7 +51,6 @@ all-features = true
 [features]
 default = []
 json = ["dep:serde_core", "dep:serde_json"]
-hyper = ["dep:hyper"]
 test-util = []
 
 [dependencies]
@@ -62,7 +60,6 @@ futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-hyper = { workspace = true, features = ["client", "http1"], optional = true }
 layered = { workspace = true, features = ["dynamic-service"] }
 ohno = { workspace = true }
 pin-project = { workspace = true }
@@ -99,7 +96,7 @@ workspace = true
 [[example]]
 name = "custom_server"
 path = "examples/custom_server.rs"
-required-features = ["json", "hyper"]
+required-features = ["json"]
 
 [[bench]]
 harness = false

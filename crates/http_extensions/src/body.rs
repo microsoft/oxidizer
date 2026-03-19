@@ -27,8 +27,6 @@ use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
-#[cfg(any(feature = "hyper", test))]
-use hyper::body::Incoming;
 use pin_project::pin_project;
 use thread_aware::{ThreadAware, Unaware};
 
@@ -275,11 +273,6 @@ impl HttpBody {
         let limit = builder.response_buffer_limit;
 
         match self.kind {
-            #[cfg(any(feature = "hyper", test))]
-            Kind::Incoming(incoming) => {
-                let data = collect_with_limit(map_incoming_stream(incoming), limit).await?;
-                Ok(builder.bytes(data))
-            }
             Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
             Kind::Bytes(None) => Err(HttpError::validation("body cannot be buffered because it is already consumed")),
             Kind::Empty => Ok(builder.empty()),
@@ -401,8 +394,6 @@ impl HttpBody {
     #[must_use]
     pub fn content_length(&self) -> Option<u64> {
         match &self.kind {
-            #[cfg(any(feature = "hyper", test))]
-            Kind::Incoming(incoming) => incoming.size_hint().exact(),
             Kind::Bytes(Some(bytes)) => Some(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => Some(0),
             Kind::Body(b) => b.size_hint().exact(),
@@ -444,8 +435,6 @@ impl HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => Some(self.builder.bytes(bytes.clone())),
             Kind::Empty => Some(self.builder.empty()),
-            #[cfg(any(feature = "hyper", test))]
-            Kind::Incoming(_) => None,
             Kind::Body(_) | Kind::Bytes(None) => None,
         }
     }
@@ -503,15 +492,6 @@ impl Body for HttpBody {
         let this = self.project();
 
         match this.kind.project() {
-            #[cfg(any(feature = "hyper", test))]
-            BodyInnerProj::Incoming(inner) => match inner.poll_frame(cx) {
-                Ready(Some(res)) => Ready(Some(match res {
-                    Ok(frame) => Ok(frame.map_data(Into::into)),
-                    Err(e) => Err(HttpError::other(e, recoverable::RecoveryInfo::unknown(), "hyper")),
-                })),
-                Ready(None) => Ready(None),
-                Poll::Pending => Poll::Pending,
-            },
             BodyInnerProj::Bytes(bytes) => bytes
                 .take()
                 .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
@@ -522,8 +502,6 @@ impl Body for HttpBody {
 
     fn size_hint(&self) -> SizeHint {
         match &self.kind {
-            #[cfg(any(feature = "hyper", test))]
-            Kind::Incoming(incoming) => incoming.size_hint(),
             Kind::Bytes(Some(bytes)) => SizeHint::with_exact(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => SizeHint::with_exact(0),
             Kind::Body(b) => b.size_hint(),
@@ -532,8 +510,6 @@ impl Body for HttpBody {
 
     fn is_end_stream(&self) -> bool {
         match &self.kind {
-            #[cfg(any(feature = "hyper", test))]
-            Kind::Incoming(incoming) => incoming.is_end_stream(),
             Kind::Bytes(Some(x)) => x.is_empty(),
             Kind::Bytes(None) | Kind::Empty => true,
             Kind::Body(b) => b.is_end_stream(),
@@ -589,12 +565,6 @@ impl HttpBodyBuilder {
     pub const fn with_response_buffer_limit(mut self, limit: Option<usize>) -> Self {
         self.response_buffer_limit = limit;
         self
-    }
-
-    /// Creates an `HttpBody` from a Hyper [`Incoming`] body.
-    #[cfg(any(feature = "hyper", test))]
-    pub fn incoming(&self, inner: Incoming) -> HttpBody {
-        HttpBody::new(Kind::Incoming(inner), self.clone())
     }
 
     /// Creates an `HttpBody` from any custom body implementation.
@@ -814,8 +784,6 @@ impl HasMemory for HttpBodyBuilder {
 )]
 #[pin_project(project = BodyInnerProj)]
 enum Kind {
-    #[cfg(any(feature = "hyper", test))]
-    Incoming(#[pin] Incoming),
     Bytes(Option<BytesView>),
     Empty,
     Body(Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>),
@@ -824,21 +792,11 @@ enum Kind {
 impl Debug for Kind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            #[cfg(any(feature = "hyper", test))]
-            Self::Incoming(_) => f.debug_struct("Incoming").finish(),
             Self::Bytes(_) => f.debug_struct("Bytes").finish(),
             Self::Empty => f.debug_struct("Empty").finish(),
             Self::Body(_) => f.debug_struct("Body").finish(),
         }
     }
-}
-
-#[cfg(any(feature = "hyper", test))]
-fn map_incoming_stream(incoming: Incoming) -> impl Stream<Item = Result<BytesView>> {
-    incoming
-        .into_data_stream()
-        .map_err(|e| HttpError::other(e, recoverable::RecoveryInfo::unknown(), "hyper"))
-        .map_ok(Into::into)
 }
 
 async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Send + Unpin, limit: Option<usize>) -> Result<BytesView> {
@@ -1443,31 +1401,30 @@ mod tests {
 
     // ── Incoming (real hyper body) tests ─────────────────────────────────
 
-    #[tokio::test]
-    async fn incoming_into_bytes() {
+    #[test]
+    fn external_body_into_bytes() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"raw bytes").await;
-        let body = builder.incoming(incoming);
-        let bytes = body.into_bytes().await.unwrap();
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"raw bytes", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
+        let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"raw bytes");
     }
 
-    #[tokio::test]
-    async fn incoming_empty_into_bytes() {
+    #[test]
+    fn external_body_empty_into_bytes() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"").await;
-        let body = builder.incoming(incoming);
-        let bytes = body.into_bytes().await.unwrap();
+        let body = builder.stream(futures::stream::iter(Vec::<Result<BytesView>>::new()));
+        let bytes = block_on(body.into_bytes()).unwrap();
         assert!(bytes.is_empty());
     }
 
-    #[tokio::test]
-    async fn incoming_into_json_owned() {
+    #[test]
+    fn external_body_into_json_owned() {
         let builder = HttpBodyBuilder::new_fake();
         let json_bytes = br#"{"id":42,"name":"alice"}"#;
-        let incoming = crate::testing::create_incoming(json_bytes).await;
-        let body = builder.incoming(incoming);
-        let model: Model = body.into_json_owned().await.unwrap();
+        let chunks = vec![Ok(BytesView::copied_from_slice(json_bytes, &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
+        let model: Model = block_on(body.into_json_owned()).unwrap();
         assert_eq!(
             model,
             Model {
@@ -1477,131 +1434,77 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn incoming_into_json_zero_copy() {
-        use std::borrow::Cow;
-
-        #[derive(Debug, Deserialize, PartialEq)]
-        struct Msg<'a> {
-            #[serde(borrow)]
-            text: Cow<'a, str>,
-        }
-
+    #[test]
+    fn external_body_try_clone_returns_none() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(br#"{"text":"hello"}"#).await;
-        let body = builder.incoming(incoming);
-        let mut json = body.into_json::<Msg>().await.unwrap();
-        let msg = json.read().unwrap();
-        assert_eq!(msg.text, "hello");
-    }
-
-    #[tokio::test]
-    async fn incoming_try_clone_returns_none() {
-        let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"no clone").await;
-        let body = builder.incoming(incoming);
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"no clone", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
         assert!(body.try_clone().is_none());
     }
 
-    #[tokio::test]
-    async fn incoming_into_bytes_view_fails() {
+    #[test]
+    fn external_body_into_bytes_view_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"not buffered").await;
-        let body = builder.incoming(incoming);
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"not buffered", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
         BytesView::try_from(body).unwrap_err();
     }
 
-    #[tokio::test]
-    async fn incoming_into_bytes_no_buffering_returns_none() {
+    #[test]
+    fn external_body_into_bytes_no_buffering_returns_none() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"data").await;
-        let body = builder.incoming(incoming);
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"data", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
         assert!(body.into_bytes_no_buffering().is_none());
     }
 
-    #[tokio::test]
-    async fn incoming_size_hint() {
+    #[test]
+    fn external_body_buffered_then_clone() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"twelve bytes").await;
-        let body = builder.incoming(incoming);
-        let hint = body.size_hint();
-        // Incoming bodies from hyper report a size hint based on Content-Length.
-        assert_eq!(hint.lower(), 12);
-    }
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"clone me", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
 
-    #[tokio::test]
-    async fn incoming_content_length() {
-        let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"len").await;
-        let body = builder.incoming(incoming);
-        assert_eq!(body.content_length(), Some(3));
-    }
-
-    #[tokio::test]
-    async fn incoming_debug_format() {
-        let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"dbg").await;
-        let body = builder.incoming(incoming);
-        let debug = format!("{body:?}");
-        assert!(debug.contains("Incoming"));
-    }
-
-    #[tokio::test]
-    async fn incoming_buffered_then_clone() {
-        let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"clone me").await;
-        let body = builder.incoming(incoming);
-
-        let buffered = body.into_buffered().await.unwrap();
+        let buffered = block_on(body.into_buffered()).unwrap();
         let cloned = buffered.try_clone().unwrap();
 
-        assert_eq!(buffered.into_text().await.unwrap(), "clone me");
-        assert_eq!(cloned.into_text().await.unwrap(), "clone me");
+        assert_eq!(block_on(buffered.into_text()).unwrap(), "clone me");
+        assert_eq!(block_on(cloned.into_text()).unwrap(), "clone me");
     }
 
-    #[tokio::test]
-    async fn incoming_with_buffer_limit_exceeded() {
+    #[test]
+    fn external_body_with_buffer_limit_exceeded() {
         let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(5));
-        let incoming = crate::testing::create_incoming(b"this exceeds the limit").await;
-        let body = builder.incoming(incoming);
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"this exceeds the limit", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
 
-        let err = body.into_buffered().await.unwrap_err();
+        let err = block_on(body.into_buffered()).unwrap_err();
         assert!(err.to_string().contains("body size exceeds the limit"));
     }
 
-    #[tokio::test]
-    async fn incoming_with_buffer_limit_ok() {
+    #[test]
+    fn external_body_with_buffer_limit_ok() {
         let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
-        let incoming = crate::testing::create_incoming(b"fits").await;
-        let body = builder.incoming(incoming);
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"fits", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
 
-        let text = body.into_text().await.unwrap();
+        let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "fits");
     }
 
-    #[tokio::test]
-    async fn incoming_is_end_stream_before_consume() {
+    #[test]
+    fn external_body_is_end_stream_with_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"data").await;
-        let body = builder.incoming(incoming);
-        // A fresh incoming body with content is not at end-of-stream.
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"data", &builder))];
+        let body = builder.stream(futures::stream::iter(chunks));
+        // A stream body with content is not at end-of-stream.
         assert!(!body.is_end_stream());
     }
 
-    #[tokio::test]
-    async fn incoming_empty_is_end_stream() {
+    #[test]
+    fn external_body_poll_frame_yields_correct_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"").await;
-        let body = builder.incoming(incoming);
-        // An empty incoming body should signal end-of-stream.
-        assert!(body.is_end_stream());
-    }
-
-    #[tokio::test]
-    async fn incoming_poll_frame_yields_correct_data() {
-        let builder = HttpBodyBuilder::new_fake();
-        let incoming = crate::testing::create_incoming(b"exact").await;
-        let mut body = pin!(builder.incoming(incoming));
+        let chunks = vec![Ok(BytesView::copied_from_slice(b"exact", &builder))];
+        let mut body = pin!(builder.stream(futures::stream::iter(chunks)));
         let mut cx = Context::from_waker(Waker::noop());
 
         if let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) {

@@ -155,12 +155,11 @@ that depends on HTTP clients.
 ## Features
 
 * `json` - Enables JSON serialization/deserialization support via `Json` type
-* `hyper` - Enables compatibility with the [`hyper`][__link28] `Incoming` body type
 * `test-util` - Enables fake implementations for testing
 
 ## Memory Management
 
-Bodies created through [`HttpBodyBuilder`][__link29] use memory pools from [`bytesbuf`][__link30] to
+Bodies created through [`HttpBodyBuilder`][__link28] use memory pools from [`bytesbuf`][__link29] to
 reduce allocation overhead. When body data is consumed, memory is automatically recycled
 for future requests. This makes the crate particularly efficient for high-throughput scenarios.
 
@@ -170,7 +169,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4sZKSwDPk5BG1YPch-oDsn4G6UQSqryTiOFG0zPDlRB2dTFYWSFgmhieXRlc2J1ZmUwLjQuMIJkaHR0cGUxLjQuMIJpaHR0cF9ib2R5ZTEuMC4xgm9odHRwX2V4dGVuc2lvbnNlMC4yLjCCZWh5cGVyZTEuOC4x
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGydNl-_IzxfZG3xoVSe_Ip8uG2_ZVW6Q71E0G9cSM-pu_UDPYWSEgmhieXRlc2J1ZmUwLjQuMIJkaHR0cGUxLjQuMIJpaHR0cF9ib2R5ZTEuMC4xgm9odHRwX2V4dGVuc2lvbnNlMC4yLjA
  [__link0]: https://crates.io/crates/http/1.4.0
  [__link1]: https://docs.rs/http_extensions/0.2.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=StatusExt
@@ -192,10 +191,9 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link25]: https://docs.rs/http/1.4.0/http/?search=StatusCode
  [__link26]: https://docs.rs/http/1.4.0/http/?search=HeaderMap
  [__link27]: https://docs.rs/http_body/1.0.1/http_body/?search=Body
- [__link28]: https://crates.io/crates/hyper/1.8.1
- [__link29]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpBodyBuilder
+ [__link28]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpBodyBuilder
+ [__link29]: https://crates.io/crates/bytesbuf/0.4.0
  [__link3]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpBody
- [__link30]: https://crates.io/crates/bytesbuf/0.4.0
  [__link4]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpRequestBuilder
  [__link5]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpResponseBuilder
  [__link6]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpBody

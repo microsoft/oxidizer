@@ -9,8 +9,11 @@
 
 use std::sync::Arc;
 
+use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use http::Request;
+use futures::TryStreamExt;
+use http_body_util::BodyExt;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -47,6 +50,18 @@ async fn main() -> Result<(), ohno::AppError> {
     Ok(())
 }
 
+/// Maps a hyper [`Incoming`] body to an [`HttpBody`][http_extensions::HttpBody]
+/// using [`HttpBodyBuilder::stream`], which wraps the incoming byte stream
+/// without requiring the `hyper` feature on `http_extensions`.
+fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder) -> http_extensions::HttpBody {
+    let stream = incoming
+        .into_data_stream()
+        .map_ok(BytesView::from)
+        .map_err(|e| http_extensions::HttpError::other(e, recoverable::RecoveryInfo::unknown(), "hyper"));
+
+    body_builder.stream(stream)
+}
+
 async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder) -> Result<(), ohno::AppError> {
     let service = Arc::new(service);
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
@@ -60,7 +75,7 @@ async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder:
 
         tokio::spawn(async move {
             let hyper_service = hyper::service::service_fn(move |request: Request<Incoming>| {
-                let request = request.map(|incoming| body_builder.incoming(incoming));
+                let request = request.map(|incoming| map_incoming_to_http_body(incoming, &body_builder));
                 let service_cloned = Arc::clone(&service_cloned);
 
                 async move { service_cloned.execute(request).await }
