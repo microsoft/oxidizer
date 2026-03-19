@@ -3,7 +3,7 @@
 
 use crate::{HttpBodyBuilder, HttpRequestBuilder, RequestHandler};
 
-/// Extension trait for types that implement `RequestHandler`.
+/// Extension trait for types that implement `RequestHandler` and `AsRef<HttpBodyBuilder>`.
 pub trait HttpRequestBuilderExt: RequestHandler
 where
     Self: Sized,
