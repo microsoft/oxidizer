@@ -93,8 +93,7 @@ mod tests {
         let header_ref = request.headers().get(http::header::CONTENT_LENGTH).unwrap();
         assert_eq!(header_ref, &CONTENT_LENGTH_ZERO);
         assert_eq!(header_ref.as_bytes(), CONTENT_LENGTH_ZERO.as_bytes());
-        // For some reason, they have different addresses, is something broken?
-        // assert_eq!(header_ref.as_bytes().as_ptr(), CONTENT_LENGTH_ZERO.as_bytes().as_ptr());
+        // We only assert value equality; header values are not required to share the same underlying storage.
     }
 
     #[test]
