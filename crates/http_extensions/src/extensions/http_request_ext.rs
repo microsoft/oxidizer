@@ -19,18 +19,15 @@ pub trait HttpRequestExt: sealed::Sealed {
 
 impl HttpRequestExt for HttpRequest {
     fn try_clone(&self) -> Option<Self> {
-        self.body().try_clone().map_or_else(
-            || None,
-            |body| {
-                let mut request = Self::new(body);
-                *request.method_mut() = self.method().clone();
-                *request.uri_mut() = self.uri().clone();
-                *request.version_mut() = self.version();
-                *request.headers_mut() = self.headers().clone();
-                *request.extensions_mut() = self.extensions().clone();
-                Some(request)
-            },
-        )
+        self.body().try_clone().map(|body| {
+            let mut request = Self::new(body);
+            *request.method_mut() = self.method().clone();
+            *request.uri_mut() = self.uri().clone();
+            *request.version_mut() = self.version();
+            *request.headers_mut() = self.headers().clone();
+            *request.extensions_mut() = self.extensions().clone();
+            request
+        })
     }
 }
 
