@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::future::ready;
 
 use bytesbuf::BytesView;
+use futures::Stream;
 use futures::future::Either;
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
@@ -338,6 +339,40 @@ impl<R> HttpRequestBuilder<'_, R> {
         let body = self.body_builder.external(body);
         self.body(body)
     }
+
+    /// Sets a streaming body for the request.
+    ///
+    /// This is a convenience wrapper around [`external`](Self::external) that accepts
+    /// a [`Stream`] of [`BytesView`] chunks. It avoids the need to manually wrap
+    /// the stream in a [`StreamBody`][http_body_util::StreamBody].
+    ///
+    /// Note that streaming bodies do not have a known content length, so the
+    /// `Content-Length` header will not be set automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder};
+    /// # use bytesbuf::BytesView;
+    /// # fn example(body_builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// let chunks = vec![
+    ///     Ok(BytesView::copied_from_slice(b"hello ", body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"world", body_builder)),
+    /// ];
+    /// let request = HttpRequestBuilder::new(body_builder)
+    ///     .post("https://example.com/upload")
+    ///     .stream(futures::stream::iter(chunks))
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn stream<S>(self, stream: S) -> Self
+    where
+        S: Stream<Item = Result<BytesView>> + Send + 'static,
+    {
+        let body = self.body_builder.stream(stream);
+        self.body(body)
+    }
 }
 
 /// Extension methods for sending requests built with `HttpRequestBuilder`.
@@ -592,7 +627,7 @@ mod tests {
 
     use super::*;
     use crate::http_request_builder_ext::HttpRequestBuilderExt;
-    use crate::testing::create_stream_body_from_chunks;
+    use crate::testing::{SingleChunkBody, create_stream_body_from_chunks};
     use crate::{FakeHandler, HeaderMapExt, HttpResponseBuilder, RequestExt};
 
     #[test]
@@ -792,6 +827,39 @@ mod tests {
             .unwrap();
 
         assert_eq!(block_on(request.into_body().into_text()).unwrap(), "custom body content");
+    }
+
+    #[test]
+    fn external_sets_body_from_custom_body_impl() {
+        let builder = HttpBodyBuilder::new_fake();
+
+        let request = HttpRequestBuilder::new_fake()
+            .post("https://example.com/upload")
+            .external(SingleChunkBody::new(BytesView::copied_from_slice(b"external payload", &builder)))
+            .build()
+            .unwrap();
+
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "external payload");
+    }
+
+    #[test]
+    fn stream_sets_body_from_chunks() {
+        let builder = HttpBodyBuilder::new_fake();
+        let chunks: Vec<crate::Result<BytesView>> = vec![
+            Ok(BytesView::copied_from_slice(b"hello ", &builder)),
+            Ok(BytesView::copied_from_slice(b"streaming ", &builder)),
+            Ok(BytesView::copied_from_slice(b"world", &builder)),
+        ];
+
+        let request = HttpRequestBuilder::new_fake()
+            .post("https://example.com/upload")
+            .stream(futures::stream::iter(chunks))
+            .build()
+            .unwrap();
+
+        // Streams don't have a known content length
+        assert!(request.headers().get(CONTENT_LENGTH).is_none());
+        assert_eq!(block_on(request.into_body().into_text()).unwrap(), "hello streaming world");
     }
 
     #[test]
