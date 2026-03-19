@@ -218,7 +218,7 @@ impl UriSafeString {
     #[cfg_attr(test, mutants::skip)] // Mutating this function leads to infinite loop and timeout
     #[inline]
     #[must_use]
-    pub fn from_static(s: &'static str) -> Self {
+    pub const fn from_static(s: &'static str) -> Self {
         // Use the same validation logic as in uri_safe! macro
         let bytes = s.as_bytes();
         let mut i = 0;
@@ -350,8 +350,8 @@ mod tests {
 
     #[test]
     fn test_uri_safe_string_from_static() {
-        let safe = UriSafeString::from_static("hello_world");
-        assert_eq!(safe.as_str(), "hello_world");
+        const SAFE: UriSafeString = UriSafeString::from_static("hello_world");
+        assert_eq!(SAFE.as_str(), "hello_world");
     }
 
     #[test]
