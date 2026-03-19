@@ -231,14 +231,60 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///     .time_to_live(Duration::from_secs(300))
     ///     .build();
     /// ```
-    #[must_use]
-    pub fn build(self) -> InMemoryCache<K, V, H>
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid
+    /// Configuration is invalid when:
+    /// - Initial capacity is greater than max capacity (if max capacity is set)
+    /// - Time-to-idle is greater than time-to-live (if both are set)
+    pub fn build(self) -> Result<InMemoryCache<K, V, H>, ValidationError>
+    where
+        K: Hash + Eq + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+        H: BuildHasher + Clone + Send + Sync + 'static,
+    {
+        self.validate()?;
+        Ok(InMemoryCache::from_builder(&self))
+    }
+
+    fn validate(&self) -> Result<(), ValidationError> {
+        ValidationError::invalid_capacity(self.max_capacity, self.initial_capacity).map_or(Ok(()), Err)?;
+        ValidationError::invalid_time_to(self.time_to_live, self.time_to_idle).map_or(Ok(()), Err)?;
+        Ok(())
+    }
+
+    pub(crate) fn build_unchecked(self) -> InMemoryCache<K, V, H>
     where
         K: Hash + Eq + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
         H: BuildHasher + Clone + Send + Sync + 'static,
     {
         InMemoryCache::from_builder(&self)
+    }
+}
+
+#[ohno::error]
+#[display("invalid cache configuration: {reason}")]
+pub struct ValidationError {
+    reason: String,
+}
+
+impl ValidationError {
+    fn invalid_capacity(max_capacity: Option<u64>, initial_capacity: Option<usize>) -> Option<Self> {
+        let max = max_capacity?;
+        let init = initial_capacity?;
+        (init as u64 > max).then(|| {
+            Self::new(format!(
+                "initial_capacity ({initial_capacity:?}) exceeds max_capacity ({max_capacity:?})"
+            ))
+        })
+    }
+
+    fn invalid_time_to(ttl: Option<Duration>, tti: Option<Duration>) -> Option<Self> {
+        let tti = tti?;
+        let ttl = ttl?;
+        (tti > ttl).then(|| Self::new(format!("time to idle ({tti:?}) exceeds time to live ({ttl:?}).")))
     }
 }
 
@@ -274,5 +320,23 @@ mod tests {
     fn name_stores_value() {
         let builder = InMemoryCacheBuilder::<String, i32>::new().name("test");
         assert_eq!(builder.name, Some("test".to_string()));
+    }
+
+    #[test]
+    fn build_max_capacity_lt_initial_capacity_returns_validation_error() {
+        let result = InMemoryCacheBuilder::<String, i32>::new()
+            .max_capacity(100)
+            .initial_capacity(101)
+            .build();
+        result.unwrap_err();
+    }
+
+    #[test]
+    fn build_ttl_less_than_tti_returns_validation_error() {
+        let result = InMemoryCacheBuilder::<String, i32>::new()
+            .time_to_live(Duration::from_secs(60))
+            .time_to_idle(Duration::from_secs(120))
+            .build();
+        result.unwrap_err();
     }
 }

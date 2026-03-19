@@ -38,7 +38,7 @@ use crate::builder::InMemoryCacheBuilder;
 ///     .insert(&"key".to_string(), CacheEntry::new(42))
 ///     .await
 ///     .unwrap();
-/// let value = cache.get(&"key".to_string()).await.unwrap();
+/// let value = cache.get("key").await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # };
 /// ```
@@ -82,7 +82,7 @@ where
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        Self::builder().build()
+        Self::builder().build_unchecked()
     }
 
     /// Creates a new in-memory cache with a maximum capacity.
@@ -99,7 +99,7 @@ where
     /// ```
     #[must_use]
     pub fn with_capacity(max_capacity: u64) -> Self {
-        Self::builder().max_capacity(max_capacity).build()
+        Self::builder().max_capacity(max_capacity).build_unchecked()
     }
 
     /// Creates a new builder for configuring an in-memory cache.
@@ -248,7 +248,8 @@ mod tests {
         let cache = InMemoryCache::<String, i32>::builder()
             .hasher(RandomState::new())
             .max_capacity(100)
-            .build();
+            .build()
+            .expect("Failed to build cache");
 
         futures::executor::block_on(async {
             cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
@@ -371,7 +372,10 @@ mod tests {
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn get_returns_none_after_cache_ttl() {
-        let cache = InMemoryCache::<String, i32>::builder().time_to_live(Duration::ZERO).build();
+        let cache = InMemoryCache::<String, i32>::builder()
+            .time_to_live(Duration::ZERO)
+            .build()
+            .expect("Failed to build cache");
         block_on(async {
             cache
                 .insert(&"key".to_string(), CacheEntry::new(42))
@@ -387,7 +391,10 @@ mod tests {
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn get_returns_none_after_cache_tti() {
-        let cache = InMemoryCache::<String, i32>::builder().time_to_idle(Duration::ZERO).build();
+        let cache = InMemoryCache::<String, i32>::builder()
+            .time_to_idle(Duration::ZERO)
+            .build()
+            .expect("Failed to build cache");
         block_on(async {
             cache
                 .insert(&"key".to_string(), CacheEntry::new(42))
@@ -479,7 +486,10 @@ mod tests {
     #[test]
     fn max_capacity_evicts_at_capacity() {
         let capacity = 5;
-        let cache = InMemoryCache::<String, u64>::builder().max_capacity(capacity).build();
+        let cache = InMemoryCache::<String, u64>::builder()
+            .max_capacity(capacity)
+            .build()
+            .expect("Cache should build successfully");
         block_on(async {
             for i in 0..=capacity {
                 cache

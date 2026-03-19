@@ -3,7 +3,7 @@
 
 [package]
 name = "cachet_tier"
-description = "A composable, customizable multi-tier caching library with rich feature support."
+description = "Core cache tier trait and abstractions for building cache backends."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]

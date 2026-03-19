@@ -16,8 +16,22 @@ use crate::{CacheEntry, Error};
 /// Implement this trait to create custom cache backends. The cache system
 /// wraps these in `CacheWrapper` to add telemetry and TTL support.
 ///
-/// All four core methods are required: `get`, `insert`, `invalidate`, and `clear`.
-/// Only `len` and `is_empty` have default implementations:
+/// # Consistency
+///
+/// Implementations must provide **read-after-write monotonicity** on a single
+/// instance: once `insert(key, entry)` returns `Ok(())`, any subsequent call to
+/// `get(key)` on the same instance must never return data older than what was
+/// written. It may return `None` (e.g., if the entry was evicted or invalidated)
+/// or a newer value, but never a stale one that predates the most recent write.
+///
+/// This guarantee is scoped to a **single instance** — if the same backing store
+/// is accessed through multiple `CacheTier` instances (e.g., separate processes
+/// connected to the same Redis cluster), replication lag or network partitions
+/// may cause one instance to observe stale data written through another. The
+/// monotonicity guarantee only applies to reads and writes through the same
+/// Rust object.
+///
+/// `len` and `is_empty` have default implementations:
 /// - `len`: Returns `None` (not all tiers track size)
 /// - `is_empty`: Delegates to `len`
 #[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
@@ -25,7 +39,9 @@ pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
 
-    /// Inserts a value, returning an error if the operation fails.
+    /// Inserts or replaces a value, returning an error if the operation fails.
+    ///
+    /// If the key already exists, the previous entry is replaced with the new one.
     fn insert(&self, key: &K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Invalidates a value, returning an error if the operation fails.

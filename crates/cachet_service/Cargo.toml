@@ -3,7 +3,7 @@
 
 [package]
 name = "cachet_service"
-description = "A composable, customizable multi-tier caching library with rich feature support."
+description = "Layered service integration for the cachet caching library."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]

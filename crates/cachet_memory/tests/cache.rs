@@ -206,7 +206,7 @@ fn clone_shares_underlying_cache() {
 #[cfg_attr(miri, ignore)]
 #[test]
 fn builder_default_creates_unbounded_cache() {
-    let cache = InMemoryCacheBuilder::<String, i32>::default().build();
+    let cache = InMemoryCacheBuilder::<String, i32>::default().build().expect("build failed");
     assert_eq!(cache.len(), Some(0));
 }
 
@@ -219,7 +219,8 @@ fn builder_all_options_combined() {
         .time_to_live(Duration::from_secs(300))
         .time_to_idle(Duration::from_secs(60))
         .name("full-config-cache")
-        .build();
+        .build()
+        .expect("build failed");
 
     assert_eq!(cache.len(), Some(0));
 }

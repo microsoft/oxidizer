@@ -3,7 +3,7 @@
 
 [package]
 name = "cachet_memory"
-description = "A composable, customizable multi-tier caching library with rich feature support."
+description = "In-memory cache tier backed by Moka for the cachet caching library."
 version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
@@ -25,6 +25,7 @@ allowed_external_types = ["cachet_tier::tier::CacheTier", "thread_aware::core::T
 [dependencies]
 cachet_tier = { workspace = true }
 moka = { workspace = true, features = ["future"] }
+ohno = { workspace = true }
 thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]

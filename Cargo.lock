@@ -343,6 +343,7 @@ dependencies = [
  "futures",
  "moka",
  "mutants",
+ "ohno 0.3.1",
  "thread_aware",
  "tick",
  "tokio",

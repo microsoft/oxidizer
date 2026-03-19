@@ -23,7 +23,8 @@
 //! let cache = InMemoryCacheBuilder::<String, i32>::new()
 //!     .max_capacity(1000)
 //!     .time_to_live(Duration::from_secs(300))
-//!     .build();
+//!     .build()
+//!     .expect("Failed to build cache");
 //!
 //! cache
 //!     .insert(&"key".to_string(), CacheEntry::new(42))
