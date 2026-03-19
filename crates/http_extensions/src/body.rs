@@ -156,7 +156,7 @@ pub struct HttpBody {
 ///
 /// # Testing
 ///
-/// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::fake()`.
+/// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
     memory: MemoryWrapper,
