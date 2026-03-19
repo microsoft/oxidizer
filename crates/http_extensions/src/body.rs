@@ -842,7 +842,7 @@ fn map_incoming_stream(incoming: Incoming) -> impl Stream<Item = Result<BytesVie
 }
 
 async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Send + Unpin, limit: Option<usize>) -> Result<BytesView> {
-    let mut total_size = 0;
+    let mut total_size = 0_usize;
     let mut fragments = Vec::new();
     let limit = limit.unwrap_or(DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES);
 
