@@ -25,9 +25,9 @@ capabilities, and data classification features.
 The crate centers around several key abstractions:
 
 * [`Uri`][__link0] - Flexible URI type with endpoint and path/query components
-* [`BaseUri`][__link1] - Lightweight type representing scheme and authority (no path/query)
-* [`TemplatedPathAndQuery`][__link2] - RFC 6570 Level 3 compliant URI templating
-* [`UriSafe`][__link3] and [`UriSafeString`][__link4] - Generic newtype wrapper proving a value is safe for URI components
+* [`BaseUri`][__link1] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`][__link2])
+* [`TemplatedPathAndQuery`][__link3] - RFC 6570 Level 3 compliant URI templating
+* [`UriSafe`][__link4] and [`UriSafeString`][__link5] - Generic newtype wrapper proving a value is safe for URI components
   by not containing any reserved characters
 
 ## Basic Usage
@@ -78,7 +78,7 @@ let uri = Uri::default()
 
 ## URI Safety Guarantees
 
-The [`UriSafe<T>`][__link5] newtype wraps values that are guaranteed
+The [`UriSafe<T>`][__link6] newtype wraps values that are guaranteed
 to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
 
 ```rust
@@ -98,7 +98,7 @@ assert!(unsafe_string.is_err());
 ```
 
 Built-in safe types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
-IP addresses, and validated [`UriSafeString`][__link6] instances.
+IP addresses, and validated [`UriSafeString`][__link7] instances.
 
 ## Telemetry Labels
 
@@ -140,7 +140,7 @@ struct UserPath {
 
 ## RFC 6570 Template Compliance
 
-The templating system implements [RFC 6570][__link7]
+The templating system implements [RFC 6570][__link8]
 Level 3 URI Template specification. Supported expansions include:
 
 * Simple string expansion: `{var}`
@@ -152,15 +152,15 @@ Level 3 URI Template specification. Supported expansions include:
 Note: Fragment expansion (`{#var}`) from RFC 6570 is **not supported** because URI
 fragments are stripped by the `http` crate and ignored by HTTP clients.
 
-Template variables must implement [`UriParam`][__link8] (except for reserved expansions)
+Template variables must implement [`UriParam`][__link9] (except for reserved expansions)
 to ensure the resulting URI is valid.
 
 ## Integration with HTTP Ecosystem
 
 This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting
-and building upon the standard [`http`][__link9] crate types. The resulting [`Uri`][__link10] can be converted
-to an [`http::Uri`][__link11] for use with HTTP clients
-and servers based on [`hyper`][__link12] like [`reqwest`][__link13].
+and building upon the standard [`http`][__link10] crate types. The resulting [`Uri`][__link11] can be converted
+to an [`http::Uri`][__link12] for use with HTTP clients
+and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 
 
 <hr/>
@@ -168,18 +168,19 @@ and servers based on [`hyper`][__link12] like [`reqwest`][__link13].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyIZu7e6bvFMG9_SXWN1Sb-DG00_3R3OA9lRG1_XMNG8hlcrYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyftk28CR_jhG9_WxkUHtfBdG9giB010pVAzGwCsTyFCPqO3YWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4w
  [__link0]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BaseUri
- [__link10]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
- [__link11]: https://docs.rs/http/1.4.0/http/?search=Uri
- [__link12]: https://docs.rs/hyper/latest/hyper/
- [__link13]: https://docs.rs/reqwest/latest/reqwest/
- [__link2]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=TemplatedPathAndQuery
- [__link3]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
- [__link4]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
- [__link5]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
- [__link6]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
- [__link7]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link8]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriParam
- [__link9]: https://docs.rs/http/latest/http/
+ [__link10]: https://docs.rs/http/latest/http/
+ [__link11]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=uri::Uri
+ [__link12]: https://docs.rs/http/1.4.0/http/?search=Uri
+ [__link13]: https://docs.rs/hyper/latest/hyper/
+ [__link14]: https://docs.rs/reqwest/latest/reqwest/
+ [__link2]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=BasePath
+ [__link3]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=TemplatedPathAndQuery
+ [__link4]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
+ [__link5]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
+ [__link6]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafe
+ [__link7]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriSafeString
+ [__link8]: https://datatracker.ietf.org/doc/html/rfc6570
+ [__link9]: https://docs.rs/templated_uri/0.1.0/templated_uri/?search=UriParam
