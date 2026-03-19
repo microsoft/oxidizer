@@ -609,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn content_length_not_set_when_body_has_no_length() {
+    fn content_length_set_to_zero_when_body_has_no_length() {
         // Create a body without a known content length
         let body = HttpBodyBuilder::new_fake().empty();
         let response = HttpResponseBuilder::new_fake().body(body).build().unwrap();
