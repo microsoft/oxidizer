@@ -805,22 +805,23 @@ async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Se
     let limit = limit.unwrap_or(DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES);
 
     while let Some(bytes) = data.try_next().await? {
-        let bytes_len = bytes.len();
-        total_size = match total_size.checked_add(bytes_len) {
-            Some(sum) => sum,
-            None => {
-                return Err(HttpError::validation(format!("body size exceeds the limit of {limit} bytes")));
-            }
-        };
-
-        if total_size > limit {
-            return Err(HttpError::validation(format!("body size exceeds the limit of {limit} bytes")));
-        }
-
+        total_size = check_size_limit(total_size, bytes.len(), limit)?;
         fragments.push(bytes);
     }
 
     Ok(BytesView::from_views(fragments))
+}
+
+fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Result<usize> {
+    let total = current_size
+        .checked_add(additional)
+        .ok_or_else(|| HttpError::validation(format!("body size exceeds the limit of {limit} bytes")))?;
+
+    if total > limit {
+        return Err(HttpError::validation(format!("body size exceeds the limit of {limit} bytes")));
+    }
+
+    Ok(total)
 }
 
 #[derive(Debug, Clone, ThreadAware)]
@@ -958,6 +959,21 @@ mod tests {
 
         let body = block_on(body.into_buffered()).unwrap();
         assert_eq!(Some(0), body.content_length());
+    }
+
+    #[test]
+    fn into_buffered_already_consumed_body_returns_error() {
+        let mut body = HttpBodyBuilder::new_fake().text("hello");
+
+        // Consume the body bytes via poll_frame, which sets Kind::Bytes to None.
+        let _frame = block_on(body.frame());
+
+        // Now the body is consumed; into_buffered should fail.
+        let err = block_on(body.into_buffered()).unwrap_err();
+        assert!(
+            err.to_string().contains("body cannot be buffered because it is already consumed"),
+            "expected consumed body error, got: {err}"
+        );
     }
 
     #[test]
@@ -1247,6 +1263,17 @@ mod tests {
     }
 
     #[test]
+    fn check_size_limit_overflow_returns_error() {
+        let result = check_size_limit(usize::MAX, 1, usize::MAX);
+
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("body size exceeds the limit"),
+            "expected body size error, got: {err}"
+        );
+    }
+
+    #[test]
     fn debug_kind() {
         let debug_str = format!("{:?}", Kind::Bytes(Some(BytesView::default())));
         assert_eq!("Bytes", debug_str);
@@ -1278,9 +1305,7 @@ mod tests {
 
     #[test]
     fn poll_frame_empty_bytes_view_returns_none() {
-        let builder = HttpBodyBuilder::new_fake();
-        let zero_bytes = BytesView::new();
-        let mut body = pin!(builder.bytes(zero_bytes));
+        let mut body = pin!(HttpBodyBuilder::new_fake().empty());
         let mut cx = Context::from_waker(Waker::noop());
 
         let result = body.as_mut().poll_frame(&mut cx);
