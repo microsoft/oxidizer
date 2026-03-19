@@ -809,9 +809,7 @@ async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Se
         total_size = match total_size.checked_add(bytes_len) {
             Some(sum) => sum,
             None => {
-                return Err(HttpError::validation(format!(
-                    "body size exceeds the limit of {limit} bytes"
-                )));
+                return Err(HttpError::validation(format!("body size exceeds the limit of {limit} bytes")));
             }
         };
 

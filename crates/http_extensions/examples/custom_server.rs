@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use http::Request;
 use futures::TryStreamExt;
+use http::Request;
 use http_body_util::BodyExt;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
 use hyper::body::Incoming;
