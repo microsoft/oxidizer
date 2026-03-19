@@ -8,17 +8,12 @@
     reason = "improves readability in benchmarks"
 )]
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
 use alloc_tracker::{Allocator, Session};
-use bytesbuf::BytesView;
 use bytesbuf::mem::testing::TransparentMemory;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http::header::CONTENT_TYPE;
 use http::{HeaderValue, Method, Uri};
-use http_body::{Body, Frame, SizeHint};
-use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
+use http_extensions::{HttpBodyBuilder, HttpRequest, HttpRequestBuilder};
 use serde::Serialize;
 
 #[global_allocator]
@@ -30,35 +25,13 @@ fn get_uri() -> Uri {
     URI_STRING.parse().expect("URI_STRING is a valid URI")
 }
 
-/// A body implementation that reports no size hint, used to benchmark the
-/// `external` path without any content-length information.
-#[derive(Debug, Default)]
-struct NoSizeBody;
-
-impl Body for NoSizeBody {
-    type Data = BytesView;
-    type Error = HttpError;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        Poll::Ready(None)
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        SizeHint::default()
-    }
-
-    fn is_end_stream(&self) -> bool {
-        true
-    }
-}
-
-fn uri_benchmarks(c: &mut Criterion) {
+#[expect(clippy::too_many_lines, reason = "bench code, such is life")]
+fn entry(c: &mut Criterion) {
     let session = Session::new();
-    let mut group = c.benchmark_group("http_request_builder_uri");
+    let mut group = c.benchmark_group("http_request_builder");
     let body_builder = HttpBodyBuilder::new_fake();
+
+    // --- URI benchmarks ---
 
     let operation = session.operation("uri_from_string");
     group.bench_function("uri_from_string", |b| {
@@ -67,7 +40,6 @@ fn uri_benchmarks(c: &mut Criterion) {
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(URI_STRING)
-                .external(NoSizeBody)
                 .build()
                 .unwrap();
         });
@@ -81,20 +53,12 @@ fn uri_benchmarks(c: &mut Criterion) {
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())
-                .external(NoSizeBody)
                 .build()
                 .unwrap();
         });
     });
 
-    group.finish();
-    session.print_to_stdout();
-}
-
-fn bodies_benchmarks(c: &mut Criterion) {
-    let session = Session::new();
-    let mut group = c.benchmark_group("http_request_builder_bodies");
-    let body_builder = HttpBodyBuilder::new_fake();
+    // --- Body benchmarks ---
 
     let uri = get_uri();
     let operation = session.operation("empty_body");
@@ -189,14 +153,7 @@ fn bodies_benchmarks(c: &mut Criterion) {
         });
     });
 
-    group.finish();
-    session.print_to_stdout();
-}
-
-fn headers_benchmarks(c: &mut Criterion) {
-    let session = Session::new();
-    let mut group = c.benchmark_group("http_request_builder_headers");
-    let body_builder = HttpBodyBuilder::new_fake();
+    // --- Header benchmarks ---
 
     let uri = get_uri();
     let operation = session.operation("no_header");
@@ -206,7 +163,6 @@ fn headers_benchmarks(c: &mut Criterion) {
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())
-                .external(NoSizeBody)
                 .build()
                 .unwrap();
         });
@@ -243,12 +199,7 @@ fn headers_benchmarks(c: &mut Criterion) {
     session.print_to_stdout();
 }
 
-criterion_group!(
-    benches,
-    uri_benchmarks,
-    bodies_benchmarks,
-    headers_benchmarks
-);
+criterion_group!(benches, entry);
 criterion_main!(benches);
 
 #[derive(Serialize, Debug)]
