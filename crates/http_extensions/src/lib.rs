@@ -222,7 +222,7 @@ pub use http_response_builder::HttpResponseBuilder;
 mod http_request_builder;
 pub(crate) mod http_utils;
 
-pub mod resilience;
+pub(crate) mod resilience;
 
 pub use http_request_builder::HttpRequestBuilder;
 

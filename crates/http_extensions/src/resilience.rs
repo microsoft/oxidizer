@@ -12,7 +12,7 @@ use recoverable::RecoveryInfo;
 /// This is opinionated detection based on common transient IO error kinds.
 // TODO: should this be moved to recoverable crate?
 #[must_use]
-pub fn detect_io_recovery(kind: ErrorKind) -> RecoveryInfo {
+pub(crate) fn detect_io_recovery(kind: ErrorKind) -> RecoveryInfo {
     match kind {
         ErrorKind::WouldBlock
         | ErrorKind::TimedOut

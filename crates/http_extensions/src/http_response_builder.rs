@@ -421,16 +421,14 @@ impl HttpResponseBuilder<'_> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;
     use http::StatusCode;
     use http::header::CONTENT_LENGTH;
-    use http_body::Frame;
-    use http_body_util::StreamBody;
     use serde::Serialize;
 
     use super::*;
     use crate::HeaderMapExt;
+    use crate::testing::create_stream_body_from_chunks;
 
     #[test]
     fn new_with_borrowed_creator() {
@@ -579,24 +577,20 @@ mod tests {
 
     #[test]
     fn external_functionality() {
-        let chunks = [b"custom".as_slice(), b" body".as_slice(), b" content".as_slice()]
-            .into_iter()
-            .map(|item| BytesView::copied_from_slice(item, &HttpBodyBuilder::new_fake()))
-            .map(|data| Ok::<_, HttpError>(Frame::data(data)));
+        let builder = HttpBodyBuilder::new_fake();
+        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"]);
 
-        let body = StreamBody::new(futures::stream::iter(chunks));
-
-        let response = HttpResponseBuilder::new_fake().external(body).build().unwrap();
+        let response = HttpResponseBuilder::new_fake().body(body).build().unwrap();
 
         assert_eq!(block_on(response.into_body().into_text()).unwrap(), "custom body content");
     }
 
     #[test]
     fn bytes_body_ok() {
-        let memory = GlobalPool::new();
+        let builder = HttpBodyBuilder::new_fake();
 
         let response = HttpResponseBuilder::new_fake()
-            .bytes(BytesView::copied_from_slice(b"hello", &memory))
+            .bytes(BytesView::copied_from_slice(b"hello", &builder))
             .build()
             .unwrap();
 
