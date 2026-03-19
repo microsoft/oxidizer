@@ -100,3 +100,13 @@ workspace = true
 name = "custom_server"
 path = "examples/custom_server.rs"
 required-features = ["json", "hyper"]
+
+[[bench]]
+harness = false
+name = "http_request_builder"
+required-features = ["test-util", "json"]
+
+[[bench]]
+harness = false
+name = "http_response_builder"
+required-features = ["test-util", "json"]
