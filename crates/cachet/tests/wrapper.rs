@@ -45,7 +45,7 @@ fn wrapper_get_hit() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
@@ -61,7 +61,7 @@ fn wrapper_insert() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_some());
     });
@@ -75,7 +75,7 @@ fn wrapper_invalidate() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         cache.invalidate(&key).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_none());
@@ -89,8 +89,8 @@ fn wrapper_clear() {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
-        cache.insert(&"k1".to_string(), CacheEntry::new(1)).await.unwrap();
-        cache.insert(&"k2".to_string(), CacheEntry::new(2)).await.unwrap();
+        cache.insert("k1".to_string(), CacheEntry::new(1)).await.unwrap();
+        cache.insert("k2".to_string(), CacheEntry::new(2)).await.unwrap();
 
         cache.clear().await.unwrap();
 
@@ -108,7 +108,7 @@ fn wrapper_len_returns_correct_count() {
 
         assert_eq!(cache.len(), Some(0));
 
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.len(), Some(1));
     });
@@ -122,7 +122,7 @@ fn wrapper_with_ttl_configured() {
         let cache = Cache::builder::<String, i32>(clock).memory().ttl(Duration::from_secs(60)).build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         // Entry should exist immediately after insertion
         let result = cache.get(&key).await.unwrap();
@@ -141,7 +141,7 @@ fn wrapper_entry_with_ttl() {
         let key = "key".to_string();
         // Entry with per-entry TTL
         let entry = CacheEntry::expires_after(42, Duration::from_secs(120));
-        cache.insert(&key, entry).await.unwrap();
+        cache.insert(key.clone(), entry).await.unwrap();
 
         // Entry should exist immediately after insertion
         let result = cache.get(&key).await.unwrap();
@@ -158,7 +158,7 @@ fn wrapper_no_ttl_configured() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         // Entry should exist (no TTL configured)
         let result = cache.get(&key).await.unwrap();
@@ -188,7 +188,7 @@ fn wrapper_insert_error_is_recorded() {
         mock.fail_when(|op| matches!(op, CacheOp::Insert { .. }));
         let cache = Cache::builder(clock).storage(mock).build();
 
-        let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
         result.unwrap_err();
     });
 }
@@ -234,7 +234,7 @@ fn wrapper_expired_entry_returns_none() {
 
         // Insert an entry with a cached_at in the far past so it is expired
         let entry = CacheEntry::expires_at(42, Duration::from_secs(1), clock.system_time() - Duration::from_secs(100));
-        cache.insert(&key, entry).await.unwrap();
+        cache.insert(key.clone(), entry).await.unwrap();
 
         // Entry should be treated as expired
         let result = cache.get(&key).await.unwrap();
@@ -265,7 +265,7 @@ fn wrapper_entry_expired_by_tier_ttl_without_per_entry_ttl() {
 
         // Insert an entry that looks very old (no per-entry TTL, just cached_at in the past)
         let entry = CacheEntry::new(42);
-        cache.insert(&key, entry).await.unwrap();
+        cache.insert(key.clone(), entry).await.unwrap();
 
         control.advance(ttl.add(Duration::from_secs(1)));
         let result = cache.get(&key).await.unwrap();
@@ -288,7 +288,7 @@ fn wrapper_tier_ttl_expires_entry_without_per_entry_ttl() {
         // Entry with no per-entry TTL, but cached_at pre-set to far in the past
         let mut entry = CacheEntry::new(42);
         entry.ensure_cached_at(clock.system_time() - Duration::from_secs(100));
-        cache.insert(&key, entry).await.unwrap();
+        cache.insert(key.clone(), entry).await.unwrap();
 
         // Tier TTL of 10s should expire this entry (100s old)
         let result = cache.get(&key).await.unwrap();

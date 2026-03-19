@@ -31,10 +31,11 @@ use cachet_tier::{CacheEntry, CacheTier};
 let cache = InMemoryCacheBuilder::<String, i32>::new()
     .max_capacity(1000)
     .time_to_live(Duration::from_secs(300))
-    .build();
+    .build()
+    .expect("Failed to build cache");
 
 cache
-    .insert(&"key".to_string(), CacheEntry::new(42))
+    .insert("key".to_string(), CacheEntry::new(42))
     .await
     .unwrap();
 let value = cache.get(&"key".to_string()).await.unwrap();
@@ -70,7 +71,7 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7_27Ahfr-pHG8_Pd57maYSAG5D_97tsPExiGypY3608Fqt7YWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0e6RRi6uDdyG81AdFYB46FyGxYP2UmYhwH0G2xLXH590rx_YWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder
  [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry::expires_after

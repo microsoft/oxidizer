@@ -42,7 +42,7 @@ pub trait CacheTier<K, V>: Send + Sync {
     /// Inserts or replaces a value, returning an error if the operation fails.
     ///
     /// If the key already exists, the previous entry is replaced with the new one.
-    fn insert(&self, key: &K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
 
     /// Invalidates a value, returning an error if the operation fails.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;

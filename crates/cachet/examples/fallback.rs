@@ -30,7 +30,7 @@ async fn main() {
 
     // Insert goes to both L1 and L2
     cache
-        .insert(&key, CacheEntry::new("Alice".to_string()))
+        .insert(key.clone(), CacheEntry::new("Alice".to_string()))
         .await
         .expect("insert failed");
 

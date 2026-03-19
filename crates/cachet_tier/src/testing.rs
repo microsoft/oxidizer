@@ -50,7 +50,7 @@ type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
 ///
 /// // Insert and retrieve
 /// cache
-///     .insert(&"key".to_string(), CacheEntry::new(42))
+///     .insert("key".to_string(), CacheEntry::new(42))
 ///     .await
 ///     .unwrap();
 /// let value = cache.get(&"key".to_string()).await.unwrap();
@@ -236,7 +236,7 @@ where
         Ok(self.data.lock().get(key).cloned())
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let op = CacheOp::Insert {
             key: key.clone(),
             entry: entry.clone(),
@@ -246,7 +246,7 @@ where
             return Err(Error::from_message("mock: insert failed"));
         }
         self.record(op);
-        self.data.lock().insert(key.clone(), entry);
+        self.data.lock().insert(key, entry);
         Ok(())
     }
 
@@ -285,7 +285,7 @@ mod tests {
     async fn insert_failure() {
         let cache = MockCache::<String, i32>::new();
         cache.fail_when(|op| matches!(op, CacheOp::Insert { .. }));
-        let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
         result.unwrap_err();
     }
 

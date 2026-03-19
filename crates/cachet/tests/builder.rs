@@ -34,7 +34,7 @@ fn mock_cache_with_storage() {
         let cache = Cache::builder(clock).storage(mock.clone()).build();
 
         // Cache operations work
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         let value = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*value.unwrap().value(), 42);
 
@@ -72,7 +72,7 @@ fn mock_cache_shares_state_with_handle() {
         let cache = Cache::builder(clock).storage(mock.clone()).build();
 
         // Insert via cache
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         // Mock handle sees the data
         assert!(mock.contains_key(&"key".to_string()));
@@ -114,7 +114,7 @@ fn fallback_builder_basic() {
 
     block_on(async {
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });
@@ -134,7 +134,7 @@ fn fallback_builder_promotion_policy() {
         .build();
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });
@@ -162,7 +162,7 @@ fn fallback_builder_nested_fallback() {
         .build();
 
     block_on(async {
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });

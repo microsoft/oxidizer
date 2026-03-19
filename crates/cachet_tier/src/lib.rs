@@ -37,7 +37,7 @@
 //!         Ok(self.0.read().unwrap().get(key).cloned())
 //!     }
 //!
-//!     async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+//!     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
 //!         self.0.write().unwrap().insert(key.clone(), entry);
 //!         Ok(())
 //!     }

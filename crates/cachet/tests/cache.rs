@@ -54,7 +54,7 @@ fn get_insert_operations() {
 
         assert!(cache.get(&key).await.unwrap().is_none());
 
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
@@ -70,7 +70,7 @@ fn invalidate_removes_entry() {
 
         let key = "key".to_string();
 
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         assert!(cache.get(&key).await.unwrap().is_some());
 
         cache.invalidate(&key).await.unwrap();
@@ -89,7 +89,7 @@ fn contains_checks_existence() {
 
         assert!(!cache.contains(&key).await.unwrap());
 
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         assert!(cache.contains(&key).await.unwrap());
     });
@@ -102,8 +102,8 @@ fn clear_removes_all_entries() {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
-        cache.insert(&"k1".to_string(), CacheEntry::new(1)).await.unwrap();
-        cache.insert(&"k2".to_string(), CacheEntry::new(2)).await.unwrap();
+        cache.insert("k1".to_string(), CacheEntry::new(1)).await.unwrap();
+        cache.insert("k2".to_string(), CacheEntry::new(2)).await.unwrap();
 
         // Verify entries exist before clearing
         assert!(cache.get(&"k1".to_string()).await.unwrap().is_some());
@@ -125,7 +125,7 @@ fn len_returns_correct_count() {
 
         assert_eq!(cache.len(), Some(0));
 
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.len(), Some(1));
     });
@@ -195,7 +195,7 @@ fn stampede_protection_returns_cached() {
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_none());
 
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
     });
@@ -210,7 +210,7 @@ fn is_empty_returns_correct_value() {
 
         assert_eq!(cache.is_empty(), Some(true));
 
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.is_empty(), Some(false));
     });
@@ -224,7 +224,7 @@ fn stampede_protection_invalidate() {
         let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         assert!(cache.get(&key).await.unwrap().is_some());
 
         cache.invalidate(&key).await.unwrap();
@@ -349,7 +349,7 @@ fn optionally_get_or_insert_hit_returns_cached() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(99)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(99)).await.unwrap();
 
         // Should return cached value without calling factory
         let result = cache.optionally_get_or_insert(&key, || async { Some(42) }).await.unwrap();
@@ -445,7 +445,7 @@ fn stampede_protection_converts_panic_to_error() {
             Ok(None)
         }
 
-        async fn insert(&self, _key: &String, _entry: CacheEntry<i32>) -> Result<(), Error> {
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
             Ok(())
         }
 
@@ -491,7 +491,7 @@ fn stampede_protection_invalidate_removes_entry() {
         let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         assert!(cache.get(&key).await.unwrap().is_some());
 
         cache.invalidate(&key).await.unwrap();
@@ -510,9 +510,7 @@ fn try_get_or_insert_with_storage_error_propagates() {
         mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
         let cache = Cache::builder(clock).storage(mock).build();
 
-        let result: Result<CacheEntry<i32>, Error> = cache
-            .try_get_or_insert(&"key".to_string(), || async { Ok::<_, std::io::Error>(42) })
-            .await;
+        let result: Result<CacheEntry<i32>, Error> = cache.try_get_or_insert("key", || async { Ok::<_, std::io::Error>(42) }).await;
         result.unwrap_err();
     });
 }
@@ -527,8 +525,7 @@ fn optionally_get_or_insert_with_storage_error_propagates() {
         mock.fail_when(|op| matches!(op, CacheOp::Get(_)));
         let cache = Cache::builder(clock).storage(mock).build();
 
-        let result: Result<Option<CacheEntry<i32>>, Error> =
-            cache.optionally_get_or_insert(&"key".to_string(), || async { Some(42) }).await;
+        let result: Result<Option<CacheEntry<i32>>, Error> = cache.optionally_get_or_insert("key", || async { Some(42) }).await;
         result.unwrap_err();
     });
 }
@@ -563,7 +560,7 @@ fn borrow_get_insert_with_str_key() {
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
         // Use &str keys with Cache<String, i32>
-        cache.insert("key", CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get("key").await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
 
@@ -578,7 +575,7 @@ fn borrow_invalidate_with_str_key() {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().build();
 
-        cache.insert("key", CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         assert!(cache.contains("key").await.unwrap());
 
         cache.invalidate("key").await.unwrap();
@@ -636,7 +633,7 @@ fn borrow_stampede_protection_with_str_key() {
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
 
-        cache.insert("key", CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get("key").await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
 
@@ -704,7 +701,7 @@ mod service_tests {
             assert!(!cache.name().is_empty());
 
             // Verify the cache works end-to-end through the service layer
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             let entry = cache.get(&"key".to_string()).await.unwrap().expect("entry should exist");
             assert_eq!(*entry.value(), 42);
         });
@@ -716,7 +713,7 @@ mod service_tests {
         block_on(async {
             let clock = Clock::new_frozen();
             let cache = Cache::builder::<String, i32>(clock).memory().build();
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let response = cache
                 .execute(CacheOperation::Get(GetRequest::new("key".to_string())))
@@ -772,7 +769,7 @@ mod service_tests {
         block_on(async {
             let clock = Clock::new_frozen();
             let cache = Cache::builder::<String, i32>(clock).memory().build();
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let response = cache
                 .execute(CacheOperation::Invalidate(InvalidateRequest::new("key".to_string())))
@@ -790,7 +787,7 @@ mod service_tests {
         block_on(async {
             let clock = Clock::new_frozen();
             let cache = Cache::builder::<String, i32>(clock).memory().build();
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let response = cache.execute(CacheOperation::Clear).await.unwrap();
             assert!(matches!(response, CacheResponse::Clear));
@@ -811,7 +808,7 @@ mod service_tests {
                 .build();
 
             let key = "key".to_string();
-            cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+            cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
             let entry = cache.get(&key).await.unwrap().expect("entry should exist");
             assert_eq!(*entry.value(), 42);
         });

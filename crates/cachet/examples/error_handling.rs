@@ -24,7 +24,7 @@ impl CacheTier<String, i32> for FailingCache {
         Err(Error::from_source(io::Error::new(ErrorKind::TimedOut, "connection timed out")).with_recovery(RecoveryInfo::retry()))
     }
 
-    async fn insert(&self, _key: &String, _entry: CacheEntry<i32>) -> Result<(), Error> {
+    async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
         Ok(())
     }
 

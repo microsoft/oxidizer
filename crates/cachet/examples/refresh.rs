@@ -25,7 +25,7 @@ impl CacheTier<String, String> for Database {
         Ok(Some(CacheEntry::new(format!("{key}_v{v}"))))
     }
 
-    async fn insert(&self, _: &String, _: CacheEntry<String>) -> Result<(), Error> {
+    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<(), Error> {
         Ok(())
     }
 

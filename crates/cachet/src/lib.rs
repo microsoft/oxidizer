@@ -170,7 +170,7 @@
 //! let clock = Clock::new_tokio();
 //! let cache = Cache::builder::<String, i32>(clock).memory().build();
 //!
-//! cache.insert("key", CacheEntry::new(42)).await?;
+//! cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 //! let value = cache.get("key").await?;
 //! assert_eq!(*value.unwrap().value(), 42);
 //! # Ok::<(), cachet::Error>(())

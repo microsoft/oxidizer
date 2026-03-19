@@ -32,7 +32,7 @@ async fn main() {
 
     // CacheServiceExt provides .get(), .insert() on any Service<CacheOperation>
     cache_with_retry
-        .insert(&"key".to_string(), CacheEntry::new("value".to_string()))
+        .insert("key".to_string(), CacheEntry::new("value".to_string()))
         .await
         .expect("insert failed");
 

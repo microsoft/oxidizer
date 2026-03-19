@@ -223,7 +223,11 @@ where
         if let Some(ref v) = fallback_value
             && self.inner.policy.should_promote(v)
         {
-            let timed_insert = self.inner.clock.timed_async(self.inner.primary.insert(key, v.clone())).await;
+            let timed_insert = self
+                .inner
+                .clock
+                .timed_async(self.inner.primary.insert(key.clone(), v.clone()))
+                .await;
             // Insert errors are intentionally swallowed — a failed promotion should not
             // fail the overall get. The CacheWrapper around the primary tier already
             // records an Error activity on insert failure.
@@ -265,10 +269,10 @@ where
         self.get_from_fallback(key).await
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let (primary_result, fallback_result) = join!(
-            self.inner.primary.insert(key, entry.clone()),
-            self.inner.fallback.insert(key, entry)
+            self.inner.primary.insert(key.clone(), entry.clone()),
+            self.inner.fallback.insert(key.clone(), entry)
         );
         primary_result?;
         fallback_result
@@ -343,7 +347,7 @@ mod tests {
             let fallback_storage = MockCache::<String, i32>::new();
 
             fallback_storage
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("insert failed");
 
@@ -382,7 +386,7 @@ mod tests {
             let fallback_storage = MockCache::<String, i32>::new();
 
             fallback_storage
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("insert failed");
 
@@ -430,11 +434,11 @@ mod tests {
             let fallback_storage = MockCache::<String, i32>::new();
 
             fallback_storage
-                .insert(&"positive".to_string(), CacheEntry::new(42))
+                .insert("positive".to_string(), CacheEntry::new(42))
                 .await
                 .expect("insert failed");
             fallback_storage
-                .insert(&"negative".to_string(), CacheEntry::new(-10))
+                .insert("negative".to_string(), CacheEntry::new(-10))
                 .await
                 .expect("insert failed");
 
@@ -519,7 +523,7 @@ mod tests {
     fn fallback_insert_writes_both() {
         block_on(async {
             let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             // Both tiers should have the value
             let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
             assert_eq!(*entry.value(), 42);
@@ -530,7 +534,7 @@ mod tests {
     fn fallback_invalidate() {
         block_on(async {
             let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             cache.invalidate(&"key".to_string()).await.unwrap();
             assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
         });
@@ -540,7 +544,7 @@ mod tests {
     fn fallback_clear() {
         block_on(async {
             let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             cache.clear().await.unwrap();
             assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
         });
@@ -551,7 +555,7 @@ mod tests {
         block_on(async {
             let cache = make_fallback_cache(FallbackPromotionPolicy::always());
             assert_eq!(cache.len(), Some(0));
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             assert_eq!(cache.len(), Some(1));
         });
     }
@@ -566,7 +570,7 @@ mod tests {
         // Insert an entry with an old cached_at so should_refresh returns true
         let old_time = clock.system_time() - Duration::from_secs(120);
         let entry = CacheEntry::expires_at(42, Duration::from_secs(300), old_time);
-        primary_mock.insert(&"key".to_string(), entry).await.unwrap();
+        primary_mock.insert("key".to_string(), entry).await.unwrap();
 
         let fallback_mock = MockCache::<String, i32>::new();
         let telemetry = TelemetryConfig::new().build();

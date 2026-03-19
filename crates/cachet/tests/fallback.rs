@@ -45,7 +45,7 @@ fn fallback_cache_hit_in_primary() {
         let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         let result = cache.get(&key).await.unwrap();
         assert!(result.is_some());
@@ -64,7 +64,7 @@ fn fallback_cache_insert_goes_to_both() {
         let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_some());
     });
@@ -81,7 +81,7 @@ fn fallback_cache_invalidate_clears_both() {
         let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         cache.invalidate(&key).await.unwrap();
 
         assert!(cache.get(&key).await.unwrap().is_none());
@@ -98,8 +98,8 @@ fn fallback_cache_clear() {
 
         let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
-        cache.insert(&"k1".to_string(), CacheEntry::new(1)).await.unwrap();
-        cache.insert(&"k2".to_string(), CacheEntry::new(2)).await.unwrap();
+        cache.insert("k1".to_string(), CacheEntry::new(1)).await.unwrap();
+        cache.insert("k2".to_string(), CacheEntry::new(2)).await.unwrap();
 
         cache.clear().await.unwrap();
 
@@ -123,7 +123,7 @@ fn fallback_cache_len_returns_correct_count() {
 
         assert_eq!(cache.len(), Some(0));
 
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(cache.len(), Some(1));
     });
@@ -151,7 +151,7 @@ fn fallback_cache_insert_error_propagation() {
             .fallback(fallback)
             .build();
 
-        let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
         result.unwrap_err();
     });
 }
@@ -235,7 +235,7 @@ fn fallback_builder_with_promotion_policy_always() {
             .build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });
@@ -256,7 +256,7 @@ fn fallback_builder_with_promotion_policy_never() {
             .build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });
@@ -281,7 +281,7 @@ fn fallback_builder_with_promotion_policy_when_boxed() {
             .build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });
@@ -310,7 +310,7 @@ fn nested_fallback_builder() {
             .build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap();
         assert_eq!(*entry.unwrap().value(), 42);
     });
@@ -325,7 +325,7 @@ fn fallback_get_triggers_promotion() {
         let primary_storage = cachet_memory::InMemoryCache::<String, i32>::new();
         let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
 
-        fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        fallback_storage.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -355,7 +355,7 @@ fn fallback_builder_stampede_protection() {
             .build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
     });
@@ -375,7 +375,7 @@ fn fallback_builder_use_logs_emits_logs() {
         let cache = Cache::builder::<String, i32>(clock).memory().use_logs().fallback(fallback).build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         cache.get(&key).await.unwrap().expect("entry should exist");
 
         // Verify logs were actually emitted
@@ -395,7 +395,7 @@ fn cache_builder_use_logs_emits_logs() {
         let cache = Cache::builder::<String, i32>(clock).memory().use_logs().build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         cache.get(&key).await.unwrap().expect("entry should exist");
 
         // Verify logs were actually emitted (catches with_logs mutation to false)
@@ -429,7 +429,7 @@ async fn fallback_builder_time_to_refresh_does_not_panic() {
         .build();
 
     let key = "key".to_string();
-    cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+    cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
     let entry = cache.get(&key).await.unwrap().expect("entry should exist");
     assert_eq!(*entry.value(), 42);
 }
@@ -441,7 +441,7 @@ async fn do_refresh_updates_primary_from_fallback() {
     let control = tick::ClockControl::new();
     let clock = control.to_clock();
     let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
-    fallback_storage.insert(&"key".to_string(), CacheEntry::new(99)).await.unwrap();
+    fallback_storage.insert("key".to_string(), CacheEntry::new(99)).await.unwrap();
 
     let primary_storage = cachet_memory::InMemoryCache::<String, i32>::new();
     let primary_check = primary_storage.clone();
@@ -450,7 +450,7 @@ async fn do_refresh_updates_primary_from_fallback() {
     // Must set cached_at because CacheWrapper checks value.cached_at() for refresh eligibility.
     let mut stale_entry = CacheEntry::new(42);
     stale_entry.ensure_cached_at(clock.system_time());
-    primary_storage.insert(&"key".to_string(), stale_entry).await.unwrap();
+    primary_storage.insert("key".to_string(), stale_entry).await.unwrap();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
     let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
@@ -486,7 +486,7 @@ async fn do_refresh_deduplicates_in_flight() {
     let control = tick::ClockControl::new();
     let clock = control.to_clock();
     let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
-    fallback_storage.insert(&"key".to_string(), CacheEntry::new(99)).await.unwrap();
+    fallback_storage.insert("key".to_string(), CacheEntry::new(99)).await.unwrap();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
     let ttr = TimeToRefresh::new(Duration::from_nanos(1), Spawner::new_tokio());
@@ -499,7 +499,7 @@ async fn do_refresh_deduplicates_in_flight() {
 
     // Insert a stale entry
     let key = "key".to_string();
-    cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+    cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
 
     // Advance the clock so the ttr duration elapses
     control.advance(Duration::from_millis(5));
@@ -529,7 +529,7 @@ fn fallback_builder_use_metrics() {
             .build();
 
         let key = "key".to_string();
-        cache.insert(&key, CacheEntry::new(42)).await.unwrap();
+        cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&key).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
     });
@@ -568,7 +568,7 @@ fn fallback_get_promotion_failure_still_returns_value() {
         primary_storage.fail_when(|op| matches!(op, cachet_tier::CacheOp::Insert { .. }));
 
         let fallback_storage = cachet_memory::InMemoryCache::<String, i32>::new();
-        fallback_storage.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        fallback_storage.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
@@ -600,7 +600,7 @@ fn fallback_insert_primary_error_propagation() {
             .fallback(fallback)
             .build();
 
-        let result = cache.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
         assert!(result.is_err(), "primary insert error should propagate");
     });
 }
@@ -664,7 +664,7 @@ fn nested_fallback_three_tier_chain() {
         let cache = l1_with_l2.fallback(l3).build();
 
         // Insert and retrieve through the 3-tier hierarchy
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         let entry = cache.get(&"key".to_string()).await.unwrap().expect("entry should exist");
         assert_eq!(*entry.value(), 42);
 

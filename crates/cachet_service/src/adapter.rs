@@ -72,7 +72,7 @@ where
         }
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let request = CacheOperation::Insert(InsertRequest::new(key.clone(), entry));
         match self.service.execute(request).await? {
             CacheResponse::Insert => Ok(()),
@@ -147,7 +147,7 @@ mod tests {
     #[tokio::test]
     async fn adapter_insert_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
-        let result = adapter.insert(&"key".to_string(), CacheEntry::new(100)).await;
+        let result = adapter.insert("key".to_string(), CacheEntry::new(100)).await;
         assert!(result.is_ok(), "insert should succeed");
     }
 
@@ -208,7 +208,7 @@ mod tests {
     #[tokio::test]
     async fn adapter_insert_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
-        let result = adapter.insert(&"key".to_string(), CacheEntry::new(42)).await;
+        let result = adapter.insert("key".to_string(), CacheEntry::new(42)).await;
         result.unwrap_err();
     }
 

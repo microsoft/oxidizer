@@ -35,10 +35,10 @@ use crate::builder::InMemoryCacheBuilder;
 /// let cache = InMemoryCache::<String, i32>::new();
 ///
 /// cache
-///     .insert(&"key".to_string(), CacheEntry::new(42))
+///     .insert("key".to_string(), CacheEntry::new(42))
 ///     .await
 ///     .unwrap();
-/// let value = cache.get("key").await.unwrap();
+/// let value = cache.get(&"key".to_string()).await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # };
 /// ```
@@ -176,7 +176,7 @@ where
         Ok(self.inner.get(key).await)
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.inner.insert(key.clone(), entry).await;
         Ok(())
     }
@@ -252,7 +252,7 @@ mod tests {
             .expect("Failed to build cache");
 
         futures::executor::block_on(async {
-            cache.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             cache.inner.run_pending_tasks().await;
 
             let value = cache.get(&"key".to_string()).await.unwrap();
@@ -319,7 +319,7 @@ mod tests {
         let cache = InMemoryCache::<String, i32>::new();
         block_on(async {
             cache
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -335,7 +335,7 @@ mod tests {
         let cache = InMemoryCache::<String, i32>::new();
         block_on(async {
             cache
-                .insert(&"key".to_string(), CacheEntry::expires_at(42, Duration::ZERO, SystemTime::now()))
+                .insert("key".to_string(), CacheEntry::expires_at(42, Duration::ZERO, SystemTime::now()))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -352,14 +352,14 @@ mod tests {
         block_on(async {
             // Insert entry without per-entry TTL (will not expire on its own)
             cache
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
 
             // Re-insert same key with zero TTL (should expire immediately via expire_after_update)
             cache
-                .insert(&"key".to_string(), CacheEntry::expires_at(99, Duration::ZERO, SystemTime::now()))
+                .insert("key".to_string(), CacheEntry::expires_at(99, Duration::ZERO, SystemTime::now()))
                 .await
                 .expect("Update should succeed");
             cache.inner.run_pending_tasks().await;
@@ -378,7 +378,7 @@ mod tests {
             .expect("Failed to build cache");
         block_on(async {
             cache
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -397,7 +397,7 @@ mod tests {
             .expect("Failed to build cache");
         block_on(async {
             cache
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -413,7 +413,7 @@ mod tests {
         let cache = InMemoryCache::<String, i32>::new();
         block_on(async {
             cache
-                .insert(&"key".to_string(), CacheEntry::new(42))
+                .insert("key".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -432,11 +432,11 @@ mod tests {
         let cache = InMemoryCache::<String, i32>::new();
         block_on(async {
             cache
-                .insert(&"key1".to_string(), CacheEntry::new(42))
+                .insert("key1".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache
-                .insert(&"key2".to_string(), CacheEntry::new(43))
+                .insert("key2".to_string(), CacheEntry::new(43))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -459,11 +459,11 @@ mod tests {
             assert_eq!(cache.len(), Some(0));
 
             cache
-                .insert(&"key1".to_string(), CacheEntry::new(42))
+                .insert("key1".to_string(), CacheEntry::new(42))
                 .await
                 .expect("Insert should succeed");
             cache
-                .insert(&"key2".to_string(), CacheEntry::new(43))
+                .insert("key2".to_string(), CacheEntry::new(43))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;
@@ -493,7 +493,7 @@ mod tests {
         block_on(async {
             for i in 0..=capacity {
                 cache
-                    .insert(&format!("key{i}"), CacheEntry::new(i))
+                    .insert(format!("key{i}"), CacheEntry::new(i))
                     .await
                     .expect("Insert should succeed");
             }
@@ -501,7 +501,7 @@ mod tests {
 
             // Insert one more entry to trigger eviction
             cache
-                .insert(&format!("key{capacity}"), CacheEntry::new(capacity))
+                .insert(format!("key{capacity}"), CacheEntry::new(capacity))
                 .await
                 .expect("Insert should succeed");
             cache.inner.run_pending_tasks().await;

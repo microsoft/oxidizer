@@ -23,7 +23,7 @@ impl CacheTier<String, String> for SlowBackend {
         Ok(Some(CacheEntry::new(format!("value_for_{key}"))))
     }
 
-    async fn insert(&self, _: &String, _: CacheEntry<String>) -> Result<(), Error> {
+    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<(), Error> {
         Ok(())
     }
 

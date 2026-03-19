@@ -17,7 +17,7 @@ fn single_level_future_size_bounded() {
     let cache = Cache::builder::<String, i32>(clock).memory().build();
 
     let get_size = size_of_val(&cache.get(&key));
-    let insert_size = size_of_val(&cache.insert(&key, CacheEntry::new(42)));
+    let insert_size = size_of_val(&cache.insert(key.clone(), CacheEntry::new(42)));
     let invalidate_size = size_of_val(&cache.invalidate(&key));
 
     // Verify that the future sizes are within reasonable bounds
@@ -37,7 +37,7 @@ fn future_size_bounded_with_nesting() {
     let cache = Cache::builder::<String, i32>(clock).memory().fallback(l2_cache).build();
 
     let get_size = size_of_val(&cache.get(&key));
-    let insert_size = size_of_val(&cache.insert(&key, CacheEntry::new(42)));
+    let insert_size = size_of_val(&cache.insert(key.clone(), CacheEntry::new(42)));
     let invalidate_size = size_of_val(&cache.invalidate(&key));
 
     // Fallback tier is type-erased via DynamicCache, so future sizes are constant

@@ -89,7 +89,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
                 let _span = op.measure_thread();
                 let start = Instant::now();
                 for i in 0..iters {
-                    let _ = cache.insert(&format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
+                    let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
                 }
                 start.elapsed()
             })
@@ -112,7 +112,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
                 let _span = op.measure_thread();
                 let start = Instant::now();
                 for i in 0..iters {
-                    let _ = cache.insert(&format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
+                    let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
                 }
                 start.elapsed()
             })

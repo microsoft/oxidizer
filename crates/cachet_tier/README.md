@@ -46,7 +46,7 @@ where
         Ok(self.0.read().unwrap().get(key).cloned())
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.0.write().unwrap().insert(key.clone(), entry);
         Ok(())
     }
@@ -74,7 +74,7 @@ for multi-tier caches with heterogeneous storage backends.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3sa6UxTwNGoG1W6bVxnFLoSG1OFZYSD3W1cG9bNTF3YfeuvYWSBgmtjYWNoZXRfdGllcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0hRqDfWg1oDG5BT1ZI-3omTG5WE4GB0Mg57G-G4ebzGeSk5YWSBgmtjYWNoZXRfdGllcmUwLjEuMA
  [__link0]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry
  [__link2]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error

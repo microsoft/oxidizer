@@ -50,7 +50,7 @@ async fn main() {
 
     // Use CacheServiceExt for ergonomic methods on the wrapped service
     logged_cache
-        .insert(&"key".to_string(), CacheEntry::new("value".to_string()))
+        .insert("key".to_string(), CacheEntry::new("value".to_string()))
         .await
         .expect("insert failed");
 

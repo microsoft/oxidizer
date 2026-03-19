@@ -14,7 +14,7 @@ async fn main() {
     let cache = Cache::builder(clock).storage(mock.clone()).build();
 
     // Operations are recorded
-    cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+    cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
     cache.get(&"key".to_string()).await.expect("get failed");
 
     println!("operations: {} recorded", mock.operations().len());

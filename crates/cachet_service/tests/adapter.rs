@@ -64,7 +64,7 @@ async fn adapter_integrates_with_cache_tier_trait() {
     // Test CacheTier operations through the adapter
     assert!(adapter.get(&"key".to_string()).await.unwrap().is_none());
 
-    adapter.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+    adapter.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
     let result = adapter.get(&"key".to_string()).await;
     assert!(result.is_ok());
@@ -85,7 +85,7 @@ async fn adapter_operations_return_ok() {
     assert!(result.unwrap().is_none());
 
     // insert
-    adapter.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+    adapter.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
     // get on existing key
     let result = adapter.get(&"key".to_string()).await.unwrap();
@@ -103,9 +103,9 @@ async fn adapter_clear_removes_all_entries() {
     let service = InMemoryCacheService::<String, i32>::new();
     let adapter = ServiceAdapter::new(service);
 
-    adapter.insert(&"key1".to_string(), CacheEntry::new(1)).await.unwrap();
-    adapter.insert(&"key2".to_string(), CacheEntry::new(2)).await.unwrap();
-    adapter.insert(&"key3".to_string(), CacheEntry::new(3)).await.unwrap();
+    adapter.insert("key1".to_string(), CacheEntry::new(1)).await.unwrap();
+    adapter.insert("key2".to_string(), CacheEntry::new(2)).await.unwrap();
+    adapter.insert("key3".to_string(), CacheEntry::new(3)).await.unwrap();
 
     adapter.clear().await.unwrap();
     assert!(adapter.get(&"key1".to_string()).await.unwrap().is_none());

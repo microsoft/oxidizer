@@ -31,7 +31,7 @@ async fn main() {
         .build();
 
     cache
-        .insert(&"key".to_string(), CacheEntry::new("value".to_string()))
+        .insert("key".to_string(), CacheEntry::new("value".to_string()))
         .await
         .expect("insert failed");
 

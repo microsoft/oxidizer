@@ -135,7 +135,7 @@ where
         }
     }
 
-    async fn insert(&self, key: &K, mut entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
@@ -243,7 +243,7 @@ mod tests {
 
             let entry = CacheEntry::expires_at(42, entry_ttl, clock.system_time());
 
-            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+            wrapper.insert("key".to_string(), entry).await.unwrap();
 
             let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
             assert_eq!(stored.ttl(), Some(entry_ttl));
@@ -260,7 +260,7 @@ mod tests {
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
 
             let entry = CacheEntry::new(42);
-            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+            wrapper.insert("key".to_string(), entry).await.unwrap();
 
             let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
             assert!(stored.ttl().is_none());
@@ -278,7 +278,7 @@ mod tests {
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
 
             let entry = CacheEntry::new(42);
-            wrapper.insert(&"key".to_string(), entry).await.unwrap();
+            wrapper.insert("key".to_string(), entry).await.unwrap();
 
             let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
             assert!(stored.ttl().is_none());
@@ -366,7 +366,7 @@ mod tests {
             assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
 
             // insert + get hit
-            wrapper.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            wrapper.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             let entry = wrapper.get(&"key".to_string()).await.unwrap().unwrap();
             assert_eq!(*entry.value(), 42);
 
@@ -375,7 +375,7 @@ mod tests {
             assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
 
             // insert + clear
-            wrapper.insert(&"a".to_string(), CacheEntry::new(1)).await.unwrap();
+            wrapper.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
             wrapper.clear().await.unwrap();
             assert!(wrapper.get(&"a".to_string()).await.unwrap().is_none());
         });
@@ -389,7 +389,7 @@ mod tests {
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
             assert_eq!(wrapper.len(), Some(0));
-            wrapper.insert(&"key".to_string(), CacheEntry::new(1)).await.unwrap();
+            wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             assert_eq!(wrapper.len(), Some(1));
         });
     }
@@ -415,7 +415,7 @@ mod tests {
             inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Insert { .. }));
             let telemetry = TelemetryConfig::new().build();
             let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-            let result = wrapper.insert(&"key".to_string(), CacheEntry::new(1)).await;
+            let result = wrapper.insert("key".to_string(), CacheEntry::new(1)).await;
             result.unwrap_err();
         });
     }

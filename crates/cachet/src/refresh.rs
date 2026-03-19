@@ -164,7 +164,7 @@ where
     }
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
-        let timed = self.clock.timed_async(self.primary.insert(&key, value)).await;
+        let timed = self.clock.timed_async(self.primary.insert(key, value)).await;
 
         match timed.result {
             Ok(()) => {
@@ -387,7 +387,7 @@ mod fetch_and_promote_tests {
         block_on(async {
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
-            fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::never());
 
@@ -404,7 +404,7 @@ mod fetch_and_promote_tests {
         block_on(async {
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
-            fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::always());
 
@@ -424,7 +424,7 @@ mod fetch_and_promote_tests {
             let primary = MockCache::<String, i32>::new();
             primary.fail_when(|_| true);
             let fallback = MockCache::<String, i32>::new();
-            fallback.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+            fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
             let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
 

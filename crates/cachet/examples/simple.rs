@@ -19,7 +19,7 @@ async fn main() {
     let key = "user:1".to_string();
 
     // Insert and retrieve
-    cache.insert(&key, "Alice".to_string().into()).await.expect("insert failed");
+    cache.insert(key.clone(), "Alice".to_string().into()).await.expect("insert failed");
     let value = cache.get(&key).await.expect("get failed");
     match value {
         Some(e) => println!("get({key}): {}", e.value()),

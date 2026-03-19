@@ -48,7 +48,7 @@ fn get_returns_none_for_missing_key() {
 fn insert_and_get_returns_value() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
         let entry = cache
             .get(&"key".to_string())
@@ -64,8 +64,8 @@ fn insert_and_get_returns_value() {
 fn insert_overwrites_existing_value() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
-        cache.insert(&"key".to_string(), CacheEntry::new(100)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(100)).await.expect("insert failed");
 
         let entry = cache
             .get(&"key".to_string())
@@ -86,7 +86,7 @@ fn get_returns_ok() {
         assert!(result.is_ok());
         assert!(result.expect("get failed").is_none());
 
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
         let result = cache.get(&"key".to_string()).await;
         assert!(result.is_ok());
         assert!(result.expect("get failed").is_some());
@@ -98,7 +98,7 @@ fn get_returns_ok() {
 fn insert_returns_ok() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
         assert!(cache.get(&"key".to_string()).await.expect("get failed").is_some());
     });
 }
@@ -108,7 +108,7 @@ fn insert_returns_ok() {
 fn invalidate_removes_entry() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
         cache.invalidate(&"key".to_string()).await.expect("invalidate failed");
 
@@ -131,7 +131,7 @@ fn invalidate_nonexistent_key_succeeds() {
 fn invalidate_returns_ok() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
         cache.invalidate(&"key".to_string()).await.expect("invalidate failed");
         assert!(cache.get(&"key".to_string()).await.expect("get failed").is_none());
@@ -143,9 +143,9 @@ fn invalidate_returns_ok() {
 fn clear_removes_all_entries() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key1".to_string(), CacheEntry::new(1)).await.expect("insert failed");
-        cache.insert(&"key2".to_string(), CacheEntry::new(2)).await.expect("insert failed");
-        cache.insert(&"key3".to_string(), CacheEntry::new(3)).await.expect("insert failed");
+        cache.insert("key1".to_string(), CacheEntry::new(1)).await.expect("insert failed");
+        cache.insert("key2".to_string(), CacheEntry::new(2)).await.expect("insert failed");
+        cache.insert("key3".to_string(), CacheEntry::new(3)).await.expect("insert failed");
 
         cache.clear().await.expect("clear failed");
 
@@ -160,7 +160,7 @@ fn clear_removes_all_entries() {
 fn clear_returns_ok() {
     block_on(async {
         let cache = InMemoryCache::<String, i32>::new();
-        cache.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
         cache.clear().await.expect("clear failed");
     });
@@ -190,7 +190,7 @@ fn clone_shares_underlying_cache() {
         let cache1 = InMemoryCache::<String, i32>::new();
         let cache2 = cache1.clone();
 
-        cache1.insert(&"key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
+        cache1.insert("key".to_string(), CacheEntry::new(42)).await.expect("insert failed");
 
         let entry = cache2
             .get(&"key".to_string())

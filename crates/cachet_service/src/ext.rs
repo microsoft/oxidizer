@@ -14,7 +14,7 @@ pub trait CacheServiceExt<K, V>: Sized {
     /// Retrieves a value from the cache.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
     /// Inserts a value into the cache.
-    fn insert(&self, key: &K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
     /// Invalidates (removes) a value from the cache.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;
     /// Clears all entries from the cache.
@@ -35,7 +35,7 @@ where
         }
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let req = InsertRequest { key: key.clone(), entry };
         match self.execute(CacheOperation::Insert(req)).await? {
             CacheResponse::Insert => Ok(()),
@@ -106,9 +106,7 @@ mod tests {
     #[tokio::test]
     async fn ext_insert_returns_ok() {
         let svc = CorrectService;
-        CacheServiceExt::insert(&svc, &"key".to_string(), CacheEntry::new(42))
-            .await
-            .unwrap();
+        CacheServiceExt::insert(&svc, "key".to_string(), CacheEntry::new(42)).await.unwrap();
     }
 
     #[tokio::test]
@@ -132,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn ext_insert_wrong_response_returns_error() {
         let svc = WrongResponseService;
-        CacheServiceExt::insert(&svc, &"key".to_string(), CacheEntry::new(42))
+        CacheServiceExt::insert(&svc, "key".to_string(), CacheEntry::new(42))
             .await
             .unwrap_err();
     }

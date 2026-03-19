@@ -33,7 +33,7 @@ fn bench_cache_operations(c: &mut Criterion) {
         let cache = Arc::new(InMemoryCache::<String, String>::new());
         rt.block_on(async {
             for i in 0..1000 {
-                let _ = cache.insert(&format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
+                let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
             }
         });
 
@@ -74,7 +74,7 @@ fn bench_cache_operations(c: &mut Criterion) {
             rt.block_on(async move {
                 let start = Instant::now();
                 for i in 0..iters {
-                    let _ = cache.insert(&format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
+                    let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
                 }
                 start.elapsed()
             })

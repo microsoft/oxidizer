@@ -74,7 +74,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// let clock = Clock::new_tokio();
 /// let cache = Cache::builder::<String, i32>(clock).memory().build();
 ///
-/// cache.insert("key", CacheEntry::new(42)).await?;
+/// cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 /// let value = cache.get("key").await?;
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # Ok::<(), cachet::Error>(())
@@ -257,17 +257,12 @@ where
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
-    /// cache.insert("key", CacheEntry::new(42)).await?;
+    /// cache.insert("key".to_string(), CacheEntry::new(42)).await?;
     /// # Ok::<(), cachet::Error>(())
     /// # };
     /// ```
-    pub async fn insert<Q>(&self, key: &Q, entry: CacheEntry<V>) -> Result<(), Error>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
-    {
-        let owned = key.to_owned();
-        self.storage.insert(&owned, entry).await
+    pub async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.storage.insert(key, entry).await
     }
 
     /// Invalidates (removes) a value from the cache.
@@ -363,10 +358,30 @@ where
     /// If the key is present, returns the cached value immediately. Otherwise,
     /// calls the provided function to compute the value, inserts it, and returns it.
     ///
+    /// # Concurrency
+    ///
+    /// This method is **not atomic**: there is a gap between the cache lookup and the
+    /// subsequent insert (a "time-of-check, time-of-use" or TOCTOU window). During
+    /// that window another caller may insert or invalidate the same key. Consequences:
+    ///
+    /// - **Last writer wins** — if two callers both miss and compute concurrently,
+    ///   whichever inserts last determines the cached value. This is standard
+    ///   cache-aside behavior and is harmless because caches are ephemeral;
+    ///   TTL ensures eventual consistency with the source of truth.
+    /// - **Invalidation during compute** — if one caller computes while another
+    ///   calls [`invalidate`](Self::invalidate), the computed value may be inserted
+    ///   after the invalidation, causing the entry to reappear. The entry will
+    ///   still expire naturally if configured.
+    ///
+    /// Stampede protection (when enabled) **narrows** this window by coalescing
+    /// concurrent misses for the same key — only one caller computes while others
+    /// share its result. It does not close the window entirely; cross-operation
+    /// races (e.g., an `invalidate` arriving mid-compute) are still possible.
+    ///
     /// # Stampede Protection
     ///
     /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
-    /// concurrent calls for the same missing key are coalesced - only one caller
+    /// concurrent calls for the same missing key are coalesced — only one caller
     /// computes the value while others wait and share the result.
     ///
     /// # Errors
@@ -416,14 +431,19 @@ where
         }
         let value = f().await;
         let entry = CacheEntry::new(value);
-        self.insert(key, entry.clone()).await?;
+        self.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.
     ///
     /// Like [`get_or_insert`](Self::get_or_insert), but the provided function can fail.
-    /// Only successful results are cached - errors are not cached, allowing retries.
+    /// Only successful results are cached — errors are not cached, allowing retries.
+    ///
+    /// # Concurrency
+    ///
+    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) —
+    /// see its Concurrency section for details.
     ///
     /// # Stampede Protection
     ///
@@ -485,15 +505,20 @@ where
         }
         let value = f().await.map_err(Error::from_source)?;
         let entry = CacheEntry::new(value);
-        self.insert(key, entry.clone()).await?;
+        self.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
     /// Retrieves a value from cache, or conditionally computes and caches it.
     ///
     /// Like [`get_or_insert`](Self::get_or_insert), but the function returns `Option<V>`.
-    /// Only `Some` values are cached - `None` results are not cached, allowing the
+    /// Only `Some` values are cached — `None` results are not cached, allowing the
     /// computation to be retried on subsequent calls.
+    ///
+    /// # Concurrency
+    ///
+    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) —
+    /// see its Concurrency section for details.
     ///
     /// # Stampede Protection
     ///
@@ -557,7 +582,7 @@ where
         match f().await {
             Some(value) => {
                 let entry = CacheEntry::new(value);
-                self.insert(key, entry.clone()).await?;
+                self.insert(key.clone(), entry.clone()).await?;
                 Ok(Some(entry))
             }
             None => Ok(None),
@@ -581,7 +606,7 @@ where
                 Ok(cachet_service::CacheResponse::Get(entry))
             }
             cachet_service::CacheOperation::Insert(req) => {
-                self.insert(&req.key, req.entry).await?;
+                self.insert(req.key, req.entry).await?;
                 Ok(cachet_service::CacheResponse::Insert)
             }
             cachet_service::CacheOperation::Invalidate(req) => {
@@ -653,7 +678,7 @@ mod tests {
     fn cache_insert_and_get() {
         block_on(async {
             let cache = build_cache();
-            cache.insert("key", CacheEntry::new(42)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
             let entry = cache.get("key").await.unwrap().expect("should exist");
             assert_eq!(*entry.value(), 42);
         });
@@ -663,7 +688,7 @@ mod tests {
     fn cache_invalidate_no_stampede() {
         block_on(async {
             let cache = build_cache();
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             cache.invalidate("key").await.unwrap();
             assert!(cache.get("key").await.unwrap().is_none());
         });
@@ -673,7 +698,7 @@ mod tests {
     fn cache_invalidate_with_stampede() {
         block_on(async {
             let cache = build_cache_with_stampede();
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             cache.invalidate("key").await.unwrap();
             assert!(cache.get("key").await.unwrap().is_none());
         });
@@ -684,7 +709,7 @@ mod tests {
         block_on(async {
             let cache = build_cache();
             assert!(!cache.contains("key").await.unwrap());
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             assert!(cache.contains("key").await.unwrap());
         });
     }
@@ -693,7 +718,7 @@ mod tests {
     fn cache_clear() {
         block_on(async {
             let cache = build_cache();
-            cache.insert("a", CacheEntry::new(1)).await.unwrap();
+            cache.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
             cache.clear().await.unwrap();
             assert!(cache.get("a").await.unwrap().is_none());
         });
@@ -705,7 +730,7 @@ mod tests {
             let cache = build_cache();
             assert_eq!(cache.len(), Some(0));
             assert_eq!(cache.is_empty(), Some(true));
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             assert_eq!(cache.len(), Some(1));
             assert_eq!(cache.is_empty(), Some(false));
         });
@@ -715,7 +740,7 @@ mod tests {
     fn cache_get_with_stampede() {
         block_on(async {
             let cache = build_cache_with_stampede();
-            cache.insert("key", CacheEntry::new(99)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(99)).await.unwrap();
             let entry = cache.get("key").await.unwrap().expect("should exist");
             assert_eq!(*entry.value(), 99);
         });
@@ -742,7 +767,7 @@ mod tests {
     fn cache_get_or_insert_hit() {
         block_on(async {
             let cache = build_cache();
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             let entry = cache.get_or_insert("key", || async { 99 }).await.unwrap();
             assert_eq!(*entry.value(), 1);
         });
@@ -773,7 +798,7 @@ mod tests {
     fn cache_try_get_or_insert_hit() {
         block_on(async {
             let cache = build_cache();
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             let entry = cache
                 .try_get_or_insert("key", || async { Ok::<_, std::io::Error>(99) })
                 .await
@@ -827,7 +852,7 @@ mod tests {
     fn cache_optionally_get_or_insert_hit() {
         block_on(async {
             let cache = build_cache();
-            cache.insert("key", CacheEntry::new(1)).await.unwrap();
+            cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             let entry = cache.optionally_get_or_insert("key", || async { Some(99) }).await.unwrap();
             assert_eq!(*entry.unwrap().value(), 1);
         });

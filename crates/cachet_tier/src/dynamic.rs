@@ -47,12 +47,12 @@ impl<K, V> Clone for DynamicCache<K, V> {
     }
 }
 
-impl<K: Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
+impl<K: Send + Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         self.0.get(key).await
     }
 
-    async fn insert(&self, key: &K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         self.0.insert(key, entry).await
     }
 
@@ -80,7 +80,7 @@ mod tests {
         let dynamic = DynamicCache::new(cache);
         let clone = dynamic.clone();
 
-        dynamic.insert(&"key".to_string(), CacheEntry::new(42)).await.unwrap();
+        dynamic.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         let entry = clone.get(&"key".to_string()).await.unwrap().unwrap();
         assert_eq!(*entry.value(), 42);

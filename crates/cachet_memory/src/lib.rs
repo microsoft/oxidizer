@@ -27,7 +27,7 @@
 //!     .expect("Failed to build cache");
 //!
 //! cache
-//!     .insert(&"key".to_string(), CacheEntry::new(42))
+//!     .insert("key".to_string(), CacheEntry::new(42))
 //!     .await
 //!     .unwrap();
 //! let value = cache.get(&"key".to_string()).await.unwrap();
