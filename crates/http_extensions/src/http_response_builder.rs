@@ -363,7 +363,7 @@ impl HttpResponseBuilder<'_> {
             try_content_length_header(&mut self.builder, length);
         }
 
-        if let Some(content_type) = self.content_type.clone() {
+        if let Some(content_type) = self.content_type.take() {
             try_header(&mut self.builder, CONTENT_TYPE, content_type);
         }
 
