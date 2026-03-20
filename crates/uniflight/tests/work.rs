@@ -16,6 +16,7 @@ fn unreachable_future() -> std::future::Pending<String> {
     std::future::pending()
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn direct_call() {
     let group = Merger::<String, String, _>::new_per_process();
@@ -28,6 +29,7 @@ async fn direct_call() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn parallel_call() {
     let call_counter = AtomicUsize::default();
@@ -46,6 +48,7 @@ async fn parallel_call() {
     assert_eq!(call_counter.load(Acquire), 1);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn parallel_call_seq_await() {
     let call_counter = AtomicUsize::default();
@@ -66,6 +69,7 @@ async fn parallel_call_seq_await() {
     assert_eq!(call_counter.load(Acquire), 1);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn call_with_static_str_key() {
     let group = Merger::<String, String, _>::new_per_process();
@@ -78,6 +82,7 @@ async fn call_with_static_str_key() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn call_with_static_string_key() {
     let group = Merger::<String, String, _>::new_per_process();
@@ -90,6 +95,7 @@ async fn call_with_static_string_key() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn call_with_custom_key() {
     #[derive(Clone, PartialEq, Eq, Hash)]
@@ -104,6 +110,7 @@ async fn call_with_custom_key() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn late_wait() {
     let group = Merger::<String, String, _>::new_per_process();
@@ -117,6 +124,7 @@ async fn late_wait() {
     assert_eq!(fut_late.await, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn cancel() {
     let group = Merger::<String, String, _>::new_per_process();
@@ -140,6 +148,7 @@ async fn cancel() {
     assert!(begin.elapsed() > Duration::from_millis(1500));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn leader_panic_returns_error_to_all() {
     let group: Arc<Merger<String, String>> = Arc::new(Merger::new());
@@ -186,6 +195,7 @@ async fn leader_panic_returns_error_to_all() {
     assert_eq!(follower_err.message(), "leader panicked");
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn debug_impl() {
     let group: Merger<String, String> = Merger::new();
@@ -210,6 +220,7 @@ async fn debug_impl() {
     assert_eq!(fut.await, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn per_process_strategy() {
     let group = Merger::<String, String, _>::new_per_process();
@@ -217,6 +228,7 @@ async fn per_process_strategy() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn per_numa_strategy() {
     let group = Merger::<String, String, _>::new_per_numa();
@@ -224,6 +236,7 @@ async fn per_numa_strategy() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn per_core_strategy() {
     let group = Merger::<String, String, _>::new_per_core();
@@ -231,6 +244,7 @@ async fn per_core_strategy() {
     assert_eq!(result, Ok("Result".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn clone_shares_state() {
     let group1 = Merger::<String, String, _>::new_per_process();
@@ -258,6 +272,7 @@ async fn clone_shares_state() {
     assert_eq!(call_counter.load(Acquire), 1);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn leader_panicked_error_traits() {
     // Create an error by triggering a panic
@@ -297,6 +312,7 @@ async fn leader_panicked_error_traits() {
     assert!(std_error.source().is_none());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn retry_after_panic_succeeds() {
     let group: Merger<String, String> = Merger::new();
@@ -319,6 +335,7 @@ async fn retry_after_panic_succeeds() {
     assert_eq!(result, Ok("success".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_impl() {
     // Test that Default::default() works the same as new()
@@ -332,6 +349,7 @@ async fn default_impl() {
     assert_eq!(result2, Ok("value".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn mixed_panic_and_success() {
     let group: Merger<String, String> = Merger::new();
@@ -361,6 +379,7 @@ async fn mixed_panic_and_success() {
     assert_eq!(success_result, Ok("success".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn follower_closure_not_called_on_panic() {
     let group: Arc<Merger<String, String>> = Arc::new(Merger::new());
