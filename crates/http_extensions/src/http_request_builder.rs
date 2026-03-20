@@ -328,11 +328,11 @@ impl<R> HttpRequestBuilder<'_, R> {
         Ok(request)
     }
 
-    /// Sets an external body implementation as the request body.
+    /// Sets a custom body implementation as the request body.
     ///
     /// This is useful when you have a custom body implementation that implements
     /// the `http_body::Body` trait and want to use it with the `HttpRequestBuilder`.
-    pub fn external<B>(self, body: B) -> Self
+    pub fn custom_body<B>(self, body: B) -> Self
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
@@ -342,7 +342,7 @@ impl<R> HttpRequestBuilder<'_, R> {
 
     /// Sets a streaming body for the request.
     ///
-    /// This is a convenience wrapper around [`external`](Self::external) that accepts
+    /// This is a convenience wrapper around [`custom_body`](Self::custom_body) that accepts
     /// a [`Stream`] of [`BytesView`] chunks. It avoids the need to manually wrap
     /// the stream in a [`StreamBody`][http_body_util::StreamBody].
     ///
@@ -815,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn external_functionality() {
+    fn custom_body_functionality() {
         let builder = HttpBodyBuilder::new_fake();
         let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"]);
 
@@ -830,12 +830,12 @@ mod tests {
     }
 
     #[test]
-    fn external_sets_body_from_custom_body_impl() {
+    fn custom_body_sets_body_from_custom_body_impl() {
         let builder = HttpBodyBuilder::new_fake();
 
         let request = HttpRequestBuilder::new_fake()
             .post("https://example.com/upload")
-            .external(SingleChunkBody::new(BytesView::copied_from_slice(b"external payload", &builder)))
+            .custom_body(SingleChunkBody::new(BytesView::copied_from_slice(b"external payload", &builder)))
             .build()
             .unwrap();
 

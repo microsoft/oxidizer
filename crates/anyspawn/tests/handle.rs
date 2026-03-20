@@ -8,6 +8,7 @@
 
 use anyspawn::Spawner;
 
+#[cfg_attr(miri, ignore)]
 #[cfg(feature = "tokio")]
 #[tokio::test]
 async fn join_handle_debug() {

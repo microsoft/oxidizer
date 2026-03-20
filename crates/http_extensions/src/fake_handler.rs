@@ -532,7 +532,7 @@ mod tests {
     fn from_response_unbuffered_error() {
         let response = HttpResponseBuilder::new_fake()
             .status(StatusCode::OK)
-            .external(Empty::new())
+            .custom_body(Empty::new())
             .build()
             .unwrap();
 
