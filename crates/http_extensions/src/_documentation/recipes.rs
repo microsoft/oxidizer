@@ -87,7 +87,7 @@
 //! # Header Values
 //!
 //! Prefer using [`HeaderValue::from_static`] for static values and [`HeaderValueExt::from_shared`] for
-//! potentially large values. The latter takes a `bytes::Bytes` value, which can be constructed from
+//! potentially large values. The latter takes an `impl Into<Bytes>` value, which can be constructed from
 //! multiple sources, giving you the flexibility to share data without copying.
 //!
 //! When you already have a [`BytesView`](bytesbuf::BytesView) (e.g. from a response body or a

@@ -8,9 +8,10 @@ use http::header::InvalidHeaderValue;
 /// Construction of [`HeaderValue`] from shared byte buffers.
 ///
 /// This extension enables zero-copy (when possible) creation of header values
-/// from [`bytes::Bytes`] by delegating to [`HeaderValue::from_maybe_shared`].
+/// from types convertible to [`bytes::Bytes`] by delegating to
+/// [`HeaderValue::from_maybe_shared`].
 pub trait HeaderValueExt: sealed::Sealed {
-    /// Creates a [`HeaderValue`] from a [`Bytes`] buffer.
+    /// Creates a [`HeaderValue`] from a source convertible to [`Bytes`].
     ///
     /// The provided bytes are validated through
     /// [`HeaderValue::from_maybe_shared`]. This is zero-copy when the
@@ -33,12 +34,12 @@ pub trait HeaderValueExt: sealed::Sealed {
     /// let value = HeaderValue::from_shared(view.to_bytes()).unwrap();
     /// assert_eq!(value, "application/json");
     /// ```
-    fn from_shared(src: Bytes) -> Result<HeaderValue, InvalidHeaderValue>;
+    fn from_shared(src: impl Into<Bytes>) -> Result<HeaderValue, InvalidHeaderValue>;
 }
 
 impl HeaderValueExt for HeaderValue {
-    fn from_shared(src: Bytes) -> Result<HeaderValue, InvalidHeaderValue> {
-        Self::from_maybe_shared(src)
+    fn from_shared(src: impl Into<Bytes>) -> Result<HeaderValue, InvalidHeaderValue> {
+        Self::from_maybe_shared(src.into())
     }
 }
 
