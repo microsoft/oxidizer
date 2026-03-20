@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1] - 2026-03-20
+
+- ✔️ Tasks
+
+  - implement `From<BytesView>` for `Bytes`
+
 ## [0.4.0] - 2026-02-26
 
 - ✨ Features
@@ -94,4 +100,3 @@
   - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
   - Increase consistency of a few little things here and there ([#65](https://github.com/microsoft/oxidizer/pull/65))
   - byte_sequences -> bytesbuf ([#58](https://github.com/microsoft/oxidizer/pull/58))
-
