@@ -197,7 +197,7 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace --color always --target ${{ matrix.target }}
       - name: Miri
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
 
   mutation-testing:
     if: github.event_name == 'pull_request'
