@@ -3,6 +3,7 @@
 
 #![allow(missing_docs, reason = "test code")]
 #![cfg(any(feature = "tokio", feature = "custom"))]
+#![cfg_attr(miri, ignore)]
 
 //! Tests for `Spawner` implementations.
 
