@@ -364,24 +364,24 @@ where
     /// subsequent insert (a "time-of-check, time-of-use" or TOCTOU window). During
     /// that window another caller may insert or invalidate the same key. Consequences:
     ///
-    /// - **Last writer wins** — if two callers both miss and compute concurrently,
+    /// - **Last writer wins** - if two callers both miss and compute concurrently,
     ///   whichever inserts last determines the cached value. This is standard
     ///   cache-aside behavior and is harmless because caches are ephemeral;
     ///   TTL ensures eventual consistency with the source of truth.
-    /// - **Invalidation during compute** — if one caller computes while another
+    /// - **Invalidation during compute** - if one caller computes while another
     ///   calls [`invalidate`](Self::invalidate), the computed value may be inserted
     ///   after the invalidation, causing the entry to reappear. The entry will
     ///   still expire naturally if configured.
     ///
     /// Stampede protection (when enabled) **narrows** this window by coalescing
-    /// concurrent misses for the same key — only one caller computes while others
+    /// concurrent misses for the same key - only one caller computes while others
     /// share its result. It does not close the window entirely; cross-operation
     /// races (e.g., an `invalidate` arriving mid-compute) are still possible.
     ///
     /// # Stampede Protection
     ///
     /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
-    /// concurrent calls for the same missing key are coalesced — only one caller
+    /// concurrent calls for the same missing key are coalesced - only one caller
     /// computes the value while others wait and share the result.
     ///
     /// # Errors
@@ -438,11 +438,11 @@ where
     /// Retrieves a value from cache, or computes and caches it if missing.
     ///
     /// Like [`get_or_insert`](Self::get_or_insert), but the provided function can fail.
-    /// Only successful results are cached — errors are not cached, allowing retries.
+    /// Only successful results are cached - errors are not cached, allowing retries.
     ///
     /// # Concurrency
     ///
-    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) —
+    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) -
     /// see its Concurrency section for details.
     ///
     /// # Stampede Protection
@@ -512,12 +512,12 @@ where
     /// Retrieves a value from cache, or conditionally computes and caches it.
     ///
     /// Like [`get_or_insert`](Self::get_or_insert), but the function returns `Option<V>`.
-    /// Only `Some` values are cached — `None` results are not cached, allowing the
+    /// Only `Some` values are cached - `None` results are not cached, allowing the
     /// computation to be retried on subsequent calls.
     ///
     /// # Concurrency
     ///
-    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) —
+    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) -
     /// see its Concurrency section for details.
     ///
     /// # Stampede Protection

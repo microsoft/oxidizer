@@ -459,7 +459,7 @@ mod fetch_and_promote_tests {
 
         let key = "panic_key".to_string();
 
-        // Trigger background refresh — spawns a task that will panic
+        // Trigger background refresh - spawns a task that will panic
         fc.do_refresh(&key);
 
         // Give the spawned task time to run and panic

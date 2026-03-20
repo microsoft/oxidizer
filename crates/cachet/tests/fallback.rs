@@ -660,7 +660,7 @@ fn nested_fallback_three_tier_chain() {
         let l1_with_l2 = Cache::builder::<String, i32>(clock.clone())
             .memory()
             .fallback(Cache::builder::<String, i32>(clock).memory());
-        // This calls FallbackBuilder.fallback() — NOT CacheBuilder.fallback()
+        // This calls FallbackBuilder.fallback() - NOT CacheBuilder.fallback()
         let cache = l1_with_l2.fallback(l3).build();
 
         // Insert and retrieve through the 3-tier hierarchy

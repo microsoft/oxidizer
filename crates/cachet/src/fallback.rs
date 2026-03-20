@@ -228,7 +228,7 @@ where
                 .clock
                 .timed_async(self.inner.primary.insert(key.clone(), v.clone()))
                 .await;
-            // Insert errors are intentionally swallowed — a failed promotion should not
+            // Insert errors are intentionally swallowed - a failed promotion should not
             // fail the overall get. The CacheWrapper around the primary tier already
             // records an Error activity on insert failure.
             if timed_insert.result.is_ok() {

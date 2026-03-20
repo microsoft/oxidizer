@@ -24,7 +24,7 @@ use crate::{CacheEntry, Error};
 /// written. It may return `None` (e.g., if the entry was evicted or invalidated)
 /// or a newer value, but never a stale one that predates the most recent write.
 ///
-/// This guarantee is scoped to a **single instance** — if the same backing store
+/// This guarantee is scoped to a **single instance** - if the same backing store
 /// is accessed through multiple `CacheTier` instances (e.g., separate processes
 /// connected to the same Redis cluster), replication lag or network partitions
 /// may cause one instance to observe stale data written through another. The
