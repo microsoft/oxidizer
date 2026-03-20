@@ -39,11 +39,12 @@ impl BytesView {
     /// This conversion always requires a small dynamic memory allocation for
     /// metadata, so avoiding conversions is valuable even if zero-copy.
     ///
-    /// # Why is this not `.into()`?
+    /// # Why prefer `.to_bytes()` over `.into()`?
     ///
-    /// We do not allow conversion via `.into()` because the conversion is not guaranteed to be
-    /// a cheap operation and may involve data copying. The `.to_bytes()` function must always
-    /// be explicitly called to make the conversion more obvious and easier to catch in reviews.
+    /// While conversion via `.into()` is supported, prefer calling `.to_bytes()` explicitly
+    /// because the conversion is not guaranteed to be a cheap operation and may involve data
+    /// copying. An explicit `.to_bytes()` call makes the conversion more obvious and easier
+    /// to catch in reviews.
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn to_bytes(&self) -> Bytes {
@@ -70,6 +71,12 @@ impl BytesView {
 
             bytes.freeze()
         }
+    }
+}
+
+impl From<BytesView> for Bytes {
+    fn from(value: BytesView) -> Self {
+        value.to_bytes()
     }
 }
 
@@ -124,6 +131,16 @@ mod tests {
         let view = BytesView::default();
         let bytes = view.to_bytes();
         assert_eq!(0, bytes.len());
+    }
+
+    #[test]
+    fn into_bytes() {
+        let memory = TransparentMemory::new();
+        let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+
+        let bytes: Bytes = view.into();
+
+        assert_eq!(bytes.as_ref(), b"Hello, world!");
     }
 
     #[test]
