@@ -33,6 +33,7 @@ thread_aware = { workspace = true, features = ["derive"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
+ohno = { workspace = true, features = ["test-util"] }
 tick = { workspace = true, features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 

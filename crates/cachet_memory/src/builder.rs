@@ -333,8 +333,8 @@ mod tests {
             .max_capacity(100)
             .initial_capacity(101)
             .build();
-        assert_eq!(
-            result.unwrap_err().to_string(),
+        ohno::assert_error_message!(
+            result.unwrap_err(),
             "invalid cache configuration: initial_capacity (101) exceeds max_capacity (100)"
         );
     }
@@ -355,8 +355,8 @@ mod tests {
             .time_to_live(Duration::from_secs(60))
             .time_to_idle(Duration::from_secs(120))
             .build();
-        assert_eq!(
-            result.unwrap_err().to_string(),
+        ohno::assert_error_message!(
+            result.unwrap_err(),
             "invalid cache configuration: time to idle (120s) exceeds time to live (60s)."
         );
     }
