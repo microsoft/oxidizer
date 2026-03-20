@@ -20,7 +20,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memo
 all-features = true
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["cachet_tier::tier::CacheTier", "thread_aware::core::ThreadAware"]
+allowed_external_types = ["cachet_tier::tier::CacheTier", "foldhash::fast::RandomState", "thread_aware::core::ThreadAware"]
 
 [dependencies]
 cachet_tier = { workspace = true }

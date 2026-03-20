@@ -279,11 +279,7 @@ impl ValidationError {
     fn invalid_capacity(max_capacity: Option<u64>, initial_capacity: Option<usize>) -> Option<Self> {
         let max = max_capacity?;
         let init = initial_capacity?;
-        (init as u64 > max).then(|| {
-            Self::new(format!(
-                "initial_capacity ({init}) exceeds max_capacity ({max})"
-            ))
-        })
+        (init as u64 > max).then(|| Self::new(format!("initial_capacity ({init}) exceeds max_capacity ({max})")))
     }
 
     fn invalid_time_to(ttl: Option<Duration>, tti: Option<Duration>) -> Option<Self> {
