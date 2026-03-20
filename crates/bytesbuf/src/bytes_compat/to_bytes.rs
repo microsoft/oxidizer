@@ -73,6 +73,12 @@ impl BytesView {
     }
 }
 
+impl From<BytesView> for Bytes {
+    fn from(value: BytesView) -> Self {
+        value.to_bytes()
+    }
+}
+
 thread_local! {
     static TO_BYTES_SHARED: Event = Event::builder()
         .name("bytesbuf_view_to_bytes_shared")
@@ -123,6 +129,13 @@ mod tests {
     fn empty_view_to_bytes() {
         let view = BytesView::default();
         let bytes = view.to_bytes();
+        assert_eq!(0, bytes.len());
+    }
+
+    #[test]
+    fn empty_view_into_bytes() {
+        let view = BytesView::default();
+        let bytes: Bytes = view.into();
         assert_eq!(0, bytes.len());
     }
 
