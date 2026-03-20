@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::fmt::{Debug, Formatter};
+
 use http::{HeaderName, HeaderValue};
 
 #[cfg(any(feature = "json", test))]
@@ -53,9 +55,14 @@ pub(crate) fn try_header(builder: &mut impl HeadersBuilder, key: HeaderName, val
 ///
 /// This works because the inner T can never be accessed from the holder. The
 /// only way to get the inner T is to consume the `SyncHolder<T>` itself.
-#[derive(Debug)]
 pub(crate) struct SyncHolder<T> {
     value: T,
+}
+
+impl<T> Debug for SyncHolder<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyncHolder").field("type", &std::any::type_name::<T>()).finish()
+    }
 }
 
 // NOTE: Do not add any methods that would expose &T or &mut T references.
@@ -104,6 +111,21 @@ mod tests {
         let request = builder.body(()).unwrap();
         let header_ref = request.headers().get(http::header::CONTENT_LENGTH).unwrap();
         assert_eq!(header_ref, "1234");
+    }
+
+    #[test]
+    fn sync_holder_debug() {
+        let holder = SyncHolder::new(42u32);
+        let debug_str = format!("{holder:?}");
+        assert_eq!(debug_str, "SyncHolder { type: \"u32\" }");
+    }
+
+    #[test]
+    fn sync_holder_debug_complex_type() {
+        let holder = SyncHolder::new(vec![1, 2, 3]);
+        let debug_str = format!("{holder:?}");
+        assert!(debug_str.starts_with("SyncHolder { type: \"alloc::vec::Vec<"));
+        assert!(debug_str.ends_with(">\" }"));
     }
 
     #[test]

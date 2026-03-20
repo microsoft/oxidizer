@@ -20,7 +20,7 @@ pub trait HeaderValueExt: sealed::Sealed {
     /// # Errors
     ///
     /// Returns [`InvalidHeaderValue`] if the byte sequence contains invalid
-    /// header value bytes (bytes outside 32-255 or the DEL byte 127).
+    /// header value bytes.
     ///
     /// # Examples
     ///
