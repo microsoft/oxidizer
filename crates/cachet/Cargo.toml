@@ -100,7 +100,7 @@ name = "wrapped"
 required-features = ["memory", "logs", "metrics"]
 
 [[example]]
-name = "fallback"
+name = "two_tier"
 required-features = ["memory", "logs", "metrics"]
 
 [[example]]
