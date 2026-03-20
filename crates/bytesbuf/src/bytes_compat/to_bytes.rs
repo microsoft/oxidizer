@@ -133,10 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_view_into_bytes() {
-        let view = BytesView::default();
+    fn into_bytes() {
+        let memory = TransparentMemory::new();
+        let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+
         let bytes: Bytes = view.into();
-        assert_eq!(0, bytes.len());
+
+        assert_eq!(bytes.as_ref(), b"Hello, world!");
     }
 
     #[test]
