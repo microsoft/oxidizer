@@ -41,7 +41,7 @@ use crate::builder::InMemoryCacheBuilder;
 ///     .insert("key".to_string(), CacheEntry::new(42))
 ///     .await
 ///     .unwrap();
-/// let value = cache.get(&"key".to_string()).await.unwrap();
+/// let value = cache.get("key").await.unwrap();
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # };
 /// ```
