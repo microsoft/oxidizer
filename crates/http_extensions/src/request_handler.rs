@@ -5,9 +5,9 @@ use layered::Service;
 
 use crate::{HttpRequest, HttpResponse, Result};
 
-/// A type alias for HTTP request handlers in the middleware pipeline.
+/// A trait for HTTP request handlers in the middleware pipeline.
 ///
-/// `RequestHandler` is specialized [`Service`] that processes [`HttpRequest`]s
+/// `RequestHandler` is a specialized [`Service`] that processes [`HttpRequest`]s
 /// and returns [`HttpResponse`]s. It serves as the foundation for building HTTP
 /// middleware pipelines.
 ///
