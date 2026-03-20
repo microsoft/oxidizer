@@ -17,7 +17,7 @@ pub trait RedactedDebug {
     ///
     /// # Errors
     ///
-    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
+    /// This function returns [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
     /// this function only returns a [`Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
     /// has occurred back up the stack.
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> Result;
@@ -35,7 +35,7 @@ pub trait RedactedDisplay {
     ///
     /// # Errors
     ///
-    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
+    /// This function returns [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
     /// this function only returns a [`Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
     /// has occurred back up the stack.
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> Result;

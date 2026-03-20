@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0] - 2026-03-20
+
+- ✨ Features
+
+  - Support redaction suppression.
+  - Add named-field struct support and trait bounds in #[classified] ([#261](https://github.com/microsoft/oxidizer/pull/261))
+
 ## [0.10.1] - 2026-01-14
 
 - 🐛 Bug Fixes

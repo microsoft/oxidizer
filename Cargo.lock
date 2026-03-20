@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "data_privacy_macros",
  "derive_more",

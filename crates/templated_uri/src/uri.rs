@@ -508,8 +508,8 @@ mod tests {
             .path_and_query(paq_without_trailing_slash.clone())
             .to_redacted_string(&redaction_engine);
         assert_eq!(
-            redacted_uri, "https://example.com/api/v1/*",
-            "redaction should replace the entire path and query with a single asterisk"
+            redacted_uri, "https://example.com/api/v1/",
+            "redaction should erase the entire path and query"
         );
 
         let redacted_uri = Uri::default()
@@ -517,19 +517,19 @@ mod tests {
             .path_and_query(paq_with_trailing_slash.clone())
             .to_redacted_string(&redaction_engine);
         assert_eq!(
-            redacted_uri, "https://example.com/api/v1/*",
-            "redaction should replace the entire path and query with a single asterisk and avoid double slashes"
+            redacted_uri, "https://example.com/api/v1/",
+            "redaction should erase the entire path and query and avoid double slashes"
         );
 
         let redacted_uri = Uri::default()
             .path_and_query(paq_without_trailing_slash)
             .to_redacted_string(&redaction_engine);
-        assert_eq!(redacted_uri, "*");
+        assert_eq!(redacted_uri, "");
 
         let redacted_uri = Uri::default()
             .path_and_query(paq_with_trailing_slash)
             .to_redacted_string(&redaction_engine);
-        assert_eq!(redacted_uri, "*");
+        assert_eq!(redacted_uri, "");
     }
 
     #[test]
@@ -546,8 +546,8 @@ mod tests {
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&uri, &mut redacted_debug).unwrap();
         assert_eq!(
-            redacted_debug, "https://example.com/api/v1/*",
-            "RedactedDebug should redact the path and query with asterisk"
+            redacted_debug, "https://example.com/api/v1/",
+            "RedactedDebug should erase the path and query"
         );
 
         // Test with path and query only (no base URI)
@@ -556,7 +556,7 @@ mod tests {
 
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&uri_no_base, &mut redacted_debug).unwrap();
-        assert_eq!(redacted_debug, "*", "RedactedDebug should redact path-only URI to asterisk");
+        assert_eq!(redacted_debug, "", "RedactedDebug should erase path-only URI");
 
         // Test with base URI only (no path and query)
         let uri_base_only = Uri::default().base_uri(base_uri);
@@ -583,7 +583,7 @@ mod tests {
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&uri_no_slash, &mut redacted_debug).unwrap();
         assert_eq!(
-            redacted_debug, "https://example.com/api/*",
+            redacted_debug, "https://example.com/api/",
             "RedactedDebug should handle paths without leading slash and avoid double slashes"
         );
     }

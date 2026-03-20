@@ -55,6 +55,7 @@ use crate::{Uri, ValidationError};
 /// use data_privacy::{
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
+/// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 /// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
@@ -71,11 +72,14 @@ use crate::{Uri, ValidationError};
 /// };
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
 ///
-/// let redaction_engine = RedactionEngine::builder().build();
+/// let asterisk_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*'));
+/// let redaction_engine = RedactionEngine::builder()
+///     .set_fallback_redactor(asterisk_redactor)
+///     .build();
 ///
 /// assert_eq!(
 ///     user_path.to_redacted_string(&redaction_engine),
-///     "/acme/user/*/"
+///     "/acme/user/********/"
 /// )
 /// ```
 pub trait TemplatedPathAndQuery: RedactedDisplay + Debug + Sync + Send
