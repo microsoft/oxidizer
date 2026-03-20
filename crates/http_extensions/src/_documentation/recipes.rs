@@ -34,19 +34,8 @@
 //! | [`HeaderValue`] | a header value — supports static, borrowed, and owned sources |
 //! | [`HeaderMap`] | an optimised multimap of headers with Robin Hood hashing |
 //!
-//! Unlike `HashMap<String, String>`, [`HeaderMap`] can represent headers with
-//! **zero allocations** by interning standard names and wrapping static strings
-//! via [`HeaderName::from_static`] / [`HeaderValue::from_static`]. Owned
-//! `String` and `Vec<u8>` values are reused without copying through `TryFrom`.
-//!
-//! ```
-//! use http::header::{CONTENT_TYPE, ACCEPT, HeaderMap, HeaderValue};
-//!
-//! let mut headers = HeaderMap::new();
-//! // Standard name constant + static value = 0 allocations
-//! headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-//! headers.insert(ACCEPT, HeaderValue::from_static("text/html"));
-//! ```
+//! See [Prefer `HeaderMap` over `HashMap<String, String>`](#prefer-headermap-over-hashmapstring-string)
+//! below for details on zero-allocation patterns.
 //!
 //! ## Body family
 //!

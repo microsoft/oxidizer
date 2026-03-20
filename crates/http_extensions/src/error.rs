@@ -72,6 +72,10 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// assert!(error.to_string().starts_with("invalid uri character"));
 /// ```
 ///
+/// ## Works with `templated_uri` crate
+///
+/// - `templated_uri::ValidationError` - Invalid URI template parameters
+///
 /// ## Custom Errors
 ///
 /// Custom errors can be wrapped using [`HttpError::other()`]:
@@ -92,8 +96,6 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// let custom_error = CustomError;
 /// let http_error = HttpError::other(custom_error, RecoveryInfo::never(), "custom");
 /// ```
-///
-/// [http]: https://docs.rs/http
 #[ohno::error]
 #[from(
     http::Error(label: "http_error", recovery: RecoveryInfo::never()),
@@ -178,13 +180,13 @@ impl HttpError {
 
     /// Creates error that indicates a service is currently unavailable.
     ///
-    /// This indicates that service is currently down, unreachable or
-    /// experiences increased rate of failures.
+    /// This indicates that the service is currently down, unreachable, or
+    /// experiencing an increased rate of failures.
     ///
     /// # Examples
     ///
-    /// Reject the execution and attach the request for possible retry later. Typical case for this
-    /// is opened circuit breaker, that rejects the executions without consuming the request.
+    /// Reject the execution and attach the request for possible retry later. A typical case for
+    /// this is an open circuit breaker that rejects executions without consuming the request.
     ///
     /// ```
     /// # use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder};
@@ -198,6 +200,7 @@ impl HttpError {
     /// }
     /// # }
     /// # fn execute_retry(http_request: HttpRequest) {}
+    /// ```
     #[must_use]
     pub fn unavailable(msg: impl Into<Cow<'static, str>>) -> Self {
         Self::other(msg.into(), RecoveryInfo::unavailable(), "unavailable")

@@ -145,7 +145,7 @@ impl<R> HttpRequestBuilder<'_, R> {
         self
     }
 
-    /// Sets a GET method and URI for the request.
+    /// Creates a GET request to the specified URI.
     pub fn get(self, uri: impl TryInto<Uri, Error: Into<HttpError>>) -> Self {
         self.uri(uri).method(Method::GET)
     }

@@ -38,7 +38,7 @@ The crate provides extension traits that add convenience methods to standard HTT
 * [`ResponseExt`][__link12] - Response recovery classification with `Retry-After` support
 * [`HttpRequestExt`][__link13] - Request cloning with body support
 * [`HeaderMapExt`][__link14] - Header value extraction and parsing
-* [`HeaderValueExt`][__link15] - Construction of [`HeaderValue`][__link16] from [`BytesView`][__link17]
+* [`HeaderValueExt`][__link15] - Construction of [`HeaderValue`][__link16] from [`Bytes`][__link17]
 
 ## Quick Start
 
@@ -169,7 +169,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGydNl-_IzxfZG3xoVSe_Ip8uG2_ZVW6Q71E0G9cSM-pu_UDPYWSEgmhieXRlc2J1ZmUwLjQuMIJkaHR0cGUxLjQuMIJpaHR0cF9ib2R5ZTEuMC4xgm9odHRwX2V4dGVuc2lvbnNlMC4yLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyKlgL27uQutG5NWANIkKYuiGyYWve9aLfqWG7wgKrc4ZtdfYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4wgmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjIuMA
  [__link0]: https://crates.io/crates/http/1.4.0
  [__link1]: https://docs.rs/http_extensions/0.2.0/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=StatusExt
@@ -179,7 +179,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link14]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HeaderMapExt
  [__link15]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HeaderValueExt
  [__link16]: https://docs.rs/http/1.4.0/http/?search=HeaderValue
- [__link17]: https://docs.rs/bytesbuf/0.4.0/bytesbuf/?search=BytesView
+ [__link17]: https://docs.rs/bytes/1.11.1/bytes/?search=Bytes
  [__link18]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=RequestHandler
  [__link19]: https://docs.rs/http_extensions/0.2.0/http_extensions/?search=HttpRequestBuilder
  [__link2]: https://docs.rs/http_extensions/0.2.0/http_extensions/type.HttpResponse.html

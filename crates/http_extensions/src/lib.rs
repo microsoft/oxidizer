@@ -33,7 +33,7 @@
 //! - [`ResponseExt`] - Response recovery classification with `Retry-After` support
 //! - [`HttpRequestExt`] - Request cloning with body support
 //! - [`HeaderMapExt`] - Header value extraction and parsing
-//! - [`HeaderValueExt`] - Construction of [`HeaderValue`][http::HeaderValue] from [`BytesView`][bytesbuf::BytesView]
+//! - [`HeaderValueExt`] - Construction of [`HeaderValue`][http::HeaderValue] from [`Bytes`][bytes::Bytes]
 //!
 //! # Quick Start
 //!
