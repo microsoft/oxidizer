@@ -21,8 +21,8 @@ fn new_creates_unbounded_cache() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn with_capacity_creates_bounded_cache() {
-    let cache = InMemoryCache::<String, i32>::with_capacity(100);
+fn with_max_capacity_creates_bounded_cache() {
+    let cache = InMemoryCache::<String, i32>::with_max_capacity(100);
     assert_eq!(cache.len(), Some(0));
 }
 

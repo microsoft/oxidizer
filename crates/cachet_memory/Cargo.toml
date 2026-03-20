@@ -24,6 +24,7 @@ allowed_external_types = ["cachet_tier::tier::CacheTier", "thread_aware::core::T
 
 [dependencies]
 cachet_tier = { workspace = true }
+foldhash = { workspace = true }
 moka = { workspace = true, features = ["future"] }
 ohno = { workspace = true }
 thread_aware = { workspace = true, features = ["derive"] }

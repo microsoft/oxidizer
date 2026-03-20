@@ -6,7 +6,10 @@
 //! This module provides a high-performance concurrent in-memory cache tier
 //! with automatic eviction and optional time-based expiration.
 
-use std::collections::hash_map::RandomState;
+// Use foldhash::fast for fast hashing of cache keys.
+// The `fast` variant is designed for high performance, making it ideal for our cache tier where we
+// need to quickly compute hash values for keys.
+use foldhash::fast::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
@@ -95,10 +98,10 @@ where
     /// ```no_run
     /// use cachet_memory::InMemoryCache;
     ///
-    /// let cache = InMemoryCache::<String, i32>::with_capacity(1000);
+    /// let cache = InMemoryCache::<String, i32>::with_max_capacity(1000);
     /// ```
     #[must_use]
-    pub fn with_capacity(max_capacity: u64) -> Self {
+    pub fn with_max_capacity(max_capacity: u64) -> Self {
         Self::builder().max_capacity(max_capacity).build_unchecked()
     }
 
@@ -156,7 +159,7 @@ where
             moka_builder = moka_builder.time_to_idle(tti);
         }
 
-        if let Some(name) = builder.name.as_deref() {
+        if let Some(name) = builder.name {
             moka_builder = moka_builder.name(name);
         }
 
@@ -224,8 +227,8 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
-    fn with_capacity_sets_max_capacity() {
-        let cache = InMemoryCache::<String, i32>::with_capacity(100);
+    fn with_max_capacity_sets_max_capacity() {
+        let cache = InMemoryCache::<String, i32>::with_max_capacity(100);
         assert_eq!(cache.inner.policy().max_capacity(), Some(100));
     }
 
@@ -246,7 +249,7 @@ mod tests {
         use std::collections::hash_map::RandomState;
 
         let cache = InMemoryCache::<String, i32>::builder()
-            .hasher(RandomState::new())
+            .with_hasher(RandomState::new())
             .max_capacity(100)
             .build()
             .expect("Failed to build cache");
@@ -307,10 +310,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn builder_name_sets_cache_name() {
-        let expected_name = "test-cache".to_string();
-        let builder = InMemoryCacheBuilder::<String, i32>::new().name(expected_name);
+        let builder = InMemoryCacheBuilder::<String, i32>::new().name("test-cache");
 
-        assert_eq!(builder.name.as_deref(), Some("test-cache"));
+        assert_eq!(builder.name, Some("test-cache"));
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri

@@ -15,6 +15,10 @@ use crate::Error;
 use crate::builder::CacheBuilder;
 
 /// Type alias for cache names used in telemetry.
+///
+/// A static reference is used so that names can be embedded in telemetry
+/// attributes (metric labels, log fields) without allocating on every
+/// cache operation.
 pub type CacheName = &'static str;
 
 /// Mergers for stampede protection on all cache operations.

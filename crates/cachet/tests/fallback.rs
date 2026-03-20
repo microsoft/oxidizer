@@ -364,7 +364,7 @@ fn fallback_builder_stampede_protection() {
 #[cfg_attr(miri, ignore)]
 #[cfg(feature = "logs")]
 #[test]
-fn fallback_builder_use_logs_emits_logs() {
+fn fallback_builder_enable_logs_emits_logs() {
     block_on(async {
         let capture = testing_aids::LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
@@ -372,7 +372,11 @@ fn fallback_builder_use_logs_emits_logs() {
         let clock = Clock::new_frozen();
         let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-        let cache = Cache::builder::<String, i32>(clock).memory().use_logs().fallback(fallback).build();
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .enable_logs()
+            .fallback(fallback)
+            .build();
 
         let key = "key".to_string();
         cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
@@ -386,13 +390,13 @@ fn fallback_builder_use_logs_emits_logs() {
 #[cfg_attr(miri, ignore)]
 #[cfg(feature = "logs")]
 #[test]
-fn cache_builder_use_logs_emits_logs() {
+fn cache_builder_enable_logs_emits_logs() {
     block_on(async {
         let capture = testing_aids::LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock).memory().use_logs().build();
+        let cache = Cache::builder::<String, i32>(clock).memory().enable_logs().build();
 
         let key = "key".to_string();
         cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
@@ -516,7 +520,7 @@ async fn do_refresh_deduplicates_in_flight() {
 #[cfg_attr(miri, ignore)]
 #[cfg(feature = "metrics")]
 #[test]
-fn fallback_builder_use_metrics() {
+fn fallback_builder_enable_metrics() {
     block_on(async {
         let tester = testing_aids::MetricTester::new();
         let clock = Clock::new_frozen();
@@ -524,7 +528,7 @@ fn fallback_builder_use_metrics() {
 
         let cache = Cache::builder::<String, i32>(clock)
             .memory()
-            .use_metrics(tester.meter_provider())
+            .enable_metrics(tester.meter_provider())
             .fallback(fallback)
             .build();
 

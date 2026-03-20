@@ -200,7 +200,7 @@
 //!
 //! # Telemetry
 //!
-//! Enable with `metrics` and/or `logs` features. Configure via `.use_metrics()` and `.use_logs()`.
+//! Enable with `metrics` and/or `logs` features. Configure via `.enable_metrics()` and `.enable_logs()`.
 //!
 //! ## Metrics (OpenTelemetry)
 //!

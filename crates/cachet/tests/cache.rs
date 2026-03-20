@@ -798,13 +798,13 @@ mod service_tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn cache_builder_use_metrics() {
+    fn cache_builder_enable_metrics() {
         block_on(async {
             let tester = testing_aids::MetricTester::new();
             let clock = Clock::new_frozen();
             let cache = Cache::builder::<String, i32>(clock)
                 .memory()
-                .use_metrics(tester.meter_provider())
+                .enable_metrics(tester.meter_provider())
                 .build();
 
             let key = "key".to_string();

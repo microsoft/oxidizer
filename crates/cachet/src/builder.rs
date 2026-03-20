@@ -178,6 +178,11 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// Sets a human-readable name for this cache tier, used in telemetry attributes.
     ///
     /// If not set, a name is derived from the storage type.
+    ///
+    /// Requires `&'static str` because the name is embedded in every telemetry
+    /// event (metric labels, log fields). A static reference avoids cloning the
+    /// name into a new allocation on each cache operation, which matters at high
+    /// throughput. In practice, cache names are always string literals.
     #[must_use]
     pub fn name(mut self, name: &'static str) -> Self {
         self.name = Some(name);
@@ -189,7 +194,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// When enabled, cache operations will emit structured logs via the `tracing` crate.
     #[cfg(any(feature = "logs", test))]
     #[must_use]
-    pub fn use_logs(mut self) -> Self {
+    pub fn enable_logs(mut self) -> Self {
         self.telemetry = self.telemetry.with_logs();
         self
     }
@@ -199,7 +204,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// When configured, cache operations will emit metrics via OpenTelemetry.
     #[cfg(any(feature = "metrics", test))]
     #[must_use]
-    pub fn use_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
+    pub fn enable_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
         self.telemetry = self.telemetry.with_metrics(meter_provider);
         self
     }
@@ -579,21 +584,21 @@ mod tests {
     }
 
     #[test]
-    fn builder_use_logs() {
+    fn builder_enable_logs() {
         let clock = Clock::new_frozen();
         let builder = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .use_logs();
+            .enable_logs();
         assert!(builder.telemetry.logs_enabled);
     }
 
     #[test]
-    fn builder_use_metrics() {
+    fn builder_enable_metrics() {
         let clock = Clock::new_frozen();
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
         let builder = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .use_metrics(&provider);
+            .enable_metrics(&provider);
         assert!(builder.telemetry.meter.is_some());
     }
 

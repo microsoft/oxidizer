@@ -134,8 +134,8 @@ fn bench_wrapper_overhead(c: &mut Criterion) {
             let clock = Clock::new_tokio();
             Cache::builder(clock)
                 .storage(MockCache::<String, String>::new())
-                .use_logs()
-                .use_metrics(&meter_provider)
+                .enable_logs()
+                .enable_metrics(&meter_provider)
                 .build()
         });
         let key = "key".to_string();

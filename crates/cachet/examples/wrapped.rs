@@ -18,8 +18,8 @@ async fn main() {
 
     let cache = Cache::builder::<String, String>(clock)
         .memory()
-        .use_logs()
-        .use_metrics(&meter_provider)
+        .enable_logs()
+        .enable_metrics(&meter_provider)
         .ttl(Duration::from_secs(30))
         .build();
 

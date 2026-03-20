@@ -16,8 +16,8 @@ use crate::telemetry::cache::CacheTelemetryInner;
 ///
 /// This is an internal builder used by [`CacheBuilder`](crate::CacheBuilder) to
 /// collect telemetry settings. Users configure telemetry through the cache
-/// builder's [`use_logs()`](crate::CacheBuilder::use_logs) and
-/// [`use_metrics()`](crate::CacheBuilder::use_metrics) methods.
+/// builder's [`enable_logs()`](crate::CacheBuilder::enable_logs) and
+/// [`enable_metrics()`](crate::CacheBuilder::enable_metrics) methods.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TelemetryConfig {
     #[cfg(any(feature = "logs", test))]

@@ -40,7 +40,7 @@ pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) initial_capacity: Option<usize>,
     pub(crate) time_to_live: Option<Duration>,
     pub(crate) time_to_idle: Option<Duration>,
-    pub(crate) name: Option<String>,
+    pub(crate) name: Option<&'static str>,
     pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
 }
@@ -171,6 +171,11 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// This name may appear in logs or debugging output from the
     /// underlying cache implementation.
     ///
+    /// Requires `&'static str` for consistency with the outer cache builder,
+    /// where the name is embedded in every telemetry event. A static reference
+    /// avoids cloning on each cache operation. In practice, cache names are
+    /// always string literals.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -181,8 +186,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///     .build();
     /// ```
     #[must_use]
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
+    pub fn name(mut self, name: &'static str) -> Self {
+        self.name = Some(name);
         self
     }
 
@@ -200,12 +205,12 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// use cachet_memory::InMemoryCache;
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
-    ///     .hasher(RandomState::new())
+    ///     .with_hasher(RandomState::new())
     ///     .max_capacity(1000)
     ///     .build();
     /// ```
     #[must_use]
-    pub fn hasher<H2>(self, hasher: H2) -> InMemoryCacheBuilder<K, V, H2> {
+    pub fn with_hasher<H2>(self, hasher: H2) -> InMemoryCacheBuilder<K, V, H2> {
         InMemoryCacheBuilder {
             max_capacity: self.max_capacity,
             initial_capacity: self.initial_capacity,
@@ -319,7 +324,7 @@ mod tests {
     #[test]
     fn name_stores_value() {
         let builder = InMemoryCacheBuilder::<String, i32>::new().name("test");
-        assert_eq!(builder.name, Some("test".to_string()));
+        assert_eq!(builder.name, Some("test"));
     }
 
     #[test]
@@ -331,6 +336,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn build_max_capacity_eq_initial_capacity_succeeds() {
         let result = InMemoryCacheBuilder::<String, i32>::new()
@@ -349,6 +355,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
     #[test]
     fn build_ttl_eq_tti_succeeds() {
         let result = InMemoryCacheBuilder::<String, i32>::new()

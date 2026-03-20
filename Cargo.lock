@@ -340,6 +340,7 @@ version = "0.1.0"
 dependencies = [
  "cachet_tier",
  "criterion",
+ "foldhash 0.2.0",
  "futures",
  "moka",
  "mutants",
