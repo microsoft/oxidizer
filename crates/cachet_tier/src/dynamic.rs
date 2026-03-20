@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::tier::DynCacheTier;
 use crate::{CacheEntry, CacheTier, Error};
 
-/// A clonable dynamic cache tier with type erasure.
+/// A cloneable dynamic cache tier with type erasure.
 ///
 /// `DynamicCache` wraps a trait object in an `Arc` to enable cloning while maintaining
 /// dynamic dispatch. Use this when you need to erase the concrete storage type

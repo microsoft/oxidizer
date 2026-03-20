@@ -6,9 +6,9 @@
 //! This module provides a high-performance concurrent in-memory cache tier
 //! with automatic eviction and optional time-based expiration.
 
-// Use foldhash::fast for fast hashing of cache keys.
-// The `fast` variant is designed for high performance, making it ideal for our cache tier where we
-// need to quickly compute hash values for keys.
+// Use foldhash::fast for high-performance hashing of cache keys.
+// The `fast` variant prioritizes speed over statistical quality, which is
+// ideal for hash table lookups where we only need good bucket distribution.
 use foldhash::fast::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};

@@ -7,10 +7,11 @@
 //! the underlying cache configuration, providing a stable API surface
 //! without exposing implementation details.
 
-use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 use std::time::Duration;
+
+use foldhash::fast::RandomState;
 
 use crate::tier::InMemoryCache;
 
@@ -64,7 +65,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             time_to_live: None,
             time_to_idle: None,
             name: None,
-            hasher: RandomState::new(),
+            hasher: RandomState::default(),
             _phantom: PhantomData,
         }
     }
@@ -193,9 +194,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
 
     /// Sets a custom hash builder for the cache.
     ///
-    /// By default, the cache uses `RandomState` (the standard library's
-    /// default hasher). Use this method to provide an alternative hasher
-    /// implementation (e.g., `FxBuildHasher` for faster hashing).
+    /// By default, the cache uses [`foldhash::fast::RandomState`] for high-performance
+    /// hashing. Use this method to provide an alternative hasher implementation.
     ///
     /// # Examples
     ///
@@ -281,7 +281,7 @@ impl ValidationError {
         let init = initial_capacity?;
         (init as u64 > max).then(|| {
             Self::new(format!(
-                "initial_capacity ({initial_capacity:?}) exceeds max_capacity ({max_capacity:?})"
+                "initial_capacity ({init}) exceeds max_capacity ({max})"
             ))
         })
     }
@@ -333,7 +333,10 @@ mod tests {
             .max_capacity(100)
             .initial_capacity(101)
             .build();
-        result.unwrap_err();
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "invalid cache configuration: initial_capacity (101) exceeds max_capacity (100)"
+        );
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
@@ -352,7 +355,10 @@ mod tests {
             .time_to_live(Duration::from_secs(60))
             .time_to_idle(Duration::from_secs(120))
             .build();
-        result.unwrap_err();
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "invalid cache configuration: time to idle (120s) exceeds time to live (60s)."
+        );
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
