@@ -332,11 +332,29 @@ mod tests {
     }
 
     #[test]
+    fn build_max_capacity_eq_initial_capacity_succeeds() {
+        let result = InMemoryCacheBuilder::<String, i32>::new()
+            .max_capacity(100)
+            .initial_capacity(100)
+            .build();
+        result.unwrap();
+    }
+
+    #[test]
     fn build_ttl_less_than_tti_returns_validation_error() {
         let result = InMemoryCacheBuilder::<String, i32>::new()
             .time_to_live(Duration::from_secs(60))
             .time_to_idle(Duration::from_secs(120))
             .build();
         result.unwrap_err();
+    }
+
+    #[test]
+    fn build_ttl_eq_tti_succeeds() {
+        let result = InMemoryCacheBuilder::<String, i32>::new()
+            .time_to_live(Duration::from_secs(60))
+            .time_to_idle(Duration::from_secs(60))
+            .build();
+        result.unwrap();
     }
 }

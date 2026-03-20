@@ -426,7 +426,7 @@ where
     where
         Fut: Future<Output = V>,
     {
-        if let Some(entry) = self.get(key).await? {
+        if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
         let value = f().await;
@@ -500,7 +500,7 @@ where
         E: std::error::Error + Send + Sync + 'static,
         Fut: Future<Output = Result<V, E>>,
     {
-        if let Some(entry) = self.get(key).await? {
+        if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
         let value = f().await.map_err(Error::from_source)?;
@@ -576,7 +576,7 @@ where
     where
         Fut: Future<Output = Option<V>>,
     {
-        if let Some(entry) = self.get(key).await? {
+        if let Some(entry) = self.storage.get(key).await? {
             return Ok(Some(entry));
         }
         match f().await {

@@ -40,7 +40,7 @@ impl CacheTier<String, UserData> for Arc<Database> {
         Ok(Some(CacheEntry::new(data)))
     }
 
-    async fn insert(&self, _: &String, _: CacheEntry<UserData>) -> Result<(), Error> {
+    async fn insert(&self, _: String, _: CacheEntry<UserData>) -> Result<(), Error> {
         Ok(())
     }
 
