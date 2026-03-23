@@ -281,6 +281,7 @@ where
 mod tests {
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn insert_failure() {
         let cache = MockCache::<String, i32>::new();
@@ -289,6 +290,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn invalidate_failure() {
         let cache = MockCache::<String, i32>::new();
@@ -297,6 +299,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn clear_failure() {
         let cache = MockCache::<String, i32>::new();

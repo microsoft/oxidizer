@@ -128,6 +128,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_get_existing() {
         let adapter = ServiceAdapter::new(MockService);
@@ -136,6 +137,7 @@ mod tests {
         assert_eq!(*result.unwrap().unwrap().value(), 42);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_get_missing() {
         let adapter = ServiceAdapter::new(MockService);
@@ -144,6 +146,7 @@ mod tests {
         assert!(result.unwrap().is_none());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_insert_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
@@ -151,6 +154,7 @@ mod tests {
         assert!(result.is_ok(), "insert should succeed");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_invalidate_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
@@ -158,6 +162,7 @@ mod tests {
         assert!(result.is_ok(), "invalidate should succeed");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_clear_returns_ok() {
         let adapter = ServiceAdapter::new(MockService);
@@ -198,6 +203,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_get_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
@@ -205,6 +211,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_insert_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
@@ -212,6 +219,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_invalidate_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);
@@ -219,6 +227,7 @@ mod tests {
         result.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn adapter_clear_wrong_response_returns_error() {
         let adapter = ServiceAdapter::new(WrongResponseService);

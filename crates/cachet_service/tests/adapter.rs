@@ -56,6 +56,7 @@ where
     }
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn adapter_integrates_with_cache_tier_trait() {
     let service = InMemoryCacheService::<String, i32>::new();
@@ -74,6 +75,7 @@ async fn adapter_integrates_with_cache_tier_trait() {
     assert!(adapter.get(&"key".to_string()).await.unwrap().is_none());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn adapter_operations_return_ok() {
     let service = InMemoryCacheService::<String, i32>::new();
@@ -98,6 +100,7 @@ async fn adapter_operations_return_ok() {
     adapter.clear().await.unwrap();
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn adapter_clear_removes_all_entries() {
     let service = InMemoryCacheService::<String, i32>::new();

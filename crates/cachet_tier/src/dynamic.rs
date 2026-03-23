@@ -74,6 +74,7 @@ mod tests {
     use super::*;
     use crate::MockCache;
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn clone_shares_state() {
         let cache = MockCache::<String, i32>::new();

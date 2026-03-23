@@ -48,6 +48,7 @@ where
     }
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn minimal_cachet_get_miss() {
     let cache = MinimalCache::<String, i32>::new();
@@ -55,6 +56,7 @@ async fn minimal_cachet_get_miss() {
     assert!(result.is_none());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn minimal_cachet_get_hit() {
     let cache = MinimalCache::<String, i32>::new();
@@ -64,6 +66,7 @@ async fn minimal_cachet_get_hit() {
     assert_eq!(*result.unwrap().value(), 42);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_insert_wraps_insert() {
     let cache = MinimalCache::<String, i32>::new();
@@ -72,6 +75,7 @@ async fn default_insert_wraps_insert() {
     assert!(result.is_some());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_invalidate_returns_ok() {
     let cache = MinimalCache::<String, i32>::new();
@@ -84,6 +88,7 @@ async fn default_invalidate_returns_ok() {
     let _: () = cache.invalidate(&"key".to_string()).await.unwrap();
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_clear_returns_ok() {
     let cache = MinimalCache::<String, i32>::new();
@@ -96,12 +101,14 @@ async fn default_clear_returns_ok() {
     let _: () = cache.clear().await.unwrap();
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_len_returns_none() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
     assert!(cache.len().is_none());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_is_empty_returns_none_when_len_is_none() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
@@ -151,12 +158,14 @@ where
     }
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn is_empty_returns_true_for_empty_cache() {
     let cache = SizedCache::<String, i32>::new();
     assert_eq!(cache.is_empty(), Some(true));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn is_empty_returns_false_for_non_empty_cache() {
     let cache = SizedCache::<String, i32>::new();
@@ -173,6 +182,7 @@ fn mock_cache_len_empty() {
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_len_after_insert() {
@@ -181,6 +191,7 @@ async fn mock_cache_len_after_insert() {
     assert_eq!(cache.len(), Some(1));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_len_after_multiple_inserts() {
@@ -190,6 +201,7 @@ async fn mock_cache_len_after_multiple_inserts() {
     assert_eq!(cache.len(), Some(2));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_is_empty_delegates_to_len() {
@@ -200,6 +212,7 @@ async fn mock_cache_is_empty_delegates_to_len() {
     assert_eq!(cache.is_empty(), Some(false));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_entry_count() {
@@ -210,6 +223,7 @@ async fn mock_cache_entry_count() {
     assert_eq!(cache.entry_count(), 1);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_contains_key() {
@@ -220,6 +234,7 @@ async fn mock_cache_contains_key() {
     assert!(cache.contains_key(&"key".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_clear_failures() {
@@ -231,6 +246,7 @@ async fn mock_cache_clear_failures() {
     cache.get(&"key".to_string()).await.unwrap();
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_operations_recording() {
@@ -257,6 +273,7 @@ fn mock_cache_debug_contains_name() {
     assert!(debug.contains("MockCache"));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_clone_shares_state() {
@@ -275,6 +292,7 @@ fn mock_cache_default_creates_empty() {
     assert_eq!(cache.len(), Some(0));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_with_data_prepopulates() {
@@ -285,6 +303,7 @@ async fn mock_cache_with_data_prepopulates() {
     assert_eq!(*entry.value(), 42);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_invalidate_removes_entry() {
@@ -296,6 +315,7 @@ async fn mock_cache_invalidate_removes_entry() {
     assert!(!cache.contains_key(&"key".to_string()));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn mock_cache_clear_removes_all() {
@@ -310,6 +330,7 @@ async fn mock_cache_clear_removes_all() {
 
 // DynamicCache tests
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn dynamic_cache_debug() {
@@ -319,6 +340,7 @@ async fn dynamic_cache_debug() {
     assert!(debug.contains("DynamicCache"));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn dynamic_cache_clone_shares_state() {
@@ -332,6 +354,7 @@ async fn dynamic_cache_clone_shares_state() {
     assert_eq!(*entry.value(), 42);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn dynamic_cache_invalidate() {
@@ -344,6 +367,7 @@ async fn dynamic_cache_invalidate() {
     assert!(dynamic.get(&"key".to_string()).await.unwrap().is_none());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn dynamic_cache_clear() {
@@ -359,6 +383,7 @@ async fn dynamic_cache_clear() {
     assert!(dynamic.get(&"b".to_string()).await.unwrap().is_none());
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
 async fn dynamic_cache_len() {

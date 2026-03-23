@@ -96,6 +96,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_get_returns_value() {
         let svc = CorrectService;
@@ -103,30 +104,35 @@ mod tests {
         assert_eq!(*result.unwrap().value(), 42);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_insert_returns_ok() {
         let svc = CorrectService;
         CacheServiceExt::insert(&svc, "key".to_string(), CacheEntry::new(42)).await.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_invalidate_returns_ok() {
         let svc = CorrectService;
         CacheServiceExt::invalidate(&svc, &"key".to_string()).await.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_clear_returns_ok() {
         let svc = CorrectService;
         CacheServiceExt::clear(&svc).await.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_get_wrong_response_returns_error() {
         let svc = WrongResponseService;
         CacheServiceExt::get(&svc, &"key".to_string()).await.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_insert_wrong_response_returns_error() {
         let svc = WrongResponseService;
@@ -135,12 +141,14 @@ mod tests {
             .unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_invalidate_wrong_response_returns_error() {
         let svc = WrongResponseService;
         CacheServiceExt::invalidate(&svc, &"key".to_string()).await.unwrap_err();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn ext_clear_wrong_response_returns_error() {
         let svc = WrongResponseService;

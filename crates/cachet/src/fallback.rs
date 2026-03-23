@@ -562,6 +562,7 @@ mod tests {
 
     /// Exercises the background-refresh-on-get path: when a primary hit has a
     /// stale `cached_at`, `FallbackCache::get` should trigger `do_refresh`.
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_get_triggers_background_refresh() {
         let clock = Clock::new_frozen();
