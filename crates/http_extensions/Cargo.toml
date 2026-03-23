@@ -96,7 +96,6 @@ workspace = true
 [[example]]
 name = "custom_server"
 path = "examples/custom_server.rs"
-required-features = ["json"]
 
 [[bench]]
 harness = false
