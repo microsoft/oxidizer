@@ -1,0 +1,49 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cachet_memory"
+description = "In-memory cache tier backed by Moka for the cachet caching library."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "caching", "concurrency"]
+categories = ["caching", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "cachet_tier::tier::CacheTier",
+    "foldhash::fast::RandomState",
+    "thread_aware::core::ThreadAware",
+]
+
+[dependencies]
+cachet_tier = { workspace = true }
+foldhash = { workspace = true }
+moka = { workspace = true, features = ["future"] }
+ohno = { workspace = true }
+thread_aware = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+criterion = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+mutants = { workspace = true }
+ohno = { workspace = true, features = ["test-util"] }
+tick = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
+[[bench]]
+name = "overhead"
+harness = false
+
+[lints]
+workspace = true
