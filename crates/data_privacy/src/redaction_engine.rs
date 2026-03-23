@@ -5,9 +5,8 @@ use core::fmt::Debug;
 use std::fmt::{Display, Formatter, Write};
 use std::sync::Arc;
 
-use data_privacy::IntoDataClass;
-
-use crate::redactors::{Redactor, Redactors};
+use crate::redaction_engine_builder::RedactionEngineBuilder;
+use crate::redaction_engine_inner::RedactionEngineInner;
 use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
 
 /// Lets you apply redaction to classified data.
@@ -60,7 +59,7 @@ use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
 /// ```
 #[derive(Clone, Default)]
 pub struct RedactionEngine {
-    redactors: Arc<Redactors>,
+    inner: Arc<RedactionEngineInner>,
 }
 
 impl RedactionEngine {
@@ -71,20 +70,28 @@ impl RedactionEngine {
     }
 
     #[must_use]
-    pub(crate) fn new(mut redactors: Redactors) -> Self {
-        redactors.shrink();
-        Self {
-            redactors: Arc::new(redactors),
-        }
+    pub(crate) fn new(mut inner: RedactionEngineInner) -> Self {
+        inner.shrink();
+        Self { inner: Arc::new(inner) }
+    }
+
+    /// Returns whether redaction would take place for the given data class.
+    ///
+    /// Returns `false` only when redaction has been explicitly suppressed for this data class
+    /// via [`RedactionEngineBuilder::suppress_redaction`]. Returns `true` in all other cases,
+    /// including when no specific redactor is registered (since the fallback redactor applies).
+    #[must_use]
+    pub fn would_redact(&self, data_class: &DataClass) -> bool {
+        self.inner.would_redact(data_class)
     }
 
     /// Redacts a value implementing [`RedactedDebug`], sending the results to the output sink.
     ///
     /// # Errors
     ///
-    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
-    /// this function only returns a [`std::fmt::Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
-    /// has occurred back up the stack.
+    /// This function returns [`Err`] if, and only if, writing to the provided output sink (which implements [`Write`]) returns [`Err`]. String redaction is considered an infallible operation;
+    /// this function only returns a [`std::fmt::Result`] because writing to the underlying sink might fail and it must provide a way to propagate the fact that an error
+    /// has occurred (as a [`std::fmt::Error`]) back up the stack.
     pub fn redacted_debug(&self, value: &impl RedactedDebug, output: &mut impl Write) -> core::fmt::Result {
         struct DebugFormatter<'a, RD>
         where
@@ -111,9 +118,9 @@ impl RedactionEngine {
     ///
     /// # Errors
     ///
-    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
-    /// this function only returns a [`std::fmt::Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
-    /// has occurred back up the stack.
+    /// This function returns [`Err`] if, and only if, writing to the provided output sink (which implements [`Write`]) returns [`Err`]. String redaction is considered an infallible operation;
+    /// this function only returns a [`std::fmt::Result`] because writing to the underlying sink might fail and it must provide a way to propagate the fact that an error
+    /// has occurred (as a [`std::fmt::Error`]) back up the stack.
     pub fn redacted_display(&self, value: &impl RedactedDisplay, output: &mut impl Write) -> core::fmt::Result {
         struct DisplayFormatter<'a, RD>
         where
@@ -145,60 +152,25 @@ impl RedactionEngine {
     ///
     /// # Errors
     ///
-    /// This function should return [`Err`] if, and only if, the provided [`Formatter`] returns [`Err`]. String redaction is considered an infallible operation;
-    /// this function only returns a [`std::fmt::Result`] because writing to the underlying stream might fail and it must provide a way to propagate the fact that an error
-    /// has occurred back up the stack.
+    /// This function returns [`Err`] if, and only if, writing to the provided output sink (which implements [`Write`]) returns [`Err`]. String redaction is considered an infallible operation;
+    /// this function only returns a [`std::fmt::Result`] because writing to the underlying sink might fail and it must provide a way to propagate the fact that an error
+    /// has occurred (as a [`std::fmt::Error`]) back up the stack.
     pub fn redact(&self, data_class: impl AsRef<DataClass>, value: impl AsRef<str>, output: &mut impl Write) -> core::fmt::Result {
-        let redactor = self.redactors.get_or_fallback(data_class.as_ref());
-        redactor.redact(data_class.as_ref(), value.as_ref(), output)
+        let data_class_ref = data_class.as_ref();
+        let value_str = value.as_ref();
+
+        if let Some(redactor) = self.inner.resolve(data_class_ref) {
+            redactor.redact(data_class_ref, value_str, output)
+        } else {
+            // Redaction has been explicitly suppressed for this data class; pass through unmodified,
+            // bypassing both class-specific and fallback redactors.
+            output.write_str(value_str)
+        }
     }
 }
 
 impl Debug for RedactionEngine {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.redactors.fmt(f)
-    }
-}
-
-/// A builder for creating a [`RedactionEngine`].
-#[derive(Debug)]
-pub struct RedactionEngineBuilder {
-    redactors: Redactors,
-}
-
-impl RedactionEngineBuilder {
-    /// Creates a new instance of `RedactionEngineBuilder`.
-    ///
-    /// This is initialized with no registered redactors and a fallback redactor that erases the input.
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self {
-            redactors: Redactors::default(),
-        }
-    }
-
-    /// Adds a redactor for a specific data class.
-    ///
-    /// Whenever the redaction engine encounters data of this class, it will use the provided redactor.
-    #[must_use]
-    pub fn add_class_redactor(mut self, data_class: impl IntoDataClass, redactor: impl Redactor + Send + Sync + 'static) -> Self {
-        self.redactors.insert(data_class.into_data_class(), redactor);
-        self
-    }
-
-    /// Adds a redactor that's a fallback for when there is no redactor registered for a particular
-    /// data class.
-    ///
-    /// The default fallback is to use an `ErasingRedactor`, which simply erases the original string.
-    #[must_use]
-    pub fn set_fallback_redactor(mut self, redactor: impl Redactor + Send + Sync + 'static) -> Self {
-        self.redactors.set_fallback(redactor);
-        self
-    }
-
-    /// Builds the `RedactionEngine`.
-    #[must_use]
-    pub fn build(self) -> RedactionEngine {
-        RedactionEngine::new(self.redactors)
+        self.inner.fmt(f)
     }
 }

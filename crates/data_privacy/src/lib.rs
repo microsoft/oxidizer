@@ -187,6 +187,8 @@ mod data_class;
 mod macros;
 mod redacted;
 mod redaction_engine;
+mod redaction_engine_builder;
+mod redaction_engine_inner;
 mod redactors;
 mod sensitive;
 
@@ -194,7 +196,8 @@ pub use classified::Classified;
 pub use data_class::{DataClass, IntoDataClass};
 pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
 pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
-pub use redaction_engine::{RedactionEngine, RedactionEngineBuilder};
+pub use redaction_engine::RedactionEngine;
+pub use redaction_engine_builder::RedactionEngineBuilder;
 #[cfg(feature = "rapidhash")]
 pub use redactors::rapidhash_redactor;
 #[cfg(feature = "xxh3")]

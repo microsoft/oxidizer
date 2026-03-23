@@ -350,10 +350,10 @@ fn test_redaction(engine: &RedactionEngine, data_class: &DataClass, input: &str,
 #[test]
 fn new_creates_builder_with_default_values() {
     let engine = RedactionEngine::builder().build();
-    test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "*");
+    test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "");
 
     let engine = RedactionEngine::builder().build();
-    test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "*");
+    test_redaction(&engine, &DataClass::new("test_taxonomy", "test_class"), "sensitive data", "");
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn add_multiple_class_redactors() {
 
     test_redaction(&engine, &data_class1, "sensitive data", "XX");
     test_redaction(&engine, &data_class2, "sensitive data", "YY");
-    test_redaction(&engine, &data_class3, "sensitive data", "*");
+    test_redaction(&engine, &data_class3, "sensitive data", "");
 }
 
 #[test]
@@ -420,4 +420,46 @@ fn debug_trait_implementation() {
     let default_builder = RedactionEngine::builder().build();
     let default_builder_debug_output = format!("{default_builder:?}");
     assert_eq!(default_builder_debug_output, "[]");
+}
+
+#[test]
+fn suppress_redaction_prevents_redaction_for_class() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, SimpleRedactor::new())
+        .suppress_redaction(TestTaxonomy::Insensitive)
+        .build();
+
+    assert!(engine.would_redact(&TestTaxonomy::Sensitive.data_class()));
+    assert!(!engine.would_redact(&TestTaxonomy::Insensitive.data_class()));
+}
+
+#[test]
+fn suppress_redaction_results_in_passthrough_output() {
+    let fallback_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Insert("REDACTED".into()));
+
+    let engine = RedactionEngine::builder()
+        .set_fallback_redactor(fallback_redactor)
+        .suppress_redaction(TestTaxonomy::Insensitive)
+        .build();
+
+    // For a suppressed class, redact() should not apply the fallback redactor
+    // and should instead pass through the original value unchanged.
+    test_redaction(&engine, &TestTaxonomy::Insensitive.data_class(), "sensitive data", "sensitive data");
+}
+
+#[test]
+fn would_redact_returns_true_for_unregistered_class() {
+    let engine = RedactionEngine::builder().build();
+
+    assert!(engine.would_redact(&TestTaxonomy::Sensitive.data_class()));
+}
+
+#[test]
+fn suppress_redaction_overrides_previously_added_redactor() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::Sensitive, SimpleRedactor::new())
+        .suppress_redaction(TestTaxonomy::Sensitive)
+        .build();
+
+    assert!(!engine.would_redact(&TestTaxonomy::Sensitive.data_class()));
 }
