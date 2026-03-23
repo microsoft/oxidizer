@@ -33,13 +33,16 @@ use crate::custom::BoxedFuture;
 /// # #[tokio::main]
 /// # async fn main() {
 /// let spawner = CustomSpawnerBuilder::tokio()
-///     .layer("logging", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-///         spawn(Box::pin(async move {
-///             println!("before");
-///             fut.await;
-///             println!("after");
-///         }));
-///     })
+///     .layer(
+///         "logging",
+///         |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+///             spawn(Box::pin(async move {
+///                 println!("before");
+///                 fut.await;
+///                 println!("after");
+///             }));
+///         },
+///     )
 ///     .build();
 ///
 /// let result = spawner.spawn(async { 42 }).await;
@@ -138,12 +141,15 @@ where
     /// # #[tokio::main]
     /// # async fn main() {
     /// let spawner = CustomSpawnerBuilder::tokio()
-    ///     .layer("tracing", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-    ///         spawn(Box::pin(async move {
-    ///             println!("task starting");
-    ///             fut.await;
-    ///         }));
-    ///     })
+    ///     .layer(
+    ///         "tracing",
+    ///         |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+    ///             spawn(Box::pin(async move {
+    ///                 println!("task starting");
+    ///                 fut.await;
+    ///             }));
+    ///         },
+    ///     )
     ///     .build();
     /// # let _ = spawner;
     /// # }

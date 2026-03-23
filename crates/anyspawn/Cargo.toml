@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn"
 description = "A generic task spawner compatible with any async runtime."
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
 categories = ["asynchronous"]

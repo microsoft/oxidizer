@@ -4,6 +4,7 @@
 #![allow(dead_code, reason = "This is a test module")]
 #![allow(missing_docs, reason = "This is a test module")]
 #![cfg(all(feature = "hedging", feature = "tower-service"))]
+#![cfg(not(miri))]
 
 //! Integration tests for hedging middleware using only public API.
 

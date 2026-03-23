@@ -1,0 +1,29 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "templated_uri_macros"
+description = "Macros for the templated_uri crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "url", "parsing", "templates", "uri"]
+categories = ["encoding", "parser-implementations", "template-engine", "web-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri_macros"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+templated_uri_macros_impl.workspace = true
+
+[dev-dependencies]
+mutants.workspace = true
+
+[lints]
+workspace = true

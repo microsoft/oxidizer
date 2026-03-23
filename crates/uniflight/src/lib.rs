@@ -359,7 +359,11 @@ where
         let cell = Self::get_or_create_cell(&inner, key);
         let owned_key = key.to_owned();
         async move {
-            let result = cell.get_or_init(func()).await.clone();
+            // Box the future immediately to keep state machine size small.
+            // Without boxing, the entire Fut type would be embedded in our state machine.
+            // With boxing, we only store a thin pointer.
+            let boxed = Box::pin(func());
+            let result = cell.get_or_init(boxed).await.clone();
             drop(cell); // Release our Arc before cleanup check
             // Remove entry if no one else is using it (weak can't upgrade)
             inner.remove_if(owned_key.borrow(), |_, weak| weak.upgrade().is_none());
@@ -540,6 +544,7 @@ mod tests {
         assert!(Arc::ptr_eq(&result, &other_cell));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn cleanup_after_completion() {
         let group: Merger<String, String> = Merger::new();
@@ -584,6 +589,7 @@ mod tests {
         assert!(group.is_empty(), "Map should be empty after all keys complete");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn catch_unwind_works() {
         // Verify that catch_unwind actually catches panics in async code
@@ -598,6 +604,7 @@ mod tests {
         assert!(result.is_err(), "catch_unwind should catch the panic");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn panic_aware_cell_catches_panic() {
         let cell = PanicAwareCell::<String>::new();

@@ -11,8 +11,9 @@
 
 This repository contains a set of crates that help you build robust highly scalable services in Rust.
 
-- [Crates](#crates)
-- [About this Repo](#about-this-repo)
+- [The Oxidizer Project](#the-oxidizer-project)
+  - [Crates](#crates)
+  - [About this Repo](#about-this-repo)
     - [Adding New Crates](#adding-new-crates)
     - [Publishing Crates](#publishing-crates)
     - [Documenting Crates](#documenting-crates)
@@ -29,11 +30,17 @@ These are the primary crates built out of this repo:
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
+- [`cachet`](./crates/cachet/README.md) - A composable, customizable multi-tier caching library with rich feature support.
+- [`cachet_memory`](./crates/cachet_memory/README.md) - In-memory cache tier backed by Moka for the cachet caching library.
+- [`cachet_service`](./crates/cachet_service/README.md) - Layered service integration for the cachet caching library.
+- [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
+- [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
+- [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 - [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.

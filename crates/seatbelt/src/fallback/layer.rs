@@ -221,6 +221,7 @@ mod tests {
         assert!(layer.fallback_action.is_some());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_async_ensure_set_correctly() {
         let context = create_test_context();
