@@ -120,7 +120,10 @@ fn bench_dynamic_cache(c: &mut Criterion) {
     });
 
     group.finish();
-    println!("\n{session}");
+    // Use eprintln (not println) so output goes to stderr. Writing to stdout
+    // breaks nextest's benchmark list parser, which expects every non-empty
+    // stdout line to end with ': test' or ': benchmark'.
+    eprintln!("\n{session}");
 }
 
 criterion_group!(benches, bench_dynamic_cache);
