@@ -19,6 +19,9 @@ check-changes:
     Write-Host "`n=== Running Clippy ===" -ForegroundColor Cyan
     just clippy
 
+    Write-Host "`n=== Checking benchmarks for stdout prints ===" -ForegroundColor Cyan
+    just check-bench-stdout
+
     Write-Host "`n=== Checking formatting ===" -ForegroundColor Cyan
     just format-check
 
@@ -35,6 +38,19 @@ check-changes:
     just deny
 
     Write-Host "`n=== All checks passed! ===" -ForegroundColor Green
+
+# Verify that benchmark files do not write to stdout, which breaks benchmark list parsing.
+[script]
+check-bench-stdout:
+    $hits = Get-ChildItem crates -Recurse -Filter *.rs |
+        Where-Object { $_.FullName -match '[/\\]benches[/\\]' } |
+        Select-String 'println!|(?<!e)print!' |
+        Where-Object { $_ -notmatch 'eprintln!|eprint!' }
+    if ($hits) {
+        Write-Host "error: use eprintln! instead of println! in benchmarks:" -ForegroundColor Red
+        $hits | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+        exit 1
+    }
 
 build PROFILE='dev':
     cargo build {{ target_package }} --profile {{ PROFILE }} --all-features --all-targets --locked
