@@ -35,11 +35,12 @@ These are the primary crates built out of this repo:
 - [`cachet_service`](./crates/cachet_service/README.md) - Layered service integration for the cachet caching library.
 - [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
+- [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
-- [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
+- [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 - [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.

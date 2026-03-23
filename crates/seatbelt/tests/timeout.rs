@@ -4,6 +4,7 @@
 #![allow(dead_code, reason = "This is a test module")]
 #![allow(missing_docs, reason = "This is a test module")]
 #![cfg(feature = "timeout")]
+#![cfg(not(miri))]
 
 //! Integration tests for timeout middleware using only public API.
 

@@ -1,0 +1,108 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_extensions"
+description = "Shared HTTP types and extension traits for clients and servers."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["oxidizer", "http", "extensions", "client", "server"]
+categories = ["network-programming"]
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "futures_core::stream::Stream",
+    "bytes::bytes::Bytes",
+    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::has_memory::HasMemory",
+    "bytesbuf::mem::memory::Memory",
+    "bytesbuf::mem::memory_shared::MemoryShared",
+    "bytesbuf::view::BytesView",
+    "http::*",
+    "http_body::Body",
+    "layered::layer::stack::Stack",
+    "layered::service::Service",
+    "layered::dynamic::DynamicService",
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+    "recoverable::Recovery",
+    "recoverable::RecoveryInfo",
+    "recoverable::RecoveryKind",
+    "serde_core::de::*",
+    "serde_core::ser::*",
+    "templated_uri::error::ValidationError",
+    "templated_uri::uri::TargetPathAndQuery",
+    "templated_uri::uri::Uri",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware::core::ThreadAware",
+    "tick::clock::Clock",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+json = ["dep:serde_core", "dep:serde_json"]
+test-util = []
+
+[dependencies]
+bytes = { workspace = true }
+bytesbuf = { workspace = true, features = ["bytes-compat"] }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+layered = { workspace = true, features = ["dynamic-service"] }
+ohno = { workspace = true }
+pin-project = { workspace = true }
+recoverable = { workspace = true }
+serde_core = { workspace = true, optional = true }
+serde_json = { workspace = true, features = ["std"], optional = true }
+templated_uri = { workspace = true }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true, features = ["fmt"] }
+
+[dev-dependencies]
+alloc_tracker = { workspace = true }
+bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
+criterion = { workspace = true }
+data_privacy = { workspace = true }
+futures = { workspace = true, features = ["std", "executor"] }
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
+layered = { workspace = true, features = ["intercept"] }
+mutants = { workspace = true }
+ohno = { workspace = true, features = ["test-util", "app-err"] }
+serde = { workspace = true, features = ["derive"] }
+serde_core = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+static_assertions = { workspace = true }
+templated_uri = { workspace = true, features = ["uuid"] }
+tick = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "custom_server"
+path = "examples/custom_server.rs"
+
+[[bench]]
+harness = false
+name = "http_request_builder"
+required-features = ["test-util", "json"]
+
+[[bench]]
+harness = false
+name = "http_response_builder"
+required-features = ["test-util", "json"]
