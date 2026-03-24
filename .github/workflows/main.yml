@@ -148,14 +148,14 @@ jobs:
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v2.9.4
+        uses: marocchino/sticky-pull-request-comment@v3.0.2
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
         if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v2.9.4
+        uses: marocchino/sticky-pull-request-comment@v3.0.2
         with:
           header: semver-check
           delete: true
@@ -250,7 +250,7 @@ jobs:
       - name: Generate Coverage (no-default-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v5.5.2
+        uses: codecov/codecov-action@v5.5.3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-all.info,lcov-no-def.info
