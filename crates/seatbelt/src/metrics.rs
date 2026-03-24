@@ -17,7 +17,15 @@ pub(crate) fn create_meter(meter_provider: &dyn MeterProvider) -> Meter {
     )
 }
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", test))]
+#[cfg(any(
+    feature = "retry",
+    feature = "breaker",
+    feature = "timeout",
+    feature = "fallback",
+    feature = "hedging",
+    feature = "chaos-injection",
+    test
+))]
 pub(crate) fn create_resilience_event_counter(meter: &Meter) -> opentelemetry::metrics::Counter<u64> {
     meter
         .u64_counter("resilience.event")

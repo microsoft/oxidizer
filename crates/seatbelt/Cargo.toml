@@ -44,6 +44,7 @@ retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
 hedging = ["dep:futures-util"]
+chaos-injection = ["dep:fastrand"]
 serde = ["dep:serde", "dep:jiff"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
@@ -131,6 +132,10 @@ required-features = ["retry", "breaker", "timeout", "serde"]
 [[example]]
 name = "fallback"
 required-features = ["fallback"]
+
+[[example]]
+name = "chaos_injection"
+required-features = ["chaos-injection"]
 
 [[bench]]
 name = "observability"

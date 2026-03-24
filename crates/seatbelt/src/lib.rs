@@ -12,6 +12,7 @@
         feature = "breaker",
         feature = "fallback",
         feature = "hedging",
+        feature = "chaos-injection",
         feature = "metrics",
         feature = "logs"
     )),
@@ -225,7 +226,10 @@ pub mod fallback;
 #[cfg(any(feature = "hedging", test))]
 pub mod hedging;
 
-#[cfg(any(feature = "retry", feature = "breaker", test))]
+#[cfg(any(feature = "chaos-injection", test))]
+pub mod chaos;
+
+#[cfg(any(feature = "retry", feature = "breaker", feature = "chaos-injection", test))]
 mod rnd;
 
 #[cfg(any(
@@ -234,6 +238,7 @@ mod rnd;
     feature = "timeout",
     feature = "fallback",
     feature = "hedging",
+    feature = "chaos-injection",
     test
 ))]
 pub(crate) mod utils;
