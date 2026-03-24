@@ -36,7 +36,7 @@ pub struct InjectionLayer<In, Out, S1 = Set, S2 = Set> {
     injection_output: Option<InjectionOutput<In, Out>>,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
-    rnd: Rnd,
+    pub(crate) rnd: Rnd,
     _state: PhantomData<fn(In, S1, S2) -> Out>,
 }
 

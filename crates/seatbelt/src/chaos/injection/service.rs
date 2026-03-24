@@ -299,6 +299,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn no_injection_when_rnd_equals_rate() {
+        let clock = tick::Clock::new_frozen();
+        let context = ResilienceContext::new(clock).name("boundary_test");
+
+        let mut layer = Injection::layer("boundary_injection", &context)
+            .rate(0.5)
+            .output_with(|_input, _args| "injected".to_string());
+
+        // rnd returns exactly the rate value: 0.5 < 0.5 is false, so no injection.
+        layer.rnd = crate::rnd::Rnd::new_fixed(0.5);
+
+        let stack = (layer, Execute::new(|input: String| async move { input }));
+
+        let service = stack.into_service();
+        let output = service.execute("original".to_string()).await;
+        assert_eq!(output, "original");
+    }
+
+    #[tokio::test]
     async fn poll_ready_propagates_inner_error() {
         let context = crate::ResilienceContext::<String, Result<String, String>>::new(tick::Clock::new_frozen()).name("test");
         let layer = Injection::layer("test_injection", &context)
