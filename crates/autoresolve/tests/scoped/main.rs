@@ -20,19 +20,16 @@ mod scheduler;
 // Base types — three-level hierarchy: App → Request → Task.
 // =============================================================================
 
-#[base]
-mod app_base {
-    pub struct AppBase {
-        pub scheduler: super::scheduler::Scheduler,
-    }
+use scheduler::Scheduler;
+
+#[base(helper_module_exported_as = crate::app_base_helper)]
+pub struct AppBase {
+    pub scheduler: Scheduler,
 }
 
-use app_base::AppBase;
-
 mod http;
-use http::request_base::RequestBase;
+use http::RequestBase;
 mod task;
-use task::task_base;
 
 // =============================================================================
 // Single-scope dependencies — each captures the counter value at construction.
@@ -54,8 +51,8 @@ mod task_handler;
 use client::Client;
 use correlation_vector::CorrelationVector;
 use http::request::Request;
+use task::TaskBase;
 use task::task::Task;
-use task::task_base::TaskBase;
 use task_client::TaskClient;
 use task_handler::TaskHandler;
 use validator::Validator;

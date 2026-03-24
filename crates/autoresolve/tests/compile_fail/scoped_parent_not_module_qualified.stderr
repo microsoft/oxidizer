@@ -1,11 +1,13 @@
-error: scoped parent must be a module-qualified path (e.g., `parent_mod::ParentType`)
-  --> tests/compile_fail/scoped_parent_not_module_qualified.rs:14:15
+error: expected identifier
+  --> tests/compile_fail/scoped_parent_not_module_qualified.rs:12:15
    |
-14 | #[base(scoped(AppBase))]
-   |               ^^^^^^^
+12 | #[base(scoped(123), helper_module_exported_as = crate::request_base_helper)]
+   |               ^^^
 
-error: scoped parent path must start with `super` or `crate`
-  --> tests/compile_fail/scoped_parent_not_module_qualified.rs:20:15
-   |
-20 | #[base(scoped(app_base::AppBase))]
-   |               ^^^^^^^^^^^^^^^^^
+warning: type `AppBase_Part0_Scheduler` should have an upper camel case name
+ --> tests/compile_fail/scoped_parent_not_module_qualified.rs:8:20
+  |
+8 |     pub scheduler: Scheduler,
+  |                    ^^^^^^^^^ help: convert the identifier to upper camel case: `AppBasePart0Scheduler`
+  |
+  = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default

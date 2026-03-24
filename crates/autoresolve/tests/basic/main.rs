@@ -15,20 +15,18 @@ mod config;
 mod my_service;
 mod validator;
 
-#[base]
-mod my_base {
-    pub struct MyBase {
-        #[spread]
-        pub builtins: crate::runtime::builtins::Builtins,
-    }
+use runtime::Builtins;
+
+#[base(helper_module_exported_as = crate::my_base_helper)]
+pub struct MyBase {
+    #[spread]
+    pub builtins: Builtins,
 }
 
 #[test]
 fn test_autoresolve() {
     use clock::Clock;
-    use my_base::MyBase;
     use my_service::MyService;
-    use runtime::builtins::Builtins;
     use scheduler::Scheduler;
 
     let builtins = Builtins {
@@ -43,3 +41,23 @@ fn test_autoresolve() {
     // Validator(42) + Clock(42) + Clock(42)*2 = 42 + 42 + 84 = 168
     assert_eq!(service.number(), 42 + 42 + 42 * 2);
 }
+
+pub mod aaa {
+    pub mod bbb {
+        #[macro_export]
+        macro_rules! macro1 {
+            () => {
+                #[macro_export]
+                macro_rules! macro3 {
+                    () => {};
+                }
+            };
+        }
+
+        macro1!();
+
+        pub use macro3 as macro3_reexport;
+    }
+}
+
+crate::aaa::bbb::macro3_reexport!();

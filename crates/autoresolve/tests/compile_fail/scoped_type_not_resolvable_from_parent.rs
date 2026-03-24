@@ -47,27 +47,23 @@ impl TaskHandler {
     }
 }
 
-#[base]
-mod app_base {
-    pub struct AppBase {
-        pub scheduler: super::Scheduler,
-    }
+#[base(helper_module_exported_as = crate::app_base_helper)]
+pub struct AppBase {
+    pub scheduler: Scheduler,
 }
 
-use app_base::AppBase;
+pub use crate::AppBase;
 
-#[base(scoped(crate::app_base::AppBase))]
-mod request_base {
-    pub struct RequestBase {
-        pub request: super::Request,
-    }
+#[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+pub struct RequestBase {
+    pub request: Request,
 }
 
-#[base(scoped(crate::request_base::RequestBase))]
-mod task_base {
-    pub struct TaskBase {
-        pub task: super::Task,
-    }
+pub use crate::RequestBase;
+
+#[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+pub struct TaskBase {
+    pub task: Task,
 }
 
 fn main() {

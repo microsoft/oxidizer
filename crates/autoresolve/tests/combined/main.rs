@@ -10,7 +10,6 @@ use autoresolve_macros::base;
 mod clock;
 mod http;
 mod runtime;
-use runtime::builtins;
 mod scheduler;
 mod telemetry;
 
@@ -20,25 +19,23 @@ mod outbound_client;
 mod sdk_provider;
 mod validator;
 
-#[base]
-mod base {
-    pub struct Base {
-        #[spread]
-        pub builtins: super::builtins::Builtins,
-        pub telemetry: super::telemetry::Telemetry,
-        pub request: super::http::request::Request,
-    }
+use http::request::Request;
+use runtime::Builtins;
+use telemetry::Telemetry;
+
+#[base(helper_module_exported_as = crate::base_helper)]
+pub struct Base {
+    #[spread]
+    pub builtins: Builtins,
+    pub telemetry: Telemetry,
+    pub request: Request,
 }
 
 #[test]
 fn test_combined() {
-    use base::Base;
-    use builtins::Builtins;
     use clock::Clock;
-    use http::request::Request;
     use outbound_client::OutboundClient;
     use scheduler::Scheduler;
-    use telemetry::Telemetry;
 
     let builtins = Builtins {
         scheduler: Scheduler,
