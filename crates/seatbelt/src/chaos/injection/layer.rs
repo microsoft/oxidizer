@@ -349,16 +349,14 @@ mod tests {
     #[test]
     fn output_error_ensure_set_correctly() {
         let context = create_test_context_result();
-        let layer: InjectionLayer<_, _, NotSet, Set> =
-            InjectionLayer::new("test".into(), &context).output_error("fixed_error".to_string());
+        let layer: InjectionLayer<_, _, NotSet, Set> = InjectionLayer::new("test".into(), &context).output_error("fixed_error".to_string());
 
         assert!(layer.injection_output.is_some());
     }
 
     #[test]
     fn output_error_with_when_ready_ok() {
-        let layer: InjectionLayer<_, _, Set, Set> =
-            create_ready_layer_result().output_error_with(|_, _| "new_error".to_string());
+        let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer_result().output_error_with(|_, _| "new_error".to_string());
 
         assert!(layer.injection_output.is_some());
     }
