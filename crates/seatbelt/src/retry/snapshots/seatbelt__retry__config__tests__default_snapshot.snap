@@ -8,5 +8,6 @@ expression: config
   "base_delay": "10ms",
   "max_delay": null,
   "use_jitter": true,
-  "max_retry_attempts": 3
+  "max_retry_attempts": 3,
+  "handle_unavailable": false
 }

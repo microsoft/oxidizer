@@ -5,7 +5,8 @@
         "base_delay": "100ms",
         "max_delay": "5s",
         "use_jitter": true,
-        "max_retry_attempts": 5
+        "max_retry_attempts": 5,
+        "handle_unavailable": false
     },
     "breaker": {
         "enabled": true,

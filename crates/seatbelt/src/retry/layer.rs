@@ -141,6 +141,7 @@ impl<In, Out, S1, S2> RetryLayer<In, Out, S1, S2> {
             .use_jitter(config.use_jitter)
             .max_retry_attempts(config.max_retry_attempts)
             .max_delay_optional(config.max_delay)
+            .handle_unavailable(config.handle_unavailable)
             .enable(config.enabled)
     }
     fn max_delay_optional(mut self, max_delay: Option<Duration>) -> Self {
@@ -754,6 +755,7 @@ mod tests {
             max_delay: Some(Duration::from_secs(60)),
             use_jitter: false,
             max_retry_attempts: 7,
+            handle_unavailable: true,
         };
 
         let layer = create_ready_layer().config(&config);

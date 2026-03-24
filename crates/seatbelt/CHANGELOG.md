@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.2] - 2026-03-10
+
+- ✨ Features
+
+  - add `RetryConfig::handle_unavailable` and `HedgingConfig::handle_unavailable`
+
 ## [0.4.1] - 2026-03-10
 
 - ✨ Features
