@@ -79,7 +79,7 @@
 //! - **Attributes**:
 //!   - `resilience.pipeline.name`: Pipeline identifier from [`ResilienceContext::name`][crate::ResilienceContext::name]
 //!   - `resilience.strategy.name`: Injection identifier from [`Injection::layer`]
-//!   - `resilience.event.name`: Always `chaos.injection`
+//!   - `resilience.event.name`: Always `chaos_injection`
 //!
 //! # Examples
 //!

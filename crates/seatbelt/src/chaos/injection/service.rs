@@ -280,7 +280,7 @@ mod tests {
             &[
                 KeyValue::new(PIPELINE_NAME, "metrics_pipeline"),
                 KeyValue::new(STRATEGY_NAME, "metrics_injection"),
-                KeyValue::new(EVENT_NAME, "chaos.injection"),
+                KeyValue::new(EVENT_NAME, "chaos_injection"),
             ],
             Some(3),
         );
