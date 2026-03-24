@@ -192,14 +192,12 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn new_needs_rate_and_output() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, NotSet, NotSet> = InjectionLayer::new("test_injection".into(), &context);
 
-        assert!(layer.rate.is_none());
-        assert!(layer.injection_output.is_none());
-        assert_eq!(layer.telemetry.strategy_name.as_ref(), "test_injection");
-        assert!(layer.enable_if.call(&"test_input".to_string()));
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[test]
@@ -256,7 +254,8 @@ mod tests {
     }
 
     #[test]
-    fn config_sets_rate_and_enabled() {
+    #[cfg_attr(miri, ignore)]
+    fn config_applies_all_settings() {
         let context = create_test_context();
         let config = InjectionConfig {
             enabled: false,
@@ -264,8 +263,7 @@ mod tests {
         };
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).config(&config);
 
-        assert_eq!(layer.rate, Some(0.75));
-        assert!(!layer.enable_if.call(&"whatever".to_string()));
+        insta::assert_debug_snapshot!(layer);
     }
 
     #[test]

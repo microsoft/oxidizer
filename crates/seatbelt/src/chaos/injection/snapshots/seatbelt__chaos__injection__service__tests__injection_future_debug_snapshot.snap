@@ -1,0 +1,5 @@
+---
+source: crates/seatbelt/src/chaos/injection/service.rs
+expression: future
+---
+InjectionFuture { .. }

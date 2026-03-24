@@ -47,11 +47,10 @@ mod tests {
     use super::*;
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "exact comparison is intentional for default constant")]
-    fn default_values() {
+    #[cfg_attr(miri, ignore)]
+    fn default_snapshot() {
         let config = InjectionConfig::default();
-        assert!(config.enabled);
-        assert_eq!(config.rate, 0.0);
+        insta::assert_json_snapshot!(config);
     }
 
     #[test]

@@ -1,0 +1,19 @@
+---
+source: crates/seatbelt/src/chaos/injection/layer.rs
+expression: layer
+---
+InjectionLayer {
+    rate: Some(
+        0.75,
+    ),
+    injection_output: None,
+    enable_if: Disabled,
+    telemetry: TelemetryHelper {
+        pipeline_name: "test_pipeline",
+        strategy_name: "test",
+        event_reporter: None,
+        logs_enabled: false,
+    },
+    rnd: Real,
+    _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::NotSet) -> alloc::string::String>,
+}

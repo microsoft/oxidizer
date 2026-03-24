@@ -287,13 +287,13 @@ mod tests {
     }
 
     #[test]
-    fn injection_future_debug_contains_struct_name() {
+    #[cfg_attr(miri, ignore)]
+    fn injection_future_debug_snapshot() {
         let future = InjectionFuture::<String> {
             inner: Box::pin(async { "test".to_string() }),
         };
-        let debug_output = format!("{future:?}");
 
-        assert!(debug_output.contains("InjectionFuture"));
+        insta::assert_debug_snapshot!(future);
     }
 
     #[tokio::test]
