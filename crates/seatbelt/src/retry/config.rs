@@ -24,6 +24,7 @@ use crate::retry::constants::{DEFAULT_BACKOFF, DEFAULT_BASE_DELAY, DEFAULT_RETRY
 /// | `max_delay` | `None` |
 /// | `use_jitter` | `true` |
 /// | `max_retry_attempts` | `3` |
+/// | `handle_unavailable` | `false` |
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
@@ -54,6 +55,11 @@ pub struct RetryConfig {
 
     /// The maximum number of retry attempts (not counting the original call).
     pub max_retry_attempts: u32,
+
+    /// Whether to treat [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable]
+    /// classifications as recoverable conditions, allowing retries against different
+    /// endpoints or resources. When `false`, unavailable responses are returned immediately.
+    pub handle_unavailable: bool,
 }
 
 impl Default for RetryConfig {
@@ -65,6 +71,7 @@ impl Default for RetryConfig {
             max_delay: None,
             use_jitter: DEFAULT_USE_JITTER,
             max_retry_attempts: DEFAULT_RETRY_ATTEMPTS,
+            handle_unavailable: false,
         }
     }
 }

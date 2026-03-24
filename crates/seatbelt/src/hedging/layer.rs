@@ -131,6 +131,7 @@ impl<In, Out, S1, S2> HedgingLayer<In, Out, S1, S2> {
     pub fn config(self, config: &HedgingConfig) -> Self {
         self.hedging_delay(config.hedging_delay)
             .max_hedged_attempts(config.max_hedged_attempts)
+            .handle_unavailable(config.handle_unavailable)
             .enable(config.enabled)
     }
 
@@ -467,6 +468,7 @@ mod tests {
             enabled: false,
             hedging_delay: Duration::from_secs(2),
             max_hedged_attempts: 4,
+            handle_unavailable: true,
         };
 
         let layer = create_ready_layer().config(&config);

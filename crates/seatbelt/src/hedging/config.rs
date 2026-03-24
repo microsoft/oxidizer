@@ -20,6 +20,7 @@ use crate::hedging::constants::{DEFAULT_HEDGING_DELAY, DEFAULT_MAX_HEDGED_ATTEMP
 /// | `enabled` | `true` |
 /// | `hedging_delay` | 500 milliseconds |
 /// | `max_hedged_attempts` | `1` |
+/// | `handle_unavailable` | `false` |
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
@@ -37,6 +38,11 @@ pub struct HedgingConfig {
 
     /// The maximum number of additional hedged attempts (not counting the original call).
     pub max_hedged_attempts: u8,
+
+    /// Whether to treat [`RecoveryInfo::unavailable()`][crate::RecoveryInfo::unavailable]
+    /// classifications as recoverable conditions, allowing continued hedging against
+    /// in-flight requests. When `false`, unavailable responses are returned immediately.
+    pub handle_unavailable: bool,
 }
 
 impl Default for HedgingConfig {
@@ -45,6 +51,7 @@ impl Default for HedgingConfig {
             enabled: true,
             hedging_delay: DEFAULT_HEDGING_DELAY,
             max_hedged_attempts: DEFAULT_MAX_HEDGED_ATTEMPTS,
+            handle_unavailable: false,
         }
     }
 }
