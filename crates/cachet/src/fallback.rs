@@ -17,7 +17,6 @@ use tick::Clock;
 use crate::Error;
 use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
-use crate::telemetry::ext::ClockExt;
 use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 
 /// Type alias for promotion predicate functions.
@@ -212,7 +211,7 @@ where
     ///
     /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
+        let timed = self.inner.clock.timed(self.inner.fallback.get(key)).await;
         self.inner
             .telemetry
             .record(self.inner.name, CacheOperation::Get, CacheActivity::Fallback, timed.duration);
@@ -223,11 +222,7 @@ where
         if let Some(ref v) = fallback_value
             && self.inner.policy.should_promote(v)
         {
-            let timed_insert = self
-                .inner
-                .clock
-                .timed_async(self.inner.primary.insert(key.clone(), v.clone()))
-                .await;
+            let timed_insert = self.inner.clock.timed(self.inner.primary.insert(key.clone(), v.clone())).await;
             // Insert errors are intentionally swallowed - a failed promotion should not
             // fail the overall get. The CacheWrapper around the primary tier already
             // records an Error activity on insert failure.

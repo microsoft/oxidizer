@@ -18,7 +18,6 @@ use cachet_tier::{CacheEntry, CacheTier};
 use parking_lot::Mutex;
 
 use crate::fallback::{FallbackCache, FallbackCacheInner};
-use crate::telemetry::ext::ClockExt;
 use crate::telemetry::{CacheActivity, CacheOperation};
 
 /// Configuration for background cache refresh.
@@ -146,7 +145,7 @@ where
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
-        let timed = self.clock.timed_async(self.fallback.get(&key)).await;
+        let timed = self.clock.timed(self.fallback.get(&key)).await;
 
         match timed.result {
             Ok(Some(value)) => self.handle_fallback_hit(key, value, timed.duration).await,
@@ -164,7 +163,7 @@ where
     }
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
-        let timed = self.clock.timed_async(self.primary.insert(key, value)).await;
+        let timed = self.clock.timed(self.primary.insert(key, value)).await;
 
         match timed.result {
             Ok(()) => {

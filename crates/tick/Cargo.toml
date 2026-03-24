@@ -96,6 +96,10 @@ required-features = ["test-util"]
 name = "interop_jiff"
 required-features = ["test-util"]
 
+[[example]]
+name = "timed_result"
+required-features = ["tokio"]
+
 [[bench]]
 name = "clock_bench"
 harness = false

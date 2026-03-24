@@ -251,6 +251,7 @@ mod periodic_timer;
 mod state;
 mod stopwatch;
 mod system_time_ext;
+mod timed;
 mod timers;
 
 pub mod runtime;
@@ -264,6 +265,7 @@ pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use system_time_ext::SystemTimeExt;
+pub use timed::{Timed, TimedResult};
 pub use timeout::Timeout;
 
 /// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.
