@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates advanced usage of the `Clock` API, including
-//! `Stopwatch`, `PeriodicTimer`, and timeouts.
+//! This example demonstrates how to measure the execution time of an async
+//! operation using [`Clock::timed`] and [`TimedResult`].
 
-use tick::Clock;
-use tick::TimedResult;
+use tick::{Clock, TimedResult};
 
 #[tokio::main]
 async fn main() {
@@ -21,6 +20,6 @@ async fn main() {
     // Use `Timed` to measure the time taken by the background job and capture its result.
     let TimedResult { result, duration } = clock.timed(background_job).await;
 
-    // Stop the measurement and print the elapsed time.
+    // Print the result and the elapsed time.
     println!("Result: {}, Elapsed time: {:?}", result, duration);
 }

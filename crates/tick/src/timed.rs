@@ -1,26 +1,48 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Extension traits for telemetry recording.
+//! Utilities for measuring the execution time of asynchronous operations.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use crate::Stopwatch;
 use pin_project_lite::pin_project;
 
-/// Result of a timed async operation.
+use crate::Stopwatch;
+
+/// The result of a timed async operation, containing both the inner future's
+/// output and the elapsed [`Duration`].
+///
+/// Produced by awaiting a [`Timed`] future, which is created via [`Clock::timed`][crate::Clock::timed].
+///
+/// # Examples
+///
+/// ```
+/// use std::time::Duration;
+///
+/// use tick::{Clock, TimedResult};
+///
+/// # async fn example(clock: &Clock) {
+/// let TimedResult { result, duration } = clock.timed(async { 42 }).await;
+/// assert_eq!(result, 42);
+/// # }
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct TimedResult<R> {
-    /// The result of the operation.
+    /// The output of the inner future.
     pub result: R,
-    /// The duration of the operation.
+    /// The wall-clock duration of the operation.
     pub duration: Duration,
 }
 
 pin_project! {
-    /// A future that times the inner future's execution.
+    /// A future that wraps an inner future and measures its execution time.
+    ///
+    /// When the inner future completes, `Timed` yields a [`TimedResult`] containing
+    /// both the output and the elapsed [`Duration`].
+    ///
+    /// Created via [`Clock::timed`][crate::Clock::timed].
     #[must_use = "futures do nothing unless polled"]
     pub struct Timed<F> {
         #[pin]

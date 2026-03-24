@@ -460,6 +460,26 @@ impl Clock {
         crate::Stopwatch::new(self)
     }
 
+    /// Wraps a future so that its execution time is measured.
+    ///
+    /// Returns a [`Timed`] future whose output is a [`TimedResult`][crate::TimedResult]
+    /// containing both the inner future's result and the elapsed duration.
+    ///
+    /// The measurement uses the same clock as the [`Stopwatch`][crate::Stopwatch],
+    /// so time can be controlled in tests via [`ClockControl`][crate::ClockControl].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::{Clock, TimedResult};
+    ///
+    /// # async fn timed_example(clock: &Clock) {
+    /// let TimedResult { result, duration } = clock.timed(async { 42 }).await;
+    /// assert_eq!(result, 42);
+    /// # }
+    /// ```
     #[must_use]
     pub fn timed<F>(&self, f: F) -> Timed<F>
     where
