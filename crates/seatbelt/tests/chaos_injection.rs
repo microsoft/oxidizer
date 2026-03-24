@@ -242,3 +242,45 @@ async fn injection_can_inject_errors(#[case] use_tower: bool) {
 
     assert_eq!(output, Err("chaos_error".to_string()));
 }
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn injection_output_error_with(#[case] use_tower: bool) {
+    let clock = Clock::new_frozen();
+    let context = ResilienceContext::new(clock);
+
+    let stack = (
+        Injection::layer("test_injection", &context)
+            .rate(1.0)
+            .output_error_with(|_input, _args| "chaos_error_with".to_string()),
+        Execute::new(|input: String| async move { Ok::<_, String>(input) }),
+    );
+
+    let mut service = stack.into_service();
+    let output = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    assert_eq!(output, Err("chaos_error_with".to_string()));
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn injection_output_error_fixed(#[case] use_tower: bool) {
+    let clock = Clock::new_frozen();
+    let context = ResilienceContext::new(clock);
+
+    let stack = (
+        Injection::layer("test_injection", &context)
+            .rate(1.0)
+            .output_error("fixed_chaos_error".to_string()),
+        Execute::new(|input: String| async move { Ok::<_, String>(input) }),
+    );
+
+    let mut service = stack.into_service();
+    let output = execute_service(&mut service, "test".to_string(), use_tower).await;
+
+    assert_eq!(output, Err("fixed_chaos_error".to_string()));
+}

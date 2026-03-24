@@ -19,7 +19,9 @@ use crate::{ResilienceContext, TelemetryString};
 /// before the layer can be built:
 ///
 /// - [`rate`][InjectionLayer::rate]: Required probability of injection
-/// - [`output_with`][InjectionLayer::output_with] or [`output`][InjectionLayer::output]:
+/// - [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output],
+///   [`output_error_with`][InjectionLayer::output_error_with], or
+///   [`output_error`][InjectionLayer::output_error]:
 ///   Required output factory
 ///
 /// For comprehensive examples, see the [injection module][crate::chaos::injection] documentation.
@@ -145,6 +147,46 @@ impl<In: Send + 'static, Out: Send + 'static, S1, S2> InjectionLayer<In, Out, S1
         Out: Clone + Sync,
     {
         self.output_with(move |_, _| value.clone())
+    }
+}
+
+impl<In, Ok, Err, S1, S2> InjectionLayer<In, Result<Ok, Err>, S1, S2>
+where
+    In: Send + 'static,
+    Ok: Send + 'static,
+    Err: Send + 'static,
+{
+    /// Sets a callback-based error factory for the injected output.
+    ///
+    /// The `error_fn` receives the consumed input and [`InjectionOutputArgs`],
+    /// and returns an error value that is wrapped in [`Err`] to produce the
+    /// output when injection is triggered. This call replaces any previous
+    /// output factory.
+    ///
+    /// This is a convenience shorthand for
+    /// [`output_with`][InjectionLayer::output_with] when the injected output is
+    /// always an error variant.
+    #[must_use]
+    pub fn output_error_with(
+        self,
+        error_fn: impl Fn(In, InjectionOutputArgs) -> Err + Send + Sync + 'static,
+    ) -> InjectionLayer<In, Result<Ok, Err>, S1, Set> {
+        self.output_with(move |input, args| Result::Err(error_fn(input, args)))
+    }
+
+    /// Sets a fixed error value that is cloned on every injection.
+    ///
+    /// This is a convenience shorthand for
+    /// [`output_error_with`][InjectionLayer::output_error_with] when the
+    /// injected error is always the same value. The input is discarded.
+    ///
+    /// This call replaces any previous output factory.
+    #[must_use]
+    pub fn output_error(self, error: Err) -> InjectionLayer<In, Result<Ok, Err>, S1, Set>
+    where
+        Err: Clone + Sync,
+    {
+        self.output_error_with(move |_, _| error.clone())
     }
 }
 
@@ -296,6 +338,39 @@ mod tests {
     }
 
     #[test]
+    fn output_error_with_ensure_set_correctly() {
+        let context = create_test_context_result();
+        let layer: InjectionLayer<_, _, NotSet, Set> =
+            InjectionLayer::new("test".into(), &context).output_error_with(|_input, _args| "injected_error".to_string());
+
+        assert!(layer.injection_output.is_some());
+    }
+
+    #[test]
+    fn output_error_ensure_set_correctly() {
+        let context = create_test_context_result();
+        let layer: InjectionLayer<_, _, NotSet, Set> =
+            InjectionLayer::new("test".into(), &context).output_error("fixed_error".to_string());
+
+        assert!(layer.injection_output.is_some());
+    }
+
+    #[test]
+    fn output_error_with_when_ready_ok() {
+        let layer: InjectionLayer<_, _, Set, Set> =
+            create_ready_layer_result().output_error_with(|_, _| "new_error".to_string());
+
+        assert!(layer.injection_output.is_some());
+    }
+
+    #[test]
+    fn output_error_when_ready_ok() {
+        let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer_result().output_error("fixed_error".to_string());
+
+        assert!(layer.injection_output.is_some());
+    }
+
+    #[test]
     fn output_with_when_ready_ok() {
         let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer().output_with(|_, _| "new".to_string());
 
@@ -323,5 +398,15 @@ mod tests {
         InjectionLayer::new("test".into(), &create_test_context())
             .rate(0.5)
             .output_with(|_input, _args| "injected_value".to_string())
+    }
+
+    fn create_test_context_result() -> ResilienceContext<String, Result<String, String>> {
+        ResilienceContext::new(Clock::new_frozen()).name("test_pipeline")
+    }
+
+    fn create_ready_layer_result() -> InjectionLayer<String, Result<String, String>, Set, Set> {
+        InjectionLayer::new("test".into(), &create_test_context_result())
+            .rate(0.5)
+            .output_error_with(|_input, _args| "injected_error".to_string())
     }
 }

@@ -41,7 +41,9 @@
 //! properly specifying the rate and the output factory:
 //!
 //! - [`rate`][InjectionLayer::rate]: Required probability of injection in `[0.0, 1.0]`
-//! - [`output_with`][InjectionLayer::output_with] or [`output`][InjectionLayer::output]:
+//! - [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output],
+//!   [`output_error_with`][InjectionLayer::output_error_with], or
+//!   [`output_error`][InjectionLayer::output_error]:
 //!   Required factory that produces the injected output
 //!
 //! Each injection layer requires an identifier for telemetry purposes. This
@@ -56,13 +58,17 @@
 //!   the consumed input and [`InjectionOutputArgs`], and returns the output.
 //! - [`output`][InjectionLayer::output]: Convenience shorthand that clones a fixed
 //!   value on every invocation.
+//! - [`output_error_with`][InjectionLayer::output_error_with]: Like `output_with`, but
+//!   the closure returns only the error value, which is automatically wrapped in `Err`.
+//! - [`output_error`][InjectionLayer::output_error]: Like `output`, but takes an error
+//!   value that is cloned and wrapped in `Err` on every invocation.
 //!
 //! # Defaults
 //!
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
 //! | Rate | `None` (required) | Probability of injection | [`rate`][InjectionLayer::rate] |
-//! | Output | `None` (required) | Produces the injected output | [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output] |
+//! | Output | `None` (required) | Produces the injected output | [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output], [`output_error_with`][InjectionLayer::output_error_with], [`output_error`][InjectionLayer::output_error] |
 //! | Enable condition | Always enabled | Injection is applied to all requests | [`enable_if`][InjectionLayer::enable_if], [`enable_always`][InjectionLayer::enable_always], [`disable`][InjectionLayer::disable] |
 //!
 //! # Thread Safety

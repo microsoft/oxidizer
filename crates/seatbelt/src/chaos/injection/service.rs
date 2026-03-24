@@ -68,7 +68,9 @@ impl<In, Out> Injection<In, Out, ()> {
     /// build a service until the required properties are set:
     /// [`rate`][InjectionLayer::rate] and one of
     /// [`output_with`][InjectionLayer::output_with] /
-    /// [`output`][InjectionLayer::output].
+    /// [`output`][InjectionLayer::output] /
+    /// [`output_error_with`][InjectionLayer::output_error_with] /
+    /// [`output_error`][InjectionLayer::output_error].
     ///
     /// The `name` identifies the injection strategy in telemetry, while
     /// `context` provides configuration shared across multiple resilience
