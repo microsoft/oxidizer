@@ -471,16 +471,14 @@ impl Clock {
     /// # Examples
     ///
     /// ```
-    /// use std::time::Duration;
-    ///
     /// use tick::{Clock, TimedResult};
     ///
     /// # async fn timed_example(clock: &Clock) {
     /// let TimedResult { result, duration } = clock.timed(async { 42 }).await;
+    /// println!("Result: {}, Duration: {:?}", result, duration);
     /// assert_eq!(result, 42);
     /// # }
     /// ```
-    #[must_use]
     pub fn timed<F>(&self, f: F) -> Timed<F>
     where
         F: Future,
@@ -815,6 +813,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore)]
     async fn timed_measures_duration() {
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -831,6 +830,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore)]
     async fn timed_handles_pending() {
         use std::pin::Pin;
         use std::sync::Arc;

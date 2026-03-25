@@ -48,6 +48,7 @@ thread_aware.workspace = true
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
+#internal
 ohno = { workspace = true, features = ["app-err"] }
 
 #external

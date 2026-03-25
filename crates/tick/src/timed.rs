@@ -19,12 +19,11 @@ use crate::Stopwatch;
 /// # Examples
 ///
 /// ```
-/// use std::time::Duration;
-///
 /// use tick::{Clock, TimedResult};
 ///
 /// # async fn example(clock: &Clock) {
 /// let TimedResult { result, duration } = clock.timed(async { 42 }).await;
+/// println!("Result: {}, Duration: {:?}", result, duration);
 /// assert_eq!(result, 42);
 /// # }
 /// ```
