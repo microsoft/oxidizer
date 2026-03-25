@@ -209,7 +209,7 @@ impl<In: Send + 'static, Out: Send + 'static> InjectionShared<In, Out> {
         #[cfg(any(feature = "logs", test))]
         if self.telemetry.logs_enabled {
             tracing::event!(
-                name: "seatbelt.injection",
+                name: "seatbelt.chaos.injection",
                 tracing::Level::WARN,
                 pipeline.name = %self.telemetry.pipeline_name,
                 strategy.name = %self.telemetry.strategy_name,
