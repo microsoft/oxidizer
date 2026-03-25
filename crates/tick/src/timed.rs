@@ -32,7 +32,7 @@ use crate::Stopwatch;
 pub struct TimedResult<R> {
     /// The output of the inner future.
     pub result: R,
-    /// The wall-clock duration of the operation.
+    /// The elapsed duration of the operation, measured using a monotonic clock.
     pub duration: Duration,
 }
 
