@@ -59,7 +59,7 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
     /// Sets a callback that dynamically computes the injection rate for each
     /// request.
     ///
-    /// The `rate_fn` receives a mutable reference to the input and
+    /// The `rate_fn` receives a reference to the input and
     /// [`InjectionRateArgs`], and returns a probability in `[0.0, 1.0]` where
     /// `0.0` means never inject and `1.0` means always inject. The returned
     /// value is clamped to this range.
@@ -69,7 +69,7 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
     #[must_use]
     pub fn rate_with(
         mut self,
-        rate_fn: impl Fn(&mut In, InjectionRateArgs) -> f64 + Send + Sync + 'static,
+        rate_fn: impl Fn(&In, InjectionRateArgs) -> f64 + Send + Sync + 'static,
     ) -> InjectionLayer<In, Out, Set, S2> {
         self.rate = Some(InjectionRate::new(rate_fn));
         self.into_state::<Set, S2>()
@@ -274,7 +274,7 @@ mod tests {
     fn rate_clamps_below_zero() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(-0.1);
-        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        let rate = layer.rate.unwrap().call(&"test".to_string(), InjectionRateArgs {});
         assert_eq!(rate, 0.0);
     }
 
@@ -282,7 +282,7 @@ mod tests {
     fn rate_clamps_above_one() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(1.1);
-        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        let rate = layer.rate.unwrap().call(&"test".to_string(), InjectionRateArgs {});
         assert_eq!(rate, 1.0);
     }
 
@@ -290,7 +290,7 @@ mod tests {
     fn rate_boundary_zero_ok() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(0.0);
-        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        let rate = layer.rate.unwrap().call(&"test".to_string(), InjectionRateArgs {});
         assert_eq!(rate, 0.0);
     }
 
@@ -298,7 +298,7 @@ mod tests {
     fn rate_boundary_one_ok() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(1.0);
-        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        let rate = layer.rate.unwrap().call(&"test".to_string(), InjectionRateArgs {});
         assert_eq!(rate, 1.0);
     }
 
@@ -358,7 +358,7 @@ mod tests {
     fn rate_when_ready_ok() {
         let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer().rate(0.99);
 
-        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        let rate = layer.rate.unwrap().call(&"test".to_string(), InjectionRateArgs {});
         assert_eq!(rate, 0.99);
     }
 
@@ -415,23 +415,8 @@ mod tests {
             InjectionLayer::new("test".into(), &context).rate_with(|input, _args| if input.starts_with("high") { 1.0 } else { 0.0 });
 
         let rate_fn = layer.rate.unwrap();
-        assert_eq!(rate_fn.call(&mut "high_priority".to_string(), InjectionRateArgs {}), 1.0);
-        assert_eq!(rate_fn.call(&mut "low_priority".to_string(), InjectionRateArgs {}), 0.0);
-    }
-
-    #[test]
-    fn rate_with_can_mutate_input() {
-        let context = create_test_context();
-        let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate_with(|input, _args| {
-            input.push_str("_tagged");
-            0.5
-        });
-
-        let rate_fn = layer.rate.unwrap();
-        let mut input = "request".to_string();
-        let rate = rate_fn.call(&mut input, InjectionRateArgs {});
-        assert_eq!(rate, 0.5);
-        assert_eq!(input, "request_tagged");
+        assert_eq!(rate_fn.call(&"high_priority".to_string(), InjectionRateArgs {}), 1.0);
+        assert_eq!(rate_fn.call(&"low_priority".to_string(), InjectionRateArgs {}), 0.0);
     }
 
     #[test]

@@ -44,7 +44,6 @@ async fn main() {
 
     let service = stack.into_service();
 
-    println!("Sending requests while the outage is active...");
     for i in 0..6 {
         let result = service.execute(format!("request-{i}")).await;
         println!("  {result}");

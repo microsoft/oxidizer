@@ -295,7 +295,7 @@ async fn rate_with_dynamic_rate(#[case] use_tower: bool) {
 
     let stack = (
         Injection::layer("test_injection", &context)
-            .rate_with(|input: &mut String, _args| if input.starts_with("inject") { 1.0 } else { 0.0 })
+            .rate_with(|input: &String, _args| if input.starts_with("inject") { 1.0 } else { 0.0 })
             .output_with(|_input, _args| Ok::<_, String>("injected".to_string())),
         Execute::new(|input: String| async move { Ok::<_, String>(input) }),
     );
@@ -315,38 +315,13 @@ async fn rate_with_dynamic_rate(#[case] use_tower: bool) {
 #[case::layered(false)]
 #[case::tower(true)]
 #[tokio::test]
-async fn rate_with_can_mutate_input(#[case] use_tower: bool) {
-    let clock = Clock::new_frozen();
-    let context = ResilienceContext::new(clock);
-
-    let stack = (
-        Injection::layer("test_injection", &context)
-            .rate_with(|input: &mut String, _args| {
-                input.push_str("_tagged");
-                0.0 // never inject, so the mutated input passes through
-            })
-            .output_with(|_input, _args| Ok::<_, String>("injected".to_string())),
-        Execute::new(|input: String| async move { Ok::<_, String>(input) }),
-    );
-
-    let mut service = stack.into_service();
-    let output = execute_service(&mut service, "request".to_string(), use_tower).await;
-
-    // Input was mutated by rate_with, then passed to inner service
-    assert_eq!(output, Ok("request_tagged".to_string()));
-}
-
-#[rstest]
-#[case::layered(false)]
-#[case::tower(true)]
-#[tokio::test]
 async fn rate_with_clamps_above_one(#[case] use_tower: bool) {
     let clock = Clock::new_frozen();
     let context = ResilienceContext::new(clock);
 
     let stack = (
         Injection::layer("test_injection", &context)
-            .rate_with(|_input: &mut String, _args| 999.0) // out of range, should clamp to 1.0
+            .rate_with(|_input: &String, _args| 999.0) // out of range, should clamp to 1.0
             .output_with(|_input, _args| Ok::<_, String>("injected".to_string())),
         Execute::new(|input: String| async move { Ok::<_, String>(input) }),
     );

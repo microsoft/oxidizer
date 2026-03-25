@@ -112,12 +112,12 @@ where
 {
     type Out = Out;
 
-    async fn execute(&self, mut input: In) -> Self::Out {
+    async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
-        if !self.shared.should_inject(&mut input) {
+        if !self.shared.should_inject(&input) {
             return self.inner.execute(input).await;
         }
 
@@ -167,13 +167,13 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: Req) -> Self::Future {
+    fn call(&mut self, req: Req) -> Self::Future {
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);
             return InjectionFuture { inner: Box::pin(future) };
         }
 
-        if !self.shared.should_inject(&mut req) {
+        if !self.shared.should_inject(&req) {
             let future = self.inner.call(req);
             return InjectionFuture { inner: Box::pin(future) };
         }
@@ -187,7 +187,7 @@ where
 }
 
 impl<In: Send + 'static, Out: Send + 'static> InjectionShared<In, Out> {
-    fn should_inject(&self, input: &mut In) -> bool {
+    fn should_inject(&self, input: &In) -> bool {
         let rate = self.rate.call(input, InjectionRateArgs {}).clamp(0.0, 1.0);
         self.rnd.next_f64() < rate
     }

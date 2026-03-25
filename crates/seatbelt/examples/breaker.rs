@@ -61,7 +61,7 @@ async fn main() -> Result<(), AppError> {
         // Chaos injection layer: simulate failures with a dynamic rate that
         // decreases over time so the service eventually "recovers".
         Injection::layer("simulated_outage", &context)
-            .rate_with(|input: &mut u32, _args| {
+            .rate_with(|input: &u32, _args| {
                 if *input > 100 {
                     // Service has fully recovered — no injected failures
                     0.0
