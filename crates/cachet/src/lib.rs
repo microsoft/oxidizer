@@ -232,6 +232,7 @@
 mod builder;
 mod cache;
 mod fallback;
+mod map;
 mod refresh;
 mod telemetry;
 mod wrapper;

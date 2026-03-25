@@ -122,6 +122,14 @@ impl<V> CacheEntry<V> {
     pub fn value(&self) -> &V {
         &self.value
     }
+
+    pub fn map_value<U, F: FnOnce(V) -> U>(self, f: F) -> CacheEntry<U> {
+        CacheEntry {
+            value: f(self.value),
+            cached_at: self.cached_at,
+            ttl: self.ttl,
+        }
+    }
 }
 
 impl<V> Deref for CacheEntry<V> {
