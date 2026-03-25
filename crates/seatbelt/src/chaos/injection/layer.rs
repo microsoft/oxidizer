@@ -18,7 +18,8 @@ use crate::{ResilienceContext, TelemetryString};
 /// and uses the type-state pattern to enforce that required properties are configured
 /// before the layer can be built:
 ///
-/// - [`rate`][InjectionLayer::rate]: Required probability of injection
+/// - [`rate`][InjectionLayer::rate] or [`rate_with`][InjectionLayer::rate_with]:
+///   Required probability of injection
 /// - [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output],
 ///   [`output_error_with`][InjectionLayer::output_error_with], or
 ///   [`output_error`][InjectionLayer::output_error]:
@@ -28,11 +29,11 @@ use crate::{ResilienceContext, TelemetryString};
 ///
 /// # Type State
 ///
-/// - `S1`: Tracks whether [`rate`][InjectionLayer::rate] has been set
+/// - `S1`: Tracks whether [`rate`][InjectionLayer::rate] or [`rate_with`][InjectionLayer::rate_with] has been set
 /// - `S2`: Tracks whether [`output_with`][InjectionLayer::output_with] has been set
 #[derive(Debug)]
 pub struct InjectionLayer<In, Out, S1 = Set, S2 = Set> {
-    rate: Option<f64>,
+    rate: Option<InjectionRate<In>>,
     injection_output: Option<InjectionOutput<In, Out>>,
     enable_if: EnableIf<In>,
     telemetry: TelemetryHelper,
@@ -55,15 +56,34 @@ impl<In, Out> InjectionLayer<In, Out, NotSet, NotSet> {
 }
 
 impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
+    /// Sets a callback that dynamically computes the injection rate for each
+    /// request.
+    ///
+    /// The `rate_fn` receives a mutable reference to the input and
+    /// [`InjectionRateArgs`], and returns a probability in `[0.0, 1.0]` where
+    /// `0.0` means never inject and `1.0` means always inject. The returned
+    /// value is clamped to this range.
+    ///
+    /// This allows the injection rate to vary per request based on request
+    /// properties or external state.
+    #[must_use]
+    pub fn rate_with(
+        mut self,
+        rate_fn: impl Fn(&mut In, InjectionRateArgs) -> f64 + Send + Sync + 'static,
+    ) -> InjectionLayer<In, Out, Set, S2> {
+        self.rate = Some(InjectionRate::new(rate_fn));
+        self.into_state::<Set, S2>()
+    }
+
     /// Sets the probability of injecting the configured output instead of calling
     /// the inner service.
     ///
     /// The `rate` is clamped to the range `[0.0, 1.0]` where `0.0` means never
     /// inject and `1.0` means always inject.
     #[must_use]
-    pub fn rate(mut self, rate: f64) -> InjectionLayer<In, Out, Set, S2> {
-        self.rate = Some(rate.clamp(0.0, 1.0));
-        self.into_state::<Set, S2>()
+    pub fn rate(self, rate: f64) -> InjectionLayer<In, Out, Set, S2> {
+        let clamped = rate.clamp(0.0, 1.0);
+        self.rate_with(move |_, _| clamped)
     }
 
     /// Applies configuration from an [`InjectionConfig`] struct.
@@ -195,7 +215,7 @@ impl<In, Out, S> Layer<S> for InjectionLayer<In, Out, Set, Set> {
 
     fn layer(&self, inner: S) -> Self::Service {
         let shared = InjectionShared {
-            rate: self.rate.expect("enforced by the type state pattern"),
+            rate: self.rate.clone().expect("enforced by the type state pattern"),
             enable_if: self.enable_if.clone(),
             injection_output: self.injection_output.clone().expect("enforced by the type state pattern"),
             rnd: self.rnd.clone(),
@@ -247,35 +267,39 @@ mod tests {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(0.5);
 
-        assert_eq!(layer.rate, Some(0.5));
+        assert!(layer.rate.is_some());
     }
 
     #[test]
     fn rate_clamps_below_zero() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(-0.1);
-        assert_eq!(layer.rate, Some(0.0));
+        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        assert_eq!(rate, 0.0);
     }
 
     #[test]
     fn rate_clamps_above_one() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(1.1);
-        assert_eq!(layer.rate, Some(1.0));
+        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        assert_eq!(rate, 1.0);
     }
 
     #[test]
     fn rate_boundary_zero_ok() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(0.0);
-        assert_eq!(layer.rate, Some(0.0));
+        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        assert_eq!(rate, 0.0);
     }
 
     #[test]
     fn rate_boundary_one_ok() {
         let context = create_test_context();
         let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate(1.0);
-        assert_eq!(layer.rate, Some(1.0));
+        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        assert_eq!(rate, 1.0);
     }
 
     #[test]
@@ -334,7 +358,8 @@ mod tests {
     fn rate_when_ready_ok() {
         let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer().rate(0.99);
 
-        assert_eq!(layer.rate, Some(0.99));
+        let rate = layer.rate.unwrap().call(&mut "test".to_string(), InjectionRateArgs {});
+        assert_eq!(rate, 0.99);
     }
 
     #[test]
@@ -373,6 +398,47 @@ mod tests {
         let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer().output_with(|_, _| "new".to_string());
 
         assert!(layer.injection_output.is_some());
+    }
+
+    #[test]
+    fn rate_with_ensure_set_correctly() {
+        let context = create_test_context();
+        let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate_with(|_input, _args| 0.42);
+
+        assert!(layer.rate.is_some());
+    }
+
+    #[test]
+    fn rate_with_receives_input() {
+        let context = create_test_context();
+        let layer: InjectionLayer<_, _, Set, NotSet> =
+            InjectionLayer::new("test".into(), &context).rate_with(|input, _args| if input.starts_with("high") { 1.0 } else { 0.0 });
+
+        let rate_fn = layer.rate.unwrap();
+        assert_eq!(rate_fn.call(&mut "high_priority".to_string(), InjectionRateArgs {}), 1.0);
+        assert_eq!(rate_fn.call(&mut "low_priority".to_string(), InjectionRateArgs {}), 0.0);
+    }
+
+    #[test]
+    fn rate_with_can_mutate_input() {
+        let context = create_test_context();
+        let layer: InjectionLayer<_, _, Set, NotSet> = InjectionLayer::new("test".into(), &context).rate_with(|input, _args| {
+            input.push_str("_tagged");
+            0.5
+        });
+
+        let rate_fn = layer.rate.unwrap();
+        let mut input = "request".to_string();
+        let rate = rate_fn.call(&mut input, InjectionRateArgs {});
+        assert_eq!(rate, 0.5);
+        assert_eq!(input, "request_tagged");
+    }
+
+    #[test]
+    fn rate_with_when_ready_ok() {
+        let layer: InjectionLayer<_, _, Set, Set> = create_ready_layer().rate_with(|_, _| 0.75);
+
+        assert!(layer.rate.is_some());
     }
 
     #[test]

@@ -21,9 +21,10 @@ use crate::utils::EnableIf;
 /// calling the inner service.
 ///
 /// `Injection` wraps an inner [`Service`] and, on each request, rolls a random
-/// number against the configured [`rate`][InjectionLayer::rate]. When the roll
-/// triggers, the inner service is skipped entirely and the configured output
-/// factory ([`output_with`][InjectionLayer::output_with] /
+/// number against the configured [`rate`][InjectionLayer::rate] (or the
+/// dynamically computed rate from [`rate_with`][InjectionLayer::rate_with]).
+/// When the roll triggers, the inner service is skipped entirely and the
+/// configured output factory ([`output_with`][InjectionLayer::output_with] /
 /// [`output`][InjectionLayer::output]) produces the response.
 ///
 /// Injection is configured by calling [`Injection::layer`] and using the builder
@@ -44,7 +45,7 @@ pub struct Injection<In, Out, S> {
 /// This struct is wrapped in an `Arc` to enable cheap cloning of the service.
 #[derive(Debug)]
 pub(crate) struct InjectionShared<In, Out> {
-    pub(crate) rate: f64,
+    pub(crate) rate: InjectionRate<In>,
     pub(crate) enable_if: EnableIf<In>,
     pub(crate) injection_output: InjectionOutput<In, Out>,
     pub(crate) rnd: Rnd,
@@ -66,7 +67,8 @@ impl<In, Out> Injection<In, Out, ()> {
     ///
     /// The instance returned by this call is a builder and cannot be used to
     /// build a service until the required properties are set:
-    /// [`rate`][InjectionLayer::rate] and one of
+    /// [`rate`][InjectionLayer::rate] / [`rate_with`][InjectionLayer::rate_with]
+    /// and one of
     /// [`output_with`][InjectionLayer::output_with] /
     /// [`output`][InjectionLayer::output] /
     /// [`output_error_with`][InjectionLayer::output_error_with] /
@@ -110,12 +112,12 @@ where
 {
     type Out = Out;
 
-    async fn execute(&self, input: In) -> Self::Out {
+    async fn execute(&self, mut input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
         }
 
-        if !self.shared.should_inject() {
+        if !self.shared.should_inject(&mut input) {
             return self.inner.execute(input).await;
         }
 
@@ -165,13 +167,13 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Req) -> Self::Future {
+    fn call(&mut self, mut req: Req) -> Self::Future {
         if !self.shared.enable_if.call(&req) {
             let future = self.inner.call(req);
             return InjectionFuture { inner: Box::pin(future) };
         }
 
-        if !self.shared.should_inject() {
+        if !self.shared.should_inject(&mut req) {
             let future = self.inner.call(req);
             return InjectionFuture { inner: Box::pin(future) };
         }
@@ -185,8 +187,9 @@ where
 }
 
 impl<In: Send + 'static, Out: Send + 'static> InjectionShared<In, Out> {
-    fn should_inject(&self) -> bool {
-        self.rnd.next_f64() < self.rate
+    fn should_inject(&self, input: &mut In) -> bool {
+        let rate = self.rate.call(input, InjectionRateArgs {}).clamp(0.0, 1.0);
+        self.rnd.next_f64() < rate
     }
 
     fn handle_injection(&self, input: In) -> Out {

@@ -40,7 +40,8 @@
 //! safety ensures that you cannot accidentally create an injection layer without
 //! properly specifying the rate and the output factory:
 //!
-//! - [`rate`][InjectionLayer::rate]: Required probability of injection in `[0.0, 1.0]`
+//! - [`rate`][InjectionLayer::rate] or [`rate_with`][InjectionLayer::rate_with]:
+//!   Required probability of injection in `[0.0, 1.0]`
 //! - [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output],
 //!   [`output_error_with`][InjectionLayer::output_error_with], or
 //!   [`output_error`][InjectionLayer::output_error]:
@@ -67,7 +68,7 @@
 //!
 //! | Parameter | Default Value | Description | Configured By |
 //! |-----------|---------------|-------------|---------------|
-//! | Rate | `None` (required) | Probability of injection | [`rate`][InjectionLayer::rate] |
+//! | Rate | `None` (required) | Probability of injection | [`rate`][InjectionLayer::rate], [`rate_with`][InjectionLayer::rate_with] |
 //! | Output | `None` (required) | Produces the injected output | [`output_with`][InjectionLayer::output_with], [`output`][InjectionLayer::output], [`output_error_with`][InjectionLayer::output_error_with], [`output_error`][InjectionLayer::output_error] |
 //! | Enable condition | Always enabled | Injection is applied to all requests | [`enable_if`][InjectionLayer::enable_if], [`enable_always`][InjectionLayer::enable_always], [`disable`][InjectionLayer::disable] |
 //!
@@ -170,8 +171,8 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-pub use args::InjectionOutputArgs;
-pub(crate) use callbacks::InjectionOutput;
+pub use args::{InjectionOutputArgs, InjectionRateArgs};
+pub(crate) use callbacks::{InjectionOutput, InjectionRate};
 pub use config::InjectionConfig;
 pub use layer::InjectionLayer;
 pub use service::Injection;

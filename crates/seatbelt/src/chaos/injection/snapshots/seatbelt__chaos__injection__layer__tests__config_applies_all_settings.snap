@@ -4,7 +4,7 @@ expression: layer
 ---
 InjectionLayer {
     rate: Some(
-        0.75,
+        InjectionRate,
     ),
     injection_output: None,
     enable_if: Disabled,
