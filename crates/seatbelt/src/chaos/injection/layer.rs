@@ -245,6 +245,7 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float comparisons are intentional in these clamping/boundary tests")]
 mod tests {
     use std::fmt::Debug;
 
