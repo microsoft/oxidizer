@@ -189,6 +189,7 @@
 //! - [`tower`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs): Tower `ServiceBuilder` integration.
 //! - [`config`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs): Loading settings from a [JSON file](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json).
 //! - [`chaos_injection`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs): Fault injection with configurable probability.
+//! - [`chaos_injection_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs): Simulating an extended outage with dynamic injection rates.
 //!
 //! # Features
 //!

@@ -137,6 +137,10 @@ required-features = ["fallback"]
 name = "chaos_injection"
 required-features = ["chaos-injection"]
 
+[[example]]
+name = "chaos_injection_advanced"
+required-features = ["chaos-injection"]
+
 [[bench]]
 name = "observability"
 harness = false

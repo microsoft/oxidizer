@@ -165,26 +165,27 @@ Examples covering each middleware and common composition patterns:
 * [`tower`][__link24]: Tower `ServiceBuilder` integration.
 * [`config`][__link25]: Loading settings from a [JSON file][__link26].
 * [`chaos_injection`][__link27]: Fault injection with configurable probability.
+* [`chaos_injection_advanced`][__link28]: Simulating an extended outage with dynamic injection rates.
 
 ## Features
 
 This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-* **`timeout`** - Enables the [`timeout`][__link28] middleware for canceling long-running operations.
-* **`retry`** - Enables the [`retry`][__link29] middleware for automatically retrying failed operations with
+* **`timeout`** - Enables the [`timeout`][__link29] middleware for canceling long-running operations.
+* **`retry`** - Enables the [`retry`][__link30] middleware for automatically retrying failed operations with
   configurable backoff strategies, jitter, and recovery classification.
-* **`hedging`** - Enables the [`hedging`][__link30] middleware for reducing tail latency via additional
+* **`hedging`** - Enables the [`hedging`][__link31] middleware for reducing tail latency via additional
   concurrent requests with configurable delay modes.
-* **`breaker`** - Enables the [`breaker`][__link31] middleware for preventing cascading failures.
-* **`fallback`** - Enables the [`fallback`][__link32] middleware for replacing invalid output with a
+* **`breaker`** - Enables the [`breaker`][__link32] middleware for preventing cascading failures.
+* **`fallback`** - Enables the [`fallback`][__link33] middleware for replacing invalid output with a
   user-defined alternative.
-* **`chaos-injection`** - Enables the [`chaos::injection`][__link33] middleware for injecting faults
+* **`chaos-injection`** - Enables the [`chaos::injection`][__link34] middleware for injecting faults
   with a configurable probability.
 * **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 * **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 * **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
   configuration types.
-* **`tower-service`** - Enables [`tower_service::Service`][__link34] trait implementations for all
+* **`tower-service`** - Enables [`tower_service::Service`][__link35] trait implementations for all
   resilience middleware.
 
 
@@ -193,7 +194,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6EJkGIuyI_QG4MIJOv2f7HEG5KAUP5RTsAAG-ts5sYIlPpgYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC40LjOCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7i7r2RnrsO4G-U4CUokhFT4Gx0-82-5JOiQGzaCpzov4UVoYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMYJoc2VhdGJlbHRlMC40LjOCZHRpY2tlMC4yLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.4.3/seatbelt/hedging/index.html
@@ -215,14 +216,15 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link25]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs
  [__link26]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
  [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs
- [__link28]: https://docs.rs/seatbelt/0.4.3/seatbelt/timeout/index.html
- [__link29]: https://docs.rs/seatbelt/0.4.3/seatbelt/retry/index.html
+ [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs
+ [__link29]: https://docs.rs/seatbelt/0.4.3/seatbelt/timeout/index.html
  [__link3]: https://crates.io/crates/tick/0.2.1
- [__link30]: https://docs.rs/seatbelt/0.4.3/seatbelt/hedging/index.html
- [__link31]: https://docs.rs/seatbelt/0.4.3/seatbelt/breaker/index.html
- [__link32]: https://docs.rs/seatbelt/0.4.3/seatbelt/fallback/index.html
- [__link33]: https://docs.rs/seatbelt/0.4.3/seatbelt/?search=chaos::injection
- [__link34]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
+ [__link30]: https://docs.rs/seatbelt/0.4.3/seatbelt/retry/index.html
+ [__link31]: https://docs.rs/seatbelt/0.4.3/seatbelt/hedging/index.html
+ [__link32]: https://docs.rs/seatbelt/0.4.3/seatbelt/breaker/index.html
+ [__link33]: https://docs.rs/seatbelt/0.4.3/seatbelt/fallback/index.html
+ [__link34]: https://docs.rs/seatbelt/0.4.3/seatbelt/?search=chaos::injection
+ [__link35]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
  [__link4]: https://docs.rs/seatbelt/0.4.3/seatbelt/?search=ResilienceContext
  [__link5]: https://docs.rs/seatbelt/0.4.3/seatbelt/?search=ResilienceContext
  [__link6]: https://docs.rs/recoverable/0.1.1/recoverable/?search=RecoveryInfo
