@@ -64,16 +64,12 @@
 mod builder;
 #[cfg(feature = "custom")]
 mod custom;
-#[cfg(any(feature = "tokio", feature = "custom"))]
 mod handle;
-#[cfg(any(feature = "tokio", feature = "custom"))]
 mod spawner;
 
 #[cfg(feature = "custom")]
 pub use builder::CustomSpawnerBuilder;
 #[cfg(feature = "custom")]
 pub use custom::BoxedFuture;
-#[cfg(any(feature = "tokio", feature = "custom"))]
 pub use handle::JoinHandle;
-#[cfg(any(feature = "tokio", feature = "custom"))]
 pub use spawner::Spawner;

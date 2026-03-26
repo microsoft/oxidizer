@@ -25,6 +25,11 @@ pub(crate) enum JoinHandleInner<T> {
     Tokio(::tokio::task::JoinHandle<T>),
     #[cfg(feature = "custom")]
     Custom(oneshot::Receiver<T>),
+    #[expect(
+        dead_code,
+        reason = "Unconstructable variant so the type compiles when no runtime feature are enabled."
+    )]
+    None,
 }
 
 impl<T> Future for JoinHandle<T> {
@@ -36,6 +41,7 @@ impl<T> Future for JoinHandle<T> {
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(|res| res.expect("spawned task panicked")),
             #[cfg(feature = "custom")]
             JoinHandleInner::Custom(rx) => Pin::new(rx).poll(cx).map(|res| res.expect("spawned task panicked")),
+            JoinHandleInner::None => unreachable!("JoinHandleInner::None can not be constructed"),
         }
     }
 }
