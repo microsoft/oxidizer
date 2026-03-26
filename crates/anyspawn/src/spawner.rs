@@ -97,6 +97,24 @@ use crate::handle::JoinHandleInner;
 /// }
 /// # }
 /// ```
+///
+/// # Thread-Aware Support
+///
+/// `Spawner` implements [`ThreadAware`] and supports per-core isolation via
+/// [`new_thread_aware`](Self::new_thread_aware). A thread-aware spawner
+/// creates a **separate** inner `Spawner` for each CPU core through a
+/// user-provided factory function. When the spawner is
+/// [relocated](ThreadAware::relocated) to a new core, the factory is
+/// re-invoked with data that has itself been relocated to the destination,
+/// producing a fresh spawner tuned for that core.
+///
+/// This enables contention-free, NUMA-friendly task dispatch — each core
+/// enqueues work through its own spawn function without touching shared
+/// state. In contrast, the Tokio and custom variants are marked
+/// `#[thread_aware(skip)]` and behave identically regardless of which core
+/// they run on.
+///
+/// See [`new_thread_aware`](Self::new_thread_aware) for usage and examples.
 #[derive(Clone, ThreadAware)]
 #[must_use]
 pub struct Spawner(SpawnerKind);
