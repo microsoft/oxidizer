@@ -126,6 +126,8 @@ enum SpawnerKind {
     #[cfg(feature = "custom")]
     Custom(CustomSpawner),
     ThreadAware(thread_aware::Arc<Spawner, PerCore>),
+    #[cfg(not(any(feature = "custom", feature = "tokio")))]
+    None,
 }
 
 impl Spawner {
@@ -274,6 +276,8 @@ impl Spawner {
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
             SpawnerKind::ThreadAware(ta) => ta.spawn(work),
+            #[cfg(not(any(feature = "custom", feature = "tokio")))]
+            SpawnerKind::None => unreachable!("SpawnerKind::None cannot be constructed"),
         }
     }
 }
@@ -286,6 +290,8 @@ impl Debug for Spawner {
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
             SpawnerKind::ThreadAware(_) => f.debug_tuple("Spawner").field(&"thread_aware").finish(),
+            #[cfg(not(any(feature = "custom", feature = "tokio")))]
+            SpawnerKind::None => unreachable!("SpawnerKind::None cannot be constructed"),
         }
     }
 }
