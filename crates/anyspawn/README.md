@@ -59,8 +59,9 @@ details and examples.
 
 ## Features
 
-* `tokio` (default): Enables the [`Spawner::new_tokio`][__link4] constructor
-* `custom`: Enables [`Spawner::new_custom`][__link5] and [`CustomSpawnerBuilder`][__link6]
+* `tokio` (default): Enables the [`Spawner::new_tokio`][__link4] and
+  [`Spawner::new_tokio_with_handle`][__link5] constructors
+* `custom`: Enables [`Spawner::new_custom`][__link6] and [`CustomSpawnerBuilder`][__link7]
 
 
 <hr/>
@@ -68,11 +69,12 @@ details and examples.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzZggGALBWlVGxKbYKO3c4jHG8sNRx0SKZpBG_ofiAdiJ08dYWSCgmhhbnlzcGF3bmUwLjIuMIJsdGhyZWFkX2F3YXJlZTAuNi4y
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9wiT4mviSlSG7bkeqiO1sYsG8AqKBp2b7sGG8q0eDukfWyeYWSCgmhhbnlzcGF3bmUwLjIuMIJsdGhyZWFkX2F3YXJlZTAuNi4y
  [__link0]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner
  [__link1]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware
  [__link2]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_thread_aware
  [__link3]: Spawner#thread-aware-support
  [__link4]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_tokio
- [__link5]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_custom
- [__link6]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=CustomSpawnerBuilder
+ [__link5]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__link6]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_custom
+ [__link7]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=CustomSpawnerBuilder

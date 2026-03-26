@@ -84,6 +84,40 @@ impl CustomSpawnerBuilder<()> {
         }
     }
 
+    /// Creates a builder using an explicit Tokio runtime handle as the base
+    /// spawn function.
+    ///
+    /// Unlike [`tokio()`](Self::tokio), this does not require an ambient Tokio
+    /// runtime context. Tasks are spawned directly on the provided
+    /// [`Handle`](::tokio::runtime::Handle).
+    ///
+    /// The spawner is named `"tokio"` in [`Debug`] output.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use anyspawn::CustomSpawnerBuilder;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let handle = tokio::runtime::Handle::current();
+    /// let spawner = CustomSpawnerBuilder::tokio_with_handle(handle).build();
+    /// let result = spawner.spawn(async { 42 }).await;
+    /// assert_eq!(result, 42);
+    /// # }
+    /// ```
+    #[cfg(feature = "tokio")]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "tokio", feature = "custom"))))]
+    #[must_use]
+    pub fn tokio_with_handle(handle: ::tokio::runtime::Handle) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static> {
+        CustomSpawnerBuilder {
+            spawn_fn: move |fut: BoxedFuture| {
+                handle.spawn(fut);
+            },
+            name: "tokio",
+        }
+    }
+
     /// Creates a builder with a custom base spawn function.
     ///
     /// The spawner is named `"custom"` by default in [`Debug`] output.
