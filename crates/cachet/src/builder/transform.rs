@@ -558,86 +558,65 @@ pub struct EncryptLayer<Inner, EE, ED> {
     pub(crate) decoder: ED,
 }
 
-// PostBuildable for CompressLayer: wraps inner chain in compression TransformAdapter.
+// PostBuildable for PostTransformTier where previous is a CompressLayer<()> (no tiers before compress).
+// The fallback gets wrapped in the compression TransformAdapter directly.
 #[cfg(feature = "compress")]
-impl<Inner, CE, CD> PostBuildable<Vec<u8>, Vec<u8>> for CompressLayer<Inner, CE, CD>
+impl<CE, CD, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<CompressLayer<(), CE, CD>, FB>
 where
-    Inner: PostBuildable<Vec<u8>, Vec<u8>>,
     CE: Codec<Vec<u8>, Vec<u8>> + 'static,
     CD: Codec<Vec<u8>, Vec<u8>> + 'static,
+    FB: Buildable<Vec<u8>, Vec<u8>>,
 {
-    type Output = TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Inner::Output, IdentityCodec, CE, CD>;
+    type Output = TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, FB::TierOutput, IdentityCodec, CE, CD>;
 
     fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let inner_tier = self.inner.build_post_tier(clock, telemetry);
-        TransformAdapter::new(inner_tier, IdentityCodec, self.encoder, self.decoder)
+        let tier = self.tier.build_tier(clock, telemetry);
+        TransformAdapter::new(tier, IdentityCodec, self.previous.encoder, self.previous.decoder)
     }
 }
 
-// PostBuildable for EncryptLayer: wraps inner chain in encryption TransformAdapter.
+// PostBuildable for PostTransformTier where previous is an EncryptLayer<()> (no tiers before encrypt).
 #[cfg(feature = "encrypt")]
-impl<Inner, EE, ED> PostBuildable<Vec<u8>, Vec<u8>> for EncryptLayer<Inner, EE, ED>
+impl<EE, ED, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<EncryptLayer<(), EE, ED>, FB>
 where
-    Inner: PostBuildable<Vec<u8>, Vec<u8>>,
     EE: Codec<Vec<u8>, Vec<u8>> + 'static,
     ED: Codec<Vec<u8>, Vec<u8>> + 'static,
+    FB: Buildable<Vec<u8>, Vec<u8>>,
 {
-    type Output = TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Inner::Output, IdentityCodec, EE, ED>;
+    type Output = TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, FB::TierOutput, IdentityCodec, EE, ED>;
 
     fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let inner_tier = self.inner.build_post_tier(clock, telemetry);
-        TransformAdapter::new(inner_tier, IdentityCodec, self.encoder, self.decoder)
+        let tier = self.tier.build_tier(clock, telemetry);
+        TransformAdapter::new(tier, IdentityCodec, self.previous.encoder, self.previous.decoder)
     }
 }
 
-// PostBuildable for PostTransformTier wrapping a CompressLayer.
-#[cfg(feature = "compress")]
-impl<CompressInner, CE, CD, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<CompressLayer<CompressInner, CE, CD>, FB>
+// PostBuildable for PostTransformTier where previous is an EncryptLayer<CompressLayer<()>>
+// (compress then encrypt, no tiers before).
+#[cfg(all(feature = "compress", feature = "encrypt"))]
+impl<CE, CD, EE, ED, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<EncryptLayer<CompressLayer<(), CE, CD>, EE, ED>, FB>
 where
-    CompressLayer<CompressInner, CE, CD>: PostBuildable<Vec<u8>, Vec<u8>>,
+    CE: Codec<Vec<u8>, Vec<u8>> + 'static,
+    CD: Codec<Vec<u8>, Vec<u8>> + 'static,
+    EE: Codec<Vec<u8>, Vec<u8>> + 'static,
+    ED: Codec<Vec<u8>, Vec<u8>> + 'static,
     FB: Buildable<Vec<u8>, Vec<u8>>,
 {
-    type Output =
-        FallbackCache<Vec<u8>, Vec<u8>, <CompressLayer<CompressInner, CE, CD> as PostBuildable<Vec<u8>, Vec<u8>>>::Output, FB::TierOutput>;
+    type Output = TransformAdapter<
+        Vec<u8>,
+        Vec<u8>,
+        Vec<u8>,
+        Vec<u8>,
+        TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, FB::TierOutput, IdentityCodec, CE, CD>,
+        IdentityCodec,
+        EE,
+        ED,
+    >;
 
     fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let primary = self.previous.build_post_tier(clock.clone(), telemetry.clone());
-        let fallback = self.tier.build_tier(clock.clone(), telemetry.clone());
-
-        FallbackCache::new(
-            type_name::<Self::Output>(None),
-            primary,
-            fallback,
-            FallbackPromotionPolicy::always(),
-            clock,
-            None,
-            telemetry,
-        )
-    }
-}
-
-// PostBuildable for PostTransformTier wrapping an EncryptLayer.
-#[cfg(feature = "encrypt")]
-impl<EncryptInner, EE, ED, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<EncryptLayer<EncryptInner, EE, ED>, FB>
-where
-    EncryptLayer<EncryptInner, EE, ED>: PostBuildable<Vec<u8>, Vec<u8>>,
-    FB: Buildable<Vec<u8>, Vec<u8>>,
-{
-    type Output =
-        FallbackCache<Vec<u8>, Vec<u8>, <EncryptLayer<EncryptInner, EE, ED> as PostBuildable<Vec<u8>, Vec<u8>>>::Output, FB::TierOutput>;
-
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let primary = self.previous.build_post_tier(clock.clone(), telemetry.clone());
-        let fallback = self.tier.build_tier(clock.clone(), telemetry.clone());
-
-        FallbackCache::new(
-            type_name::<Self::Output>(None),
-            primary,
-            fallback,
-            FallbackPromotionPolicy::always(),
-            clock,
-            None,
-            telemetry,
-        )
+        let tier = self.tier.build_tier(clock, telemetry);
+        // First wrap in compression, then encryption
+        let compressed = TransformAdapter::new(tier, IdentityCodec, self.previous.inner.encoder, self.previous.inner.decoder);
+        TransformAdapter::new(compressed, IdentityCodec, self.previous.encoder, self.previous.decoder)
     }
 }
