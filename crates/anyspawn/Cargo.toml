@@ -27,7 +27,7 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["tokio", "custom"]
+default = []
 tokio = ["dep:tokio"]
 custom = ["dep:futures-channel"]
 
@@ -43,8 +43,19 @@ insta.workspace = true
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = "2"
 static_assertions.workspace = true
-tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[[test]]
+name = "spawner"
+required-features = ["tokio", "custom"]
+
+[[test]]
+name = "handle"
+required-features = ["tokio"]
+
+[[test]]
+name = "builder"
+required-features = ["tokio", "custom"]
 
 [[bench]]
 name = "spawner"

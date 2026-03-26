@@ -83,7 +83,6 @@ dependencies = [
  "smol",
  "static_assertions",
  "thread_aware",
- "tick",
  "tokio",
 ]
 
