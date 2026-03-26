@@ -122,7 +122,7 @@ pub struct Spawner(SpawnerKind);
 #[derive(Clone, ThreadAware)]
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
-    Tokio,
+    Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
     #[cfg(feature = "custom")]
     Custom(CustomSpawner),
     ThreadAware(thread_aware::Arc<Spawner, PerCore>),
@@ -153,7 +153,32 @@ impl Spawner {
     #[cfg(feature = "tokio")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     pub fn new_tokio() -> Self {
-        Self(SpawnerKind::Tokio)
+        Self(SpawnerKind::Tokio(None))
+    }
+
+    /// Creates a spawner that uses the given Tokio runtime handle for spawning.
+    ///
+    /// Unlike [`new_tokio`](Self::new_tokio), this spawner does not require an
+    /// ambient Tokio runtime context. It spawns tasks directly on the provided
+    /// [`Handle`](::tokio::runtime::Handle).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use anyspawn::Spawner;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let handle = tokio::runtime::Handle::current();
+    /// let spawner = Spawner::new_tokio_with_handle(handle);
+    /// let result = spawner.spawn(async { 42 }).await;
+    /// assert_eq!(result, 42);
+    /// # }
+    /// ```
+    #[cfg(feature = "tokio")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
+    pub fn new_tokio_with_handle(handle: ::tokio::runtime::Handle) -> Self {
+        Self(SpawnerKind::Tokio(Some(handle)))
     }
 
     /// Creates a custom spawner from a closure.
@@ -270,7 +295,13 @@ impl Spawner {
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "tokio")]
-            SpawnerKind::Tokio => JoinHandle(JoinHandleInner::Tokio(::tokio::spawn(work))),
+            SpawnerKind::Tokio(handle) => {
+                let jh = match handle {
+                    Some(h) => h.spawn(work),
+                    None => ::tokio::spawn(work),
+                };
+                JoinHandle(JoinHandleInner::Tokio(jh))
+            }
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
             SpawnerKind::ThreadAware(ta) => ta.spawn(work),
@@ -282,7 +313,9 @@ impl Debug for Spawner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             #[cfg(feature = "tokio")]
-            SpawnerKind::Tokio => f.debug_tuple("Spawner").field(&"tokio").finish(),
+            SpawnerKind::Tokio(None) => f.debug_tuple("Spawner").field(&"tokio").finish(),
+            #[cfg(feature = "tokio")]
+            SpawnerKind::Tokio(Some(_)) => f.debug_tuple("Spawner").field(&"tokio(handle)").finish(),
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
             SpawnerKind::ThreadAware(_) => f.debug_tuple("Spawner").field(&"thread_aware").finish(),
