@@ -49,10 +49,18 @@ let spawner = Spawner::new_custom("threadpool", |fut| {
 let handle = spawner.spawn(async { 42 });
 ```
 
+## Thread-Aware Support
+
+`Spawner` implements [`ThreadAware`][__link1] and supports
+per-core isolation via [`Spawner::new_thread_aware`][__link2], enabling
+contention-free, NUMA-friendly task dispatch. See the
+[thread-aware section on `Spawner`][__link3] for
+details and examples.
+
 ## Features
 
-* `tokio` (default): Enables the [`Spawner::new_tokio`][__link1] constructor
-* `custom`: Enables [`Spawner::new_custom`][__link2] and [`CustomSpawnerBuilder`][__link3]
+* `tokio` (default): Enables the [`Spawner::new_tokio`][__link4] constructor
+* `custom`: Enables [`Spawner::new_custom`][__link5] and [`CustomSpawnerBuilder`][__link6]
 
 
 <hr/>
@@ -60,8 +68,11 @@ let handle = spawner.spawn(async { 42 });
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4kogXIVaWzIG_FIsBdF8WN2G2_j-q32s9sZG1ijNLpXv0lkYWSBgmhhbnlzcGF3bmUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzZggGALBWlVGxKbYKO3c4jHG8sNRx0SKZpBG_ofiAdiJ08dYWSCgmhhbnlzcGF3bmUwLjIuMIJsdGhyZWFkX2F3YXJlZTAuNi4y
  [__link0]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_tokio
- [__link2]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_custom
- [__link3]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=CustomSpawnerBuilder
+ [__link1]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware
+ [__link2]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_thread_aware
+ [__link3]: Spawner#thread-aware-support
+ [__link4]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_tokio
+ [__link5]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=Spawner::new_custom
+ [__link6]: https://docs.rs/anyspawn/0.2.0/anyspawn/?search=CustomSpawnerBuilder

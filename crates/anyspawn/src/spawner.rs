@@ -7,6 +7,8 @@ use std::fmt::{self, Debug};
 #[cfg(feature = "custom")]
 use std::sync::Arc;
 
+use thread_aware::{PerCore, ThreadAware};
+
 #[cfg(feature = "custom")]
 use crate::custom::{BoxedFuture, CustomSpawner};
 use crate::handle::JoinHandle;
@@ -95,24 +97,46 @@ use crate::handle::JoinHandleInner;
 /// }
 /// # }
 /// ```
-#[derive(Clone)]
+///
+/// # Thread-Aware Support
+///
+/// `Spawner` implements [`ThreadAware`] and supports per-core isolation via
+/// [`new_thread_aware`](Self::new_thread_aware). A thread-aware spawner
+/// creates a **separate** inner `Spawner` for each CPU core through a
+/// user-provided factory function. When the spawner is
+/// [relocated](ThreadAware::relocated) to a new core, the factory is
+/// re-invoked with data that has itself been relocated to the destination,
+/// producing a fresh spawner tuned for that core.
+///
+/// This enables contention-free, NUMA-friendly task dispatch, each core
+/// queues work through its own spawn function without touching shared
+/// state. In contrast, the Tokio and custom variants do not create per-core
+/// state: they ignore relocation and behave identically regardless of which
+/// core they run on.
+///
+/// See [`new_thread_aware`](Self::new_thread_aware) for usage and examples.
+#[derive(Clone, ThreadAware)]
 #[must_use]
 pub struct Spawner(SpawnerKind);
 
-#[derive(Clone)]
+#[derive(Clone, ThreadAware)]
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio,
     #[cfg(feature = "custom")]
     Custom(CustomSpawner),
+    ThreadAware(thread_aware::Arc<Spawner, PerCore>),
 }
 
 impl Spawner {
     /// Creates a spawner that uses the Tokio runtime.
     ///
+    /// Tasks are spawned via [`tokio::spawn`], which requires a Tokio runtime
+    /// context at the point of spawning.
+    ///
     /// # Panics
     ///
-    /// Panics if called outside of a Tokio runtime context.
+    /// [`Spawner::spawn`] will panic if called outside of a Tokio runtime context.
     ///
     /// # Examples
     ///
@@ -155,21 +179,66 @@ impl Spawner {
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
     {
-        Self(SpawnerKind::Custom(CustomSpawner::new(
-            Arc::new(f),
-            name,
-            Arc::from([] as [Box<str>; 0]),
-        )))
+        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name)))
     }
 
-    /// Creates a custom spawner with name and layer metadata for [`Debug`]
-    /// output. Used internally by [`CustomSpawnerBuilder::build`](crate::CustomSpawnerBuilder::build).
-    #[cfg(feature = "custom")]
-    pub(crate) fn new_custom_with_layers<F>(name: &'static str, f: F, layer_names: Arc<[Box<str>]>) -> Self
+    /// Creates a thread-aware spawner with per-core isolation.
+    ///
+    /// Unlike [`new_custom`](Self::new_custom), which shares a single spawn
+    /// function across all cores, this constructor creates a separate
+    /// [`Spawner`] for each CPU core via the provided `factory`. The
+    /// [`ThreadAware`] `data` is automatically relocated to each core before
+    /// being passed to `factory`, enabling contention-free, NUMA-friendly
+    /// spawner.
+    ///
+    /// # When to use this
+    ///
+    /// Use this when you need maximum throughput by avoiding cross-core
+    /// contention. For example, if each core has its own work-stealing queue,
+    /// you can pass the queue handle as `data` and have `f` build a
+    /// spawner that queues directly on the local core's queue.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use anyspawn::Spawner;
+    /// # use thread_aware::ThreadAware;
+    /// # use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+    /// # #[derive(Default, Clone)]
+    /// # struct Scheduler(Option<usize>);
+    /// # impl Scheduler { fn name(&self) -> String { format!("core-{}", self.0.unwrap_or(0)) } }
+    /// # impl ThreadAware for Scheduler {
+    /// #     fn relocated(self, _: MemoryAffinity, dest: PinnedAffinity) -> Self {
+    /// #         Self(Some(dest.processor_index()))
+    /// #     }
+    /// # }
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let scheduler = Scheduler::default();
+    ///
+    /// // Each core gets its own Spawner whose Scheduler carries the
+    /// // destination core's processor index after relocation.
+    /// let spawner = Spawner::new_thread_aware(
+    ///     scheduler,
+    ///     |scheduler| {
+    ///         Spawner::new_custom("per-core-tokio", move |fut| {
+    ///             println!("{}: spawning", scheduler.name());
+    ///             tokio::spawn(fut);
+    ///         })
+    ///     },
+    /// );
+    ///
+    /// let result = spawner.spawn(async { 1 + 1 }).await;
+    /// assert_eq!(result, 2);
+    /// # }
+    /// ```
+    pub fn new_thread_aware<D>(data: D, factory: fn(D) -> Self) -> Self
     where
-        F: Fn(BoxedFuture) + Send + Sync + 'static,
+        D: ThreadAware + Send + Sync + Clone + 'static,
     {
-        Self(SpawnerKind::Custom(CustomSpawner::new(Arc::new(f), name, layer_names)))
+        let arc = thread_aware::Arc::new_with(data, factory);
+        Self(SpawnerKind::ThreadAware(arc))
     }
 
     /// Spawns an async task on the runtime.
@@ -204,6 +273,7 @@ impl Spawner {
             SpawnerKind::Tokio => JoinHandle(JoinHandleInner::Tokio(::tokio::spawn(work))),
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
+            SpawnerKind::ThreadAware(ta) => ta.spawn(work),
         }
     }
 }
@@ -215,6 +285,7 @@ impl Debug for Spawner {
             SpawnerKind::Tokio => f.debug_tuple("Spawner").field(&"tokio").finish(),
             #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
+            SpawnerKind::ThreadAware(_) => f.debug_tuple("Spawner").field(&"thread_aware").finish(),
         }
     }
 }

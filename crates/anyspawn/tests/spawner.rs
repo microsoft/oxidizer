@@ -70,3 +70,11 @@ fn custom_spawner_debug() {
     let debug_str = format!("{spawner:?}");
     assert!(debug_str.contains("noop"));
 }
+
+#[cfg(feature = "custom")]
+#[test]
+fn thread_aware_spawner_debug() {
+    let spawner = Spawner::new_thread_aware((), |()| Spawner::new_custom("inner", |_| {}));
+    let debug_str = format!("{spawner:?}");
+    assert_eq!(debug_str, "Spawner(\"thread_aware\")");
+}
