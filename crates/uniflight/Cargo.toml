@@ -38,6 +38,7 @@ tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
+    "sync",
     "time",
     "rt-multi-thread",
 ] }
