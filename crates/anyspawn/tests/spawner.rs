@@ -45,6 +45,15 @@ fn tokio_with_handle_spawn_and_await() {
     assert_eq!(result, 42);
 }
 
+#[cfg(feature = "tokio")]
+#[test]
+fn tokio_with_handle_spawner_debug() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = Spawner::new_tokio_with_handle(rt.handle().clone());
+    let debug_str = format!("{spawner:?}");
+    assert_eq!(debug_str, r#"Spawner("tokio(handle)")"#);
+}
+
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawn_and_await() {

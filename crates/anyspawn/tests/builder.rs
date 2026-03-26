@@ -73,6 +73,16 @@ fn built_spawner_debug_no_layers() {
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
+#[test]
+fn tokio_with_handle_spawner_still_works() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
+
+    // Spawning with an explicit handle works even outside a Tokio runtime context.
+    let result = rt.block_on(spawner.spawn(async { 42 }));
+    assert_eq!(result, 42);
+}
+
 #[tokio::test]
 async fn layered_spawner_still_works() {
     let spawner = CustomSpawnerBuilder::tokio()
