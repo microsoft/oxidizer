@@ -44,6 +44,14 @@
 //! let handle = spawner.spawn(async { 42 });
 //! ```
 //!
+//! # Thread-Aware Support
+//!
+//! `Spawner` implements [`ThreadAware`](thread_aware::ThreadAware) and supports
+//! per-core isolation via [`Spawner::new_thread_aware`], enabling
+//! contention-free, NUMA-friendly task dispatch. See the
+//! [thread-aware section on `Spawner`](Spawner#thread-aware-support) for
+//! details and examples.
+//!
 //! # Features
 //!
 //! - `tokio` (default): Enables the [`Spawner::new_tokio`] constructor
