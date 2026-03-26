@@ -108,8 +108,8 @@ use crate::handle::JoinHandleInner;
 /// re-invoked with data that has itself been relocated to the destination,
 /// producing a fresh spawner tuned for that core.
 ///
-/// This enables contention-free, NUMA-friendly task dispatch — each core
-/// enqueues work through its own spawn function without touching shared
+/// This enables contention-free, NUMA-friendly task dispatch, each core
+/// queues work through its own spawn function without touching shared
 /// state. In contrast, the Tokio and custom variants are marked
 /// `#[thread_aware(skip)]` and behave identically regardless of which core
 /// they run on.
@@ -189,14 +189,14 @@ impl Spawner {
     /// [`Spawner`] for each CPU core via the provided `factory`. The
     /// [`ThreadAware`] `data` is automatically relocated to each core before
     /// being passed to `factory`, enabling contention-free, NUMA-friendly
-    /// spawners.
+    /// spawner.
     ///
     /// # When to use this
     ///
     /// Use this when you need maximum throughput by avoiding cross-core
     /// contention. For example, if each core has its own work-stealing queue,
     /// you can pass the queue handle as `data` and have `f` build a
-    /// spawner that enqueues directly on the local core's queue.
+    /// spawner that queues directly on the local core's queue.
     ///
     /// # Examples
     ///
