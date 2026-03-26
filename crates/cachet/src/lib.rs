@@ -232,9 +232,9 @@
 mod builder;
 mod cache;
 mod fallback;
-mod map;
 mod refresh;
 mod telemetry;
+mod transform;
 mod wrapper;
 
 #[doc(inline)]
@@ -258,3 +258,5 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+#[doc(inline)]
+pub use transform::{Codec, TransformAdapter, TransformCodec};
