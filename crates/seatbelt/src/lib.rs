@@ -12,6 +12,7 @@
         feature = "breaker",
         feature = "fallback",
         feature = "hedging",
+        feature = "chaos-injection",
         feature = "metrics",
         feature = "logs"
     )),
@@ -112,6 +113,14 @@
 //! - [`breaker`] - Middleware that prevents cascading failures.
 //! - [`fallback`] - Middleware that replaces invalid output with a user-defined alternative.
 //!
+//! ## Chaos Testing
+//!
+//! The [`chaos`] module provides middleware for deliberately injecting faults into a service
+//! pipeline, enabling teams to verify that their systems handle failures gracefully.
+//!
+//! - [`chaos::injection`] - Middleware that replaces service output with a user-provided value
+//!   at a configurable probability.
+//!
 //! # Middleware Ordering
 //!
 //! The order in which resilience middleware is composed **matters**. Layers apply outer to inner
@@ -179,6 +188,8 @@
 //! - [`resilience_pipeline`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/resilience_pipeline.rs): Composing retry and timeout with metrics.
 //! - [`tower`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/tower.rs): Tower `ServiceBuilder` integration.
 //! - [`config`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs): Loading settings from a [JSON file](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json).
+//! - [`chaos_injection`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs): Fault injection with configurable probability.
+//! - [`chaos_injection_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs): Simulating an extended outage with dynamic injection rates.
 //!
 //! # Features
 //!
@@ -192,6 +203,8 @@
 //! - **`breaker`** - Enables the [`breaker`] middleware for preventing cascading failures.
 //! - **`fallback`** - Enables the [`fallback`] middleware for replacing invalid output with a
 //!   user-defined alternative.
+//! - **`chaos-injection`** - Enables the [`chaos::injection`] middleware for injecting faults
+//!   with a configurable probability.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 //! - **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
@@ -225,7 +238,10 @@ pub mod fallback;
 #[cfg(any(feature = "hedging", test))]
 pub mod hedging;
 
-#[cfg(any(feature = "retry", feature = "breaker", test))]
+#[cfg(any(feature = "chaos-injection", test))]
+pub mod chaos;
+
+#[cfg(any(feature = "retry", feature = "breaker", feature = "chaos-injection", test))]
 mod rnd;
 
 #[cfg(any(
@@ -234,6 +250,7 @@ mod rnd;
     feature = "timeout",
     feature = "fallback",
     feature = "hedging",
+    feature = "chaos-injection",
     test
 ))]
 pub(crate) mod utils;
