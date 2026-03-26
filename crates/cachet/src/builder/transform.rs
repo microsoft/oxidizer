@@ -126,6 +126,86 @@ where
     }
 }
 
+// ── .serialize() on CacheBuilder ──
+
+#[cfg(feature = "serialize")]
+impl<K, V, CT> CacheBuilder<K, V, CT>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    CT: CacheTier<K, V> + Send + Sync + 'static,
+{
+    /// Applies a serialization boundary using the given codecs.
+    ///
+    /// Keys and values are serialized to `Vec<u8>`. All subsequent `.fallback()` tiers
+    /// must work with `Vec<u8>` keys and values.
+    pub fn serialize<KE, VE, VD>(
+        self,
+        key_encoder: KE,
+        value_encoder: VE,
+        value_decoder: VD,
+    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self, KE, VE, VD, (), Serialized>
+    where
+        KE: Codec<K, Vec<u8>>,
+        VE: Codec<V, Vec<u8>>,
+        VD: Codec<Vec<u8>, V>,
+    {
+        let clock = self.clock.clone();
+        let telemetry = self.telemetry.clone();
+        let stampede_protection = self.stampede_protection;
+        TransformBuilder {
+            pre_transform: self,
+            post_transform: (),
+            key_encoder,
+            value_encoder,
+            value_decoder,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+// ── .serialize() on FallbackBuilder ──
+
+#[cfg(feature = "serialize")]
+impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    PB: CacheTierBuilder<K, V>,
+    FB: CacheTierBuilder<K, V>,
+{
+    /// Applies a serialization boundary using the given codecs.
+    pub fn serialize<KE, VE, VD>(
+        self,
+        key_encoder: KE,
+        value_encoder: VE,
+        value_decoder: VD,
+    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self, KE, VE, VD, (), Serialized>
+    where
+        KE: Codec<K, Vec<u8>>,
+        VE: Codec<V, Vec<u8>>,
+        VD: Codec<Vec<u8>, V>,
+    {
+        let clock = self.clock.clone();
+        let telemetry = self.telemetry.clone();
+        let stampede_protection = self.stampede_protection;
+        TransformBuilder {
+            pre_transform: self,
+            post_transform: (),
+            key_encoder,
+            value_encoder,
+            value_decoder,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 // ── Transformed phase: .transform() again, .serialize(), .fallback() ──
 
 impl<K, V, KT, VT, PreBuilder, KE, VE, VD, PostBuilder> TransformBuilder<K, V, KT, VT, PreBuilder, KE, VE, VD, PostBuilder, Transformed>
