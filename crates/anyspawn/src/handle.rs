@@ -29,19 +29,25 @@ pub(crate) enum JoinHandleInner<T> {
         dead_code,
         reason = "Unconstructable variant so the type compiles when no runtime feature are enabled."
     )]
-    None,
+    #[cfg(not(any(feature = "custom", feature = "tokio")))]
+    None(std::marker::PhantomData<fn() -> T>),
 }
 
 impl<T> Future for JoinHandle<T> {
     type Output = T;
 
+    #[cfg_attr(
+        not(any(feature = "custom", feature = "tokio")),
+        expect(unused_variables, reason = "cx is unused depending on features")
+    )]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match &mut self.get_mut().0 {
             #[cfg(feature = "tokio")]
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(|res| res.expect("spawned task panicked")),
             #[cfg(feature = "custom")]
             JoinHandleInner::Custom(rx) => Pin::new(rx).poll(cx).map(|res| res.expect("spawned task panicked")),
-            JoinHandleInner::None => unreachable!("JoinHandleInner::None can not be constructed"),
+            #[cfg(not(any(feature = "custom", feature = "tokio")))]
+            JoinHandleInner::None(_) => unreachable!("JoinHandleInner::None can not be constructed"),
         }
     }
 }
