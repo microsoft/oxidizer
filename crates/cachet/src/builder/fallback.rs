@@ -13,7 +13,7 @@ use super::cache::CacheBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::fallback::{FallbackCache, FallbackPromotionPolicy};
 use crate::refresh::TimeToRefresh;
-use crate::telemetry::TelemetryConfig;
+use crate::telemetry::{CacheTelemetry, TelemetryConfig};
 use crate::{Cache, CacheTier};
 
 /// Builder for a cache with fallback tiers.
@@ -162,5 +162,27 @@ where
     /// ```
     pub fn build(self) -> Cache<K, V, DynamicCache<K, V>> {
         <Self as Buildable<K, V>>::build(self)
+    }
+
+    /// Builds the fallback chain into a `CacheBuilder` wrapping a `DynamicCache`.
+    ///
+    /// Used internally by `.transform()` on `FallbackBuilder` to collapse the
+    /// fallback chain before applying a type transform.
+    pub(crate) fn build_dynamic(self) -> CacheBuilder<K, V, DynamicCache<K, V>> {
+        let name = self.name;
+        let clock = self.clock.clone();
+        let telemetry_config = self.telemetry.clone();
+        let stampede_protection = self.stampede_protection;
+        let telemetry = telemetry_config.clone().build();
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
+        CacheBuilder {
+            name,
+            storage: tier,
+            ttl: None,
+            clock,
+            telemetry: telemetry_config,
+            stampede_protection,
+            _phantom: std::marker::PhantomData,
+        }
     }
 }

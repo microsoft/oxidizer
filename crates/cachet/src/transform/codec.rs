@@ -10,3 +10,9 @@ use crate::Error;
 pub trait Codec<T1, T2>: Send + Sync {
     fn apply(&self, value: &T1) -> Result<T2, Error>;
 }
+
+impl<T1, T2> Codec<T1, T2> for Box<dyn Codec<T1, T2>> {
+    fn apply(&self, value: &T1) -> Result<T2, Error> {
+        (**self).apply(value)
+    }
+}

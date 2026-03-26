@@ -6,9 +6,6 @@ use crate::{CacheEntry, CacheTier, Codec, Error};
 use std::fmt::Debug;
 
 /// A boxed-closure codec for custom transforms.
-///
-/// This is the escape hatch for users who want to use closures rather than
-/// implementing the [`Codec`] trait directly. Involves boxing.
 pub struct TransformCodec<A, B> {
     apply_fn: Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>,
 }
@@ -46,9 +43,6 @@ impl<A, B> Debug for TransformCodec<A, B> {
 }
 
 /// An identity codec that passes values through unchanged.
-///
-/// Used as the key codec in compress/encrypt `TransformAdapter` layers
-/// where only values need transformation.
 #[derive(Debug, Clone, Copy)]
 pub struct IdentityCodec;
 
@@ -58,54 +52,52 @@ impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
     }
 }
 
-/// Adapter that transforms keys and values between two type spaces.
+/// Adapter that transforms keys and values between user types and storage types.
 ///
-/// Generic over codec types to avoid boxing when concrete codecs
-/// (e.g., `BincodeCodec`, `ZstdCodec`) are used directly.
-pub struct TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
+/// `TransformAdapter<K, KT, V, VT, S>`:
+/// - `K, V` = user-facing types (the types the adapter exposes via `CacheTier<K, V>`)
+/// - `KT, VT` = storage types (the types used by the inner `S: CacheTier<KT, VT>`)
+/// - Codecs go from user → storage: `key_encoder: K→KT`, `value_encoder: V→VT`, `value_decoder: VT→V`
+///
+/// Implements `CacheTier<K, V>` by encoding keys/values to `KT, VT` for the inner tier.
+pub struct TransformAdapter<K, KT, V, VT, S>
 where
-    S: CacheTier<K2, V2>,
-    KE: Codec<K1, K2>,
-    VE: Codec<V1, V2>,
-    VD: Codec<V2, V1>,
+    S: CacheTier<KT, VT>,
 {
     inner: S,
-    key_encoder: KE,
-    value_encoder: VE,
-    value_decoder: VD,
-    _phantom: std::marker::PhantomData<(K1, K2, V1, V2)>,
+    key_encoder: Box<dyn Codec<K, KT>>,
+    value_encoder: Box<dyn Codec<V, VT>>,
+    value_decoder: Box<dyn Codec<VT, V>>,
 }
 
-impl<K1, K2, V1, V2, S, KE, VE, VD> TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
+impl<K, KT, V, VT, S> TransformAdapter<K, KT, V, VT, S>
 where
-    S: CacheTier<K2, V2>,
-    KE: Codec<K1, K2>,
-    VE: Codec<V1, V2>,
-    VD: Codec<V2, V1>,
+    S: CacheTier<KT, VT>,
 {
-    pub fn new(inner: S, key_encoder: KE, value_encoder: VE, value_decoder: VD) -> Self {
+    pub fn new(
+        inner: S,
+        key_encoder: impl Codec<K, KT> + 'static,
+        value_encoder: impl Codec<V, VT> + 'static,
+        value_decoder: impl Codec<VT, V> + 'static,
+    ) -> Self {
         Self {
             inner,
-            key_encoder,
-            value_encoder,
-            value_decoder,
-            _phantom: std::marker::PhantomData,
+            key_encoder: Box::new(key_encoder),
+            value_encoder: Box::new(value_encoder),
+            value_decoder: Box::new(value_decoder),
         }
     }
 }
 
-impl<K1, K2, V1, V2, S, KE, VE, VD> CacheTier<K1, V1> for TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
+impl<K, KT, V, VT, S> CacheTier<K, V> for TransformAdapter<K, KT, V, VT, S>
 where
-    K1: Send + Sync,
-    V1: Send + Sync,
-    K2: Send + Sync,
-    V2: Send + Sync,
-    S: CacheTier<K2, V2> + Send + Sync,
-    KE: Codec<K1, K2>,
-    VE: Codec<V1, V2>,
-    VD: Codec<V2, V1>,
+    K: Send + Sync,
+    V: Send + Sync,
+    KT: Send + Sync,
+    VT: Send + Sync,
+    S: CacheTier<KT, VT> + Send + Sync,
 {
-    async fn get(&self, key: &K1) -> Result<Option<CacheEntry<V1>>, Error> {
+    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let mapped_key = self.key_encoder.apply(key)?;
         let entry_option = self.inner.get(&mapped_key).await?;
         if let Some(entry) = entry_option {
@@ -116,14 +108,14 @@ where
         }
     }
 
-    async fn insert(&self, key: K1, entry: CacheEntry<V1>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let mapped_key = self.key_encoder.apply(&key)?;
         let mapped_value = self.value_encoder.apply(entry.value())?;
         let mapped_entry = entry.map_value(|_| mapped_value);
         self.inner.insert(mapped_key, mapped_entry).await
     }
 
-    async fn invalidate(&self, key: &K1) -> Result<(), Error> {
+    async fn invalidate(&self, key: &K) -> Result<(), Error> {
         let mapped_key = self.key_encoder.apply(key)?;
         self.inner.invalidate(&mapped_key).await
     }
@@ -137,20 +129,17 @@ where
     }
 }
 
-impl<K1, K2, V1, V2, S, KE, VE, VD> Debug for TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
+impl<K, KT, V, VT, S> Debug for TransformAdapter<K, KT, V, VT, S>
 where
-    S: CacheTier<K2, V2> + Debug,
-    KE: Codec<K1, K2>,
-    VE: Codec<V1, V2>,
-    VD: Codec<V2, V1>,
+    S: CacheTier<KT, VT> + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TransformAdapter")
             .field("inner", &self.inner)
-            .field("K1", &std::any::type_name::<K1>())
-            .field("K2", &std::any::type_name::<K2>())
-            .field("V1", &std::any::type_name::<V1>())
-            .field("V2", &std::any::type_name::<V2>())
+            .field("K", &std::any::type_name::<K>())
+            .field("KT", &std::any::type_name::<KT>())
+            .field("V", &std::any::type_name::<V>())
+            .field("VT", &std::any::type_name::<VT>())
             .finish()
     }
 }

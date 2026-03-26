@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Transform builder for applying type-conversion boundaries in the cache pipeline.
+
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -11,37 +13,28 @@ use super::buildable::{Buildable, type_name};
 use super::cache::CacheBuilder;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
-use crate::fallback::{FallbackCache, FallbackPromotionPolicy};
+use crate::fallback::FallbackPromotionPolicy;
 use crate::telemetry::{CacheTelemetry, TelemetryConfig};
 use crate::wrapper::CacheWrapper;
-use crate::{Cache, CacheTier, Codec, IdentityCodec, TransformAdapter, TransformCodec};
+use crate::{CacheTier, Codec, IdentityCodec, TransformAdapter};
 
-// Phase markers — enforce ordering at compile time.
-/// Phase after a generic `.transform()` call.
-pub struct Transformed;
-/// Phase after `.serialize()` — enables `.compress()` and `.encrypt()`.
-pub struct Serialized;
-/// Phase after `.compress()` — enables `.encrypt()` only.
-pub struct Compressed;
-/// Phase after `.encrypt()` — no more transforms, only `.fallback()` and `.build()`.
-pub struct Encrypted;
-
-/// Builder for constructing a cache with a transform boundary.
+/// Builder that introduces a type-conversion boundary in the cache pipeline.
 ///
-/// Created by calling `.transform()` or `.serialize()` on a `CacheBuilder` or `FallbackBuilder`.
-/// Post-transform fallback tiers are accumulated internally. On `.build()`, the post-transform
-/// chain is wrapped in a single `TransformAdapter` and attached as a fallback to the
-/// pre-transform builder.
-pub struct TransformBuilder<K, V, KT, VT, PreBuilder, KE, VE, VD, PostBuilder, Phase> {
-    pre_transform: PreBuilder,
-    post_transform: PostBuilder,
-    key_encoder: KE,
-    value_encoder: VE,
-    value_decoder: VD,
+/// - `Pre`: the pre-transform builder (`CacheTierBuilder<K, V>`)
+/// - `Post`: the post-transform builder (`CacheTierBuilder<KT, VT>`), starts as `()`
+///
+/// At build time, both sides are built into tiers, the post-transform tier is wrapped
+/// in a `TransformAdapter`, and combined with the pre-transform tier via fallback.
+pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
+    pre: Pre,
+    post: Post,
+    key_encoder: Box<dyn Codec<K, KT>>,
+    value_encoder: Box<dyn Codec<V, VT>>,
+    value_decoder: Box<dyn Codec<VT, V>>,
     clock: Clock,
     telemetry: TelemetryConfig,
     stampede_protection: bool,
-    _phantom: PhantomData<(K, V, KT, VT, Phase)>,
+    _phantom: PhantomData<(K, V, KT, VT)>,
 }
 
 // ── .transform() on CacheBuilder ──
@@ -54,30 +47,32 @@ where
 {
     /// Applies a generic type transform boundary.
     ///
-    /// All subsequent `.fallback()` tiers will work with the transformed types `KT, VT`.
-    /// Can be called multiple times in the `Transformed` phase for chained type changes.
-    pub fn transform<KT, VT, KE, VE, VD>(
+    /// The codecs convert FROM user types TO storage types:
+    /// - `key_encoder`: `K -> KT`
+    /// - `value_encoder`: `V -> VT`
+    /// - `value_decoder`: `VT -> V`
+    ///
+    /// Subsequent `.fallback()` tiers must work with `KT, VT`.
+    #[must_use]
+    pub fn transform<KT, VT>(
         self,
-        key_encoder: KE,
-        value_encoder: VE,
-        value_decoder: VD,
-    ) -> TransformBuilder<K, V, KT, VT, Self, KE, VE, VD, (), Transformed>
+        key_encoder: impl Codec<K, KT> + 'static,
+        value_encoder: impl Codec<V, VT> + 'static,
+        value_decoder: impl Codec<VT, V> + 'static,
+    ) -> TransformBuilder<K, V, KT, VT, Self>
     where
         KT: Clone + Hash + Eq + Send + Sync + 'static,
         VT: Clone + Send + Sync + 'static,
-        KE: Codec<K, KT>,
-        VE: Codec<V, VT>,
-        VD: Codec<VT, V>,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
         TransformBuilder {
-            pre_transform: self,
-            post_transform: (),
-            key_encoder,
-            value_encoder,
-            value_decoder,
+            pre: self,
+            post: (),
+            key_encoder: Box::new(key_encoder),
+            value_encoder: Box::new(value_encoder),
+            value_decoder: Box::new(value_decoder),
             clock,
             telemetry,
             stampede_protection,
@@ -95,29 +90,27 @@ where
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
-    /// Applies a generic type transform boundary.
-    pub fn transform<KT, VT, KE, VE, VD>(
+    /// Applies a generic type transform boundary on a fallback builder.
+    #[must_use]
+    pub fn transform<KT, VT>(
         self,
-        key_encoder: KE,
-        value_encoder: VE,
-        value_decoder: VD,
-    ) -> TransformBuilder<K, V, KT, VT, Self, KE, VE, VD, (), Transformed>
+        key_encoder: impl Codec<K, KT> + 'static,
+        value_encoder: impl Codec<V, VT> + 'static,
+        value_decoder: impl Codec<VT, V> + 'static,
+    ) -> TransformBuilder<K, V, KT, VT, Self>
     where
         KT: Clone + Hash + Eq + Send + Sync + 'static,
         VT: Clone + Send + Sync + 'static,
-        KE: Codec<K, KT>,
-        VE: Codec<V, VT>,
-        VD: Codec<VT, V>,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
         TransformBuilder {
-            pre_transform: self,
-            post_transform: (),
-            key_encoder,
-            value_encoder,
-            value_decoder,
+            pre: self,
+            post: (),
+            key_encoder: Box::new(key_encoder),
+            value_encoder: Box::new(value_encoder),
+            value_decoder: Box::new(value_decoder),
             clock,
             telemetry,
             stampede_protection,
@@ -126,7 +119,7 @@ where
     }
 }
 
-// ── .serialize() on CacheBuilder ──
+// ── .serialize() ──
 
 #[cfg(feature = "serialize")]
 impl<K, V, CT> CacheBuilder<K, V, CT>
@@ -135,39 +128,17 @@ where
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
-    /// Applies a serialization boundary using the given codecs.
-    ///
-    /// Keys and values are serialized to `Vec<u8>`. All subsequent `.fallback()` tiers
-    /// must work with `Vec<u8>` keys and values.
-    pub fn serialize<KE, VE, VD>(
+    /// Applies a serialization boundary.
+    #[must_use]
+    pub fn serialize(
         self,
-        key_encoder: KE,
-        value_encoder: VE,
-        value_decoder: VD,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self, KE, VE, VD, (), Serialized>
-    where
-        KE: Codec<K, Vec<u8>>,
-        VE: Codec<V, Vec<u8>>,
-        VD: Codec<Vec<u8>, V>,
-    {
-        let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone();
-        let stampede_protection = self.stampede_protection;
-        TransformBuilder {
-            pre_transform: self,
-            post_transform: (),
-            key_encoder,
-            value_encoder,
-            value_decoder,
-            clock,
-            telemetry,
-            stampede_protection,
-            _phantom: PhantomData,
-        }
+        key_encoder: impl Codec<K, Vec<u8>> + 'static,
+        value_encoder: impl Codec<V, Vec<u8>> + 'static,
+        value_decoder: impl Codec<Vec<u8>, V> + 'static,
+    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self> {
+        self.transform(key_encoder, value_encoder, value_decoder)
     }
 }
-
-// ── .serialize() on FallbackBuilder ──
 
 #[cfg(feature = "serialize")]
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
@@ -177,27 +148,77 @@ where
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
-    /// Applies a serialization boundary using the given codecs.
-    pub fn serialize<KE, VE, VD>(
+    /// Applies a serialization boundary on a fallback builder.
+    #[must_use]
+    pub fn serialize(
         self,
-        key_encoder: KE,
-        value_encoder: VE,
-        value_decoder: VD,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self, KE, VE, VD, (), Serialized>
+        key_encoder: impl Codec<K, Vec<u8>> + 'static,
+        value_encoder: impl Codec<V, Vec<u8>> + 'static,
+        value_decoder: impl Codec<Vec<u8>, V> + 'static,
+    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self> {
+        self.transform(key_encoder, value_encoder, value_decoder)
+    }
+}
+
+// ── .fallback() on TransformBuilder ──
+
+impl<K, V, KT, VT, Pre> TransformBuilder<K, V, KT, VT, Pre, ()>
+where
+    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    VT: Clone + Send + Sync + 'static,
+{
+    /// Sets the first post-transform storage tier (speaks `KT, VT`).
+    pub fn fallback<FB>(self, fallback: FB) -> TransformBuilder<K, V, KT, VT, Pre, FB>
     where
-        KE: Codec<K, Vec<u8>>,
-        VE: Codec<V, Vec<u8>>,
-        VD: Codec<Vec<u8>, V>,
+        FB: CacheTierBuilder<KT, VT>,
+    {
+        TransformBuilder {
+            pre: self.pre,
+            post: fallback,
+            key_encoder: self.key_encoder,
+            value_encoder: self.value_encoder,
+            value_decoder: self.value_decoder,
+            clock: self.clock,
+            telemetry: self.telemetry,
+            stampede_protection: self.stampede_protection,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
+where
+    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    VT: Clone + Send + Sync + 'static,
+    Post: CacheTierBuilder<KT, VT>,
+{
+    /// Adds another post-transform fallback tier (speaks `KT, VT`).
+    pub fn fallback<FB>(self, fallback: FB) -> TransformBuilder<K, V, KT, VT, Pre, FallbackBuilder<KT, VT, Post, FB>>
+    where
+        FB: CacheTierBuilder<KT, VT>,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
+
+        let post_chain = FallbackBuilder {
+            name: None,
+            primary_builder: self.post,
+            fallback_builder: fallback,
+            policy: FallbackPromotionPolicy::always(),
+            clock: clock.clone(),
+            refresh: None,
+            telemetry: telemetry.clone(),
+            stampede_protection,
+            _phantom: PhantomData,
+        };
+
         TransformBuilder {
-            pre_transform: self,
-            post_transform: (),
-            key_encoder,
-            value_encoder,
-            value_decoder,
+            pre: self.pre,
+            post: post_chain,
+            key_encoder: self.key_encoder,
+            value_encoder: self.value_encoder,
+            value_decoder: self.value_decoder,
             clock,
             telemetry,
             stampede_protection,
@@ -206,273 +227,186 @@ where
     }
 }
 
-// ── Transformed phase: .transform() again, .serialize(), .fallback() ──
+// ── .compress() ──
 
-impl<K, V, KT, VT, PreBuilder, KE, VE, VD, PostBuilder> TransformBuilder<K, V, KT, VT, PreBuilder, KE, VE, VD, PostBuilder, Transformed>
+#[cfg(feature = "compress")]
+impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+    /// Adds a compression layer. Values are compressed; keys pass through unchanged.
+    #[must_use]
+    pub fn compress(
+        self,
+        compress_encoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
+        compress_decoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
+    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+        let TransformBuilder {
+            pre,
+            post,
+            key_encoder,
+            value_encoder,
+            value_decoder,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom,
+        } = self;
+
+        let new_ve: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
+            first: value_encoder,
+            second: Box::new(compress_encoder),
+        });
+
+        let new_vd: Box<dyn Codec<Vec<u8>, V>> = Box::new(ChainedCodec {
+            first: Box::new(compress_decoder),
+            second: value_decoder,
+        });
+
+        TransformBuilder {
+            pre,
+            post,
+            key_encoder,
+            value_encoder: new_ve,
+            value_decoder: new_vd,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+// ── .encrypt() ──
+
+#[cfg(feature = "encrypt")]
+impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+    /// Adds an encryption layer. Values are encrypted; keys pass through unchanged.
+    #[must_use]
+    pub fn encrypt(
+        self,
+        encrypt_encoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
+        encrypt_decoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
+    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+        let TransformBuilder {
+            pre,
+            post,
+            key_encoder,
+            value_encoder,
+            value_decoder,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom,
+        } = self;
+
+        let new_ve: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
+            first: value_encoder,
+            second: Box::new(encrypt_encoder),
+        });
+
+        let new_vd: Box<dyn Codec<Vec<u8>, V>> = Box::new(ChainedCodec {
+            first: Box::new(encrypt_decoder),
+            second: value_decoder,
+        });
+
+        TransformBuilder {
+            pre,
+            post,
+            key_encoder,
+            value_encoder: new_ve,
+            value_decoder: new_vd,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+// ── Codec chaining ──
+
+/// Chains two codecs: applies `first` then `second`.
+struct ChainedCodec<A, B, C> {
+    first: Box<dyn Codec<A, B>>,
+    second: Box<dyn Codec<B, C>>,
+}
+
+impl<A: Send + Sync, B: Send + Sync, C: Send + Sync> Codec<A, C> for ChainedCodec<A, B, C> {
+    fn apply(&self, value: &A) -> Result<C, crate::Error> {
+        let intermediate = self.first.apply(value)?;
+        self.second.apply(&intermediate)
+    }
+}
+
+// SAFETY: Send + Sync is guaranteed by Codec: Send + Sync on the boxed fields.
+unsafe impl<A, B, C> Send for ChainedCodec<A, B, C> {}
+unsafe impl<A, B, C> Sync for ChainedCodec<A, B, C> {}
+
+// ── Sealed + CacheTierBuilder ──
+
+impl<K, V, KT, VT, Pre, Post> Sealed for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     KT: Clone + Hash + Eq + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
-    KE: Codec<K, KT>,
-    VE: Codec<V, VT>,
-    VD: Codec<VT, V>,
 {
-    /// Adds a post-transform fallback tier.
-    ///
-    /// The fallback tier must work with the transformed types `KT, VT`.
-    pub fn fallback<FB>(
-        self,
-        fallback: FB,
-    ) -> TransformBuilder<K, V, KT, VT, PreBuilder, KE, VE, VD, PostTransformTier<PostBuilder, FB>, Transformed>
-    where
-        FB: CacheTierBuilder<KT, VT>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: PostTransformTier {
-                previous: self.post_transform,
-                tier: fallback,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
 }
 
-// ── Serialized phase: .compress(), .encrypt(), .fallback() ──
-
-impl<K, V, PreBuilder, KE, VE, VD, PostBuilder> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, PostBuilder, Serialized>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KE: Codec<K, Vec<u8>>,
-    VE: Codec<V, Vec<u8>>,
-    VD: Codec<Vec<u8>, V>,
-{
-    /// Adds a post-transform fallback tier.
-    pub fn fallback<FB>(
-        self,
-        fallback: FB,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, PostTransformTier<PostBuilder, FB>, Serialized>
-    where
-        FB: CacheTierBuilder<Vec<u8>, Vec<u8>>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: PostTransformTier {
-                previous: self.post_transform,
-                tier: fallback,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Adds a compression layer to the transform pipeline.
-    ///
-    /// Values are compressed after serialization and before encryption.
-    /// Keys pass through unchanged via `IdentityCodec`.
-    #[cfg(feature = "compress")]
-    pub fn compress<CE, CD>(
-        self,
-        encoder: CE,
-        decoder: CD,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, CompressLayer<PostBuilder, CE, CD>, Compressed>
-    where
-        CE: Codec<Vec<u8>, Vec<u8>>,
-        CD: Codec<Vec<u8>, Vec<u8>>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: CompressLayer {
-                inner: self.post_transform,
-                encoder,
-                decoder,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Adds an encryption layer to the transform pipeline.
-    ///
-    /// Values are encrypted after serialization. Keys pass through unchanged.
-    #[cfg(feature = "encrypt")]
-    pub fn encrypt<EE, ED>(
-        self,
-        encoder: EE,
-        decoder: ED,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, EncryptLayer<PostBuilder, EE, ED>, Encrypted>
-    where
-        EE: Codec<Vec<u8>, Vec<u8>>,
-        ED: Codec<Vec<u8>, Vec<u8>>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: EncryptLayer {
-                inner: self.post_transform,
-                encoder,
-                decoder,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-// ── Compressed phase: .encrypt(), .fallback() ──
-
-impl<K, V, PreBuilder, KE, VE, VD, PostBuilder> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, PostBuilder, Compressed>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KE: Codec<K, Vec<u8>>,
-    VE: Codec<V, Vec<u8>>,
-    VD: Codec<Vec<u8>, V>,
-{
-    /// Adds a post-transform fallback tier.
-    pub fn fallback<FB>(
-        self,
-        fallback: FB,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, PostTransformTier<PostBuilder, FB>, Compressed>
-    where
-        FB: CacheTierBuilder<Vec<u8>, Vec<u8>>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: PostTransformTier {
-                previous: self.post_transform,
-                tier: fallback,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Adds an encryption layer after compression.
-    #[cfg(feature = "encrypt")]
-    pub fn encrypt<EE, ED>(
-        self,
-        encoder: EE,
-        decoder: ED,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, EncryptLayer<PostBuilder, EE, ED>, Encrypted>
-    where
-        EE: Codec<Vec<u8>, Vec<u8>>,
-        ED: Codec<Vec<u8>, Vec<u8>>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: EncryptLayer {
-                inner: self.post_transform,
-                encoder,
-                decoder,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-// ── Encrypted phase: .fallback() only ──
-
-impl<K, V, PreBuilder, KE, VE, VD, PostBuilder> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, PostBuilder, Encrypted>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KE: Codec<K, Vec<u8>>,
-    VE: Codec<V, Vec<u8>>,
-    VD: Codec<Vec<u8>, V>,
-{
-    /// Adds a post-transform fallback tier.
-    pub fn fallback<FB>(
-        self,
-        fallback: FB,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, PreBuilder, KE, VE, VD, PostTransformTier<PostBuilder, FB>, Encrypted>
-    where
-        FB: CacheTierBuilder<Vec<u8>, Vec<u8>>,
-    {
-        TransformBuilder {
-            pre_transform: self.pre_transform,
-            post_transform: PostTransformTier {
-                previous: self.post_transform,
-                tier: fallback,
-            },
-            key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
-            clock: self.clock,
-            telemetry: self.telemetry,
-            stampede_protection: self.stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-// ── Build: available on all phases once there's at least one post-transform fallback ──
-
-impl<K, V, KT, VT, PreBuilder, KE, VE, VD, PostInner, PostFB, Phase>
-    TransformBuilder<K, V, KT, VT, PreBuilder, KE, VE, VD, PostTransformTier<PostInner, PostFB>, Phase>
+impl<K, V, KT, VT, Pre, Post> CacheTierBuilder<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     KT: Clone + Hash + Eq + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
-    PreBuilder: Buildable<K, V>,
-    KE: Codec<K, KT> + 'static,
-    VE: Codec<V, VT> + 'static,
-    VD: Codec<VT, V> + 'static,
-    PostTransformTier<PostInner, PostFB>: PostBuildable<KT, VT>,
 {
-    /// Builds the full cache hierarchy.
-    ///
-    /// The post-transform fallback chain is wrapped in a single `TransformAdapter`
-    /// and attached as a fallback to the pre-transform builder.
-    pub fn build(self) -> Cache<K, V, DynamicCache<K, V>> {
+}
+
+// ── .build() ──
+
+#[expect(private_bounds, reason = "Buildable is an internal trait")]
+impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    VT: Clone + Send + Sync + 'static,
+    Pre: Buildable<K, V>,
+    Post: Buildable<KT, VT>,
+{
+    /// Builds the full cache hierarchy with the transform boundary.
+    pub fn build(self) -> crate::Cache<K, V, DynamicCache<K, V>> {
+        <Self as Buildable<K, V>>::build(self)
+    }
+}
+
+// ── Buildable ──
+
+impl<K, V, KT, VT, Pre, Post> Buildable<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    VT: Clone + Send + Sync + 'static,
+    Pre: Buildable<K, V>,
+    Post: Buildable<KT, VT>,
+{
+    type Output = DynamicCache<K, V>;
+    type TierOutput = TransformAdapter<K, KT, V, VT, Post::TierOutput>;
+
+    fn build(self) -> crate::Cache<K, V, Self::Output> {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone().build();
+        let stampede_protection = self.stampede_protection;
 
-        // Build the post-transform chain
-        let post_tier = self.post_transform.build_post_tier(clock.clone(), telemetry.clone());
+        // Build pre-transform tier
+        let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone());
 
-        // Wrap in TransformAdapter
+        // Build post-transform tier, wrap in TransformAdapter
+        let post_tier = self.post.build_tier(clock.clone(), telemetry.clone());
         let adapted = TransformAdapter::new(post_tier, self.key_encoder, self.value_encoder, self.value_decoder);
 
-        // Build the pre-transform tier and add the adapted tier as a fallback
-        let pre_tier = self.pre_transform.build_tier(clock.clone(), telemetry.clone());
-
-        let fallback_cache = FallbackCache::new(
-            type_name::<Self>(None),
+        // Combine via fallback: pre_tier is primary, adapted is fallback
+        let fallback = crate::fallback::FallbackCache::new(
+            type_name::<Self::TierOutput>(None),
             pre_tier,
             adapted,
             FallbackPromotionPolicy::always(),
@@ -481,142 +415,17 @@ where
             telemetry,
         );
 
-        let dynamic = DynamicCache::new(fallback_cache);
-        Cache::new(type_name::<Self>(None), dynamic, clock, self.stampede_protection)
-    }
-}
-
-// ── Post-transform tier accumulation ──
-
-/// Wrapper for accumulating post-transform tiers.
-pub struct PostTransformTier<Previous, Tier> {
-    previous: Previous,
-    tier: Tier,
-}
-
-/// Internal trait for building the post-transform chain.
-pub(crate) trait PostBuildable<K, V> {
-    type Output: CacheTier<K, V> + Send + Sync + 'static;
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output;
-}
-
-// Single post-transform tier (first one added after the boundary).
-impl<KT, VT, FB> PostBuildable<KT, VT> for PostTransformTier<(), FB>
-where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
-    FB: Buildable<KT, VT>,
-{
-    type Output = FB::TierOutput;
-
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        self.tier.build_tier(clock, telemetry)
-    }
-}
-
-// Chained post-transform tiers (second, third, etc.).
-impl<KT, VT, PrevInner, PrevTier, FB> PostBuildable<KT, VT> for PostTransformTier<PostTransformTier<PrevInner, PrevTier>, FB>
-where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
-    PostTransformTier<PrevInner, PrevTier>: PostBuildable<KT, VT>,
-    FB: Buildable<KT, VT>,
-{
-    type Output = FallbackCache<KT, VT, <PostTransformTier<PrevInner, PrevTier> as PostBuildable<KT, VT>>::Output, FB::TierOutput>;
-
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let primary = self.previous.build_post_tier(clock.clone(), telemetry.clone());
-        let fallback = self.tier.build_tier(clock.clone(), telemetry.clone());
-
-        FallbackCache::new(
-            type_name::<Self::Output>(None),
-            primary,
-            fallback,
-            FallbackPromotionPolicy::always(),
+        let dynamic = DynamicCache::new(fallback);
+        crate::Cache::new(
+            type_name::<crate::Cache<K, V, Self::Output>>(None),
+            dynamic,
             clock,
-            None,
-            telemetry,
+            stampede_protection,
         )
     }
-}
 
-// ── Compress/Encrypt layer types ──
-
-/// Wraps a post-transform chain with a compression `TransformAdapter` at build time.
-#[cfg(feature = "compress")]
-pub struct CompressLayer<Inner, CE, CD> {
-    pub(crate) inner: Inner,
-    pub(crate) encoder: CE,
-    pub(crate) decoder: CD,
-}
-
-/// Wraps a post-transform chain with an encryption `TransformAdapter` at build time.
-#[cfg(feature = "encrypt")]
-pub struct EncryptLayer<Inner, EE, ED> {
-    pub(crate) inner: Inner,
-    pub(crate) encoder: EE,
-    pub(crate) decoder: ED,
-}
-
-// PostBuildable for PostTransformTier where previous is a CompressLayer<()> (no tiers before compress).
-// The fallback gets wrapped in the compression TransformAdapter directly.
-#[cfg(feature = "compress")]
-impl<CE, CD, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<CompressLayer<(), CE, CD>, FB>
-where
-    CE: Codec<Vec<u8>, Vec<u8>> + 'static,
-    CD: Codec<Vec<u8>, Vec<u8>> + 'static,
-    FB: Buildable<Vec<u8>, Vec<u8>>,
-{
-    type Output = TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, FB::TierOutput, IdentityCodec, CE, CD>;
-
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let tier = self.tier.build_tier(clock, telemetry);
-        TransformAdapter::new(tier, IdentityCodec, self.previous.encoder, self.previous.decoder)
-    }
-}
-
-// PostBuildable for PostTransformTier where previous is an EncryptLayer<()> (no tiers before encrypt).
-#[cfg(feature = "encrypt")]
-impl<EE, ED, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<EncryptLayer<(), EE, ED>, FB>
-where
-    EE: Codec<Vec<u8>, Vec<u8>> + 'static,
-    ED: Codec<Vec<u8>, Vec<u8>> + 'static,
-    FB: Buildable<Vec<u8>, Vec<u8>>,
-{
-    type Output = TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, FB::TierOutput, IdentityCodec, EE, ED>;
-
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let tier = self.tier.build_tier(clock, telemetry);
-        TransformAdapter::new(tier, IdentityCodec, self.previous.encoder, self.previous.decoder)
-    }
-}
-
-// PostBuildable for PostTransformTier where previous is an EncryptLayer<CompressLayer<()>>
-// (compress then encrypt, no tiers before).
-#[cfg(all(feature = "compress", feature = "encrypt"))]
-impl<CE, CD, EE, ED, FB> PostBuildable<Vec<u8>, Vec<u8>> for PostTransformTier<EncryptLayer<CompressLayer<(), CE, CD>, EE, ED>, FB>
-where
-    CE: Codec<Vec<u8>, Vec<u8>> + 'static,
-    CD: Codec<Vec<u8>, Vec<u8>> + 'static,
-    EE: Codec<Vec<u8>, Vec<u8>> + 'static,
-    ED: Codec<Vec<u8>, Vec<u8>> + 'static,
-    FB: Buildable<Vec<u8>, Vec<u8>>,
-{
-    type Output = TransformAdapter<
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        TransformAdapter<Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, FB::TierOutput, IdentityCodec, CE, CD>,
-        IdentityCodec,
-        EE,
-        ED,
-    >;
-
-    fn build_post_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::Output {
-        let tier = self.tier.build_tier(clock, telemetry);
-        // First wrap in compression, then encryption
-        let compressed = TransformAdapter::new(tier, IdentityCodec, self.previous.inner.encoder, self.previous.inner.decoder);
-        TransformAdapter::new(compressed, IdentityCodec, self.previous.encoder, self.previous.decoder)
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
+        let post_tier = self.post.build_tier(clock, telemetry);
+        TransformAdapter::new(post_tier, self.key_encoder, self.value_encoder, self.value_decoder)
     }
 }

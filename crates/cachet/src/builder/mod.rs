@@ -16,4 +16,4 @@ pub(crate) use buildable::Buildable;
 pub use cache::CacheBuilder;
 pub use fallback::FallbackBuilder;
 pub use sealed::CacheTierBuilder;
-pub use transform::{Compressed, Encrypted, Serialized, TransformBuilder, Transformed};
+pub use transform::TransformBuilder;
