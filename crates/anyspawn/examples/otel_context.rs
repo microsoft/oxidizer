@@ -16,7 +16,8 @@ use opentelemetry::context::FutureExt as OtelFutureExt;
 #[tokio::main]
 async fn main() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer("otel-context", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .name("tokio_with_otel")
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             let cx = Context::current();
             spawn(Box::pin(fut.with_context(cx)));
         })

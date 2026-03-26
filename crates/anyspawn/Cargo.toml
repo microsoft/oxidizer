@@ -27,6 +27,7 @@ custom = ["dep:futures-channel"]
 [dependencies]
 futures-channel = { workspace = true, features = ["alloc"], optional = true }
 tokio = { workspace = true, features = ["rt"], optional = true }
+thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -53,6 +54,10 @@ required-features = ["tokio"]
 
 [[example]]
 name = "otel_context"
+required-features = ["tokio", "custom"]
+
+[[example]]
+name = "thread_aware"
 required-features = ["tokio", "custom"]
 
 [lints]

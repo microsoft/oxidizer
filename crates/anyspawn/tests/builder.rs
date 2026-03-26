@@ -30,34 +30,34 @@ fn builder_debug_no_layers() {
 #[test]
 fn builder_debug_with_layers() {
     let builder = CustomSpawnerBuilder::tokio()
-        .layer("tracing", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
-        .layer("metrics", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         });
 
-    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio", layers: ["tracing", "metrics"] }"#);
+    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio" }"#);
 }
 
 #[test]
 fn builder_custom_name_debug() {
-    let builder = CustomSpawnerBuilder::custom("smol", |_: BoxedFuture| {});
+    let builder = CustomSpawnerBuilder::custom(|_: BoxedFuture| {}).name("smol");
     insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "smol" }"#);
 }
 
 #[test]
 fn built_spawner_debug_with_layers() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer("otel-context", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
-        .layer("panic-handler", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
         .build();
 
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio", layers: ["otel-context", "panic-handler"] })"#);
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn built_spawner_debug_no_layers() {
 #[tokio::test]
 async fn layered_spawner_still_works() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer("passthrough", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
         .build();
