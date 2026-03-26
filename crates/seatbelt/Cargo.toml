@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.4.2"
+version = "0.4.3"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -44,6 +44,7 @@ retry = ["dep:fastrand"]
 breaker = ["dep:fastrand"]
 fallback = []
 hedging = ["dep:futures-util"]
+chaos-injection = ["dep:fastrand"]
 serde = ["dep:serde", "dep:jiff"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 logs = ["dep:tracing"]
@@ -122,7 +123,7 @@ required-features = ["hedging"]
 
 [[example]]
 name = "breaker"
-required-features = ["breaker", "metrics"]
+required-features = ["breaker", "metrics", "chaos-injection"]
 
 [[example]]
 name = "config"
@@ -131,6 +132,14 @@ required-features = ["retry", "breaker", "timeout", "serde"]
 [[example]]
 name = "fallback"
 required-features = ["fallback"]
+
+[[example]]
+name = "chaos_injection"
+required-features = ["chaos-injection"]
+
+[[example]]
+name = "chaos_injection_advanced"
+required-features = ["chaos-injection"]
 
 [[bench]]
 name = "observability"

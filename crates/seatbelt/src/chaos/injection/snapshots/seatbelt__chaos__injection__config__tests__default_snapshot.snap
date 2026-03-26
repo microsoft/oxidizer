@@ -1,0 +1,8 @@
+---
+source: crates/seatbelt/src/chaos/injection/config.rs
+expression: config
+---
+{
+  "enabled": true,
+  "rate": 0.0
+}
