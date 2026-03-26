@@ -5,6 +5,10 @@ use crate::{CacheEntry, CacheTier, Codec, Error};
 
 use std::fmt::Debug;
 
+/// A boxed-closure codec for custom transforms.
+///
+/// This is the escape hatch for users who want to use closures rather than
+/// implementing the [`Codec`] trait directly. Involves boxing.
 pub struct TransformCodec<A, B> {
     apply_fn: Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>,
 }
@@ -27,9 +31,7 @@ impl<A, B> TransformCodec<A, B> {
 }
 
 impl<A, B> Codec<A, B> for TransformCodec<A, B> {
-    type Error = Error;
-
-    fn apply(&self, value: &A) -> Result<B, Self::Error> {
+    fn apply(&self, value: &A) -> Result<B, Error> {
         (self.apply_fn)(value)
     }
 }
@@ -43,52 +45,71 @@ impl<A, B> Debug for TransformCodec<A, B> {
     }
 }
 
-pub struct TransformAdapter<K1, K2, V1, V2, S>
-where
-    S: CacheTier<K2, V2>,
-{
-    inner: S,
-    key_encoder: Box<dyn Codec<K1, K2, Error = Error>>,
-    value_encoder: Box<dyn Codec<V1, V2, Error = Error>>,
-    value_decoder: Box<dyn Codec<V2, V1, Error = Error>>,
+/// An identity codec that passes values through unchanged.
+///
+/// Used as the key codec in compress/encrypt `TransformAdapter` layers
+/// where only values need transformation.
+#[derive(Debug, Clone, Copy)]
+pub struct IdentityCodec;
+
+impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
+    fn apply(&self, value: &T) -> Result<T, Error> {
+        Ok(value.clone())
+    }
 }
 
-impl<K1, K2, V1, V2, S> TransformAdapter<K1, K2, V1, V2, S>
+/// Adapter that transforms keys and values between two type spaces.
+///
+/// Generic over codec types to avoid boxing when concrete codecs
+/// (e.g., `BincodeCodec`, `ZstdCodec`) are used directly.
+pub struct TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
 where
     S: CacheTier<K2, V2>,
-    K1: 'static,
-    K2: 'static,
-    V1: 'static,
-    V2: 'static,
+    KE: Codec<K1, K2>,
+    VE: Codec<V1, V2>,
+    VD: Codec<V2, V1>,
 {
-    pub fn new(
-        inner: S,
-        key_encoder: TransformCodec<K1, K2>,
-        value_encoder: TransformCodec<V1, V2>,
-        value_decoder: TransformCodec<V2, V1>,
-    ) -> Self {
+    inner: S,
+    key_encoder: KE,
+    value_encoder: VE,
+    value_decoder: VD,
+    _phantom: std::marker::PhantomData<(K1, K2, V1, V2)>,
+}
+
+impl<K1, K2, V1, V2, S, KE, VE, VD> TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
+where
+    S: CacheTier<K2, V2>,
+    KE: Codec<K1, K2>,
+    VE: Codec<V1, V2>,
+    VD: Codec<V2, V1>,
+{
+    pub fn new(inner: S, key_encoder: KE, value_encoder: VE, value_decoder: VD) -> Self {
         Self {
             inner,
-            key_encoder: Box::new(key_encoder),
-            value_encoder: Box::new(value_encoder),
-            value_decoder: Box::new(value_decoder),
+            key_encoder,
+            value_encoder,
+            value_decoder,
+            _phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<K1, K2, V1, V2, S> CacheTier<K1, V1> for TransformAdapter<K1, K2, V1, V2, S>
+impl<K1, K2, V1, V2, S, KE, VE, VD> CacheTier<K1, V1> for TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
 where
     K1: Send + Sync,
     V1: Send + Sync,
     K2: Send + Sync,
     V2: Send + Sync,
     S: CacheTier<K2, V2> + Send + Sync,
+    KE: Codec<K1, K2>,
+    VE: Codec<V1, V2>,
+    VD: Codec<V2, V1>,
 {
     async fn get(&self, key: &K1) -> Result<Option<CacheEntry<V1>>, Error> {
         let mapped_key = self.key_encoder.apply(key)?;
         let entry_option = self.inner.get(&mapped_key).await?;
         if let Some(entry) = entry_option {
-            let mapped_value = self.value_decoder.apply(&entry.value())?;
+            let mapped_value = self.value_decoder.apply(entry.value())?;
             Ok(Some(entry.map_value(|_| mapped_value)))
         } else {
             Ok(None)
@@ -116,9 +137,12 @@ where
     }
 }
 
-impl<K1, K2, V1, V2, S> Debug for TransformAdapter<K1, K2, V1, V2, S>
+impl<K1, K2, V1, V2, S, KE, VE, VD> Debug for TransformAdapter<K1, K2, V1, V2, S, KE, VE, VD>
 where
     S: CacheTier<K2, V2> + Debug,
+    KE: Codec<K1, K2>,
+    VE: Codec<V1, V2>,
+    VD: Codec<V2, V1>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TransformAdapter")
