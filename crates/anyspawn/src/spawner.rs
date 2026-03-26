@@ -110,9 +110,9 @@ use crate::handle::JoinHandleInner;
 ///
 /// This enables contention-free, NUMA-friendly task dispatch, each core
 /// queues work through its own spawn function without touching shared
-/// state. In contrast, the Tokio and custom variants are marked
-/// `#[thread_aware(skip)]` and behave identically regardless of which core
-/// they run on.
+/// state. In contrast, the Tokio and custom variants do not create per-core
+/// state: they ignore relocation and behave identically regardless of which
+/// core they run on.
 ///
 /// See [`new_thread_aware`](Self::new_thread_aware) for usage and examples.
 #[derive(Clone, ThreadAware)]
