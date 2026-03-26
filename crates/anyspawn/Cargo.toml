@@ -16,6 +16,13 @@ license.workspace = true
 homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "thread_aware::core::ThreadAware",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
@@ -26,8 +33,8 @@ custom = ["dep:futures-channel"]
 
 [dependencies]
 futures-channel = { workspace = true, features = ["alloc"], optional = true }
-tokio = { workspace = true, features = ["rt"], optional = true }
 thread_aware = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
