@@ -3,6 +3,7 @@
 
 #![allow(missing_docs, reason = "test code")]
 #![cfg(feature = "custom")]
+#![cfg(not(miri))] // miri does not support OS threads and CPU affinity helpers
 
 //! Tests for [`Spawner`] relocation behavior with [`ThreadAware`].
 //!
