@@ -258,8 +258,14 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+#[cfg(feature = "encrypt")]
+#[doc(inline)]
+pub use transform::{AesGcmDecoder, AesGcmEncoder};
 #[cfg(feature = "serialize")]
 #[doc(inline)]
 pub use transform::{BincodeDecoder, BincodeEncoder};
 #[doc(inline)]
 pub use transform::{Codec, IdentityCodec, TransformAdapter, TransformCodec};
+#[cfg(feature = "compress")]
+#[doc(inline)]
+pub use transform::{ZstdDecoder, ZstdEncoder};
