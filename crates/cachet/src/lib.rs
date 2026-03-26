@@ -238,7 +238,7 @@ mod transform;
 mod wrapper;
 
 #[doc(inline)]
-pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder};
+pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
 #[cfg(feature = "memory")]

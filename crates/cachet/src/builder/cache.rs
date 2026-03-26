@@ -273,30 +273,6 @@ where
         }
     }
 
-    // TODO: will be reworked as .transform() in the next phase
-    // #[must_use]
-    // pub fn map<KMapped, VMapped>(
-    //     self,
-    //     key_encoder: MapCodec<K, KMapped>,
-    //     value_encoder: MapCodec<V, VMapped>,
-    //     value_decoder: MapCodec<VMapped, V>,
-    // ) -> CacheBuilder<KMapped, VMapped, MapAdapter<K, KMapped, V, VMapped, CT>>
-    // where
-    //     KMapped: Clone + Hash + Eq + Send + Sync + 'static,
-    //     VMapped: Clone + Send + Sync + 'static,
-    // {
-    //     let storage = MapAdapter::new(self.storage, key_encoder, value_encoder, value_decoder);
-    //     CacheBuilder {
-    //         name: self.name,
-    //         storage,
-    //         ttl: self.ttl,
-    //         clock: self.clock,
-    //         telemetry: self.telemetry,
-    //         stampede_protection: self.stampede_protection,
-    //         _phantom: PhantomData,
-    //     }
-    // }
-
     /// Builds the cache with the configured storage and settings.
     ///
     /// # Examples
