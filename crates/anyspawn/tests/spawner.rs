@@ -34,6 +34,17 @@ async fn tokio_spawn_fire_and_forget() {
     assert_eq!(rx.await.unwrap(), 42);
 }
 
+#[cfg(feature = "tokio")]
+#[test]
+fn tokio_with_handle_spawn_and_await() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = Spawner::new_tokio_with_handle(rt.handle().clone());
+
+    // Spawning with an explicit handle works even outside a Tokio runtime context.
+    let result = rt.block_on(spawner.spawn(async { 42 }));
+    assert_eq!(result, 42);
+}
+
 #[cfg(feature = "custom")]
 #[test]
 fn custom_spawn_and_await() {

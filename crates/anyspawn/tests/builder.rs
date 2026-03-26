@@ -16,6 +16,13 @@ fn tokio_spawner_debug() {
 }
 
 #[test]
+fn tokio_with_handle_spawner_debug() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
+}
+
+#[test]
 fn custom_spawner_debug() {
     let spawner = Spawner::new_custom("my-runtime", |_| {});
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "my-runtime" })"#);
