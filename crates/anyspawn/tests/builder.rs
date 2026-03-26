@@ -15,6 +15,13 @@ fn tokio_spawner_debug() {
 }
 
 #[test]
+fn tokio_with_handle_spawner_debug() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
+}
+
+#[test]
 fn custom_spawner_debug() {
     let spawner = Spawner::new_custom("my-runtime", |_| {});
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "my-runtime" })"#);
@@ -63,6 +70,16 @@ fn built_spawner_debug_with_layers() {
 fn built_spawner_debug_no_layers() {
     let spawner = CustomSpawnerBuilder::tokio().build();
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
+}
+
+#[test]
+fn tokio_with_handle_spawner_still_works() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
+
+    // Spawning with an explicit handle works even outside a Tokio runtime context.
+    let result = rt.block_on(spawner.spawn(async { 42 }));
+    assert_eq!(result, 42);
 }
 
 #[tokio::test]

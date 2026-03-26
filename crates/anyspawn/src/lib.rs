@@ -54,7 +54,8 @@
 //!
 //! # Features
 //!
-//! - `tokio` (default): Enables the [`Spawner::new_tokio`] constructor
+//! - `tokio` (default): Enables the [`Spawner::new_tokio`] and
+//!   [`Spawner::new_tokio_with_handle`] constructors
 //! - `custom`: Enables [`Spawner::new_custom`] and [`CustomSpawnerBuilder`]
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
