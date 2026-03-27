@@ -121,11 +121,9 @@
 //! # use seatbelt::chaos::latency::{Latency, LatencyConfig};
 //! # async fn example(clock: Clock) {
 //! let context = ResilienceContext::new(&clock);
-//! let config = LatencyConfig {
-//!     rate: 0.1,
-//!     latency: Duration::from_millis(200),
-//!     ..LatencyConfig::default()
-//! };
+//! let mut config = LatencyConfig::default();
+//! config.rate = 0.1;
+//! config.latency = Duration::from_millis(200);
 //!
 //! let stack = (
 //!     Latency::layer("my_latency", &context)
