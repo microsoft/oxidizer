@@ -1,50 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Cache builder types for constructing single and multi-tier caches.
-//!
-//! This module provides the builder pattern infrastructure for creating
-//! caches with configurable storage, TTL, telemetry, and fallback tiers.
-
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::time::Duration;
 
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
-use cachet_tier::DynamicCache;
 #[cfg(any(feature = "metrics", test))]
 use opentelemetry::metrics::MeterProvider;
 use tick::Clock;
 
-use crate::builder::sealed::Sealed;
+use super::buildable::Buildable;
+use super::fallback::FallbackBuilder;
+use super::sealed::{CacheTierBuilder, Sealed};
 use crate::fallback::{FallbackCache, FallbackPromotionPolicy};
-use crate::refresh::TimeToRefresh;
-use crate::telemetry::{CacheTelemetry, TelemetryConfig};
+use crate::telemetry::TelemetryConfig;
 use crate::wrapper::CacheWrapper;
 use crate::{Cache, CacheTier};
-
-mod sealed {
-    pub(crate) trait Sealed {}
-}
-
-/// A builder that can produce a cache tier.
-///
-/// This trait is sealed and cannot be implemented outside this crate.
-/// It's implemented by `CacheBuilder` and `FallbackBuilder` to enable
-/// type-safe cache hierarchy construction.
-///
-/// # Examples
-///
-/// ```no_run
-/// use cachet::Cache;
-/// use tick::Clock;
-///
-/// let clock = Clock::new_tokio();
-/// let cache = Cache::builder::<String, i32>(clock).memory().build();
-/// ```
-#[expect(private_bounds, reason = "intentionally sealed trait pattern")]
-pub trait CacheTierBuilder<K, V>: Sealed {}
 
 /// Builder for constructing a cache with a single tier.
 ///
@@ -67,13 +40,13 @@ pub trait CacheTierBuilder<K, V>: Sealed {}
 /// ```
 #[derive(Debug)]
 pub struct CacheBuilder<K, V, CT = ()> {
-    name: Option<&'static str>,
-    storage: CT,
-    ttl: Option<Duration>,
-    clock: Clock,
-    telemetry: TelemetryConfig,
-    stampede_protection: bool,
-    _phantom: PhantomData<(K, V)>,
+    pub(crate) name: Option<&'static str>,
+    pub(crate) storage: CT,
+    pub(crate) ttl: Option<Duration>,
+    pub(crate) clock: Clock,
+    pub(crate) telemetry: TelemetryConfig,
+    pub(crate) stampede_protection: bool,
+    pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V> CacheBuilder<K, V, ()> {
@@ -326,248 +299,24 @@ where
 {
 }
 
-/// Builder for a cache with fallback tiers.
-///
-/// Created via `CacheBuilder::fallback`. When built, produces a `Cache`
-/// wrapping a `FallbackCache` structure.
-#[derive(Debug)]
-#[expect(clippy::struct_field_names, reason = "builder field naming is intentional")]
-pub struct FallbackBuilder<K, V, PB, FB> {
-    name: Option<&'static str>,
-    primary_builder: PB,
-    fallback_builder: FB,
-    policy: FallbackPromotionPolicy<V>,
-    clock: Clock,
-    refresh: Option<TimeToRefresh<K>>,
-    telemetry: TelemetryConfig,
-    stampede_protection: bool,
-    _phantom: PhantomData<(K, V)>,
-}
-
-impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
-    /// Sets the promotion policy for this fallback tier.
-    ///
-    /// The policy determines when values from the fallback tier should be
-    /// promoted to the primary tier.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use cachet::{Cache, FallbackPromotionPolicy};
-    /// use tick::Clock;
-    ///
-    /// let clock = Clock::new_tokio();
-    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
-    ///
-    /// let cache = Cache::builder::<String, String>(clock)
-    ///     .memory()
-    ///     .fallback(l2)
-    ///     .promotion_policy(FallbackPromotionPolicy::always())
-    ///     .build();
-    /// ```
-    #[must_use]
-    pub fn promotion_policy(mut self, policy: FallbackPromotionPolicy<V>) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    /// Configures background refresh for this fallback tier.
-    ///
-    /// When entries in the primary tier exceed the refresh duration,
-    /// they will be asynchronously refreshed from the fallback tier.
-    #[must_use]
-    pub fn time_to_refresh(mut self, refresh: TimeToRefresh<K>) -> Self {
-        self.refresh = Some(refresh);
-        self
-    }
-
-    /// Enables stampede protection for cache reads.
-    ///
-    /// When enabled, concurrent requests for the same key will be merged
-    /// so that only one request performs the lookup. Others wait and share the result.
-    ///
-    /// This prevents the "thundering herd" problem where many concurrent cache
-    /// misses for the same key overwhelm the backend.
-    #[must_use]
-    pub fn stampede_protection(mut self) -> Self {
-        self.stampede_protection = true;
-        self
-    }
-}
-
-impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-{
-    /// Adds another fallback tier to the cache hierarchy.
-    ///
-    /// This allows building arbitrarily deep cache hierarchies like:
-    /// L1 → L2 → L3 → Database
-    ///
-    /// Each `FallbackBuilder` controls its own promotion policy via `.promotion_policy()`.
-    ///
-    /// Accepts either a `CacheBuilder` or another `FallbackBuilder` as the fallback.
-    pub fn fallback<FB2>(self, fallback: FB2) -> FallbackBuilder<K, V, Self, FB2>
-    where
-        FB2: CacheTierBuilder<K, V>,
-    {
-        let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone();
-        let stampede_protection = self.stampede_protection;
-
-        FallbackBuilder {
-            name: self.name,
-            primary_builder: self,
-            fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::always(),
-            clock,
-            refresh: None,
-            telemetry,
-            stampede_protection,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<K, V, PB, FB> Sealed for FallbackBuilder<K, V, PB, FB>
-where
-    PB: CacheTierBuilder<K, V>,
-    FB: CacheTierBuilder<K, V>,
-{
-}
-
-impl<K, V, PB, FB> CacheTierBuilder<K, V> for FallbackBuilder<K, V, PB, FB>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    PB: CacheTierBuilder<K, V>,
-    FB: CacheTierBuilder<K, V>,
-{
-}
-
-#[expect(private_bounds, reason = "Buildable is an internal trait")]
-impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
-where
-    K: Clone + Eq + Hash + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    PB: CacheTierBuilder<K, V> + Buildable<K, V>,
-    FB: CacheTierBuilder<K, V> + Buildable<K, V>,
-{
-    /// Builds the multi-tier cache hierarchy.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use cachet::Cache;
-    /// use tick::Clock;
-    ///
-    /// let clock = Clock::new_tokio();
-    /// let l2 = Cache::builder::<String, i32>(clock.clone()).memory();
-    ///
-    /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .memory()
-    ///     .fallback(l2)
-    ///     .build();
-    /// ```
-    pub fn build(self) -> Cache<K, V, DynamicCache<K, V>> {
-        <Self as Buildable<K, V>>::build(self)
-    }
-}
-
-/// Internal trait for building cache hierarchies.
-pub(crate) trait Buildable<K, V> {
-    type Output: CacheTier<K, V> + Send + Sync + 'static;
-    type TierOutput: CacheTier<K, V> + Send + Sync + 'static;
-
-    fn build(self) -> Cache<K, V, Self::Output>;
-
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput;
-}
-
-impl<K, V, CT> Buildable<K, V> for CacheBuilder<K, V, CT>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    CT: CacheTier<K, V> + Send + Sync + 'static,
-{
-    type Output = CacheWrapper<K, V, CT>;
-    type TierOutput = Self::Output;
-
-    fn build(self) -> Cache<K, V, Self::Output> {
-        let name = self.name;
-        let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build();
-        let stampede_protection = self.stampede_protection;
-
-        let tier = self.build_tier(clock.clone(), telemetry);
-
-        Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
-    }
-
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
-        CacheWrapper::new(type_name::<CT>(self.name), self.storage, clock, self.ttl, telemetry)
-    }
-}
-
-impl<K, V, PB, FB> Buildable<K, V> for FallbackBuilder<K, V, PB, FB>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    PB: Buildable<K, V>,
-    FB: Buildable<K, V>,
-{
-    type Output = DynamicCache<K, V>;
-    type TierOutput = FallbackCache<K, V, PB::TierOutput, FB::TierOutput>;
-
-    fn build(self) -> Cache<K, V, Self::Output> {
-        let name = self.name;
-        let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build();
-        let stampede_protection = self.stampede_protection;
-
-        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
-
-        Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
-    }
-
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
-        let primary = self.primary_builder.build_tier(clock.clone(), telemetry.clone());
-        let fallback = self.fallback_builder.build_tier(clock.clone(), telemetry.clone());
-
-        FallbackCache::new(
-            type_name::<Self::TierOutput>(self.name),
-            primary,
-            fallback,
-            self.policy,
-            clock,
-            self.refresh,
-            telemetry,
-        )
-    }
-}
-
-fn type_name<S>(user_name: Option<&'static str>) -> &'static str {
-    if let Some(name) = user_name {
-        name
-    } else {
-        std::any::type_name::<S>()
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tick::Clock;
+
     use super::*;
+    use crate::{Cache, FallbackPromotionPolicy};
 
     #[test]
     fn type_name_with_user_name() {
-        let name = type_name::<String>(Some("custom_name"));
+        let name = super::super::buildable::type_name::<String>(Some("custom_name"));
         assert_eq!(name, "custom_name");
     }
 
     #[test]
     fn type_name_without_user_name() {
-        let name = type_name::<String>(None);
+        let name = super::super::buildable::type_name::<String>(None);
         assert_eq!(name, "alloc::string::String");
     }
 
@@ -626,7 +375,6 @@ mod tests {
             .storage(cachet_tier::MockCache::new())
             .stampede_protection()
             .build();
-        // Stampede protection is internal; just verify it builds
         assert!(!cache.name().is_empty());
     }
 
@@ -705,11 +453,9 @@ mod tests {
     fn fallback_builder_fallback() {
         let clock = Clock::new_frozen();
         let l3 = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
-        // l2 is a FallbackBuilder
         let l2 = Cache::builder::<String, i32>(clock.clone())
             .storage(cachet_tier::MockCache::new())
             .fallback(l3);
-        // Call fallback() on FallbackBuilder to exercise FallbackBuilder::fallback
         let l1 = l2.fallback(Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new()));
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())

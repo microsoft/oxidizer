@@ -142,7 +142,7 @@ where
             Ok(()) => {
                 self.telemetry
                     .record(self.name, CacheOperation::Insert, CacheActivity::Inserted, timed.duration);
-                if let Some(size) = self.inner.len() {
+                if let Ok(Some(size)) = self.inner.len().await {
                     self.telemetry.record_size(self.name, size);
                 }
             }
@@ -160,7 +160,7 @@ where
             Ok(()) => {
                 self.telemetry
                     .record(self.name, CacheOperation::Invalidate, CacheActivity::Invalidated, timed.duration);
-                if let Some(size) = self.inner.len() {
+                if let Ok(Some(size)) = self.inner.len().await {
                     self.telemetry.record_size(self.name, size);
                 }
             }
@@ -178,7 +178,7 @@ where
             Ok(()) => {
                 self.telemetry
                     .record(self.name, CacheOperation::Clear, CacheActivity::Ok, timed.duration);
-                if let Some(size) = self.inner.len() {
+                if let Ok(Some(size)) = self.inner.len().await {
                     self.telemetry.record_size(self.name, size);
                 }
             }
@@ -190,8 +190,8 @@ where
         timed.result
     }
 
-    fn len(&self) -> Option<u64> {
-        self.inner.len()
+    async fn len(&self) -> Result<Option<u64>, Error> {
+        self.inner.len().await
     }
 }
 
@@ -201,10 +201,6 @@ mod tests {
 
     use super::*;
     use crate::telemetry::TelemetryConfig;
-
-    fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        futures::executor::block_on(f)
-    }
 
     #[test]
     fn wrapper_is_expired_with_no_ttl_returns_false() {
@@ -230,59 +226,56 @@ mod tests {
         assert!(wrapper.is_expired(&entry));
     }
 
-    #[test]
-    fn insert_preserves_per_entry_ttl_over_tier_ttl() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            let inner_check = inner.clone();
-            let telemetry = TelemetryConfig::new().build();
-            let tier_ttl = Duration::from_secs(60);
-            let entry_ttl = Duration::from_secs(30);
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry);
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn insert_preserves_per_entry_ttl_over_tier_ttl() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let inner_check = inner.clone();
+        let telemetry = TelemetryConfig::new().build();
+        let tier_ttl = Duration::from_secs(60);
+        let entry_ttl = Duration::from_secs(30);
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry);
 
-            let entry = CacheEntry::expires_at(42, entry_ttl, clock.system_time());
+        let entry = CacheEntry::expires_at(42, entry_ttl, clock.system_time());
 
-            wrapper.insert("key".to_string(), entry).await.unwrap();
+        wrapper.insert("key".to_string(), entry).await.unwrap();
 
-            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
-            assert_eq!(stored.ttl(), Some(entry_ttl));
-        });
+        let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+        assert_eq!(stored.ttl(), Some(entry_ttl));
     }
 
-    #[test]
-    fn insert_without_tier_ttl_leaves_entry_ttl_unset() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            let inner_check = inner.clone();
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn insert_without_tier_ttl_leaves_entry_ttl_unset() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let inner_check = inner.clone();
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
 
-            let entry = CacheEntry::new(42);
-            wrapper.insert("key".to_string(), entry).await.unwrap();
+        let entry = CacheEntry::new(42);
+        wrapper.insert("key".to_string(), entry).await.unwrap();
 
-            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
-            assert!(stored.ttl().is_none());
-        });
+        let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+        assert!(stored.ttl().is_none());
     }
 
-    #[test]
-    fn insert_with_tier_ttl_leaves_entry_ttl_unset() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            let inner_check = inner.clone();
-            let telemetry = TelemetryConfig::new().build();
-            let tier_ttl = Duration::from_secs(60);
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn insert_with_tier_ttl_leaves_entry_ttl_unset() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let inner_check = inner.clone();
+        let telemetry = TelemetryConfig::new().build();
+        let tier_ttl = Duration::from_secs(60);
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry);
 
-            let entry = CacheEntry::new(42);
-            wrapper.insert("key".to_string(), entry).await.unwrap();
+        let entry = CacheEntry::new(42);
+        wrapper.insert("key".to_string(), entry).await.unwrap();
 
-            let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
-            assert!(stored.ttl().is_none());
-        });
+        let stored = inner_check.get(&"key".to_string()).await.unwrap().unwrap();
+        assert!(stored.ttl().is_none());
     }
 
     #[test]
@@ -354,95 +347,89 @@ mod tests {
         assert!(result.is_some());
     }
 
-    #[test]
-    fn mock_wrapper_get_insert_invalidate_clear() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mock_wrapper_get_insert_invalidate_clear() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
 
-            // get miss
-            assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
+        // get miss
+        assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
 
-            // insert + get hit
-            wrapper.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-            let entry = wrapper.get(&"key".to_string()).await.unwrap().unwrap();
-            assert_eq!(*entry.value(), 42);
+        // insert + get hit
+        wrapper.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let entry = wrapper.get(&"key".to_string()).await.unwrap().unwrap();
+        assert_eq!(*entry.value(), 42);
 
-            // invalidate
-            wrapper.invalidate(&"key".to_string()).await.unwrap();
-            assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
+        // invalidate
+        wrapper.invalidate(&"key".to_string()).await.unwrap();
+        assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
 
-            // insert + clear
-            wrapper.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
-            wrapper.clear().await.unwrap();
-            assert!(wrapper.get(&"a".to_string()).await.unwrap().is_none());
-        });
+        // insert + clear
+        wrapper.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
+        wrapper.clear().await.unwrap();
+        assert!(wrapper.get(&"a".to_string()).await.unwrap().is_none());
     }
 
-    #[test]
-    fn mock_wrapper_len() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-            assert_eq!(wrapper.len(), Some(0));
-            wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
-            assert_eq!(wrapper.len(), Some(1));
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mock_wrapper_len() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+        assert_eq!(wrapper.len().await.expect("len should return Ok"), Some(0));
+        wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
+        assert_eq!(wrapper.len().await.expect("len should return Ok"), Some(1));
     }
 
-    #[test]
-    fn mock_wrapper_get_error() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Get(_)));
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-            let result = wrapper.get(&"key".to_string()).await;
-            result.unwrap_err();
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mock_wrapper_get_error() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Get(_)));
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+        let result = wrapper.get(&"key".to_string()).await;
+        result.unwrap_err();
     }
 
-    #[test]
-    fn mock_wrapper_insert_error() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Insert { .. }));
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-            let result = wrapper.insert("key".to_string(), CacheEntry::new(1)).await;
-            result.unwrap_err();
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mock_wrapper_insert_error() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Insert { .. }));
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+        let result = wrapper.insert("key".to_string(), CacheEntry::new(1)).await;
+        result.unwrap_err();
     }
 
-    #[test]
-    fn mock_wrapper_invalidate_error() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Invalidate(_)));
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-            let result = wrapper.invalidate(&"key".to_string()).await;
-            result.unwrap_err();
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mock_wrapper_invalidate_error() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Invalidate(_)));
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+        let result = wrapper.invalidate(&"key".to_string()).await;
+        result.unwrap_err();
     }
 
-    #[test]
-    fn mock_wrapper_clear_error() {
-        block_on(async {
-            let clock = Clock::new_frozen();
-            let inner = MockCache::<String, i32>::new();
-            inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Clear));
-            let telemetry = TelemetryConfig::new().build();
-            let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-            let result = wrapper.clear().await;
-            result.unwrap_err();
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn mock_wrapper_clear_error() {
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Clear));
+        let telemetry = TelemetryConfig::new().build();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
+        let result = wrapper.clear().await;
+        result.unwrap_err();
     }
 }

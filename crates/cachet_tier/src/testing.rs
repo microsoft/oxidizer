@@ -30,6 +30,7 @@ pub enum CacheOp<K, V> {
     Invalidate(K),
     /// A clear operation was performed.
     Clear,
+    Len,
 }
 
 type FailPredicate<K, V> = Box<dyn Fn(&CacheOp<K, V>) -> bool + Send + Sync>;
@@ -272,8 +273,14 @@ where
         Ok(())
     }
 
-    fn len(&self) -> Option<u64> {
-        Some(self.data.lock().len() as u64)
+    async fn len(&self) -> Result<Option<u64>, Error> {
+        let op = CacheOp::Len;
+        if self.should_fail(&op) {
+            self.record(op);
+            return Err(Error::from_message("mock: len failed"));
+        }
+        self.record(op);
+        Ok(Some(self.data.lock().len() as u64))
     }
 }
 
