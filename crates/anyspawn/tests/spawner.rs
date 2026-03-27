@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test code")]
-#![cfg(any(feature = "tokio", feature = "custom"))]
 #![cfg(not(miri))] // miri doesn't work well with `insta` snapshots
 
 //! Tests for `Spawner` implementations.
@@ -11,7 +10,6 @@ use anyspawn::Spawner;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync);
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn tokio_spawn_and_await() {
     let spawner = Spawner::new_tokio();
@@ -19,7 +17,6 @@ async fn tokio_spawn_and_await() {
     assert_eq!(result, 42);
 }
 
-#[cfg(feature = "tokio")]
 #[tokio::test]
 async fn tokio_spawn_fire_and_forget() {
     let spawner = Spawner::new_tokio();
@@ -34,7 +31,6 @@ async fn tokio_spawn_fire_and_forget() {
     assert_eq!(rx.await.unwrap(), 42);
 }
 
-#[cfg(feature = "tokio")]
 #[test]
 fn tokio_with_handle_spawn_and_await() {
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -45,7 +41,6 @@ fn tokio_with_handle_spawn_and_await() {
     assert_eq!(result, 42);
 }
 
-#[cfg(feature = "tokio")]
 #[test]
 fn tokio_with_handle_spawner_debug() {
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -54,7 +49,6 @@ fn tokio_with_handle_spawner_debug() {
     assert_eq!(debug_str, r#"Spawner("tokio(handle)")"#);
 }
 
-#[cfg(feature = "custom")]
 #[test]
 fn custom_spawn_and_await() {
     let spawner = Spawner::new_custom("threadpool", |fut| {
@@ -65,7 +59,6 @@ fn custom_spawn_and_await() {
     assert_eq!(result, 42);
 }
 
-#[cfg(feature = "custom")]
 #[tokio::test]
 async fn custom_spawn_fire_and_forget() {
     let spawner = Spawner::new_custom("threadpool", |fut| {
@@ -83,7 +76,6 @@ async fn custom_spawn_fire_and_forget() {
     assert_eq!(rx.recv().unwrap(), 42);
 }
 
-#[cfg(feature = "custom")]
 #[test]
 fn custom_spawner_debug() {
     let spawner = Spawner::new_custom("noop", |_| {});
@@ -91,7 +83,6 @@ fn custom_spawner_debug() {
     assert!(debug_str.contains("noop"));
 }
 
-#[cfg(feature = "custom")]
 #[test]
 fn thread_aware_spawner_debug() {
     let spawner = Spawner::new_thread_aware((), |()| Spawner::new_custom("inner", |_| {}));

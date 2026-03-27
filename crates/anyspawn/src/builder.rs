@@ -28,10 +28,11 @@ use crate::custom::BoxedFuture;
 /// # Examples
 ///
 /// ```rust
-/// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
-///
+/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() {
+/// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+///
 /// let spawner = CustomSpawnerBuilder::tokio()
 ///     .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
 ///         spawn(Box::pin(async move {
@@ -45,6 +46,8 @@ use crate::custom::BoxedFuture;
 /// let result = spawner.spawn(async { 42 }).await;
 /// assert_eq!(result, 42);
 /// # }
+/// # #[cfg(not(feature = "tokio"))]
+/// # fn main() {}
 /// ```
 pub struct CustomSpawnerBuilder<S> {
     spawn_fn: S,
@@ -73,7 +76,7 @@ impl CustomSpawnerBuilder<()> {
     /// # }
     /// ```
     #[cfg(feature = "tokio")]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "tokio", feature = "custom"))))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
     pub fn tokio() -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static> {
         CustomSpawnerBuilder {
@@ -107,7 +110,7 @@ impl CustomSpawnerBuilder<()> {
     /// # }
     /// ```
     #[cfg(feature = "tokio")]
-    #[cfg_attr(docsrs, doc(cfg(all(feature = "tokio", feature = "custom"))))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
     pub fn tokio_with_handle(handle: ::tokio::runtime::Handle) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static> {
         CustomSpawnerBuilder {
@@ -184,10 +187,11 @@ where
     /// # Examples
     ///
     /// ```rust
-    /// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
-    ///
+    /// # #[cfg(feature = "tokio")]
     /// # #[tokio::main]
     /// # async fn main() {
+    /// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+    ///
     /// let spawner = CustomSpawnerBuilder::tokio()
     ///     .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
     ///         spawn(Box::pin(async move {
@@ -198,6 +202,8 @@ where
     ///     .build();
     /// # let _ = spawner;
     /// # }
+    /// # #[cfg(not(feature = "tokio"))]
+    /// # fn main() {}
     /// ```
     pub fn layer<L>(self, layer_fn: L) -> CustomSpawnerBuilder<impl Fn(BoxedFuture) + Send + Sync + 'static>
     where

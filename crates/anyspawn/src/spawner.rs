@@ -4,15 +4,12 @@
 //! [`Spawner`] for plugging in runtime implementations.
 
 use std::fmt::{self, Debug};
-#[cfg(feature = "custom")]
 use std::sync::Arc;
 
 use thread_aware::{PerCore, ThreadAware};
 
-#[cfg(feature = "custom")]
 use crate::custom::{BoxedFuture, CustomSpawner};
 use crate::handle::JoinHandle;
-#[cfg(any(feature = "tokio", feature = "custom"))]
 use crate::handle::JoinHandleInner;
 
 /// Runtime-agnostic task spawner.
@@ -27,22 +24,24 @@ use crate::handle::JoinHandleInner;
 /// Using Tokio:
 ///
 /// ```rust
-/// use anyspawn::Spawner;
-///
+/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() {
+/// use anyspawn::Spawner;
+///
 /// let spawner = Spawner::new_tokio();
 /// let handle = spawner.spawn(async {
 ///     println!("Task running!");
 /// });
 /// handle.await; // Wait for task to complete
-///
 /// # }
+/// # #[cfg(not(feature = "tokio"))]
+/// # fn main() {}
 /// ```
 ///
 /// ## Custom Runtime
 ///
-/// ```rust,ignore
+/// ```rust
 /// use anyspawn::Spawner;
 ///
 /// let spawner = Spawner::new_custom("threadpool", |fut| {
@@ -60,14 +59,17 @@ use crate::handle::JoinHandleInner;
 /// Await the [`JoinHandle`](crate::JoinHandle) to retrieve a value from the task:
 ///
 /// ```rust
-/// use anyspawn::Spawner;
-///
+/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() {
+/// use anyspawn::Spawner;
+///
 /// let spawner = Spawner::new_tokio();
 /// let value = spawner.spawn(async { 1 + 1 }).await;
 /// assert_eq!(value, 2);
 /// # }
+/// # #[cfg(not(feature = "tokio"))]
+/// # fn main() {}
 /// ```
 ///
 /// ## Handling Errors
@@ -75,10 +77,11 @@ use crate::handle::JoinHandleInner;
 /// Return a `Result` from the task to propagate errors:
 ///
 /// ```rust
-/// use anyspawn::Spawner;
-///
+/// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() {
+/// use anyspawn::Spawner;
+///
 /// let spawner = Spawner::new_tokio();
 ///
 /// let result = spawner
@@ -96,6 +99,8 @@ use crate::handle::JoinHandleInner;
 ///     Err(e) => eprintln!("Task failed: {e}"),
 /// }
 /// # }
+/// # #[cfg(not(feature = "tokio"))]
+/// # fn main() {}
 /// ```
 ///
 /// # Thread-Aware Support
@@ -123,7 +128,6 @@ pub struct Spawner(SpawnerKind);
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
-    #[cfg(feature = "custom")]
     Custom(CustomSpawner),
     ThreadAware(thread_aware::Arc<Spawner, PerCore>),
 }
@@ -198,8 +202,6 @@ impl Spawner {
     ///     std::thread::spawn(move || futures::executor::block_on(fut));
     /// });
     /// ```
-    #[cfg(feature = "custom")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "custom")))]
     pub fn new_custom<F>(name: &'static str, f: F) -> Self
     where
         F: Fn(BoxedFuture) + Send + Sync + 'static,
@@ -226,6 +228,9 @@ impl Spawner {
     /// # Examples
     ///
     /// ```rust
+    /// # #[cfg(feature = "tokio")]
+    /// # #[tokio::main]
+    /// # async fn main() {
     /// use anyspawn::Spawner;
     /// # use thread_aware::ThreadAware;
     /// # use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
@@ -238,8 +243,6 @@ impl Spawner {
     /// #     }
     /// # }
     ///
-    /// # #[tokio::main]
-    /// # async fn main() {
     /// let scheduler = Scheduler::default();
     ///
     /// // Each core gets its own Spawner whose Scheduler carries the
@@ -257,6 +260,8 @@ impl Spawner {
     /// let result = spawner.spawn(async { 1 + 1 }).await;
     /// assert_eq!(result, 2);
     /// # }
+    /// # #[cfg(not(feature = "tokio"))]
+    /// # fn main() {}
     /// ```
     pub fn new_thread_aware<D>(data: D, factory: fn(D) -> Self) -> Self
     where
@@ -278,10 +283,11 @@ impl Spawner {
     /// # Examples
     ///
     /// ```rust
-    /// use anyspawn::Spawner;
-    ///
+    /// # #[cfg(feature = "tokio")]
     /// # #[tokio::main]
     /// # async fn main() {
+    /// use anyspawn::Spawner;
+    ///
     /// let spawner = Spawner::new_tokio();
     ///
     /// // Await to get the result
@@ -291,6 +297,8 @@ impl Spawner {
     /// // Or fire-and-forget by dropping the handle
     /// let _ = spawner.spawn(async { println!("background task") });
     /// # }
+    /// # #[cfg(not(feature = "tokio"))]
+    /// # fn main() {}
     /// ```
     pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
@@ -302,7 +310,6 @@ impl Spawner {
                 };
                 JoinHandle(JoinHandleInner::Tokio(jh))
             }
-            #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.call(work))),
             SpawnerKind::ThreadAware(ta) => ta.spawn(work),
         }
@@ -316,7 +323,6 @@ impl Debug for Spawner {
             SpawnerKind::Tokio(None) => f.debug_tuple("Spawner").field(&"tokio").finish(),
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(Some(_)) => f.debug_tuple("Spawner").field(&"tokio(handle)").finish(),
-            #[cfg(feature = "custom")]
             SpawnerKind::Custom(c) => f.debug_tuple("Spawner").field(c).finish(),
             SpawnerKind::ThreadAware(_) => f.debug_tuple("Spawner").field(&"thread_aware").finish(),
         }

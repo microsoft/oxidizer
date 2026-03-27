@@ -7,7 +7,6 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-#[cfg(feature = "custom")]
 use futures_channel::oneshot;
 
 /// A handle to a spawned task that can be awaited to retrieve its result.
@@ -23,7 +22,6 @@ pub struct JoinHandle<T>(pub(crate) JoinHandleInner<T>);
 pub(crate) enum JoinHandleInner<T> {
     #[cfg(feature = "tokio")]
     Tokio(::tokio::task::JoinHandle<T>),
-    #[cfg(feature = "custom")]
     Custom(oneshot::Receiver<T>),
 }
 
@@ -34,7 +32,6 @@ impl<T> Future for JoinHandle<T> {
         match &mut self.get_mut().0 {
             #[cfg(feature = "tokio")]
             JoinHandleInner::Tokio(jh) => Pin::new(jh).poll(cx).map(|res| res.expect("spawned task panicked")),
-            #[cfg(feature = "custom")]
             JoinHandleInner::Custom(rx) => Pin::new(rx).poll(cx).map(|res| res.expect("spawned task panicked")),
         }
     }
