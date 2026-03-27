@@ -64,8 +64,8 @@ impl<K: Send + Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
         self.0.clear().await
     }
 
-    fn len(&self) -> Option<u64> {
-        self.0.len()
+    async fn len(&self) -> Result<Option<u64>, Error> {
+        self.0.len().await
     }
 }
 
