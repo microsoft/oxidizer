@@ -5,6 +5,6 @@ expression: config
 {
   "enabled": true,
   "rate": 0.0,
-  "latency": 0,
+  "latency": "0s",
   "max_latency": null
 }

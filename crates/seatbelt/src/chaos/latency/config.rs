@@ -40,12 +40,18 @@ pub struct LatencyConfig {
     /// The latency duration to inject. When [`max_latency`][LatencyConfig::max_latency]
     /// is `None`, this is used as a fixed delay. When `max_latency` is `Some`,
     /// this is the lower bound of the random range `[latency, max_latency)`.
-    #[cfg_attr(any(feature = "serde", test), serde(with = "duration_millis"))]
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(with = "jiff::fmt::serde::unsigned_duration::friendly::compact::required")
+    )]
     pub latency: Duration,
 
     /// Optional upper bound for a random latency range. When set, the injected
     /// latency is chosen uniformly at random from `[latency, max_latency)`.
-    #[cfg_attr(any(feature = "serde", test), serde(default, with = "option_duration_millis"))]
+    #[cfg_attr(
+        any(feature = "serde", test),
+        serde(default, with = "jiff::fmt::serde::unsigned_duration::friendly::compact::optional")
+    )]
     pub max_latency: Option<Duration>,
 }
 
@@ -57,38 +63,6 @@ impl Default for LatencyConfig {
             latency: Duration::ZERO,
             max_latency: None,
         }
-    }
-}
-
-#[cfg(any(feature = "serde", test))]
-mod duration_millis {
-    use std::time::Duration;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
-        duration.as_millis().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
-        let millis = u64::deserialize(deserializer)?;
-        Ok(Duration::from_millis(millis))
-    }
-}
-
-#[cfg(any(feature = "serde", test))]
-mod option_duration_millis {
-    use std::time::Duration;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(duration: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error> {
-        duration.map(|d| d.as_millis()).serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Duration>, D::Error> {
-        let millis = Option::<u64>::deserialize(deserializer)?;
-        Ok(millis.map(Duration::from_millis))
     }
 }
 
