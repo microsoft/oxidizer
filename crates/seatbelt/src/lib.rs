@@ -13,6 +13,7 @@
         feature = "fallback",
         feature = "hedging",
         feature = "chaos-injection",
+        feature = "chaos-latency",
         feature = "metrics",
         feature = "logs"
     )),
@@ -120,6 +121,8 @@
 //!
 //! - [`chaos::injection`] - Middleware that replaces service output with a user-provided value
 //!   at a configurable probability.
+//! - [`chaos::latency`] - Middleware that injects artificial delay before the inner service
+//!   call at a configurable probability.
 //!
 //! # Middleware Ordering
 //!
@@ -205,6 +208,8 @@
 //!   user-defined alternative.
 //! - **`chaos-injection`** - Enables the [`chaos::injection`] middleware for injecting faults
 //!   with a configurable probability.
+//! - **`chaos-latency`** - Enables the [`chaos::latency`] middleware for injecting artificial
+//!   delay with a configurable probability.
 //! - **`metrics`** - Exposes the OpenTelemetry metrics API for collecting and reporting metrics.
 //! - **`logs`** - Enables structured logging for resilience middleware using the `tracing` crate.
 //! - **`serde`** - Enables `serde::Serialize` and `serde::Deserialize` implementations for
@@ -238,10 +243,16 @@ pub mod fallback;
 #[cfg(any(feature = "hedging", test))]
 pub mod hedging;
 
-#[cfg(any(feature = "chaos-injection", test))]
+#[cfg(any(feature = "chaos-injection", feature = "chaos-latency", test))]
 pub mod chaos;
 
-#[cfg(any(feature = "retry", feature = "breaker", feature = "chaos-injection", test))]
+#[cfg(any(
+    feature = "retry",
+    feature = "breaker",
+    feature = "chaos-injection",
+    feature = "chaos-latency",
+    test
+))]
 mod rnd;
 
 #[cfg(any(
@@ -251,6 +262,7 @@ mod rnd;
     feature = "fallback",
     feature = "hedging",
     feature = "chaos-injection",
+    feature = "chaos-latency",
     test
 ))]
 pub(crate) mod utils;
