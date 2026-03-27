@@ -694,3 +694,190 @@ mod full_pipeline_tests {
         assert_eq!(len, Some(0));
     }
 }
+
+// ---------------------------------------------------------------------------
+// FallbackBuilder.transform() (builder/transform.rs:91-113)
+// ---------------------------------------------------------------------------
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn fallback_builder_transform() {
+    use cachet::Cache;
+    use tick::Clock;
+
+    let clock = Clock::new_frozen();
+
+    // Post-transform remote tier (i32 keys, String values)
+    let remote = Cache::builder::<i32, String>(clock.clone()).storage(MockCache::new());
+
+    // L2 memory tier (String keys, i32 values)
+    let l2 = Cache::builder::<String, i32>(clock.clone()).storage(MockCache::new());
+
+    // Build: L1 (memory) -> fallback L2 -> .transform() -> fallback remote
+    let cache = Cache::builder::<String, i32>(clock)
+        .storage(MockCache::new())
+        .fallback(l2)
+        .transform(
+            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformCodec::new(
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+                |v: &String| v.parse::<i32>(),
+            ),
+        )
+        .fallback(remote)
+        .build();
+
+    cache.insert("99".to_string(), CacheEntry::new(99)).await.unwrap();
+    let result = cache.get(&"99".to_string()).await.unwrap();
+    assert!(result.is_some());
+    assert_eq!(*result.unwrap().value(), 99);
+}
+
+// ---------------------------------------------------------------------------
+// FallbackBuilder.serialize() (builder/transform.rs:146-152)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "serialize")]
+mod fallback_serialize_tests {
+    use cachet::{BincodeCodec, BincodeEncoder, BytesView, Cache, CacheEntry, MockCache};
+    use tick::Clock;
+
+    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct TestStruct {
+        name: String,
+        value: u64,
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_builder_serialize() {
+        let clock = Clock::new_frozen();
+
+        // Post-serialize remote tier (bytes)
+        let remote = Cache::builder::<BytesView, BytesView>(clock.clone()).storage(MockCache::new());
+
+        // L2 memory tier (same types as outer)
+        let l2 = Cache::builder::<String, TestStruct>(clock.clone()).storage(MockCache::new());
+
+        // Build: L1 -> fallback L2 -> .serialize() -> fallback remote
+        let cache = Cache::builder::<String, TestStruct>(clock)
+            .storage(MockCache::new())
+            .fallback(l2)
+            .serialize(BincodeEncoder, BincodeCodec)
+            .fallback(remote)
+            .build();
+
+        let item = TestStruct {
+            name: "test".into(),
+            value: 42,
+        };
+        cache.insert("key1".to_string(), CacheEntry::new(item.clone())).await.unwrap();
+
+        let result = cache.get(&"key1".to_string()).await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), item);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ChainedCodec::decode() (builder/transform.rs:314-317)
+// ---------------------------------------------------------------------------
+
+#[cfg(all(feature = "serialize", feature = "compress"))]
+mod chained_decode_tests {
+    use cachet::{BincodeCodec, BincodeEncoder, BytesView, Cache, CacheEntry, MockCache, ZstdCodec};
+    use tick::Clock;
+
+    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Payload {
+        id: u64,
+        data: String,
+    }
+
+    /// Exercises `ChainedCodec::decode` by inserting via one cache and reading
+    /// from a second cache that shares the same remote `MockCache` but has an
+    /// empty pre-transform tier, forcing the read through the transform adapter.
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn chained_codec_decode_via_shared_remote() {
+        let clock = Clock::new_frozen();
+
+        // Shared remote mock – both caches will point here
+        let remote_mock = MockCache::<BytesView, BytesView>::new();
+
+        // Cache A: insert data (encodes via serialize + compress into remote)
+        let cache_a = Cache::builder::<String, Payload>(clock.clone())
+            .storage(MockCache::new())
+            .serialize(BincodeEncoder, BincodeCodec)
+            .compress(ZstdCodec::new(3))
+            .fallback(Cache::builder(clock.clone()).storage(remote_mock.clone()))
+            .build();
+
+        let payload = Payload {
+            id: 1,
+            data: "chained-decode-test".into(),
+        };
+        cache_a.insert("k1".to_string(), CacheEntry::new(payload.clone())).await.unwrap();
+
+        // Cache B: fresh (empty) pre-transform tier, same remote with encoded data
+        let cache_b = Cache::builder::<String, Payload>(clock.clone())
+            .storage(MockCache::new())
+            .serialize(BincodeEncoder, BincodeCodec)
+            .compress(ZstdCodec::new(3))
+            .fallback(Cache::builder(clock).storage(remote_mock))
+            .build();
+
+        // Get from cache_b: pre-transform tier is empty, so the read falls
+        // through to the post-transform (remote) tier and exercises
+        // ChainedCodec::decode (decompress -> deserialize).
+        let result = cache_b.get(&"k1".to_string()).await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), payload);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Debug impls (tier.rs:39-44, 83-88, 193-201; encrypt.rs:32-34)
+// ---------------------------------------------------------------------------
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn debug_impls_for_transform_types() {
+    // TransformEncoder Debug (tier.rs:38-45)
+    let encoder = TransformEncoder::infallible(|v: &i32| v.to_string());
+    let debug_str = format!("{:?}", encoder);
+    assert!(debug_str.contains("TransformEncoder"));
+
+    // TransformCodec Debug (tier.rs:82-89)
+    let codec = TransformCodec::new(
+        |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        |v: &String| v.parse::<i32>(),
+    );
+    let debug_str = format!("{:?}", codec);
+    assert!(debug_str.contains("TransformCodec"));
+
+    // TransformAdapter Debug (tier.rs:189-202)
+    let inner = MockCache::<i32, String>::new();
+    let adapter = TransformAdapter::new(
+        inner,
+        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+        TransformCodec::new(
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            |v: &String| v.parse::<i32>(),
+        ),
+    );
+    let debug_str = format!("{:?}", adapter);
+    assert!(debug_str.contains("TransformAdapter"));
+}
+
+#[cfg(feature = "encrypt")]
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn debug_impl_for_aesgcm_codec() {
+    use cachet::AesGcmCodec;
+
+    let key = [0u8; 32];
+    let codec = AesGcmCodec::new(&key);
+    let debug_str = format!("{:?}", codec);
+    assert!(debug_str.contains("AesGcmCodec"));
+}
