@@ -59,9 +59,8 @@ details and examples.
 
 ## Features
 
-* `tokio` (default): Enables the [`Spawner::new_tokio`][__link4] and
+* `tokio`: Enables the [`Spawner::new_tokio`][__link4] and
   [`Spawner::new_tokio_with_handle`][__link5] constructors
-* `custom`: Enables [`Spawner::new_custom`][__link6] and [`CustomSpawnerBuilder`][__link7]
 
 
 <hr/>
