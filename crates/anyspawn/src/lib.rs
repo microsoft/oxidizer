@@ -21,19 +21,22 @@
 //! ## Using Tokio
 //!
 //! ```rust
-//! use anyspawn::Spawner;
-//!
+//! # #[cfg(feature = "tokio")]
 //! # #[tokio::main]
 //! # async fn main() {
+//! use anyspawn::Spawner;
+//!
 //! let spawner = Spawner::new_tokio();
 //! let result = spawner.spawn(async { 1 + 1 }).await;
 //! assert_eq!(result, 2);
 //! # }
+//! # #[cfg(not(feature = "tokio"))]
+//! # fn main() {}
 //! ```
 //!
 //! ## Custom Runtime
 //!
-//! ```rust,ignore
+//! ```rust
 //! use anyspawn::Spawner;
 //!
 //! let spawner = Spawner::new_custom("threadpool", |fut| {
@@ -54,23 +57,18 @@
 //!
 //! # Features
 //!
-//! - `tokio` (default): Enables the [`Spawner::new_tokio`] and
+//! - `tokio`: Enables the [`Spawner::new_tokio`] and
 //!   [`Spawner::new_tokio_with_handle`] constructors
-//! - `custom`: Enables [`Spawner::new_custom`] and [`CustomSpawnerBuilder`]
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/anyspawn/favicon.ico")]
 
-#[cfg(feature = "custom")]
 mod builder;
-#[cfg(feature = "custom")]
 mod custom;
 mod handle;
 mod spawner;
 
-#[cfg(feature = "custom")]
 pub use builder::CustomSpawnerBuilder;
-#[cfg(feature = "custom")]
 pub use custom::BoxedFuture;
 pub use handle::JoinHandle;
 pub use spawner::Spawner;
