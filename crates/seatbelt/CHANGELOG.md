@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.3] - 2026-03-24
+
+- ✨ Features
+
+  - introduce chaos injection middleware ([#335](https://github.com/microsoft/oxidizer/pull/335))
+
 ## [0.4.2] - 2026-03-10
 
 - ✨ Features

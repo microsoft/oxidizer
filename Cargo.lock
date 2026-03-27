@@ -73,7 +73,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "anyspawn"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "futures",
@@ -82,7 +82,7 @@ dependencies = [
  "opentelemetry",
  "smol",
  "static_assertions",
- "tick",
+ "thread_aware",
  "tokio",
 ]
 
@@ -2064,7 +2064,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "alloc_tracker",
  "criterion",

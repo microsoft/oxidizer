@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test code")]
-#![cfg(all(feature = "tokio", feature = "custom"))]
 #![cfg(not(miri))] // miri doesn't work well with `insta` snapshots
 
 //! Tests for `CustomSpawnerBuilder` naming and debug output.
@@ -13,6 +12,13 @@ use anyspawn::{BoxedFuture, CustomSpawnerBuilder, Spawner};
 fn tokio_spawner_debug() {
     let spawner = Spawner::new_tokio();
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner("tokio")"#);
+}
+
+#[test]
+fn tokio_with_handle_spawner_debug() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
 #[test]
@@ -30,34 +36,34 @@ fn builder_debug_no_layers() {
 #[test]
 fn builder_debug_with_layers() {
     let builder = CustomSpawnerBuilder::tokio()
-        .layer("tracing", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
-        .layer("metrics", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         });
 
-    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio", layers: ["tracing", "metrics"] }"#);
+    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio" }"#);
 }
 
 #[test]
 fn builder_custom_name_debug() {
-    let builder = CustomSpawnerBuilder::custom("smol", |_: BoxedFuture| {});
+    let builder = CustomSpawnerBuilder::custom(|_: BoxedFuture| {}).name("smol");
     insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "smol" }"#);
 }
 
 #[test]
 fn built_spawner_debug_with_layers() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer("otel-context", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
-        .layer("panic-handler", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
         .build();
 
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio", layers: ["otel-context", "panic-handler"] })"#);
+    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
 #[test]
@@ -66,10 +72,20 @@ fn built_spawner_debug_no_layers() {
     insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
 }
 
+#[test]
+fn tokio_with_handle_spawner_still_works() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
+
+    // Spawning with an explicit handle works even outside a Tokio runtime context.
+    let result = rt.block_on(spawner.spawn(async { 42 }));
+    assert_eq!(result, 42);
+}
+
 #[tokio::test]
 async fn layered_spawner_still_works() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer("passthrough", |fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
+        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
             spawn(fut);
         })
         .build();

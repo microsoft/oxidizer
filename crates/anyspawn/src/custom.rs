@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_channel::oneshot;
+use thread_aware::ThreadAware;
 
 /// A type-erased, heap-allocated, pinned future that returns `()`.
 ///
@@ -15,20 +16,16 @@ pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type SpawnFn = dyn Fn(BoxedFuture) + Send + Sync;
 
 /// Internal wrapper for custom spawn functions.
-#[derive(Clone)]
+#[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
+    #[thread_aware(skip)]
     spawn_fn: Arc<SpawnFn>,
     name: &'static str,
-    layer_names: Arc<[Box<str>]>,
 }
 
 impl CustomSpawner {
-    pub(crate) fn new(spawn_fn: Arc<SpawnFn>, name: &'static str, layer_names: Arc<[Box<str>]>) -> Self {
-        Self {
-            spawn_fn,
-            name,
-            layer_names,
-        }
+    pub(crate) fn new(spawn_fn: Arc<SpawnFn>, name: &'static str) -> Self {
+        Self { spawn_fn, name }
     }
 
     pub(crate) fn call<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
@@ -45,9 +42,6 @@ impl Debug for CustomSpawner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("CustomSpawner");
         s.field("name", &self.name);
-        if !self.layer_names.is_empty() {
-            s.field("layers", &self.layer_names);
-        }
         s.finish()
     }
 }

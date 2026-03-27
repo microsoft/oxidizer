@@ -101,6 +101,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         feature = "timeout",
         feature = "fallback",
         feature = "hedging",
+        feature = "chaos-injection",
         test
     ))]
     pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {

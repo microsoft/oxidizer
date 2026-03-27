@@ -2,12 +2,14 @@
 // Licensed under the MIT License.
 
 //! Circuit breaker example that simulates a major service outage and tripping of the
-//! circuit breaker by:
+//! circuit breaker by leveraging the [`Injection`] chaos middleware to inject failures
+//! with a dynamic rate:
 //!
-//! 1. Monitoring failure rates in real-time
-//! 2. Opening the circuit when failure thresholds are exceeded
-//! 3. Allowing probe requests to test service recovery
-//! 4. Automatically closing the circuit when the service recovers
+//! 1. Early requests (input ≤ 15) fail at 80% to quickly trip the breaker
+//! 2. Mid-range requests (input 16–100) fail at 40%, simulating a degraded service
+//! 3. Later requests (input > 100) never fail, simulating full recovery
+//! 4. The circuit breaker monitors failure rates, opens when thresholds are exceeded,
+//!    probes the service to detect recovery, and closes automatically
 
 use std::time::Duration;
 
@@ -16,6 +18,7 @@ use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
 use seatbelt::breaker::Breaker;
+use seatbelt::chaos::injection::Injection;
 use seatbelt::{RecoveryInfo, ResilienceContext};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
@@ -28,7 +31,11 @@ async fn main() -> Result<(), AppError> {
     let clock = Clock::new_tokio();
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider);
 
-    // Define stack with circuit breaker layer
+    // Define stack with circuit breaker + chaos injection layers.
+    //
+    // The Injection layer sits inside the breaker so that from the breaker's
+    // perspective the inner service is "failing" — exactly as a real downstream
+    // outage would look.
     let stack = (
         Breaker::layer("my_breaker", &context)
             // Required: classify the recoverability of outputs
@@ -51,6 +58,22 @@ async fn main() -> Result<(), AppError> {
                     args.open_duration().as_secs()
                 );
             }),
+        // Chaos injection layer: simulate failures with a dynamic rate that
+        // decreases over time so the service eventually "recovers".
+        Injection::layer("simulated_outage", &context)
+            .rate_with(|input: &u32, _args| {
+                if *input > 100 {
+                    // Service has fully recovered — no injected failures
+                    0.0
+                } else if *input > 15 {
+                    // Degraded service — moderate failure rate
+                    0.4
+                } else {
+                    // Initial burst of failures — high rate to trip the breaker quickly
+                    0.8
+                }
+            })
+            .output_error_with(|input, _args| format!("transient error for '{input}'")),
         Execute::new(execute_operation),
     );
 
@@ -58,8 +81,8 @@ async fn main() -> Result<(), AppError> {
     let service = stack.into_service();
 
     // Execute multiple attempts, the circuit breaker will eventually open because the
-    // failure rate exceeds the threshold. You can play with this value an increase it to 300
-    // to see how the circuit breaker eventually closes when the service recovers.
+    // failure rate exceeds the threshold. You can play with this value and increase it
+    // to 300 to see how the circuit breaker eventually closes when the service recovers.
     for attempt in 0..30 {
         clock.delay(Duration::from_millis(50)).await;
 
@@ -75,19 +98,9 @@ async fn main() -> Result<(), AppError> {
     Ok(())
 }
 
-// Simulate major service outage, 50% chance of failing
+// The inner service always succeeds — failures are injected by the Injection layer.
 async fn execute_operation(input: u32) -> Result<String, String> {
-    // After input 100, the service recovers and always succeeds
-    if input > 100 {
-        return Ok(format!("output-{input}"));
-    }
-
-    if fastrand::i16(0..10) > 5 {
-        Err(format!("transient error for '{input}'"))
-    } else {
-        // Produce some output
-        Ok(format!("output-{input}"))
-    }
+    Ok(format!("output-{input}"))
 }
 
 fn configure_telemetry() -> SdkMeterProvider {
