@@ -119,17 +119,12 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     /// Panics if `range.start >= range.end`.
     #[must_use]
     pub fn latency_range(mut self, range: Range<Duration>) -> LatencyLayer<In, Out, S1, Set> {
-        assert!(
-            range.start < range.end,
-            "latency_range requires start < end, got {start:?}..{end:?}",
-            start = range.start,
-            end = range.end
-        );
+        let span = range.end.checked_sub(range.start).expect("latency_range requires start < end");
+        assert!(span != Duration::ZERO, "latency_range requires start < end");
+
         let rnd = self.rnd.clone();
-        self.latency_duration = Some(LatencyDuration::new(move |_, _| {
-            let span = range.end - range.start;
-            range.start + span.mul_f64(rnd.next_f64())
-        }));
+
+        self.latency_duration = Some(LatencyDuration::new(move |_, _| range.start + span.mul_f64(rnd.next_f64())));
         self.into_state::<S1, Set>()
     }
 

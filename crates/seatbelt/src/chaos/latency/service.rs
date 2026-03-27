@@ -227,7 +227,7 @@ impl<In: Send + 'static, Out: Send + 'static> LatencyShared<In, Out> {
                 tracing::Level::WARN,
                 pipeline.name = %self.telemetry.pipeline_name,
                 strategy.name = %self.telemetry.strategy_name,
-                latency.ms = duration.as_millis() as u64,
+                latency.ms = duration.as_millis(),
             );
         }
 
