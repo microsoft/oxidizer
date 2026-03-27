@@ -243,7 +243,6 @@ impl Spawner {
     /// #     }
     /// # }
     ///
-    /// # let rt = tokio::runtime::Runtime::new().unwrap();
     /// let scheduler = Scheduler::default();
     ///
     /// // Each core gets its own Spawner whose Scheduler carries the
