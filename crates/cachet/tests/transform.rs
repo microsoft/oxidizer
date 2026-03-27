@@ -313,7 +313,7 @@ async fn builder_nested_transform_as_fallback() {
 
 #[cfg(feature = "serialize")]
 mod serialize_tests {
-    use cachet::{BincodeCodec, BytesView, CacheEntry, Codec, Encoder, MockCache};
+    use cachet::{BincodeCodec, BincodeEncoder, BytesView, CacheEntry, Codec, Encoder, MockCache};
 
     #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
     struct UserProfile {
@@ -389,6 +389,19 @@ mod serialize_tests {
         let cloned = bytes.clone();
         let decoded: UserProfile = Codec::<UserProfile, BytesView>::decode(&codec, &cloned).unwrap();
         assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_encoder_produces_non_empty_output() {
+        let encoder = BincodeEncoder;
+        let value = "test string".to_string();
+        let encoded: BytesView = Encoder::<String, BytesView>::encode(&encoder, &value).unwrap();
+        assert!(encoded.first_slice().len() > 0, "BincodeEncoder should produce non-empty output");
+        // Verify the encoded data can be decoded by BincodeCodec
+        let codec = BincodeCodec;
+        let decoded: String = Codec::<String, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, value);
     }
 
     #[cfg_attr(miri, ignore)]
@@ -568,6 +581,23 @@ mod encrypt_tests {
         let truncated = make_bytes(&[0u8; 5]);
         let result = Codec::<BytesView, BytesView>::decode(&codec, &truncated);
         assert!(result.is_err());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_nonce_only_no_ciphertext_fails_in_decrypt() {
+        let key = [6u8; 32];
+        let codec = AesGcmCodec::new(&key);
+        // Exactly 12 bytes = nonce only, no ciphertext or auth tag.
+        // Should pass the length guard (12 is not < 12) and fail in AES-GCM decrypt.
+        let nonce_only = make_bytes(&[0u8; 12]);
+        let result = Codec::<BytesView, BytesView>::decode(&codec, &nonce_only);
+        let err = result.unwrap_err();
+        // The error should come from decrypt, NOT from the length guard.
+        assert!(
+            err.to_string().contains("decryption failed"),
+            "expected 'decryption failed' for nonce-only input (not 'too short'), got: {err}"
+        );
     }
 }
 
