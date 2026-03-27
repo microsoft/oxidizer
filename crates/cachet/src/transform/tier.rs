@@ -1,35 +1,81 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CacheEntry, CacheTier, Codec, Error};
+use crate::{CacheEntry, CacheTier, Codec, Encoder, Error};
 
 use std::fmt::Debug;
 
-/// A boxed-closure codec for custom transforms.
-pub struct TransformCodec<A, B> {
-    apply_fn: Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>,
+/// A boxed-closure encoder for custom one-directional transforms (keys).
+pub struct TransformEncoder<A, B> {
+    encode_fn: Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>,
 }
 
-impl<A, B> TransformCodec<A, B> {
-    pub fn custom<ApplyError>(apply_fn: impl Fn(&A) -> Result<B, ApplyError> + Send + Sync + 'static) -> Self
+impl<A, B> TransformEncoder<A, B> {
+    /// Creates a new `TransformEncoder` from a fallible closure.
+    pub fn custom<EncodeError>(encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static) -> Self
     where
-        ApplyError: std::error::Error + Send + Sync + 'static,
+        EncodeError: std::error::Error + Send + Sync + 'static,
     {
         Self {
-            apply_fn: Box::new(move |a| apply_fn(a).map_err(|e| Error::from_source(e))),
+            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
         }
     }
 
-    pub fn infallible(apply_fn: impl Fn(&A) -> B + Send + Sync + 'static) -> Self {
+    /// Creates a new `TransformEncoder` from an infallible closure.
+    pub fn infallible(encode_fn: impl Fn(&A) -> B + Send + Sync + 'static) -> Self {
         Self {
-            apply_fn: Box::new(move |a| Ok(apply_fn(a))),
+            encode_fn: Box::new(move |a| Ok(encode_fn(a))),
         }
+    }
+}
+
+impl<A, B> Encoder<A, B> for TransformEncoder<A, B> {
+    fn encode(&self, value: &A) -> Result<B, Error> {
+        (self.encode_fn)(value)
+    }
+}
+
+impl<A, B> Debug for TransformEncoder<A, B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformEncoder")
+            .field("A", &std::any::type_name::<A>())
+            .field("B", &std::any::type_name::<B>())
+            .finish()
+    }
+}
+
+/// A boxed-closure codec for custom bidirectional transforms (values).
+pub struct TransformCodec<A, B> {
+    encode_fn: Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>,
+    decode_fn: Box<dyn Fn(&B) -> Result<A, Error> + Send + Sync>,
+}
+
+impl<A, B> TransformCodec<A, B> {
+    /// Creates a new `TransformCodec` from a pair of fallible closures.
+    pub fn new<EncodeError, DecodeError>(
+        encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static,
+        decode_fn: impl Fn(&B) -> Result<A, DecodeError> + Send + Sync + 'static,
+    ) -> Self
+    where
+        EncodeError: std::error::Error + Send + Sync + 'static,
+        DecodeError: std::error::Error + Send + Sync + 'static,
+    {
+        Self {
+            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
+            decode_fn: Box::new(move |b| decode_fn(b).map_err(|e| Error::from_source(e))),
+        }
+    }
+}
+
+impl<A, B> Encoder<A, B> for TransformCodec<A, B> {
+    fn encode(&self, value: &A) -> Result<B, Error> {
+        (self.encode_fn)(value)
     }
 }
 
 impl<A, B> Codec<A, B> for TransformCodec<A, B> {
-    fn apply(&self, value: &A) -> Result<B, Error> {
-        (self.apply_fn)(value)
+    fn decode(&self, value: &B) -> Result<A, Error> {
+        (self.decode_fn)(value)
     }
 }
 
@@ -46,8 +92,14 @@ impl<A, B> Debug for TransformCodec<A, B> {
 #[derive(Debug, Clone, Copy)]
 pub struct IdentityCodec;
 
+impl<T: Clone + Send + Sync> Encoder<T, T> for IdentityCodec {
+    fn encode(&self, value: &T) -> Result<T, Error> {
+        Ok(value.clone())
+    }
+}
+
 impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
-    fn apply(&self, value: &T) -> Result<T, Error> {
+    fn decode(&self, value: &T) -> Result<T, Error> {
         Ok(value.clone())
     }
 }
@@ -57,7 +109,7 @@ impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
 /// `TransformAdapter<K, KT, V, VT, S>`:
 /// - `K, V` = user-facing types (the types the adapter exposes via `CacheTier<K, V>`)
 /// - `KT, VT` = storage types (the types used by the inner `S: CacheTier<KT, VT>`)
-/// - Codecs go from user → storage: `key_encoder: K→KT`, `value_encoder: V→VT`, `value_decoder: VT→V`
+/// - `key_encoder: K→KT` (one-directional), `value_codec: V↔VT` (bidirectional)
 ///
 /// Implements `CacheTier<K, V>` by encoding keys/values to `KT, VT` for the inner tier.
 pub struct TransformAdapter<K, KT, V, VT, S>
@@ -65,26 +117,31 @@ where
     S: CacheTier<KT, VT>,
 {
     inner: S,
-    key_encoder: Box<dyn Codec<K, KT>>,
-    value_encoder: Box<dyn Codec<V, VT>>,
-    value_decoder: Box<dyn Codec<VT, V>>,
+    key_encoder: Box<dyn Encoder<K, KT>>,
+    value_codec: Box<dyn Codec<V, VT>>,
 }
 
 impl<K, KT, V, VT, S> TransformAdapter<K, KT, V, VT, S>
 where
     S: CacheTier<KT, VT>,
 {
-    pub fn new(
-        inner: S,
-        key_encoder: impl Codec<K, KT> + 'static,
-        value_encoder: impl Codec<V, VT> + 'static,
-        value_decoder: impl Codec<VT, V> + 'static,
-    ) -> Self {
+    /// Creates a new `TransformAdapter` with codecs that are boxed internally.
+    pub fn new(inner: S, key_encoder: impl Encoder<K, KT> + 'static, value_codec: impl Codec<V, VT> + 'static) -> Self {
         Self {
             inner,
             key_encoder: Box::new(key_encoder),
-            value_encoder: Box::new(value_encoder),
-            value_decoder: Box::new(value_decoder),
+            value_codec: Box::new(value_codec),
+        }
+    }
+
+    /// Creates a new `TransformAdapter` from pre-boxed codecs.
+    ///
+    /// Avoids double-boxing when codecs are already boxed.
+    pub(crate) fn from_boxed(inner: S, key_encoder: Box<dyn Encoder<K, KT>>, value_codec: Box<dyn Codec<V, VT>>) -> Self {
+        Self {
+            inner,
+            key_encoder,
+            value_codec,
         }
     }
 }
@@ -98,10 +155,10 @@ where
     S: CacheTier<KT, VT> + Send + Sync,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let mapped_key = self.key_encoder.apply(key)?;
+        let mapped_key = self.key_encoder.encode(key)?;
         let entry_option = self.inner.get(&mapped_key).await?;
         if let Some(entry) = entry_option {
-            let mapped_value = self.value_decoder.apply(entry.value())?;
+            let mapped_value = self.value_codec.decode(entry.value())?;
             Ok(Some(entry.map_value(|_| mapped_value)))
         } else {
             Ok(None)
@@ -109,14 +166,14 @@ where
     }
 
     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        let mapped_key = self.key_encoder.apply(&key)?;
-        let mapped_value = self.value_encoder.apply(entry.value())?;
+        let mapped_key = self.key_encoder.encode(&key)?;
+        let mapped_value = self.value_codec.encode(entry.value())?;
         let mapped_entry = entry.map_value(|_| mapped_value);
         self.inner.insert(mapped_key, mapped_entry).await
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        let mapped_key = self.key_encoder.apply(key)?;
+        let mapped_key = self.key_encoder.encode(key)?;
         self.inner.invalidate(&mapped_key).await
     }
 

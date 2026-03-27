@@ -13,7 +13,7 @@
 //! Data flow on get (L1 miss):
 //!   L2 → decrypt → decompress → deserialize → String,MyValue
 
-use cachet::{AesGcmDecoder, AesGcmEncoder, BincodeDecoder, BincodeEncoder, Cache, CacheEntry, MockCache, ZstdDecoder, ZstdEncoder};
+use cachet::{AesGcmCodec, BincodeCodec, BincodeEncoder, Cache, CacheEntry, MockCache, ZstdCodec};
 use tick::Clock;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -37,9 +37,9 @@ async fn main() {
     //   L1 (memory) → serialize → compress → encrypt → L2 (remote)
     let cache = Cache::builder::<String, UserProfile>(clock)
         .memory()
-        .serialize(BincodeEncoder, BincodeEncoder, BincodeDecoder)
-        .compress(ZstdEncoder::new(3), ZstdDecoder)
-        .encrypt(AesGcmEncoder::new(&key), AesGcmDecoder::new(&key))
+        .serialize(BincodeEncoder, BincodeCodec)
+        .compress(ZstdCodec::new(3))
+        .encrypt(AesGcmCodec::new(&key))
         .fallback(remote)
         .build();
 

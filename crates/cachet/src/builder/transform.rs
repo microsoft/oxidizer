@@ -15,8 +15,7 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::fallback::FallbackPromotionPolicy;
 use crate::telemetry::{CacheTelemetry, TelemetryConfig};
-use crate::wrapper::CacheWrapper;
-use crate::{CacheTier, Codec, IdentityCodec, TransformAdapter};
+use crate::{CacheTier, Codec, Encoder, TransformAdapter};
 
 /// Builder that introduces a type-conversion boundary in the cache pipeline.
 ///
@@ -28,9 +27,8 @@ use crate::{CacheTier, Codec, IdentityCodec, TransformAdapter};
 pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
     pre: Pre,
     post: Post,
-    key_encoder: Box<dyn Codec<K, KT>>,
-    value_encoder: Box<dyn Codec<V, VT>>,
-    value_decoder: Box<dyn Codec<VT, V>>,
+    key_encoder: Box<dyn Encoder<K, KT>>,
+    value_codec: Box<dyn Codec<V, VT>>,
     clock: Clock,
     telemetry: TelemetryConfig,
     stampede_protection: bool,
@@ -48,17 +46,15 @@ where
     /// Applies a generic type transform boundary.
     ///
     /// The codecs convert FROM user types TO storage types:
-    /// - `key_encoder`: `K -> KT`
-    /// - `value_encoder`: `V -> VT`
-    /// - `value_decoder`: `VT -> V`
+    /// - `key_encoder`: `K -> KT` (one-directional)
+    /// - `value_codec`: `V <-> VT` (bidirectional)
     ///
     /// Subsequent `.fallback()` tiers must work with `KT, VT`.
     #[must_use]
     pub fn transform<KT, VT>(
         self,
-        key_encoder: impl Codec<K, KT> + 'static,
-        value_encoder: impl Codec<V, VT> + 'static,
-        value_decoder: impl Codec<VT, V> + 'static,
+        key_encoder: impl Encoder<K, KT> + 'static,
+        value_codec: impl Codec<V, VT> + 'static,
     ) -> TransformBuilder<K, V, KT, VT, Self>
     where
         KT: Clone + Hash + Eq + Send + Sync + 'static,
@@ -71,8 +67,7 @@ where
             pre: self,
             post: (),
             key_encoder: Box::new(key_encoder),
-            value_encoder: Box::new(value_encoder),
-            value_decoder: Box::new(value_decoder),
+            value_codec: Box::new(value_codec),
             clock,
             telemetry,
             stampede_protection,
@@ -94,9 +89,8 @@ where
     #[must_use]
     pub fn transform<KT, VT>(
         self,
-        key_encoder: impl Codec<K, KT> + 'static,
-        value_encoder: impl Codec<V, VT> + 'static,
-        value_decoder: impl Codec<VT, V> + 'static,
+        key_encoder: impl Encoder<K, KT> + 'static,
+        value_codec: impl Codec<V, VT> + 'static,
     ) -> TransformBuilder<K, V, KT, VT, Self>
     where
         KT: Clone + Hash + Eq + Send + Sync + 'static,
@@ -109,8 +103,7 @@ where
             pre: self,
             post: (),
             key_encoder: Box::new(key_encoder),
-            value_encoder: Box::new(value_encoder),
-            value_decoder: Box::new(value_decoder),
+            value_codec: Box::new(value_codec),
             clock,
             telemetry,
             stampede_protection,
@@ -132,11 +125,10 @@ where
     #[must_use]
     pub fn serialize(
         self,
-        key_encoder: impl Codec<K, Vec<u8>> + 'static,
-        value_encoder: impl Codec<V, Vec<u8>> + 'static,
-        value_decoder: impl Codec<Vec<u8>, V> + 'static,
+        key_encoder: impl Encoder<K, Vec<u8>> + 'static,
+        value_codec: impl Codec<V, Vec<u8>> + 'static,
     ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self> {
-        self.transform(key_encoder, value_encoder, value_decoder)
+        self.transform(key_encoder, value_codec)
     }
 }
 
@@ -152,11 +144,10 @@ where
     #[must_use]
     pub fn serialize(
         self,
-        key_encoder: impl Codec<K, Vec<u8>> + 'static,
-        value_encoder: impl Codec<V, Vec<u8>> + 'static,
-        value_decoder: impl Codec<Vec<u8>, V> + 'static,
+        key_encoder: impl Encoder<K, Vec<u8>> + 'static,
+        value_codec: impl Codec<V, Vec<u8>> + 'static,
     ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self> {
-        self.transform(key_encoder, value_encoder, value_decoder)
+        self.transform(key_encoder, value_codec)
     }
 }
 
@@ -176,8 +167,7 @@ where
             pre: self.pre,
             post: fallback,
             key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
+            value_codec: self.value_codec,
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -217,8 +207,7 @@ where
             pre: self.pre,
             post: post_chain,
             key_encoder: self.key_encoder,
-            value_encoder: self.value_encoder,
-            value_decoder: self.value_decoder,
+            value_codec: self.value_codec,
             clock,
             telemetry,
             stampede_protection,
@@ -232,40 +221,32 @@ where
 #[cfg(feature = "compress")]
 impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
     /// Adds a compression layer. Values are compressed; keys pass through unchanged.
+    ///
+    /// Chains the compression codec onto the existing value codec
+    /// so the pipeline becomes: serialize → compress on write, decompress → deserialize on read.
     #[must_use]
-    pub fn compress(
-        self,
-        compress_encoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
-        compress_decoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+    pub fn compress(self, codec: impl Codec<Vec<u8>, Vec<u8>> + 'static) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
         let TransformBuilder {
             pre,
             post,
             key_encoder,
-            value_encoder,
-            value_decoder,
+            value_codec,
             clock,
             telemetry,
             stampede_protection,
             _phantom,
         } = self;
 
-        let new_ve: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
-            first: value_encoder,
-            second: Box::new(compress_encoder),
-        });
-
-        let new_vd: Box<dyn Codec<Vec<u8>, V>> = Box::new(ChainedCodec {
-            first: Box::new(compress_decoder),
-            second: value_decoder,
+        let new_vc: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
+            outer: value_codec,
+            inner: Box::new(codec),
         });
 
         TransformBuilder {
             pre,
             post,
             key_encoder,
-            value_encoder: new_ve,
-            value_decoder: new_vd,
+            value_codec: new_vc,
             clock,
             telemetry,
             stampede_protection,
@@ -280,39 +261,28 @@ impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec
 impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
     /// Adds an encryption layer. Values are encrypted; keys pass through unchanged.
     #[must_use]
-    pub fn encrypt(
-        self,
-        encrypt_encoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
-        encrypt_decoder: impl Codec<Vec<u8>, Vec<u8>> + 'static,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+    pub fn encrypt(self, codec: impl Codec<Vec<u8>, Vec<u8>> + 'static) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
         let TransformBuilder {
             pre,
             post,
             key_encoder,
-            value_encoder,
-            value_decoder,
+            value_codec,
             clock,
             telemetry,
             stampede_protection,
             _phantom,
         } = self;
 
-        let new_ve: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
-            first: value_encoder,
-            second: Box::new(encrypt_encoder),
-        });
-
-        let new_vd: Box<dyn Codec<Vec<u8>, V>> = Box::new(ChainedCodec {
-            first: Box::new(encrypt_decoder),
-            second: value_decoder,
+        let new_vc: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
+            outer: value_codec,
+            inner: Box::new(codec),
         });
 
         TransformBuilder {
             pre,
             post,
             key_encoder,
-            value_encoder: new_ve,
-            value_decoder: new_vd,
+            value_codec: new_vc,
             clock,
             telemetry,
             stampede_protection,
@@ -323,22 +293,28 @@ impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec
 
 // ── Codec chaining ──
 
-/// Chains two codecs: applies `first` then `second`.
+/// Chains two bidirectional codecs: `outer` then `inner` on encode, reverse on decode.
+///
+/// `Send + Sync` is automatically derived because `Box<dyn Codec<_, _>>` is `Send + Sync`
+/// (the `Codec` trait has `Send + Sync` as supertraits via `Encoder`).
 struct ChainedCodec<A, B, C> {
-    first: Box<dyn Codec<A, B>>,
-    second: Box<dyn Codec<B, C>>,
+    outer: Box<dyn Codec<A, B>>,
+    inner: Box<dyn Codec<B, C>>,
 }
 
-impl<A: Send + Sync, B: Send + Sync, C: Send + Sync> Codec<A, C> for ChainedCodec<A, B, C> {
-    fn apply(&self, value: &A) -> Result<C, crate::Error> {
-        let intermediate = self.first.apply(value)?;
-        self.second.apply(&intermediate)
+impl<A: Send + Sync, B: Send + Sync, C: Send + Sync> Encoder<A, C> for ChainedCodec<A, B, C> {
+    fn encode(&self, value: &A) -> Result<C, crate::Error> {
+        let intermediate = self.outer.encode(value)?;
+        self.inner.encode(&intermediate)
     }
 }
 
-// SAFETY: Send + Sync is guaranteed by Codec: Send + Sync on the boxed fields.
-unsafe impl<A, B, C> Send for ChainedCodec<A, B, C> {}
-unsafe impl<A, B, C> Sync for ChainedCodec<A, B, C> {}
+impl<A: Send + Sync, B: Send + Sync, C: Send + Sync> Codec<A, C> for ChainedCodec<A, B, C> {
+    fn decode(&self, value: &C) -> Result<A, crate::Error> {
+        let intermediate = self.inner.decode(value)?;
+        self.outer.decode(&intermediate)
+    }
+}
 
 // ── Sealed + CacheTierBuilder ──
 
@@ -390,42 +366,41 @@ where
     Post: Buildable<KT, VT>,
 {
     type Output = DynamicCache<K, V>;
-    type TierOutput = TransformAdapter<K, KT, V, VT, Post::TierOutput>;
+    type TierOutput = DynamicCache<K, V>;
 
     fn build(self) -> crate::Cache<K, V, Self::Output> {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
+        let tier = self.build_tier(clock.clone(), telemetry);
 
-        // Build pre-transform tier
-        let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone());
-
-        // Build post-transform tier, wrap in TransformAdapter
-        let post_tier = self.post.build_tier(clock.clone(), telemetry.clone());
-        let adapted = TransformAdapter::new(post_tier, self.key_encoder, self.value_encoder, self.value_decoder);
-
-        // Combine via fallback: pre_tier is primary, adapted is fallback
-        let fallback = crate::fallback::FallbackCache::new(
-            type_name::<Self::TierOutput>(None),
-            pre_tier,
-            adapted,
-            FallbackPromotionPolicy::always(),
-            clock.clone(),
-            None,
-            telemetry,
-        );
-
-        let dynamic = DynamicCache::new(fallback);
         crate::Cache::new(
             type_name::<crate::Cache<K, V, Self::Output>>(None),
-            dynamic,
+            tier,
             clock,
             stampede_protection,
         )
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
-        let post_tier = self.post.build_tier(clock, telemetry);
-        TransformAdapter::new(post_tier, self.key_encoder, self.value_encoder, self.value_decoder)
+        // Build pre-transform tier
+        let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone());
+
+        // Build post-transform tier, wrap in TransformAdapter
+        let post_tier = self.post.build_tier(clock.clone(), telemetry.clone());
+        let adapted = TransformAdapter::from_boxed(post_tier, self.key_encoder, self.value_codec);
+
+        // Combine: pre is primary, adapted is fallback
+        let fallback = crate::fallback::FallbackCache::new(
+            type_name::<Self::TierOutput>(None),
+            pre_tier,
+            adapted,
+            FallbackPromotionPolicy::always(),
+            clock,
+            None,
+            telemetry,
+        );
+
+        DynamicCache::new(fallback)
     }
 }

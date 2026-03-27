@@ -5,7 +5,7 @@
 
 #![cfg(feature = "test-util")]
 
-use cachet::{CacheEntry, CacheOp, CacheTier, Error, MockCache, TransformAdapter, TransformCodec};
+use cachet::{CacheEntry, CacheOp, CacheTier, MockCache, TransformAdapter, TransformCodec, TransformEncoder};
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
@@ -14,9 +14,11 @@ async fn get_returns_mapped_from_inner() {
     let inner = MockCache::with_data(data.into_iter().collect());
     let adapter = TransformAdapter::new(
         inner.clone(),
-        TransformCodec::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::custom(|v: &String| v.parse::<i32>()),
-        TransformCodec::infallible(|v: &i32| v.to_string()),
+        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+        TransformCodec::new(
+            |v: &String| v.parse::<i32>(),
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        ),
     );
 
     let value = adapter.get(&"1".to_string()).await.unwrap();
@@ -31,9 +33,11 @@ async fn insert_maps_and_inserts_into_inner() {
     let inner = MockCache::new();
     let adapter = TransformAdapter::new(
         inner.clone(),
-        TransformCodec::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::custom(|v: &String| v.parse::<i32>()),
-        TransformCodec::infallible(|v: &i32| v.to_string()),
+        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+        TransformCodec::new(
+            |v: &String| v.parse::<i32>(),
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        ),
     );
     adapter.insert("1".to_string(), "1".to_string().into()).await.unwrap();
     adapter.insert("2".to_string(), "2".to_string().into()).await.unwrap();
@@ -60,9 +64,11 @@ async fn invalidate_maps_and_invalidates_inner() {
     let inner = MockCache::new();
     let adapter = TransformAdapter::new(
         inner.clone(),
-        TransformCodec::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::custom(|v: &String| v.parse::<i32>()),
-        TransformCodec::infallible(|v: &i32| v.to_string()),
+        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+        TransformCodec::new(
+            |v: &String| v.parse::<i32>(),
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        ),
     );
     adapter.invalidate(&"1".to_string()).await.unwrap();
 
@@ -76,9 +82,11 @@ async fn clear_calls_inner_clear() {
     let inner = MockCache::new();
     let adapter = TransformAdapter::new(
         inner.clone(),
-        TransformCodec::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::custom(|v: &String| v.parse::<i32>()),
-        TransformCodec::infallible(|v: &i32| v.to_string()),
+        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+        TransformCodec::new(
+            |v: &String| v.parse::<i32>(),
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        ),
     );
     adapter.clear().await.unwrap();
 
@@ -93,9 +101,11 @@ async fn len_calls_inner_len() {
     let inner = MockCache::with_data(data.into_iter().collect());
     let adapter = TransformAdapter::new(
         inner.clone(),
-        TransformCodec::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::custom(|v: &String| v.parse::<i32>()),
-        TransformCodec::infallible(|v: &i32| v.to_string()),
+        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+        TransformCodec::new(
+            |v: &String| v.parse::<i32>(),
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        ),
     );
 
     let len = adapter.len().await;
@@ -107,7 +117,7 @@ async fn len_calls_inner_len() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn transform_builder_with_fallback() {
-    use cachet::{Cache, TransformBuilder};
+    use cachet::Cache;
     use tick::Clock;
 
     let clock = Clock::new_frozen();
@@ -119,9 +129,11 @@ async fn transform_builder_with_fallback() {
     let cache = Cache::builder::<String, i32>(clock)
         .storage(MockCache::new())
         .transform(
-            TransformCodec::custom(|k: &String| k.parse::<i32>()),
-            TransformCodec::infallible(|v: &i32| v.to_string()),
-            TransformCodec::custom(|v: &String| v.parse::<i32>()),
+            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformCodec::new(
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+                |v: &String| v.parse::<i32>(),
+            ),
         )
         .fallback(remote)
         .build();

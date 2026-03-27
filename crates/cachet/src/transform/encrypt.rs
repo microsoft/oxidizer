@@ -6,33 +6,35 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 
-use crate::{Codec, Error};
+use crate::{Codec, Encoder, Error};
 
-/// A codec that encrypts bytes using AES-256-GCM.
+const NONCE_SIZE: usize = 12;
+
+/// A bidirectional codec that encrypts and decrypts bytes using AES-256-GCM.
 ///
-/// Each encryption prepends a 12-byte nonce to the ciphertext.
-/// The nonce is randomly generated per call.
+/// `encode` encrypts, prepending a 12-byte random nonce to the ciphertext.
+/// `decode` decrypts, expecting the nonce + ciphertext format produced by `encode`.
 #[derive(Clone)]
-pub struct AesGcmEncoder {
+pub struct AesGcmCodec {
     cipher: Aes256Gcm,
 }
 
-impl AesGcmEncoder {
-    /// Creates a new AES-256-GCM encoder from a 32-byte key.
+impl AesGcmCodec {
+    /// Creates a new AES-256-GCM codec from a 32-byte key.
     pub fn new(key: &[u8; 32]) -> Self {
         let cipher = Aes256Gcm::new(key.into());
         Self { cipher }
     }
 }
 
-impl std::fmt::Debug for AesGcmEncoder {
+impl std::fmt::Debug for AesGcmCodec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AesGcmEncoder").finish_non_exhaustive()
+        f.debug_struct("AesGcmCodec").finish_non_exhaustive()
     }
 }
 
-impl Codec<Vec<u8>, Vec<u8>> for AesGcmEncoder {
-    fn apply(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
+impl Encoder<Vec<u8>, Vec<u8>> for AesGcmCodec {
+    fn encode(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
         let mut nonce_bytes = [0u8; NONCE_SIZE];
         getrandom::getrandom(&mut nonce_bytes).map_err(|e| Error::from_message(format!("failed to generate nonce: {e}")))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
@@ -48,32 +50,8 @@ impl Codec<Vec<u8>, Vec<u8>> for AesGcmEncoder {
     }
 }
 
-/// A codec that decrypts AES-256-GCM encrypted bytes.
-///
-/// Expects input to be nonce (12 bytes) + ciphertext, as produced by [`AesGcmEncoder`].
-#[derive(Clone)]
-pub struct AesGcmDecoder {
-    cipher: Aes256Gcm,
-}
-
-impl AesGcmDecoder {
-    /// Creates a new AES-256-GCM decoder from a 32-byte key.
-    pub fn new(key: &[u8; 32]) -> Self {
-        let cipher = Aes256Gcm::new(key.into());
-        Self { cipher }
-    }
-}
-
-impl std::fmt::Debug for AesGcmDecoder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AesGcmDecoder").finish_non_exhaustive()
-    }
-}
-
-const NONCE_SIZE: usize = 12;
-
-impl Codec<Vec<u8>, Vec<u8>> for AesGcmDecoder {
-    fn apply(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
+impl Codec<Vec<u8>, Vec<u8>> for AesGcmCodec {
+    fn decode(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
         if value.len() < NONCE_SIZE {
             return Err(Error::from_message("AES-GCM ciphertext too short: missing nonce"));
         }

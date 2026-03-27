@@ -260,12 +260,12 @@ pub use fallback::FallbackPromotionPolicy;
 pub use refresh::TimeToRefresh;
 #[cfg(feature = "encrypt")]
 #[doc(inline)]
-pub use transform::{AesGcmDecoder, AesGcmEncoder};
-#[cfg(feature = "serialize")]
-#[doc(inline)]
-pub use transform::{BincodeDecoder, BincodeEncoder};
-#[doc(inline)]
-pub use transform::{Codec, IdentityCodec, TransformAdapter, TransformCodec};
+pub use transform::AesGcmCodec;
 #[cfg(feature = "compress")]
 #[doc(inline)]
-pub use transform::{ZstdDecoder, ZstdEncoder};
+pub use transform::ZstdCodec;
+#[cfg(feature = "serialize")]
+#[doc(inline)]
+pub use transform::{BincodeCodec, BincodeEncoder};
+#[doc(inline)]
+pub use transform::{Codec, Encoder, IdentityCodec, TransformAdapter, TransformCodec, TransformEncoder};
