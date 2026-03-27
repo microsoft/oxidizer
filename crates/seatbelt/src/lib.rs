@@ -193,6 +193,7 @@
 //! - [`config`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.rs): Loading settings from a [JSON file](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json).
 //! - [`chaos_injection`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs): Fault injection with configurable probability.
 //! - [`chaos_injection_advanced`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs): Simulating an extended outage with dynamic injection rates.
+//! - [`chaos_latency`](https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs): Injecting artificial delay with configurable probability.
 //!
 //! # Features
 //!

@@ -142,6 +142,10 @@ required-features = ["chaos-injection"]
 name = "chaos_injection_advanced"
 required-features = ["chaos-injection"]
 
+[[example]]
+name = "chaos_latency"
+required-features = ["chaos-latency"]
+
 [[bench]]
 name = "observability"
 harness = false
