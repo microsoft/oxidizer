@@ -229,21 +229,21 @@ impl Spawner {
     ///
     /// ```rust
     /// # #[cfg(feature = "tokio")]
-    /// # fn main() {
+    /// # #[tokio::main]
+    /// # async fn main() {
     /// use anyspawn::Spawner;
-    /// use thread_aware::ThreadAware;
-    /// use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
-    /// #[derive(Default, Clone)]
-    /// struct Scheduler(Option<usize>);
-    /// impl Scheduler { fn name(&self) -> String { format!("core-{}", self.0.unwrap_or(0)) } }
-    /// impl ThreadAware for Scheduler {
-    ///     fn relocated(self, _: MemoryAffinity, dest: PinnedAffinity) -> Self {
-    ///         Self(Some(dest.processor_index()))
-    ///     }
-    /// }
+    /// # use thread_aware::ThreadAware;
+    /// # use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+    /// # #[derive(Default, Clone)]
+    /// # struct Scheduler(Option<usize>);
+    /// # impl Scheduler { fn name(&self) -> String { format!("core-{}", self.0.unwrap_or(0)) } }
+    /// # impl ThreadAware for Scheduler {
+    /// #     fn relocated(self, _: MemoryAffinity, dest: PinnedAffinity) -> Self {
+    /// #         Self(Some(dest.processor_index()))
+    /// #     }
+    /// # }
     ///
     /// # let rt = tokio::runtime::Runtime::new().unwrap();
-    /// # rt.block_on(async {
     /// let scheduler = Scheduler::default();
     ///
     /// // Each core gets its own Spawner whose Scheduler carries the
@@ -260,7 +260,6 @@ impl Spawner {
     ///
     /// let result = spawner.spawn(async { 1 + 1 }).await;
     /// assert_eq!(result, 2);
-    /// # });
     /// # }
     /// # #[cfg(not(feature = "tokio"))]
     /// # fn main() {}
