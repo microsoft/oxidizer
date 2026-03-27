@@ -6,6 +6,8 @@
 use std::cell::RefCell;
 use std::io::Read;
 
+use bytesbuf::BytesView;
+
 use crate::{Codec, Encoder, Error};
 
 /// A bidirectional codec that compresses and decompresses bytes using Zstandard.
@@ -37,22 +39,23 @@ impl ZstdCodec {
     }
 }
 
-impl Encoder<Vec<u8>, Vec<u8>> for ZstdCodec {
-    fn encode(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
-        zstd::encode_all(value.as_slice(), self.level).map_err(Error::from_source)
+impl Encoder<BytesView, BytesView> for ZstdCodec {
+    fn encode(&self, value: &BytesView) -> Result<BytesView, Error> {
+        let compressed = zstd::encode_all(value.clone(), self.level).map_err(Error::from_source)?;
+        Ok(compressed.into())
     }
 }
 
-impl Codec<Vec<u8>, Vec<u8>> for ZstdCodec {
-    fn decode(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
+impl Codec<BytesView, BytesView> for ZstdCodec {
+    fn decode(&self, value: &BytesView) -> Result<BytesView, Error> {
         DCTX.with_borrow_mut(|dctx| {
             dctx.reset(zstd::zstd_safe::ResetDirective::SessionOnly)
                 .map_err(|code| Error::from_message(format!("failed to reset zstd decompression context: error code {code}")))?;
-            let mut decoder = zstd::stream::read::Decoder::with_context(value.as_slice(), dctx);
+            let mut decoder = zstd::stream::read::Decoder::with_context(value.clone(), dctx);
             let mut output = Vec::new();
             decoder.read_to_end(&mut output).map_err(Error::from_source)?;
             decoder.finish();
-            Ok(output)
+            Ok(output.into())
         })
     }
 }

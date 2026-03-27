@@ -23,6 +23,7 @@ all-features = true
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "bytesbuf::view::BytesView",
     "cachet_memory::*",
     "cachet_service::*",
     "cachet_tier::*",
@@ -48,6 +49,7 @@ encrypt = ["dep:aes-gcm", "dep:getrandom"]
 anyspawn = { workspace = true, features = ["tokio"] }
 aes-gcm = { workspace = true, optional = true }
 bincode = { workspace = true, optional = true }
+bytesbuf = { workspace = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }

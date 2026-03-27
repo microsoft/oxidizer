@@ -240,6 +240,8 @@ mod wrapper;
 #[doc(inline)]
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
+pub use bytesbuf::BytesView;
+#[doc(inline)]
 pub use cache::{Cache, CacheName};
 #[cfg(feature = "memory")]
 #[doc(inline)]

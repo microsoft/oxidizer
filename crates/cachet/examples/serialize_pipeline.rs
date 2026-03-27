@@ -13,7 +13,7 @@
 //! Data flow on get (L1 miss):
 //!   L2 → decrypt → decompress → deserialize → String,MyValue
 
-use cachet::{AesGcmCodec, BincodeCodec, BincodeEncoder, Cache, CacheEntry, MockCache, ZstdCodec};
+use cachet::{AesGcmCodec, BincodeCodec, BincodeEncoder, BytesView, Cache, CacheEntry, MockCache, ZstdCodec};
 use tick::Clock;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -31,7 +31,7 @@ async fn main() {
 
     // L2: a remote tier that stores Vec<u8> keys and Vec<u8> values.
     // In a real app, this would be Redis, S3, etc.
-    let remote = Cache::builder::<Vec<u8>, Vec<u8>>(clock.clone()).storage(MockCache::new());
+    let remote = Cache::builder::<BytesView, BytesView>(clock.clone()).storage(MockCache::new());
 
     // Build the cache with the full pipeline:
     //   L1 (memory) → serialize → compress → encrypt → L2 (remote)

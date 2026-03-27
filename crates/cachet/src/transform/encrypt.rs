@@ -5,6 +5,7 @@
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
+use bytesbuf::BytesView;
 
 use crate::{Codec, Encoder, Error};
 
@@ -33,32 +34,34 @@ impl std::fmt::Debug for AesGcmCodec {
     }
 }
 
-impl Encoder<Vec<u8>, Vec<u8>> for AesGcmCodec {
-    fn encode(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
+impl Encoder<BytesView, BytesView> for AesGcmCodec {
+    fn encode(&self, value: &BytesView) -> Result<BytesView, Error> {
         let mut nonce_bytes = [0u8; NONCE_SIZE];
         getrandom::getrandom(&mut nonce_bytes).map_err(|e| Error::from_message(format!("failed to generate nonce: {e}")))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = self
             .cipher
-            .encrypt(nonce, value.as_slice())
+            .encrypt(nonce, value.first_slice())
             .map_err(|e| Error::from_message(format!("AES-GCM encryption failed: {e}")))?;
-        // Prepend nonce to ciphertext
         let mut result = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
         result.extend_from_slice(&nonce_bytes);
         result.extend(ciphertext);
-        Ok(result)
+        Ok(result.into())
     }
 }
 
-impl Codec<Vec<u8>, Vec<u8>> for AesGcmCodec {
-    fn decode(&self, value: &Vec<u8>) -> Result<Vec<u8>, Error> {
-        if value.len() < NONCE_SIZE {
+impl Codec<BytesView, BytesView> for AesGcmCodec {
+    fn decode(&self, value: &BytesView) -> Result<BytesView, Error> {
+        let slice = value.first_slice();
+        if slice.len() < NONCE_SIZE {
             return Err(Error::from_message("AES-GCM ciphertext too short: missing nonce"));
         }
-        let (nonce_bytes, ciphertext) = value.split_at(NONCE_SIZE);
+        let (nonce_bytes, ciphertext) = slice.split_at(NONCE_SIZE);
         let nonce = Nonce::from_slice(nonce_bytes);
-        self.cipher
+        let plaintext = self
+            .cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| Error::from_message(format!("AES-GCM decryption failed: {e}")))
+            .map_err(|e| Error::from_message(format!("AES-GCM decryption failed: {e}")))?;
+        Ok(plaintext.into())
     }
 }

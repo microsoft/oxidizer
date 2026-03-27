@@ -6,6 +6,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
+use bytesbuf::BytesView;
 use cachet_tier::DynamicCache;
 use tick::Clock;
 
@@ -125,9 +126,9 @@ where
     #[must_use]
     pub fn serialize(
         self,
-        key_encoder: impl Encoder<K, Vec<u8>> + 'static,
-        value_codec: impl Codec<V, Vec<u8>> + 'static,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self> {
+        key_encoder: impl Encoder<K, BytesView> + 'static,
+        value_codec: impl Codec<V, BytesView> + 'static,
+    ) -> TransformBuilder<K, V, BytesView, BytesView, Self> {
         self.transform(key_encoder, value_codec)
     }
 }
@@ -144,9 +145,9 @@ where
     #[must_use]
     pub fn serialize(
         self,
-        key_encoder: impl Encoder<K, Vec<u8>> + 'static,
-        value_codec: impl Codec<V, Vec<u8>> + 'static,
-    ) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Self> {
+        key_encoder: impl Encoder<K, BytesView> + 'static,
+        value_codec: impl Codec<V, BytesView> + 'static,
+    ) -> TransformBuilder<K, V, BytesView, BytesView, Self> {
         self.transform(key_encoder, value_codec)
     }
 }
@@ -219,13 +220,13 @@ where
 // ── .compress() ──
 
 #[cfg(feature = "compress")]
-impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     /// Adds a compression layer. Values are compressed; keys pass through unchanged.
     ///
     /// Chains the compression codec onto the existing value codec
     /// so the pipeline becomes: serialize → compress on write, decompress → deserialize on read.
     #[must_use]
-    pub fn compress(self, codec: impl Codec<Vec<u8>, Vec<u8>> + 'static) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+    pub fn compress(self, codec: impl Codec<BytesView, BytesView> + 'static) -> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
         let TransformBuilder {
             pre,
             post,
@@ -237,7 +238,7 @@ impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec
             _phantom,
         } = self;
 
-        let new_vc: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
+        let new_vc: Box<dyn Codec<V, BytesView>> = Box::new(ChainedCodec {
             outer: value_codec,
             inner: Box::new(codec),
         });
@@ -258,10 +259,10 @@ impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec
 // ── .encrypt() ──
 
 #[cfg(feature = "encrypt")]
-impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     /// Adds an encryption layer. Values are encrypted; keys pass through unchanged.
     #[must_use]
-    pub fn encrypt(self, codec: impl Codec<Vec<u8>, Vec<u8>> + 'static) -> TransformBuilder<K, V, Vec<u8>, Vec<u8>, Pre, Post> {
+    pub fn encrypt(self, codec: impl Codec<BytesView, BytesView> + 'static) -> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
         let TransformBuilder {
             pre,
             post,
@@ -273,7 +274,7 @@ impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, Vec<u8>, Vec
             _phantom,
         } = self;
 
-        let new_vc: Box<dyn Codec<V, Vec<u8>>> = Box::new(ChainedCodec {
+        let new_vc: Box<dyn Codec<V, BytesView>> = Box::new(ChainedCodec {
             outer: value_codec,
             inner: Box::new(codec),
         });
