@@ -21,5 +21,5 @@ async fn main() {
     let TimedResult { result, duration } = clock.timed(background_job).await;
 
     // Print the result and the elapsed time.
-    println!("Result: {}, Elapsed time: {:?}", result, duration);
+    println!("Result: {result}, Elapsed time: {duration:?}");
 }
