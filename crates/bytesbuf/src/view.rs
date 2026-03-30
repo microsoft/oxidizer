@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::hash::{Hash, Hasher};
 use std::iter;
 use std::num::NonZero;
 use std::ops::{Bound, RangeBounds};
@@ -864,6 +865,17 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
 
 impl Eq for BytesView {}
 
+impl Hash for BytesView {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash all bytes in logical order, consistent with PartialEq.
+        // We also hash the length to distinguish e.g. [1,2]+[3] from [1]+[2,3].
+        self.len.hash(state);
+        for (slice, _) in self.slices() {
+            state.write(slice);
+        }
+    }
+}
+
 /// Iterator over the slices of a [`BytesView`] and their metadata.
 ///
 /// Returned by [`BytesView::slices()`] and provides each slice together with its
@@ -937,7 +949,7 @@ mod tests {
     use crate::BytesBuf;
     use crate::mem::testing::{TestMemoryBlock, TransparentMemory, std_alloc_block};
 
-    assert_impl_all!(BytesView: Send, Sync, Eq);
+    assert_impl_all!(BytesView: Send, Sync, Eq, Hash);
 
     // BytesView intentionally does not implement From<&[u8]> because creating a view
     // requires a memory provider to ensure optimal memory configuration. Users should

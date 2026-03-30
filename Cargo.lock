@@ -310,6 +310,7 @@ version = "0.1.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
+ "bytesbuf",
  "cachet_memory",
  "cachet_service",
  "cachet_tier",
@@ -363,6 +364,7 @@ dependencies = [
 name = "cachet_tier"
 version = "0.1.0"
 dependencies = [
+ "bytesbuf",
  "dynosaur",
  "ohno 0.3.1",
  "parking_lot",
