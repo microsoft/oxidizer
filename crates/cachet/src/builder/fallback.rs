@@ -9,10 +9,10 @@ use tick::Clock;
 
 use super::buildable::Buildable;
 use super::sealed::{CacheTierBuilder, Sealed};
+use crate::Cache;
 use crate::fallback::FallbackPromotionPolicy;
 use crate::refresh::TimeToRefresh;
 use crate::telemetry::TelemetryConfig;
-use crate::Cache;
 
 /// Builder for a cache with fallback tiers.
 ///
