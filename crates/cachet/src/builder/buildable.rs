@@ -14,7 +14,7 @@ use crate::wrapper::CacheWrapper;
 use crate::{Cache, CacheTier};
 
 /// Internal trait for building cache hierarchies.
-pub(crate) trait Buildable<K, V> {
+pub(super) trait Buildable<K, V> {
     type Output: CacheTier<K, V> + Send + Sync + 'static;
     type TierOutput: CacheTier<K, V> + Send + Sync + 'static;
 
@@ -85,7 +85,7 @@ where
     }
 }
 
-pub(crate) fn type_name<S>(user_name: Option<&'static str>) -> &'static str {
+pub(super) fn type_name<S>(user_name: Option<&'static str>) -> &'static str {
     if let Some(name) = user_name {
         name
     } else {

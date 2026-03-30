@@ -9,7 +9,7 @@
 mod buildable;
 mod cache;
 mod fallback;
-pub(crate) mod sealed;
+mod sealed;
 
 pub use cache::CacheBuilder;
 pub use fallback::FallbackBuilder;
