@@ -376,3 +376,67 @@ async fn debug_impls_for_transform_types() {
     let debug_str = format!("{:?}", adapter);
     assert!(debug_str.contains("TransformAdapter"));
 }
+
+// ---------------------------------------------------------------------------
+// ZstdCodec round-trip tests (compress feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "compress")]
+mod compress_tests {
+    use cachet::{BytesView, Codec, Encoder, ZstdCodec};
+
+    fn make_bytes(data: &[u8]) -> BytesView {
+        Vec::from(data).into()
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn zstd_round_trip_small_data() {
+        let codec = ZstdCodec::new(3);
+        let original = make_bytes(b"small payload");
+        let compressed = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decompressed = Codec::<BytesView, BytesView>::decode(&codec, &compressed).unwrap();
+        assert_eq!(decompressed, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn zstd_round_trip_large_data() {
+        let codec = ZstdCodec::new(3);
+        let data: Vec<u8> = (0..2048).map(|i| (i % 256) as u8).collect();
+        let original = make_bytes(&data);
+        let compressed = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decompressed = Codec::<BytesView, BytesView>::decode(&codec, &compressed).unwrap();
+        assert_eq!(decompressed, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn zstd_round_trip_empty_bytes() {
+        let codec = ZstdCodec::new(3);
+        let original = make_bytes(b"");
+        let compressed = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decompressed = Codec::<BytesView, BytesView>::decode(&codec, &compressed).unwrap();
+        assert_eq!(decompressed, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn zstd_compression_level_1() {
+        let codec = ZstdCodec::new(1);
+        let original = make_bytes(b"test data for level 1 compression");
+        let compressed = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decompressed = Codec::<BytesView, BytesView>::decode(&codec, &compressed).unwrap();
+        assert_eq!(decompressed, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn zstd_compression_level_22() {
+        let codec = ZstdCodec::new(22);
+        let original = make_bytes(b"test data for level 22 compression");
+        let compressed = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decompressed = Codec::<BytesView, BytesView>::decode(&codec, &compressed).unwrap();
+        assert_eq!(decompressed, original.first_slice());
+    }
+}

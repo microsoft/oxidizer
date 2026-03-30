@@ -6,6 +6,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
+use bytesbuf::BytesView;
 use cachet_tier::DynamicCache;
 use tick::Clock;
 
@@ -169,6 +170,45 @@ where
             post: post_chain,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+// ── .compress() ──
+
+#[cfg(feature = "compress")]
+impl<K, V: Send + Sync + 'static, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
+    /// Adds a compression layer. Values are compressed; keys pass through unchanged.
+    ///
+    /// Chains the compression codec onto the existing value codec
+    /// so the pipeline becomes: serialize → compress on write, decompress → deserialize on read.
+    #[must_use]
+    pub fn compress(self, codec: impl Codec<BytesView, BytesView> + 'static) -> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
+        let TransformBuilder {
+            pre,
+            post,
+            key_encoder,
+            value_codec,
+            clock,
+            telemetry,
+            stampede_protection,
+            _phantom,
+        } = self;
+
+        let new_vc: Box<dyn Codec<V, BytesView>> = Box::new(ChainedCodec {
+            outer: value_codec,
+            inner: Box::new(codec),
+        });
+
+        TransformBuilder {
+            pre,
+            post,
+            key_encoder,
+            value_codec: new_vc,
             clock,
             telemetry,
             stampede_protection,
