@@ -59,6 +59,7 @@
 //! [`DynamicCache`] wraps any `CacheTier` in a type-erased container. This is useful
 //! for multi-tier caches with heterogeneous storage backends.
 
+mod distributed;
 mod entry;
 mod error;
 #[cfg(any(feature = "test-util", test))]
@@ -67,6 +68,8 @@ mod tier;
 
 mod dynamic;
 
+#[doc(inline)]
+pub use distributed::DistributedCacheTier;
 #[doc(inline)]
 pub use dynamic::DynamicCache;
 #[doc(inline)]
