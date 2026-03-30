@@ -376,3 +376,120 @@ async fn debug_impls_for_transform_types() {
     let debug_str = format!("{:?}", adapter);
     assert!(debug_str.contains("TransformAdapter"));
 }
+
+// ---------------------------------------------------------------------------
+// AesGcmCodec round-trip tests (encrypt feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "encrypt")]
+mod encrypt_tests {
+    use cachet::{AesGcmCodec, BytesView, Codec, Encoder};
+
+    fn make_bytes(data: &[u8]) -> BytesView {
+        Vec::from(data).into()
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_round_trip_small_data() {
+        let key = [1u8; 32];
+        let codec = AesGcmCodec::new(&key);
+        let original = make_bytes(b"hello encryption");
+        let encrypted = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decrypted = Codec::<BytesView, BytesView>::decode(&codec, &encrypted).unwrap();
+        assert_eq!(decrypted, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_round_trip_large_data() {
+        let key = [2u8; 32];
+        let codec = AesGcmCodec::new(&key);
+        let data: Vec<u8> = (0..4096).map(|i| (i % 256) as u8).collect();
+        let original = make_bytes(&data);
+        let encrypted = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decrypted = Codec::<BytesView, BytesView>::decode(&codec, &encrypted).unwrap();
+        assert_eq!(decrypted, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_round_trip_empty_bytes() {
+        let key = [3u8; 32];
+        let codec = AesGcmCodec::new(&key);
+        let original = make_bytes(b"");
+        let encrypted = Encoder::<BytesView, BytesView>::encode(&codec, &original).unwrap();
+        let decrypted = Codec::<BytesView, BytesView>::decode(&codec, &encrypted).unwrap();
+        assert_eq!(decrypted, original.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_different_keys_produce_different_ciphertext() {
+        let key_a = [10u8; 32];
+        let key_b = [20u8; 32];
+        let codec_a = AesGcmCodec::new(&key_a);
+        let codec_b = AesGcmCodec::new(&key_b);
+        let original = make_bytes(b"same plaintext");
+
+        let encrypted_a = Encoder::<BytesView, BytesView>::encode(&codec_a, &original).unwrap();
+        let encrypted_b = Encoder::<BytesView, BytesView>::encode(&codec_b, &original).unwrap();
+
+        // Ciphertext must differ (different keys + random nonces)
+        assert_ne!(encrypted_a.first_slice(), encrypted_b.first_slice());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_wrong_key_fails_to_decrypt() {
+        let key_a = [10u8; 32];
+        let key_b = [20u8; 32];
+        let codec_a = AesGcmCodec::new(&key_a);
+        let codec_b = AesGcmCodec::new(&key_b);
+        let original = make_bytes(b"secret data");
+
+        let encrypted = Encoder::<BytesView, BytesView>::encode(&codec_a, &original).unwrap();
+        let result = Codec::<BytesView, BytesView>::decode(&codec_b, &encrypted);
+        assert!(result.is_err());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_truncated_ciphertext_fails() {
+        let key = [5u8; 32];
+        let codec = AesGcmCodec::new(&key);
+        // Fewer than 12 bytes ΓåÆ nonce is missing
+        let truncated = make_bytes(&[0u8; 5]);
+        let result = Codec::<BytesView, BytesView>::decode(&codec, &truncated);
+        assert!(result.is_err());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn aesgcm_nonce_only_no_ciphertext_fails_in_decrypt() {
+        let key = [6u8; 32];
+        let codec = AesGcmCodec::new(&key);
+        // Exactly 12 bytes = nonce only, no ciphertext or auth tag.
+        // Should pass the length guard (12 is not < 12) and fail in AES-GCM decrypt.
+        let nonce_only = make_bytes(&[0u8; 12]);
+        let result = Codec::<BytesView, BytesView>::decode(&codec, &nonce_only);
+        let err = result.unwrap_err();
+        // The error should come from decrypt, NOT from the length guard.
+        assert!(
+            err.to_string().contains("decryption failed"),
+            "expected 'decryption failed' for nonce-only input (not 'too short'), got: {err}"
+        );
+    }
+}
+
+#[cfg(feature = "encrypt")]
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn debug_impl_for_aesgcm_codec() {
+    use cachet::AesGcmCodec;
+
+    let key = [0u8; 32];
+    let codec = AesGcmCodec::new(&key);
+    let debug_str = format!("{:?}", codec);
+    assert!(debug_str.contains("AesGcmCodec"));
+}
