@@ -376,3 +376,170 @@ async fn debug_impls_for_transform_types() {
     let debug_str = format!("{:?}", adapter);
     assert!(debug_str.contains("TransformAdapter"));
 }
+
+// ---------------------------------------------------------------------------
+// BincodeCodec round-trip tests (serialize feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "serialize")]
+mod serialize_tests {
+    use cachet::{BincodeCodec, BincodeEncoder, BytesView, CacheEntry, Codec, Encoder, MockCache};
+
+    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct UserProfile {
+        name: String,
+        age: u32,
+        tags: Vec<String>,
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_round_trip_string() {
+        let codec = BincodeCodec;
+        let original = "hello world".to_string();
+        let encoded: BytesView = Encoder::<String, BytesView>::encode(&codec, &original).unwrap();
+        let decoded: String = Codec::<String, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_round_trip_integer() {
+        let codec = BincodeCodec;
+        let original: i64 = -9_999_999;
+        let encoded: BytesView = Encoder::<i64, BytesView>::encode(&codec, &original).unwrap();
+        let decoded: i64 = Codec::<i64, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_round_trip_struct() {
+        let codec = BincodeCodec;
+        let original = UserProfile {
+            name: "Alice".into(),
+            age: 30,
+            tags: vec!["admin".into(), "active".into()],
+        };
+        let encoded: BytesView = Encoder::<UserProfile, BytesView>::encode(&codec, &original).unwrap();
+        let decoded: UserProfile = Codec::<UserProfile, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_round_trip_empty_vec() {
+        let codec = BincodeCodec;
+        let original: Vec<u8> = vec![];
+        let encoded: BytesView = Encoder::<Vec<u8>, BytesView>::encode(&codec, &original).unwrap();
+        let decoded: Vec<u8> = Codec::<Vec<u8>, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_round_trip_large_value() {
+        let codec = BincodeCodec;
+        let original: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
+        let encoded: BytesView = Encoder::<Vec<u8>, BytesView>::encode(&codec, &original).unwrap();
+        let decoded: Vec<u8> = Codec::<Vec<u8>, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bytesview_serialize_round_trip_preserves_data() {
+        let codec = BincodeCodec;
+        let original = UserProfile {
+            name: "Bob".into(),
+            age: 25,
+            tags: vec!["user".into()],
+        };
+        let bytes: BytesView = Encoder::<UserProfile, BytesView>::encode(&codec, &original).unwrap();
+        let cloned = bytes.clone();
+        let decoded: UserProfile = Codec::<UserProfile, BytesView>::decode(&codec, &cloned).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn bincode_encoder_produces_non_empty_output() {
+        let encoder = BincodeEncoder;
+        let value = "test string".to_string();
+        let encoded: BytesView = Encoder::<String, BytesView>::encode(&encoder, &value).unwrap();
+        assert!(encoded.first_slice().len() > 0, "BincodeEncoder should produce non-empty output");
+        // Verify the encoded data can be decoded by BincodeCodec
+        let codec = BincodeCodec;
+        let decoded: String = Codec::<String, BytesView>::decode(&codec, &encoded).unwrap();
+        assert_eq!(decoded, value);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn serialize_builder_without_compress_or_encrypt() {
+        use cachet::{BincodeEncoder, Cache};
+        use tick::Clock;
+
+        let clock = Clock::new_frozen();
+        let remote = Cache::builder::<BytesView, BytesView>(clock.clone()).storage(MockCache::new());
+
+        let cache = Cache::builder::<String, UserProfile>(clock)
+            .storage(MockCache::new())
+            .serialize(BincodeEncoder, BincodeCodec)
+            .fallback(remote)
+            .build();
+
+        let profile = UserProfile {
+            name: "Charlie".into(),
+            age: 40,
+            tags: vec![],
+        };
+        cache.insert("key1".to_string(), CacheEntry::new(profile.clone())).await.unwrap();
+
+        let result = cache.get(&"key1".to_string()).await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), profile);
+    }
+}
+
+#[cfg(feature = "serialize")]
+mod fallback_serialize_tests {
+    use cachet::{BincodeCodec, BincodeEncoder, BytesView, Cache, CacheEntry, MockCache};
+    use tick::Clock;
+
+    #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct TestStruct {
+        name: String,
+        value: u64,
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_builder_serialize() {
+        let clock = Clock::new_frozen();
+
+        // Post-serialize remote tier (bytes)
+        let remote = Cache::builder::<BytesView, BytesView>(clock.clone()).storage(MockCache::new());
+
+        // L2 memory tier (same types as outer)
+        let l2 = Cache::builder::<String, TestStruct>(clock.clone()).storage(MockCache::new());
+
+        // Build: L1 -> fallback L2 -> .serialize() -> fallback remote
+        let cache = Cache::builder::<String, TestStruct>(clock)
+            .storage(MockCache::new())
+            .fallback(l2)
+            .serialize(BincodeEncoder, BincodeCodec)
+            .fallback(remote)
+            .build();
+
+        let item = TestStruct {
+            name: "test".into(),
+            value: 42,
+        };
+        cache.insert("key1".to_string(), CacheEntry::new(item.clone())).await.unwrap();
+
+        let result = cache.get(&"key1".to_string()).await.unwrap();
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), item);
+    }
+}

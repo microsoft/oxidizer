@@ -262,3 +262,6 @@ pub use fallback::FallbackPromotionPolicy;
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
 pub use transform::{Codec, Encoder, IdentityCodec, TransformAdapter, TransformCodec, TransformEncoder};
+#[cfg(feature = "serialize")]
+#[doc(inline)]
+pub use transform::{BincodeCodec, BincodeEncoder};

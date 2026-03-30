@@ -6,6 +6,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
+use bytesbuf::BytesView;
 use cachet_tier::DynamicCache;
 use tick::Clock;
 
@@ -109,6 +110,45 @@ where
             stampede_protection,
             _phantom: PhantomData,
         }
+    }
+}
+
+// ── .serialize() ──
+
+#[cfg(feature = "serialize")]
+impl<K, V, CT> CacheBuilder<K, V, CT>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    CT: CacheTier<K, V> + Send + Sync + 'static,
+{
+    /// Applies a serialization boundary.
+    #[must_use]
+    pub fn serialize(
+        self,
+        key_encoder: impl Encoder<K, BytesView> + 'static,
+        value_codec: impl Codec<V, BytesView> + 'static,
+    ) -> TransformBuilder<K, V, BytesView, BytesView, Self> {
+        self.transform(key_encoder, value_codec)
+    }
+}
+
+#[cfg(feature = "serialize")]
+impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+    PB: CacheTierBuilder<K, V>,
+    FB: CacheTierBuilder<K, V>,
+{
+    /// Applies a serialization boundary on a fallback builder.
+    #[must_use]
+    pub fn serialize(
+        self,
+        key_encoder: impl Encoder<K, BytesView> + 'static,
+        value_codec: impl Codec<V, BytesView> + 'static,
+    ) -> TransformBuilder<K, V, BytesView, BytesView, Self> {
+        self.transform(key_encoder, value_codec)
     }
 }
 
