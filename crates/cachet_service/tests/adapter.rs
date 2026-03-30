@@ -116,11 +116,13 @@ async fn adapter_clear_removes_all_entries() {
     assert!(adapter.get(&"key3".to_string()).await.unwrap().is_none());
 }
 
-#[test]
-fn adapter_len_returns_none() {
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn adapter_len_returns_none() {
     let service = InMemoryCacheService::<String, i32>::new();
     let adapter = ServiceAdapter::new(service);
-    assert_eq!(adapter.len(), None);
+    let len = adapter.len().await.expect("len should return Ok");
+    assert_eq!(len, None);
 }
 
 #[test]
