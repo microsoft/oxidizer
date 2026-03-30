@@ -123,7 +123,7 @@ tracing-test = { version = "0.2.6", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
-uuid = { version = "1.21.0", default-features = false }
+uuid = { version = "1.23.0", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 
