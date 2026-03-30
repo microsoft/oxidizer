@@ -301,12 +301,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use tick::Clock;
-
     use super::*;
-    use crate::{Cache, FallbackPromotionPolicy};
 
     #[test]
     fn type_name_with_user_name() {
