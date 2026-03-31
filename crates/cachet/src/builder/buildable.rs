@@ -86,9 +86,5 @@ where
 }
 
 pub(super) fn type_name<S>(user_name: Option<&'static str>) -> &'static str {
-    if let Some(name) = user_name {
-        name
-    } else {
-        std::any::type_name::<S>()
-    }
+    user_name.unwrap_or_else(|| std::any::type_name::<S>())
 }
