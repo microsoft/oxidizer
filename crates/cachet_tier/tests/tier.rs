@@ -105,7 +105,7 @@ async fn default_clear_returns_ok() {
 #[tokio::test]
 async fn default_len_returns_none() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
-    assert!(cache.len().is_none());
+    assert!(cache.len().await.unwrap().is_none());
 }
 
 #[cfg_attr(miri, ignore)]
@@ -113,7 +113,7 @@ async fn default_len_returns_none() {
 async fn default_is_empty_returns_none_when_len_is_none() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
     // is_empty delegates to len(); since len() returns None, is_empty() should too
-    assert!(cache.is_empty().is_none());
+    assert!(cache.is_empty().await.unwrap().is_none());
 }
 
 /// Cache that implements `len()` so we can test `is_empty()` default derivation
@@ -153,8 +153,8 @@ where
         Ok(())
     }
 
-    fn len(&self) -> Option<u64> {
-        Some(self.data.lock().expect("lock poisoned").len() as u64)
+    async fn len(&self) -> Result<Option<u64>, Error> {
+        Ok(Some(self.data.lock().expect("lock poisoned").len() as u64))
     }
 }
 
@@ -162,7 +162,7 @@ where
 #[tokio::test]
 async fn is_empty_returns_true_for_empty_cache() {
     let cache = SizedCache::<String, i32>::new();
-    assert_eq!(cache.is_empty(), Some(true));
+    assert_eq!(cache.is_empty().await.unwrap(), Some(true));
 }
 
 #[cfg_attr(miri, ignore)]
@@ -170,16 +170,17 @@ async fn is_empty_returns_true_for_empty_cache() {
 async fn is_empty_returns_false_for_non_empty_cache() {
     let cache = SizedCache::<String, i32>::new();
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(cache.is_empty(), Some(false));
+    assert_eq!(cache.is_empty().await.unwrap(), Some(false));
 }
 
 // MockCache tests
 
-#[test]
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
 #[cfg(feature = "test-util")]
-fn mock_cache_len_empty() {
+async fn mock_cache_len_empty() {
     let cache = MockCache::<String, i32>::new();
-    assert_eq!(cache.len(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), Some(0));
 }
 
 #[cfg_attr(miri, ignore)]
@@ -188,7 +189,7 @@ fn mock_cache_len_empty() {
 async fn mock_cache_len_after_insert() {
     let cache = MockCache::<String, i32>::new();
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(cache.len(), Some(1));
+    assert_eq!(cache.len().await.unwrap(), Some(1));
 }
 
 #[cfg_attr(miri, ignore)]
@@ -198,7 +199,7 @@ async fn mock_cache_len_after_multiple_inserts() {
     let cache = MockCache::<String, i32>::new();
     cache.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
     cache.insert("b".to_string(), CacheEntry::new(2)).await.unwrap();
-    assert_eq!(cache.len(), Some(2));
+    assert_eq!(cache.len().await.unwrap(), Some(2));
 }
 
 #[cfg_attr(miri, ignore)]
@@ -206,10 +207,10 @@ async fn mock_cache_len_after_multiple_inserts() {
 #[cfg(feature = "test-util")]
 async fn mock_cache_is_empty_delegates_to_len() {
     let cache = MockCache::<String, i32>::new();
-    assert_eq!(cache.is_empty(), Some(true));
+    assert_eq!(cache.is_empty().await.unwrap(), Some(true));
 
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(cache.is_empty(), Some(false));
+    assert_eq!(cache.is_empty().await.unwrap(), Some(false));
 }
 
 #[cfg_attr(miri, ignore)]
@@ -285,11 +286,12 @@ async fn mock_cache_clone_shares_state() {
     assert_eq!(*entry.value(), 42);
 }
 
-#[test]
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
 #[cfg(feature = "test-util")]
-fn mock_cache_default_creates_empty() {
+async fn mock_cache_default_creates_empty() {
     let cache = MockCache::<String, i32>::default();
-    assert_eq!(cache.len(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), Some(0));
 }
 
 #[cfg_attr(miri, ignore)]
@@ -390,7 +392,7 @@ async fn dynamic_cache_len() {
     let cache = MockCache::<String, i32>::new();
     let dynamic = DynamicCache::new(cache);
 
-    assert_eq!(dynamic.len(), Some(0));
+    assert_eq!(dynamic.len().await.unwrap(), Some(0));
     dynamic.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(dynamic.len(), Some(1));
+    assert_eq!(dynamic.len().await.unwrap(), Some(1));
 }

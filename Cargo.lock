@@ -363,6 +363,7 @@ dependencies = [
 name = "cachet_tier"
 version = "0.1.0"
 dependencies = [
+ "bytesbuf",
  "dynosaur",
  "ohno 0.3.1",
  "parking_lot",

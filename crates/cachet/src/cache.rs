@@ -342,9 +342,12 @@ where
     ///
     /// Use this value for approximate capacity monitoring and metrics, not for
     /// correctness decisions.
-    #[must_use]
-    pub fn len(&self) -> Option<u64> {
-        self.storage.len()
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying storage tier fails.
+    pub async fn len(&self) -> Result<Option<u64>, Error> {
+        self.storage.len().await
     }
 
     /// Returns `true` if the cache **appears** to contain no entries.
@@ -352,9 +355,12 @@ where
     /// Returns `None` if the underlying storage does not support size tracking.
     ///
     /// Subject to the same approximation caveats as [`len`](Self::len).
-    #[must_use]
-    pub fn is_empty(&self) -> Option<bool> {
-        self.storage.is_empty()
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying storage tier fails.
+    pub async fn is_empty(&self) -> Result<Option<bool>, Error> {
+        self.storage.is_empty().await
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.
@@ -732,11 +738,11 @@ mod tests {
     fn cache_len_and_is_empty() {
         block_on(async {
             let cache = build_cache();
-            assert_eq!(cache.len(), Some(0));
-            assert_eq!(cache.is_empty(), Some(true));
+            assert_eq!(cache.len().await.expect("len should return Ok"), Some(0));
+            assert_eq!(cache.is_empty().await.expect("is_empty should return Ok"), Some(true));
             cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
-            assert_eq!(cache.len(), Some(1));
-            assert_eq!(cache.is_empty(), Some(false));
+            assert_eq!(cache.len().await.expect("len should return Ok"), Some(1));
+            assert_eq!(cache.is_empty().await.expect("is_empty should return Ok"), Some(false));
         });
     }
 
