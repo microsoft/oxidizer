@@ -33,8 +33,8 @@ impl ExtensionsExt for Extensions {
 }
 
 pub(crate) mod sealed {
-    #[expect(private_bounds, reason = "intentional, sealed trait pattern")]
     pub trait Sealed {}
+    #[expect(private_bounds, reason = "intentional, sealed trait pattern")]
     impl Sealed for super::Extensions {}
 }
 
