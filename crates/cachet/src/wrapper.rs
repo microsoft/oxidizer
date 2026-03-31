@@ -142,7 +142,7 @@ where
             Ok(()) => {
                 self.telemetry
                     .record(self.name, CacheOperation::Insert, CacheActivity::Inserted, timed.duration);
-                if let Ok(Some(size)) = self.inner.len().await {
+                if let Ok(Some(size)) = self.len().await {
                     self.telemetry.record_size(self.name, size);
                 }
             }
@@ -160,7 +160,7 @@ where
             Ok(()) => {
                 self.telemetry
                     .record(self.name, CacheOperation::Invalidate, CacheActivity::Invalidated, timed.duration);
-                if let Ok(Some(size)) = self.inner.len().await {
+                if let Ok(Some(size)) = self.len().await {
                     self.telemetry.record_size(self.name, size);
                 }
             }
@@ -178,7 +178,7 @@ where
             Ok(()) => {
                 self.telemetry
                     .record(self.name, CacheOperation::Clear, CacheActivity::Ok, timed.duration);
-                if let Ok(Some(size)) = self.inner.len().await {
+                if let Ok(Some(size)) = self.len().await {
                     self.telemetry.record_size(self.name, size);
                 }
             }
@@ -191,7 +191,14 @@ where
     }
 
     async fn len(&self) -> Result<Option<u64>, Error> {
-        self.inner.len().await
+        #[cfg(any(feature = "metrics", test))]
+        {
+            self.inner.len().await
+        }
+        #[cfg(not(any(feature = "metrics", test)))]
+        {
+            Ok(None)
+        }
     }
 }
 
