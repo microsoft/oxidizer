@@ -37,8 +37,8 @@ async fn mock_cache_with_storage() {
     let value = cache.get(&"key".to_string()).await.unwrap();
     assert_eq!(*value.unwrap().value(), 42);
 
-    // Mock handle records operations (insert + get + len from telemetry)
-    assert_eq!(mock.operations().len(), 3);
+    // Mock handle records operations (insert + get)
+    assert_eq!(mock.operations().len(), 2);
 }
 
 #[test]
