@@ -28,6 +28,7 @@
 //!
 //! The crate provides extension traits that add convenience methods to standard HTTP types:
 //!
+//! - [`ExtensionsExt`] - Extensions for [`http::Extensions`] to extract URL template labels
 //! - [`StatusExt`] - Status code validation and recovery classification
 //! - [`RequestExt`] - Extensions for HTTP requests
 //! - [`ResponseExt`] - Response recovery classification with `Retry-After` support

@@ -3,7 +3,7 @@
 
 use http::Request;
 use templated_uri::uri::TargetPathAndQuery;
-
+use crate::extensions::ExtensionsExt;
 use crate::UrlTemplateLabel;
 
 /// Extensions for HTTP requests.
@@ -28,10 +28,7 @@ impl<B> RequestExt for Request<B> {
     }
 
     fn url_template_label(&self) -> Option<UrlTemplateLabel> {
-        self.extensions().get::<UrlTemplateLabel>().cloned().or_else(|| {
-            self.path_and_query()
-                .map(|path| UrlTemplateLabel::new(path.label().unwrap_or_else(|| path.template())))
-        })
+        self.extensions().url_template_label()
     }
 }
 
