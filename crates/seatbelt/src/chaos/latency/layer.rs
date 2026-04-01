@@ -112,15 +112,19 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     /// before calling the inner service.
     ///
     /// On each injection, a duration is picked uniformly at random from
-    /// `[range.start, range.end)`.
+    /// `[range.start, range.end)`. If `range.start == range.end`, this
+    /// behaves identically to [`latency(range.start)`][LatencyLayer::latency].
     ///
     /// # Panics
     ///
-    /// Panics if `range.start >= range.end`.
+    /// Panics if `range.start > range.end`.
     #[must_use]
     pub fn latency_range(mut self, range: Range<Duration>) -> LatencyLayer<In, Out, S1, Set> {
         let span = range.end.checked_sub(range.start).expect("latency_range requires start < end");
-        assert!(span != Duration::ZERO, "latency_range requires start < end");
+
+        if span == Duration::ZERO {
+            return self.latency(range.start);
+        }
 
         let rnd = self.rnd.clone();
 
@@ -304,11 +308,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "latency_range requires start < end")]
-    fn latency_range_panics_on_equal_bounds() {
+    fn latency_range_equal_bounds_delegates_to_latency() {
         let context = create_test_context();
-        let _layer: LatencyLayer<_, _, NotSet, Set> =
+        let layer: LatencyLayer<_, _, NotSet, Set> =
             LatencyLayer::new("test".into(), &context).latency_range(Duration::from_millis(100)..Duration::from_millis(100));
+
+        assert!(layer.latency_duration.is_some());
+        let duration = layer.latency_duration.unwrap().call(&"test".to_string(), LatencyDurationArgs {});
+        assert_eq!(duration, Duration::from_millis(100));
     }
 
     #[test]
