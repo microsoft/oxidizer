@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn"
 description = "A generic task spawner compatible with any async runtime."
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
 categories = ["asynchronous"]
@@ -28,12 +28,11 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["tokio", "custom"]
+default = []
 tokio = ["dep:tokio"]
-custom = ["dep:futures-channel"]
 
 [dependencies]
-futures-channel = { workspace = true, features = ["alloc"], optional = true }
+futures-channel = { workspace = true, features = ["alloc"] }
 thread_aware = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt"], optional = true }
 
@@ -44,17 +43,28 @@ insta.workspace = true
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = "2"
 static_assertions.workspace = true
-tick = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[[test]]
+name = "spawner"
+required-features = ["tokio"]
+
+[[test]]
+name = "handle"
+required-features = ["tokio"]
+
+[[test]]
+name = "builder"
+required-features = ["tokio"]
 
 [[bench]]
 name = "spawner"
 harness = false
-required-features = ["tokio", "custom"]
+required-features = ["tokio"]
 
 [[example]]
 name = "custom"
-required-features = ["tokio", "custom"]
+required-features = ["tokio"]
 
 [[example]]
 name = "tokio"
@@ -62,11 +72,11 @@ required-features = ["tokio"]
 
 [[example]]
 name = "otel_context"
-required-features = ["tokio", "custom"]
+required-features = ["tokio"]
 
 [[example]]
 name = "thread_aware"
-required-features = ["tokio", "custom"]
+required-features = ["tokio"]
 
 [lints]
 workspace = true
