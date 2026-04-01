@@ -31,7 +31,6 @@ allowed_external_types = [
 test-util = ["dep:parking_lot"]
 
 [dependencies]
-bytesbuf = { workspace = true }
 dynosaur = { workspace = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true, optional = true }
