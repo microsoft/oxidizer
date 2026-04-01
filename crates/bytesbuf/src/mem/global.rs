@@ -411,10 +411,11 @@ thread_local! {
         .build();
 
     // Counts how many GlobalPoolInner instances have been created. Each instance owns its own
-    // memory capacity, so creating many of them defeats the purpose of pooling. In typical usage,
-    // a thread-aware GlobalPool creates at most one instance per thread, so application owners
-    // can use this metric to detect if something is inadvertently creating an excessive number
-    // of pools instead of reusing existing ones.
+    // memory capacity, so creating many of them defeats the purpose of pooling. In typical usage
+    // with a thread-aware GlobalPool backed by thread_aware::PerCore, there is at most one
+    // instance per core/affinity (for pinned worker threads), so application owners can use this
+    // metric to detect if something is inadvertently creating an excessive number of pools instead
+    // of reusing existing ones.
     static INSTANCES_CREATED: Event = Event::builder()
         .name("bytesbuf_global_pool_instances_total")
         .build();
