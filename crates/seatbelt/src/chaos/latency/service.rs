@@ -114,6 +114,7 @@ where
 {
     type Out = Out;
 
+    #[cfg_attr(test, mutants::skip)] // enable_if guard causes test timeouts under mutation
     async fn execute(&self, input: In) -> Self::Out {
         if !self.shared.enable_if.call(&input) {
             return self.inner.execute(input).await;
