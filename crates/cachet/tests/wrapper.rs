@@ -215,6 +215,7 @@ async fn wrapper_expired_entry_returns_none() {
     assert!(result.is_none(), "expired entry should return None");
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn wrapper_inner_returns_reference() {
     let clock = Clock::new_frozen();
