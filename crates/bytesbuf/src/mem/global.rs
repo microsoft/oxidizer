@@ -139,6 +139,8 @@ struct GlobalPoolInner {
 
 impl GlobalPoolInner {
     fn new() -> Self {
+        INSTANCES_CREATED.with(Event::observe_once);
+
         Self {
             pool_1k: Arc::new(Mutex::new(RawPinnedPool::new())),
             pool_4k: Arc::new(Mutex::new(RawPinnedPool::new())),
@@ -406,6 +408,15 @@ thread_local! {
     static RESERVATION_REQUESTED_SIZE: Event = Event::builder()
         .name("bytesbuf_global_pool_reservation_requested_size")
         .histogram(RESERVATION_SIZE_BUCKETS)
+        .build();
+
+    // Counts how many GlobalPoolInner instances have been created. Each instance owns its own
+    // memory capacity, so creating many of them defeats the purpose of pooling. In typical usage,
+    // a thread-aware GlobalPool creates at most one instance per thread, so application owners
+    // can use this metric to detect if something is inadvertently creating an excessive number
+    // of pools instead of reusing existing ones.
+    static INSTANCES_CREATED: Event = Event::builder()
+        .name("bytesbuf_global_pool_instances_total")
         .build();
 }
 
