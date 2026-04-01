@@ -310,6 +310,7 @@ version = "0.1.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
+ "bytesbuf",
  "cachet_memory",
  "cachet_service",
  "cachet_tier",

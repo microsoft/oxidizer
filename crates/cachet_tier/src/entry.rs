@@ -122,6 +122,16 @@ impl<V> CacheEntry<V> {
     pub fn value(&self) -> &V {
         &self.value
     }
+
+    /// Transforms the value while preserving metadata (`cached_at`, `ttl`).
+    #[must_use]
+    pub fn map_value<U, F: FnOnce(V) -> U>(self, f: F) -> CacheEntry<U> {
+        CacheEntry {
+            value: f(self.value),
+            cached_at: self.cached_at,
+            ttl: self.ttl,
+        }
+    }
 }
 
 impl<V> Deref for CacheEntry<V> {

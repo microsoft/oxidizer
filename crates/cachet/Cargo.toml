@@ -43,6 +43,7 @@ service = ["dep:cachet_service", "dep:layered"]
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
+bytesbuf = { workspace = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
@@ -138,6 +139,10 @@ required-features = ["memory", "service"]
 [[example]]
 name = "service_middleware_composition"
 required-features = ["memory", "service"]
+
+[[example]]
+name = "type_mapping"
+required-features = ["memory", "test-util"]
 
 [lints]
 workspace = true
