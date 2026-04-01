@@ -26,6 +26,7 @@ fn cache_builder_with_storage() {
     });
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn mock_cache_with_storage() {
     let clock = Clock::new_frozen();
