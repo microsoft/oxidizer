@@ -326,7 +326,7 @@ where
 
     /// Returns an **approximate** count of entries, if supported by the underlying storage.
     ///
-    /// Returns `None` if the underlying storage does not support size tracking.
+    /// Returns `Ok(None)` if the underlying storage does not support size tracking.
     ///
     /// # Approximation
     ///
@@ -352,7 +352,7 @@ where
 
     /// Returns `true` if the cache **appears** to contain no entries.
     ///
-    /// Returns `None` if the underlying storage does not support size tracking.
+    /// Returns `Ok(None)` if the underlying storage does not support size tracking.
     ///
     /// Subject to the same approximation caveats as [`len`](Self::len).
     ///
