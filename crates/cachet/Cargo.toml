@@ -43,7 +43,6 @@ service = ["dep:cachet_service", "dep:layered"]
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
-bytesbuf = { workspace = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
