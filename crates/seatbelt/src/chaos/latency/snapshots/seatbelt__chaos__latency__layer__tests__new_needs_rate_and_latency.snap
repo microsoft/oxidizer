@@ -1,0 +1,31 @@
+---
+source: crates/seatbelt/src/chaos/latency/layer.rs
+expression: layer
+---
+LatencyLayer {
+    context: ResilienceContext {
+        clock: Clock {
+            kind: "controlled",
+            timers: 0,
+            alive: true,
+            affinity: None,
+            ..
+        },
+        name: "test_pipeline",
+        meter: None,
+        logs_enabled: false,
+        _in: PhantomData<fn() -> alloc::string::String>,
+        _out: PhantomData<fn() -> alloc::string::String>,
+    },
+    rate: None,
+    latency_duration: None,
+    enable_if: Enabled,
+    telemetry: TelemetryHelper {
+        pipeline_name: "test_pipeline",
+        strategy_name: "test_latency",
+        event_reporter: None,
+        logs_enabled: false,
+    },
+    rnd: Real,
+    _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::NotSet, seatbelt::typestates::NotSet) -> alloc::string::String>,
+}

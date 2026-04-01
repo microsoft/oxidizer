@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.4] - 2026-04-01
+
+- ✨ Features
+
+  - introduce chaos latency ([#345](https://github.com/microsoft/oxidizer/pull/345))
+
 ## [0.4.3] - 2026-03-24
 
 - ✨ Features

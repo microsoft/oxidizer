@@ -11,6 +11,11 @@
 //!
 //! - [`injection`] - Replaces service output with a user-provided value at a
 //!   configurable probability.
+//! - [`latency`] - Injects artificial delay before the inner service call at a
+//!   configurable probability.
 
 #[cfg(any(feature = "chaos-injection", test))]
 pub mod injection;
+
+#[cfg(any(feature = "chaos-latency", test))]
+pub mod latency;
