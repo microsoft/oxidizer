@@ -199,6 +199,7 @@ where
 }
 
 impl<In: Send + 'static, Out: Send + 'static> LatencyShared<In, Out> {
+    #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn should_inject(&self, input: &In) -> bool {
         let rate = self.rate.call(input, LatencyRateArgs {}).clamp(0.0, 1.0);
         self.rnd.next_f64() < rate
