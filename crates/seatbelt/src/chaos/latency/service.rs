@@ -161,7 +161,7 @@ where
     Err: Send + 'static,
     Req: Send + 'static,
     Res: Send + 'static,
-    S: tower_service::Service<Req, Response = Res, Error = Err> + Send + Sync + 'static,
+    S: tower_service::Service<Req, Response = Res, Error = Err> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     type Response = Res;
@@ -187,12 +187,12 @@ where
         self.shared.handle_latency(duration);
 
         let shared = Arc::clone(&self.shared);
-        let future = self.inner.call(req);
+        let mut inner = self.inner.clone();
 
         LatencyFuture {
             inner: Box::pin(async move {
                 shared.clock.delay(duration).await;
-                future.await
+                inner.call(req).await
             }),
         }
     }

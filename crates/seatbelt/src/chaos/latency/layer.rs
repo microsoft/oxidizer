@@ -120,7 +120,7 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     /// Panics if `range.start > range.end`.
     #[must_use]
     pub fn latency_range(mut self, range: Range<Duration>) -> LatencyLayer<In, Out, S1, Set> {
-        let span = range.end.checked_sub(range.start).expect("latency_range requires start < end");
+        let span = range.end.checked_sub(range.start).expect("latency_range requires start <= end");
 
         if span == Duration::ZERO {
             return self.latency(range.start);
@@ -140,14 +140,19 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     /// [`max_latency`][LatencyConfig::max_latency] is set), and
     /// [`enable`][LatencyLayer::enable] properties from the config.
     ///
+    /// When `max_latency` is `Some` but less than or equal to `latency`, the
+    /// range is treated as a fixed latency of `config.latency` instead of
+    /// panicking. This keeps config-file-driven setup non-panicking even when
+    /// the values are misconfigured.
+    ///
     /// This transitions both type-state parameters to [`Set`], so a single
     /// `config()` call is sufficient to produce a buildable layer.
     #[must_use]
     pub fn config(self, config: &LatencyConfig) -> LatencyLayer<In, Out, Set, Set> {
         let with_rate = self.rate(config.rate).enable(config.enabled);
         match config.max_latency {
-            Some(max) => with_rate.latency_range(config.latency..max),
-            None => with_rate.latency(config.latency),
+            Some(max) if max > config.latency => with_rate.latency_range(config.latency..max),
+            _ => with_rate.latency(config.latency),
         }
     }
 
@@ -300,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "latency_range requires start < end")]
+    #[should_panic(expected = "latency_range requires start <= end")]
     fn latency_range_panics_on_invalid_range() {
         let context = create_test_context();
         let _layer: LatencyLayer<_, _, NotSet, Set> =
@@ -354,6 +359,36 @@ mod tests {
             rate: 0.5,
             latency: Duration::from_millis(100),
             max_latency: Some(Duration::from_millis(500)),
+        };
+        let layer: LatencyLayer<_, _, Set, Set> = LatencyLayer::new("test".into(), &context).config(&config);
+
+        assert!(layer.rate.is_some());
+        assert!(layer.latency_duration.is_some());
+    }
+
+    #[test]
+    fn config_with_max_latency_equal_to_latency_uses_fixed() {
+        let context = create_test_context();
+        let config = LatencyConfig {
+            enabled: true,
+            rate: 0.5,
+            latency: Duration::from_millis(100),
+            max_latency: Some(Duration::from_millis(100)),
+        };
+        let layer: LatencyLayer<_, _, Set, Set> = LatencyLayer::new("test".into(), &context).config(&config);
+
+        assert!(layer.rate.is_some());
+        assert!(layer.latency_duration.is_some());
+    }
+
+    #[test]
+    fn config_with_max_latency_less_than_latency_uses_fixed() {
+        let context = create_test_context();
+        let config = LatencyConfig {
+            enabled: true,
+            rate: 0.5,
+            latency: Duration::from_millis(200),
+            max_latency: Some(Duration::from_millis(50)),
         };
         let layer: LatencyLayer<_, _, Set, Set> = LatencyLayer::new("test".into(), &context).config(&config);
 
