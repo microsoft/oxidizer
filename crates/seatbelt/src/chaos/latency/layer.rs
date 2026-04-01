@@ -319,6 +319,19 @@ mod tests {
     }
 
     #[test]
+    fn latency_range_non_equal_bounds_uses_random_duration() {
+        let context = create_test_context();
+        let mut layer: LatencyLayer<String, String, NotSet, NotSet> = LatencyLayer::new("test".into(), &context);
+        layer.rnd = Rnd::new_fixed(0.5);
+        let layer: LatencyLayer<_, _, NotSet, Set> = layer.latency_range(Duration::from_millis(100)..Duration::from_millis(500));
+
+        assert!(layer.latency_duration.is_some());
+        let duration = layer.latency_duration.unwrap().call(&"test".to_string(), LatencyDurationArgs {});
+        // With rnd fixed at 0.5: start(100ms) + span(400ms) * 0.5 = 300ms
+        assert_eq!(duration, Duration::from_millis(300));
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn config_applies_all_settings() {
         let context = create_test_context();
