@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use crate::UrlTemplateLabel;
+use crate::extensions::ExtensionsExt;
 use http::Request;
 use templated_uri::uri::TargetPathAndQuery;
-use crate::extensions::ExtensionsExt;
-use crate::UrlTemplateLabel;
 
 /// Extensions for HTTP requests.
 pub trait RequestExt: sealed::Sealed {

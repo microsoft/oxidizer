@@ -48,10 +48,7 @@ mod tests {
         extensions.insert(UrlTemplateLabel::new("/api/users/{id}"));
 
         assert_eq!(
-            extensions
-                .url_template_label()
-                .as_ref()
-                .map(UrlTemplateLabel::as_str),
+            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
             Some("/api/users/{id}")
         );
     }
@@ -59,9 +56,7 @@ mod tests {
     #[test]
     fn returns_label_from_target_path_and_query() {
         let mut extensions = Extensions::new();
-        extensions.insert(TargetPathAndQuery::from_path_and_query(
-            "/path".parse().unwrap(),
-        ));
+        extensions.insert(TargetPathAndQuery::from_path_and_query("/path".parse().unwrap()));
 
         let result = extensions.url_template_label();
         assert!(result.is_some());
@@ -71,15 +66,10 @@ mod tests {
     fn explicit_label_takes_precedence_over_target_path() {
         let mut extensions = Extensions::new();
         extensions.insert(UrlTemplateLabel::new("/explicit"));
-        extensions.insert(TargetPathAndQuery::from_path_and_query(
-            "/path".parse().unwrap(),
-        ));
+        extensions.insert(TargetPathAndQuery::from_path_and_query("/path".parse().unwrap()));
 
         assert_eq!(
-            extensions
-                .url_template_label()
-                .as_ref()
-                .map(UrlTemplateLabel::as_str),
+            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
             Some("/explicit")
         );
     }
