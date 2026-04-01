@@ -470,7 +470,7 @@ mod tests {
             .max_capacity(capacity)
             .build()
             .expect("Cache should build successfully");
-        for i in 0..=capacity {
+        for i in 0..capacity {
             cache
                 .insert(format!("key{i}"), CacheEntry::new(i))
                 .await
