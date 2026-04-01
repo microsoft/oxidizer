@@ -147,6 +147,7 @@ impl<In, Out, S1, S2> LatencyLayer<In, Out, S1, S2> {
     ///
     /// This transitions both type-state parameters to [`Set`], so a single
     /// `config()` call is sufficient to produce a buildable layer.
+    #[cfg_attr(test, mutants::skip)] // produces unkillable mutants
     #[must_use]
     pub fn config(self, config: &LatencyConfig) -> LatencyLayer<In, Out, Set, Set> {
         let with_rate = self.rate(config.rate).enable(config.enabled);
@@ -354,16 +355,19 @@ mod tests {
     #[test]
     fn config_with_max_latency_applies_range() {
         let context = create_test_context();
+        let mut layer: LatencyLayer<String, String, NotSet, NotSet> = LatencyLayer::new("test".into(), &context);
+        layer.rnd = Rnd::new_fixed(0.5);
         let config = LatencyConfig {
             enabled: true,
             rate: 0.5,
             latency: Duration::from_millis(100),
             max_latency: Some(Duration::from_millis(500)),
         };
-        let layer: LatencyLayer<_, _, Set, Set> = LatencyLayer::new("test".into(), &context).config(&config);
+        let layer: LatencyLayer<_, _, Set, Set> = layer.config(&config);
 
-        assert!(layer.rate.is_some());
-        assert!(layer.latency_duration.is_some());
+        // With rnd fixed at 0.5: start(100ms) + span(400ms) * 0.5 = 300ms
+        let duration = layer.latency_duration.unwrap().call(&"test".to_string(), LatencyDurationArgs {});
+        assert_eq!(duration, Duration::from_millis(300));
     }
 
     #[test]
@@ -377,8 +381,8 @@ mod tests {
         };
         let layer: LatencyLayer<_, _, Set, Set> = LatencyLayer::new("test".into(), &context).config(&config);
 
-        assert!(layer.rate.is_some());
-        assert!(layer.latency_duration.is_some());
+        let duration = layer.latency_duration.unwrap().call(&"test".to_string(), LatencyDurationArgs {});
+        assert_eq!(duration, Duration::from_millis(100));
     }
 
     #[test]
@@ -392,8 +396,8 @@ mod tests {
         };
         let layer: LatencyLayer<_, _, Set, Set> = LatencyLayer::new("test".into(), &context).config(&config);
 
-        assert!(layer.rate.is_some());
-        assert!(layer.latency_duration.is_some());
+        let duration = layer.latency_duration.unwrap().call(&"test".to_string(), LatencyDurationArgs {});
+        assert_eq!(duration, Duration::from_millis(200));
     }
 
     #[test]
