@@ -54,7 +54,14 @@ impl<In, Out> ResilienceContext<In, Out> {
 
     /// Get the configured clock for timing operations.
     #[must_use]
-    #[cfg(any(feature = "retry", feature = "breaker", feature = "timeout", feature = "hedging", test))]
+    #[cfg(any(
+        feature = "retry",
+        feature = "breaker",
+        feature = "timeout",
+        feature = "hedging",
+        feature = "chaos-latency",
+        test
+    ))]
     pub(crate) fn get_clock(&self) -> &Clock {
         &self.clock
     }
@@ -102,6 +109,7 @@ impl<In, Out> ResilienceContext<In, Out> {
         feature = "fallback",
         feature = "hedging",
         feature = "chaos-injection",
+        feature = "chaos-latency",
         test
     ))]
     pub(crate) fn create_telemetry(&self, strategy_name: Cow<'static, str>) -> crate::utils::TelemetryHelper {

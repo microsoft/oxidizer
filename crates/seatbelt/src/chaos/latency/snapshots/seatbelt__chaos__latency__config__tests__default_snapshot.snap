@@ -1,0 +1,10 @@
+---
+source: crates/seatbelt/src/chaos/latency/config.rs
+expression: config
+---
+{
+  "enabled": true,
+  "rate": 0.0,
+  "latency": "0s",
+  "max_latency": null
+}
