@@ -10,7 +10,6 @@
 pub(crate) mod attributes;
 pub(crate) mod cache;
 pub(crate) mod config;
-pub(crate) mod ext;
 #[cfg(any(feature = "metrics", test))]
 pub(crate) mod metrics;
 

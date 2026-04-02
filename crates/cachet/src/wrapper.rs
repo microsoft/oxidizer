@@ -14,7 +14,6 @@ use cachet_tier::CacheTier;
 use tick::Clock;
 
 use crate::cache::CacheName;
-use crate::telemetry::ext::ClockExt;
 use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 use crate::{CacheEntry, Error};
 
@@ -124,7 +123,7 @@ where
     CT: CacheTier<K, V> + Send + Sync,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let timed = self.clock.timed_async(self.inner.get(key)).await;
+        let timed = self.clock.timed(self.inner.get(key)).await;
         match timed.result {
             Ok(value) => Ok(self.handle_get_result(value, timed.duration)),
             Err(e) => {
@@ -137,7 +136,7 @@ where
 
     async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
-        let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
+        let timed = self.clock.timed(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
                 self.telemetry
@@ -155,7 +154,7 @@ where
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        let timed = self.clock.timed_async(self.inner.invalidate(key)).await;
+        let timed = self.clock.timed(self.inner.invalidate(key)).await;
         match &timed.result {
             Ok(()) => {
                 self.telemetry
@@ -173,7 +172,7 @@ where
     }
 
     async fn clear(&self) -> Result<(), Error> {
-        let timed = self.clock.timed_async(self.inner.clear()).await;
+        let timed = self.clock.timed(self.inner.clear()).await;
         match &timed.result {
             Ok(()) => {
                 self.telemetry
