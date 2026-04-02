@@ -39,6 +39,7 @@ The crate provides extension traits that add convenience methods to standard HTT
 * [`HttpRequestExt`][__link13] - Request cloning with body support
 * [`HeaderMapExt`][__link14] - Header value extraction and parsing
 * [`HeaderValueExt`][__link15] - Construction of [`HeaderValue`][__link16] from [`Bytes`][__link17]
+* [`ExtensionsExt`][__link30] - Extensions for [`http::Extensions`][__link31] to extract URL template labels
 
 ## Quick Start
 
@@ -194,6 +195,8 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link28]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBodyBuilder
  [__link29]: https://crates.io/crates/bytesbuf/0.4.1
  [__link3]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBody
+ [__link30]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=ExtensionsExt
+ [__link31]: https://docs.rs/http/1.4.0/http/?search=Extensions
  [__link4]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpRequestBuilder
  [__link5]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpResponseBuilder
  [__link6]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBody
