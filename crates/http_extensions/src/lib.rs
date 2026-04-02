@@ -34,7 +34,7 @@
 //! - [`HttpRequestExt`] - Request cloning with body support
 //! - [`HeaderMapExt`] - Header value extraction and parsing
 //! - [`HeaderValueExt`] - Construction of [`HeaderValue`][http::HeaderValue] from [`Bytes`][bytes::Bytes]
-//! - [`ExtensionsExt`] - Extensions for [`http::Extensions`][http::Extensions] to extract URL template labels
+//! - [`ExtensionsExt`] - Extensions for [`Extensions`][http::Extensions] to extract URL template labels
 //!
 //! # Quick Start
 //!
