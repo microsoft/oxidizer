@@ -24,6 +24,10 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 Do not manually edit `CHANGELOG.md` files. Changelogs are automatically updated on release.
 
+## Pull Requests
+
+Pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/) naming, e.g. `feat(bytesbuf): add new metric` or `fix(cachet): correct eviction logic`.
+
 ## Maintainability
 
 While it is fine to use `.expect()`, the precondition is that it is either a programming error (the caller did something wrong)
