@@ -148,14 +148,14 @@ jobs:
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v2.9.4
+        uses: marocchino/sticky-pull-request-comment@v3.0.2
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
         if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v2.9.4
+        uses: marocchino/sticky-pull-request-comment@v3.0.2
         with:
           header: semver-check
           delete: true
