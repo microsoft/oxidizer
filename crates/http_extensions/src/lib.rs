@@ -212,7 +212,7 @@ mod http_request_builder_ext;
 pub use http_request_builder_ext::HttpRequestBuilderExt;
 
 mod extensions;
-pub use extensions::{HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
+pub use extensions::{ExtensionsExt, HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
 
 mod url_template_label;
 pub use url_template_label::UrlTemplateLabel;
