@@ -107,11 +107,11 @@ async fn fallback_cache_len_returns_correct_count() {
         .fallback(fallback)
         .build();
 
-    assert_eq!(cache.len(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), Some(0));
 
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
-    assert_eq!(cache.len(), Some(1));
+    assert_eq!(cache.len().await.unwrap(), Some(1));
 }
 
 fn failing_cache() -> MockCache<String, i32> {

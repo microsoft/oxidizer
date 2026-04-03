@@ -95,9 +95,9 @@ where
         }
     }
 
-    fn len(&self) -> Option<u64> {
+    async fn len(&self) -> Result<Option<u64>, Error> {
         // Service-based tiers typically don't expose length information
-        None
+        Ok(None)
     }
 }
 
@@ -170,10 +170,11 @@ mod tests {
         assert!(result.is_ok(), "clear should succeed");
     }
 
-    #[test]
-    fn adapter_len() {
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn adapter_len() {
         let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
-        assert_eq!(adapter.len(), None);
+        assert_eq!(adapter.len().await.expect("len should return Ok"), None);
     }
 
     #[test]

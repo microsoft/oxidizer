@@ -33,6 +33,7 @@ _manifest
 .artifactIgnore
 .sarif
 ARROW
+bacon.toml
 
 # Agent files
 .claude

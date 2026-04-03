@@ -290,9 +290,9 @@ where
         fallback_result
     }
 
-    fn len(&self) -> Option<u64> {
+    async fn len(&self) -> Result<Option<u64>, Error> {
         // Return length of primary cache if available
-        self.inner.primary.len()
+        self.inner.primary.len().await
     }
 }
 
@@ -317,10 +317,6 @@ mod tests {
     type TestPrimary = CacheWrapper<String, i32, MockCache<String, i32>>;
     type TestFallbackCache = FallbackCache<String, i32, TestPrimary, MockCache<String, i32>>;
 
-    fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        futures::executor::block_on(f)
-    }
-
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
@@ -337,76 +333,74 @@ mod tests {
 
     /// Tests that promotion from fallback to primary works correctly.
     /// This test accesses internal state to verify promotion behavior.
-    #[test]
-    fn fallback_cachet_promotes_from_fallback_to_primary() {
-        block_on(async {
-            let clock = Clock::new_frozen();
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_cachet_promotes_from_fallback_to_primary() {
+        let clock = Clock::new_frozen();
 
-            let primary_storage = MockCache::<String, i32>::new();
-            let primary_check = primary_storage.clone();
-            let fallback_storage = MockCache::<String, i32>::new();
+        let primary_storage = MockCache::<String, i32>::new();
+        let primary_check = primary_storage.clone();
+        let fallback_storage = MockCache::<String, i32>::new();
 
-            fallback_storage
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("insert failed");
+        fallback_storage
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("insert failed");
 
-            let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
-            let cache = Cache::builder::<String, i32>(clock)
-                .storage(primary_storage)
-                .fallback(fallback)
-                .promotion_policy(FallbackPromotionPolicy::always())
-                .build();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .promotion_policy(FallbackPromotionPolicy::always())
+            .build();
 
-            // Primary should be empty initially
-            let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
-            assert!(primary_result.is_none());
+        // Primary should be empty initially
+        let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
+        assert!(primary_result.is_none());
 
-            // Get should find in fallback and promote to primary
-            let result = cache.get(&"key".to_string()).await.expect("get failed");
-            assert!(result.is_some());
-            assert_eq!(*result.unwrap().value(), 42);
+        // Get should find in fallback and promote to primary
+        let result = cache.get(&"key".to_string()).await.expect("get failed");
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
 
-            // Now primary should have the value (promoted from fallback)
-            let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
-            assert!(primary_result.is_some());
-        });
+        // Now primary should have the value (promoted from fallback)
+        let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
+        assert!(primary_result.is_some());
     }
 
     /// Tests that Never promotion policy prevents promotion to primary.
     /// This test accesses internal state to verify no promotion occurs.
-    #[test]
-    fn fallback_cachet_never_policy_does_not_promote() {
-        block_on(async {
-            let clock = Clock::new_frozen();
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_cachet_never_policy_does_not_promote() {
+        let clock = Clock::new_frozen();
 
-            let primary_storage = MockCache::<String, i32>::new();
-            let primary_check = primary_storage.clone();
-            let fallback_storage = MockCache::<String, i32>::new();
+        let primary_storage = MockCache::<String, i32>::new();
+        let primary_check = primary_storage.clone();
+        let fallback_storage = MockCache::<String, i32>::new();
 
-            fallback_storage
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("insert failed");
+        fallback_storage
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("insert failed");
 
-            let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
-            let cache = Cache::builder::<String, i32>(clock)
-                .storage(primary_storage)
-                .fallback(fallback)
-                .promotion_policy(FallbackPromotionPolicy::never())
-                .build();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .promotion_policy(FallbackPromotionPolicy::never())
+            .build();
 
-            // Get should find in fallback but NOT promote
-            let result = cache.get(&"key".to_string()).await.expect("get failed");
-            assert!(result.is_some());
-            assert_eq!(*result.unwrap().value(), 42);
+        // Get should find in fallback but NOT promote
+        let result = cache.get(&"key".to_string()).await.expect("get failed");
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
 
-            // Primary should still be empty (no promotion)
-            let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
-            assert!(primary_result.is_none());
-        });
+        // Primary should still be empty (no promotion)
+        let primary_result = primary_check.get(&"key".to_string()).await.expect("get failed");
+        assert!(primary_result.is_none());
     }
 
     /// Tests that `FallbackCacheInner` Debug output is correct.
@@ -420,56 +414,56 @@ mod tests {
 
     /// Tests that conditional promotion policy only promotes matching entries.
     /// This test accesses internal state to verify selective promotion.
-    #[test]
-    fn fallback_cachet_when_policy_conditional_promotion() {
-        block_on(async {
-            fn is_positive(entry: &CacheEntry<i32>) -> bool {
-                *entry.value() > 0
-            }
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_cachet_when_policy_conditional_promotion() {
+        fn is_positive(entry: &CacheEntry<i32>) -> bool {
+            *entry.value() > 0
+        }
 
-            let clock = Clock::new_frozen();
+        let clock = Clock::new_frozen();
 
-            let primary_storage = MockCache::<String, i32>::new();
-            let primary_check = primary_storage.clone();
-            let fallback_storage = MockCache::<String, i32>::new();
+        let primary_storage = MockCache::<String, i32>::new();
+        let primary_check = primary_storage.clone();
+        let fallback_storage = MockCache::<String, i32>::new();
 
-            fallback_storage
-                .insert("positive".to_string(), CacheEntry::new(42))
-                .await
-                .expect("insert failed");
-            fallback_storage
-                .insert("negative".to_string(), CacheEntry::new(-10))
-                .await
-                .expect("insert failed");
+        fallback_storage
+            .insert("positive".to_string(), CacheEntry::new(42))
+            .await
+            .expect("insert failed");
+        fallback_storage
+            .insert("negative".to_string(), CacheEntry::new(-10))
+            .await
+            .expect("insert failed");
 
-            let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+        let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
 
-            let cache = Cache::builder::<String, i32>(clock)
-                .storage(primary_storage)
-                .fallback(fallback)
-                .promotion_policy(FallbackPromotionPolicy::when(is_positive))
-                .build();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(primary_storage)
+            .fallback(fallback)
+            .promotion_policy(FallbackPromotionPolicy::when(is_positive))
+            .build();
 
-            // Get positive value - should be promoted
-            let result = cache.get(&"positive".to_string()).await.expect("get failed");
-            assert!(result.is_some());
-            assert_eq!(*result.unwrap().value(), 42);
+        // Get positive value - should be promoted
+        let result = cache.get(&"positive".to_string()).await.expect("get failed");
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), 42);
 
-            // Get negative value - should NOT be promoted
-            let result = cache.get(&"negative".to_string()).await.expect("get failed");
-            assert!(result.is_some());
-            assert_eq!(*result.unwrap().value(), -10);
+        // Get negative value - should NOT be promoted
+        let result = cache.get(&"negative".to_string()).await.expect("get failed");
+        assert!(result.is_some());
+        assert_eq!(*result.unwrap().value(), -10);
 
-            // Check primary has positive but not negative
-            let positive = primary_check.get(&"positive".to_string()).await.expect("get failed");
-            assert!(positive.is_some());
-            let negative = primary_check.get(&"negative".to_string()).await.expect("get failed");
-            assert!(negative.is_none());
-        });
+        // Check primary has positive but not negative
+        let positive = primary_check.get(&"positive".to_string()).await.expect("get failed");
+        assert!(positive.is_some());
+        let negative = primary_check.get(&"negative".to_string()).await.expect("get failed");
+        assert!(negative.is_none());
     }
 
-    #[test]
-    fn policy_type_debug_formatting() {
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn policy_type_debug_formatting() {
         let always = FallbackPromotionPolicy::<i32>::always();
         let never = FallbackPromotionPolicy::<i32>::never();
         let when = FallbackPromotionPolicy::<i32>::when(|_| true);
@@ -510,54 +504,49 @@ mod tests {
         assert_eq!(cache.inner.name, "fallback");
     }
 
-    #[test]
-    fn fallback_get_miss_both() {
-        block_on(async {
-            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            let result = cache.get(&"key".to_string()).await.unwrap();
-            assert!(result.is_none());
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_get_miss_both() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let result = cache.get(&"key".to_string()).await.unwrap();
+        assert!(result.is_none());
     }
 
-    #[test]
-    fn fallback_insert_writes_both() {
-        block_on(async {
-            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-            // Both tiers should have the value
-            let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
-            assert_eq!(*entry.value(), 42);
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_insert_writes_both() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        // Both tiers should have the value
+        let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
+        assert_eq!(*entry.value(), 42);
     }
 
-    #[test]
-    fn fallback_invalidate() {
-        block_on(async {
-            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-            cache.invalidate(&"key".to_string()).await.unwrap();
-            assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_invalidate() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.invalidate(&"key".to_string()).await.unwrap();
+        assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
     }
 
-    #[test]
-    fn fallback_clear() {
-        block_on(async {
-            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-            cache.clear().await.unwrap();
-            assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_clear() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.clear().await.unwrap();
+        assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
     }
 
-    #[test]
-    fn fallback_len() {
-        block_on(async {
-            let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-            assert_eq!(cache.len(), Some(0));
-            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-            assert_eq!(cache.len(), Some(1));
-        });
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fallback_len() {
+        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        assert_eq!(cache.len().await.expect("len should return Ok"), Some(0));
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        assert_eq!(cache.len().await.expect("len should return Ok"), Some(1));
     }
 
     /// Exercises the background-refresh-on-get path: when a primary hit has a

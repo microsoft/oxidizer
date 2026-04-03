@@ -272,8 +272,8 @@ where
         Ok(())
     }
 
-    fn len(&self) -> Option<u64> {
-        Some(self.data.lock().len() as u64)
+    async fn len(&self) -> Result<Option<u64>, Error> {
+        Ok(Some(self.data.lock().len() as u64))
     }
 }
 

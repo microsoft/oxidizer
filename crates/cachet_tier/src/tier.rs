@@ -52,7 +52,7 @@ pub trait CacheTier<K, V>: Send + Sync {
 
     /// Returns an **approximate** count of entries, if the implementation supports it.
     ///
-    /// Returns `None` for implementations that do not track size.
+    /// Returns `Ok(None)` for implementations that do not track size.
     ///
     /// # Approximation
     ///
@@ -63,19 +63,30 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// Do not use this value for exact bookkeeping or correctness decisions. It is
     /// suitable for approximate capacity monitoring, metrics, and health checks.
-    fn len(&self) -> Option<u64> {
-        None
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying storage operation fails.
+    fn len(&self) -> impl Future<Output = Result<Option<u64>, Error>> + Send {
+        async { Ok(None) }
     }
 
     /// Returns `true` if the cache **appears** to contain no entries.
     ///
-    /// Returns `None` for implementations that do not track size.
+    /// Returns `Ok(None)` for implementations that do not track size.
     ///
     /// Subject to the same approximation caveat as [`len`](Self::len): a return
-    /// value of `false` does not guarantee that a subsequent `get` will find anything,
-    /// and a return value of `true` does not guarantee the cache is actually empty if
+    /// value of `Some(false)` does not guarantee that a subsequent `get` will find
+    /// anything, and `Some(true)` does not guarantee the cache is actually empty if
     /// entries have expired but not yet been evicted.
-    fn is_empty(&self) -> Option<bool> {
-        self.len().map(|len| len == 0)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying storage operation fails.
+    fn is_empty(&self) -> impl Future<Output = Result<Option<bool>, Error>> + Send {
+        async {
+            let len = self.len().await?;
+            Ok(len.map(|len| len == 0))
+        }
     }
 }
