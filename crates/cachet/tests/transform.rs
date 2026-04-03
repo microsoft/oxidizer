@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, CacheOp, IdentityCodec, MockCache, TransformCodec, TransformEncoder, infallible};
+use cachet::{Cache, CacheEntry, CacheOp, MockCache, TransformCodec, TransformEncoder, infallible};
 use tick::Clock;
 
 /// Builds a cache with L1 (`MockCache<String, String>`) and L2 (`MockCache<i32, i32>`)
@@ -112,6 +112,22 @@ async fn roundtrip_insert_then_get() {
     assert_eq!(*result.value(), "42");
 }
 
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn len_delegates_through_transform() {
+    let clock = Clock::new_frozen();
+    let l1_data = vec![
+        ("1".to_string(), CacheEntry::new("a".to_string())),
+        ("2".to_string(), CacheEntry::new("b".to_string())),
+    ];
+    let l1 = MockCache::with_data(l1_data.into_iter().collect());
+    let l2 = MockCache::<i32, i32>::new();
+    let cache = build_transform_cache(clock, l1, l2);
+
+    let len = cache.len();
+    assert_eq!(len, Some(2));
+}
+
 // -- Error propagation --
 
 #[cfg_attr(miri, ignore)]
@@ -209,25 +225,6 @@ async fn invalidate_key_encode_error_propagates() {
 
     let err = cache.invalidate(&"bad".to_string()).await.unwrap_err();
     assert!(err.is_source::<std::num::ParseIntError>());
-}
-
-// -- Identity codec through builder --
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn identity_codec_roundtrip() {
-    let clock = Clock::new_frozen();
-
-    let cache = Cache::builder::<i32, i32>(clock.clone())
-        .storage(MockCache::new())
-        .transform(IdentityCodec, IdentityCodec)
-        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
-        .build();
-
-    cache.insert(1, CacheEntry::new(42)).await.unwrap();
-
-    let result = cache.get(&1).await.unwrap().unwrap();
-    assert_eq!(*result.value(), 42);
 }
 
 // -- Infallible encoder through builder --

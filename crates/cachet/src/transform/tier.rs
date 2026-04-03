@@ -90,22 +90,6 @@ impl<A, B> Debug for TransformCodec<A, B> {
     }
 }
 
-/// An identity codec that passes values through unchanged.
-#[derive(Debug, Clone, Copy)]
-pub struct IdentityCodec;
-
-impl<T: Clone + Send + Sync> Encoder<T, T> for IdentityCodec {
-    fn encode(&self, value: &T) -> Result<T, Error> {
-        Ok(value.clone())
-    }
-}
-
-impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
-    fn decode(&self, value: &T) -> Result<T, Error> {
-        Ok(value.clone())
-    }
-}
-
 /// Adapter that transforms keys and values between user types and storage types.
 ///
 /// `TransformAdapter<K, KT, V, VT, S>`:
@@ -199,14 +183,19 @@ mod tests {
 
     #[test]
     fn transform_adapter_debug() {
+        let codec = TransformCodec::new(
+            |v: &String| v.parse::<i32>(),
+            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+        );
+        // Exercise both directions so closure bodies are covered.
+        assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
+        assert_eq!(codec.decode(&42).unwrap(), "42");
+
         let inner = MockCache::<i32, i32>::new();
         let adapter = TransformAdapter::from_boxed(
             inner,
             Box::new(TransformEncoder::custom(|k: &String| k.parse::<i32>())),
-            Box::new(TransformCodec::new(
-                |v: &String| v.parse::<i32>(),
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            )),
+            Box::new(codec),
         );
         let debug = format!("{adapter:?}");
         assert!(debug.contains("TransformAdapter"));
