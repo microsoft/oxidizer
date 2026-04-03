@@ -10,7 +10,9 @@ mod buildable;
 mod cache;
 mod fallback;
 mod sealed;
+mod transform;
 
 pub use cache::CacheBuilder;
 pub use fallback::FallbackBuilder;
 pub use sealed::CacheTierBuilder;
+pub use transform::TransformBuilder;
