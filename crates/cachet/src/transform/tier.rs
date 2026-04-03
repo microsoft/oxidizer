@@ -114,7 +114,7 @@ impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
 /// - `key_encoder: K→KT` (one-directional), `value_codec: V↔VT` (bidirectional)
 ///
 /// Implements `CacheTier<K, V>` by encoding keys/values to `KT, VT` for the inner tier.
-pub struct TransformAdapter<K, KT, V, VT, S>
+pub(crate) struct TransformAdapter<K, KT, V, VT, S>
 where
     S: CacheTier<KT, VT>,
 {
@@ -127,18 +127,7 @@ impl<K, KT, V, VT, S> TransformAdapter<K, KT, V, VT, S>
 where
     S: CacheTier<KT, VT>,
 {
-    /// Creates a new `TransformAdapter` with codecs that are boxed internally.
-    pub fn new(inner: S, key_encoder: impl Encoder<K, KT> + 'static, value_codec: impl Codec<V, VT> + 'static) -> Self {
-        Self {
-            inner,
-            key_encoder: Box::new(key_encoder),
-            value_codec: Box::new(value_codec),
-        }
-    }
-
     /// Creates a new `TransformAdapter` from pre-boxed codecs.
-    ///
-    /// Avoids double-boxing when codecs are already boxed.
     pub(crate) fn from_boxed(inner: S, key_encoder: Box<dyn Encoder<K, KT>>, value_codec: Box<dyn Codec<V, VT>>) -> Self {
         Self {
             inner,
@@ -200,5 +189,26 @@ where
             .field("V", &std::any::type_name::<V>())
             .field("VT", &std::any::type_name::<VT>())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cachet_tier::MockCache;
+
+    #[test]
+    fn transform_adapter_debug() {
+        let inner = MockCache::<i32, i32>::new();
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::custom(|k: &String| k.parse::<i32>())),
+            Box::new(TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            )),
+        );
+        let debug = format!("{adapter:?}");
+        assert!(debug.contains("TransformAdapter"));
     }
 }

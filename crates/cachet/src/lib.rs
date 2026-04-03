@@ -259,4 +259,4 @@ pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
-pub use transform::{Codec, Encoder, IdentityCodec, TransformAdapter, TransformCodec, TransformEncoder};
+pub use transform::{Codec, Encoder, IdentityCodec, TransformCodec, TransformEncoder};

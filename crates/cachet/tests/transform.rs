@@ -1,302 +1,333 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for transform module: `TransformAdapter` and `TransformBuilder`.
+//! Integration tests for the transform module via `CacheBuilder`.
 
 #![cfg(feature = "test-util")]
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, CacheOp, CacheTier, IdentityCodec, MockCache, TransformAdapter, TransformCodec, TransformEncoder};
+use cachet::{Cache, CacheEntry, CacheOp, IdentityCodec, MockCache, TransformCodec, TransformEncoder};
 use tick::Clock;
 
-// ── TransformAdapter direct tests ──
+/// Builds a cache with L1 (`MockCache<String, String>`) and L2 (`MockCache<i32, i32>`)
+/// separated by a String-to-i32 transform boundary.
+fn build_transform_cache(
+    clock: Clock,
+    l1: MockCache<String, String>,
+    l2: MockCache<i32, i32>,
+) -> Cache<String, String, impl cachet::CacheTier<String, String>> {
+    Cache::builder::<String, String>(clock.clone())
+        .storage(l1)
+        .transform(
+            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            ),
+        )
+        .fallback(Cache::builder::<i32, i32>(clock).storage(l2))
+        .build()
+}
+
+// -- Insert + Get through transform boundary --
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn get_returns_mapped_from_inner() {
-    let data = vec![(1, CacheEntry::new(1))];
-    let inner = MockCache::with_data(data.into_iter().collect());
-    let adapter = TransformAdapter::new(
-        inner.clone(),
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+async fn insert_transforms_into_l2() {
+    let clock = Clock::new_frozen();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<i32, i32>::new();
+    let cache = build_transform_cache(clock, l1, l2.clone());
 
-    let value = adapter.get(&"1".to_string()).await.unwrap();
-    assert!(value.is_some());
+    cache.insert("42".to_string(), CacheEntry::new("100".to_string())).await.unwrap();
 
-    // Verify operations
-    assert_eq!(inner.operations(), vec![CacheOp::Get(1),]);
+    let l2_ops = l2.operations();
+    let insert_ops: Vec<_> = l2_ops.iter().filter(|op| matches!(op, CacheOp::Insert { .. })).collect();
+    assert_eq!(insert_ops.len(), 1);
+    assert!(matches!(&insert_ops[0], CacheOp::Insert { key: 42, .. }));
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn insert_maps_and_inserts_into_inner() {
-    let inner = MockCache::new();
-    let adapter = TransformAdapter::new(
-        inner.clone(),
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
-    adapter.insert("1".to_string(), "1".to_string().into()).await.unwrap();
-    adapter.insert("2".to_string(), "2".to_string().into()).await.unwrap();
+async fn get_falls_back_through_transform() {
+    let clock = Clock::new_frozen();
+    let l1 = MockCache::<String, String>::new();
+    let l2_data = vec![(42, CacheEntry::new(100))];
+    let l2 = MockCache::with_data(l2_data.into_iter().collect());
+    let cache = build_transform_cache(clock, l1, l2);
 
-    // Verify operations
-    assert_eq!(
-        inner.operations(),
-        vec![
-            CacheOp::Insert {
-                key: 1,
-                entry: CacheEntry::new(1),
-            },
-            CacheOp::Insert {
-                key: 2,
-                entry: CacheEntry::new(2),
-            },
-        ]
-    );
+    let result = cache.get(&"42".to_string()).await.unwrap().unwrap();
+    assert_eq!(*result.value(), "100");
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn invalidate_maps_key() {
-    let inner = MockCache::new();
-    let adapter = TransformAdapter::new(
-        inner.clone(),
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+async fn get_miss_in_both_tiers() {
+    let clock = Clock::new_frozen();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<i32, i32>::new();
+    let cache = build_transform_cache(clock, l1, l2);
 
-    adapter.invalidate(&"42".to_string()).await.unwrap();
-
-    assert_eq!(inner.operations(), vec![CacheOp::Invalidate(42)]);
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn clear_delegates_to_inner() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner.clone(),
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
-
-    adapter.clear().await.unwrap();
-
-    assert_eq!(inner.operations(), vec![CacheOp::Clear]);
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn get_returns_none_when_inner_misses() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner.clone(),
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
-
-    let result = adapter.get(&"999".to_string()).await.unwrap();
+    let result = cache.get(&"999".to_string()).await.unwrap();
     assert!(result.is_none());
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn get_preserves_entry_metadata() {
-    use std::time::{Duration, SystemTime};
+async fn invalidate_transforms_key_to_l2() {
+    let clock = Clock::new_frozen();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<i32, i32>::new();
+    let cache = build_transform_cache(clock, l1, l2.clone());
 
-    let now = SystemTime::now();
-    let ttl = Duration::from_secs(300);
-    let entry = CacheEntry::expires_at(42, ttl, now);
-    let data = vec![(1, entry)];
-    let inner = MockCache::with_data(data.into_iter().collect());
+    cache.invalidate(&"42".to_string()).await.unwrap();
 
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
-
-    let result = adapter.get(&"1".to_string()).await.unwrap().unwrap();
-    assert_eq!(*result.value(), "42".to_string());
-    assert_eq!(result.cached_at(), Some(now));
-    assert_eq!(result.ttl(), Some(ttl));
+    let l2_ops = l2.operations();
+    assert!(l2_ops.contains(&CacheOp::Invalidate(42)));
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn get_key_encode_error_propagates() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|_k: &String| "not_a_number".parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+async fn clear_propagates_to_l2() {
+    let clock = Clock::new_frozen();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<i32, i32>::new();
+    let cache = build_transform_cache(clock, l1, l2.clone());
 
-    adapter.get(&"bad".to_string()).await.unwrap_err();
+    cache.clear().await.unwrap();
+
+    let l2_ops = l2.operations();
+    assert!(l2_ops.contains(&CacheOp::Clear));
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn roundtrip_insert_then_get() {
+    let clock = Clock::new_frozen();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<i32, i32>::new();
+    let cache = build_transform_cache(clock, l1, l2);
+
+    cache.insert("1".to_string(), CacheEntry::new("42".to_string())).await.unwrap();
+
+    let result = cache.get(&"1".to_string()).await.unwrap().unwrap();
+    assert_eq!(*result.value(), "42");
+}
+
+// -- Error propagation --
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn get_key_encode_error_propagates() {
+    let clock = Clock::new_frozen();
+
+    let cache = Cache::builder::<String, String>(clock.clone())
+        .storage(MockCache::new())
+        .transform(
+            TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
+            TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            ),
+        )
+        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
+        .build();
+
+    let err = cache.get(&"anything".to_string()).await.unwrap_err();
+    assert!(err.is_source::<std::num::ParseIntError>());
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn get_value_decode_error_propagates() {
-    let data = vec![(1, CacheEntry::new(1))];
-    let inner = MockCache::with_data(data.into_iter().collect());
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            // Decode always fails
-            |_v: &i32| Err::<String, _>("bad".parse::<i32>().unwrap_err()),
-        ),
-    );
+    let clock = Clock::new_frozen();
+    let l2_data = vec![(1, CacheEntry::new(1))];
 
-    adapter.get(&"1".to_string()).await.unwrap_err();
+    let cache = Cache::builder::<String, String>(clock.clone())
+        .storage(MockCache::new())
+        .transform(
+            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                |_v: &i32| Err::<String, _>("bad".parse::<i32>().unwrap_err()),
+            ),
+        )
+        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::with_data(l2_data.into_iter().collect())))
+        .build();
+
+    let err = cache.get(&"1".to_string()).await.unwrap_err();
+    assert!(err.is_source::<std::num::ParseIntError>());
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn insert_key_encode_error_propagates() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|_k: &String| "not_a_number".parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+    let clock = Clock::new_frozen();
 
-    adapter
-        .insert("bad".to_string(), CacheEntry::new("1".to_string()))
-        .await
-        .unwrap_err();
+    let cache = Cache::builder::<String, String>(clock.clone())
+        .storage(MockCache::new())
+        .transform(
+            TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
+            TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            ),
+        )
+        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
+        .build();
+
+    let err = cache.insert("1".to_string(), CacheEntry::new("42".to_string())).await.unwrap_err();
+    assert!(err.is_source::<std::num::ParseIntError>());
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn insert_value_encode_error_propagates() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |_v: &String| "not_a_number".parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+    let clock = Clock::new_frozen();
 
-    adapter
+    let cache = Cache::builder::<String, String>(clock.clone())
+        .storage(MockCache::new())
+        .transform(
+            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformCodec::new(
+                |_v: &String| "bad".parse::<i32>(),
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            ),
+        )
+        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
+        .build();
+
+    let err = cache
         .insert("1".to_string(), CacheEntry::new("hello".to_string()))
         .await
         .unwrap_err();
+    assert!(err.is_source::<std::num::ParseIntError>());
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn invalidate_key_encode_error_propagates() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|_k: &String| "not_a_number".parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+    let clock = Clock::new_frozen();
 
-    adapter.invalidate(&"bad".to_string()).await.unwrap_err();
+    let cache = Cache::builder::<String, String>(clock.clone())
+        .storage(MockCache::new())
+        .transform(
+            TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
+            TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            ),
+        )
+        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
+        .build();
+
+    let err = cache.invalidate(&"bad".to_string()).await.unwrap_err();
+    assert!(err.is_source::<std::num::ParseIntError>());
 }
+
+// -- Identity codec through builder --
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn len_delegates_to_inner() {
-    let data = vec![(1, CacheEntry::new(1)), (2, CacheEntry::new(2))];
-    let inner = MockCache::with_data(data.into_iter().collect());
+async fn identity_codec_roundtrip() {
+    let clock = Clock::new_frozen();
 
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
+    let cache = Cache::builder::<i32, i32>(clock.clone())
+        .storage(MockCache::new())
+        .transform(IdentityCodec, IdentityCodec)
+        .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
+        .build();
 
-    assert_eq!(adapter.len(), Some(2));
-}
+    cache.insert(1, CacheEntry::new(42)).await.unwrap();
 
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn identity_roundtrip() {
-    let data = vec![(1, CacheEntry::new(100))];
-    let inner = MockCache::with_data(data.into_iter().collect());
-    let adapter = TransformAdapter::new(inner, IdentityCodec, IdentityCodec);
-
-    let result = adapter.get(&1).await.unwrap().unwrap();
-    assert_eq!(*result.value(), 100);
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn identity_insert_roundtrip() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(inner.clone(), IdentityCodec, IdentityCodec);
-
-    adapter.insert(1, CacheEntry::new(42)).await.unwrap();
-
-    let result = adapter.get(&1).await.unwrap().unwrap();
+    let result = cache.get(&1).await.unwrap().unwrap();
     assert_eq!(*result.value(), 42);
 }
 
+// -- Infallible encoder through builder --
+
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn infallible_encoder() {
-    let inner = MockCache::<String, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner.clone(),
-        TransformEncoder::infallible(|k: &i32| k.to_string()),
-        TransformCodec::new(
-            |v: &i32| Ok::<_, std::convert::Infallible>(*v),
-            |v: &i32| Ok::<_, std::convert::Infallible>(*v),
-        ),
-    );
+async fn infallible_encoder_through_builder() {
+    let clock = Clock::new_frozen();
+    let l2 = MockCache::<String, i32>::new();
 
-    adapter.insert(42, CacheEntry::new(100)).await.unwrap();
+    let cache = Cache::builder::<i32, i32>(clock.clone())
+        .storage(MockCache::new())
+        .transform(
+            TransformEncoder::infallible(|k: &i32| k.to_string()),
+            TransformCodec::new(
+                |v: &i32| Ok::<_, std::convert::Infallible>(*v),
+                |v: &i32| Ok::<_, std::convert::Infallible>(*v),
+            ),
+        )
+        .fallback(Cache::builder::<String, i32>(clock).storage(l2.clone()))
+        .build();
 
-    assert_eq!(
-        inner.operations(),
-        vec![CacheOp::Insert {
-            key: "42".to_string(),
-            entry: CacheEntry::new(100),
-        }]
-    );
+    cache.insert(42, CacheEntry::new(100)).await.unwrap();
+
+    let l2_ops = l2.operations();
+    let insert_ops: Vec<_> = l2_ops.iter().filter(|op| matches!(op, CacheOp::Insert { .. })).collect();
+    assert_eq!(insert_ops.len(), 1);
+    assert!(matches!(&insert_ops[0], CacheOp::Insert { key, .. } if key == "42"));
 }
 
-// ── Debug impls ──
+// -- FallbackBuilder.transform() --
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn transform_on_fallback_builder() {
+    let clock = Clock::new_frozen();
+
+    let cache = Cache::builder::<i32, i32>(clock.clone())
+        .memory()
+        .ttl(Duration::from_secs(60))
+        .fallback(Cache::builder::<i32, i32>(clock.clone()).storage(MockCache::new()))
+        .transform(
+            TransformEncoder::infallible(|k: &i32| k.to_string()),
+            TransformCodec::new(
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+                |v: &String| v.parse::<i32>(),
+            ),
+        )
+        .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
+        .build();
+
+    cache.insert(1, CacheEntry::new(10)).await.unwrap();
+
+    let result = cache.get(&1).await.unwrap().unwrap();
+    assert_eq!(*result.value(), 10);
+}
+
+// -- Chained post-transform fallback --
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn chained_post_transform_fallback() {
+    let clock = Clock::new_frozen();
+
+    let cache = Cache::builder::<i32, i32>(clock.clone())
+        .memory()
+        .ttl(Duration::from_secs(60))
+        .transform(
+            TransformEncoder::infallible(|k: &i32| k.to_string()),
+            TransformCodec::new(
+                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+                |v: &String| v.parse::<i32>(),
+            ),
+        )
+        .fallback(Cache::builder::<String, String>(clock.clone()).storage(MockCache::new()))
+        .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
+        .build();
+
+    cache.insert(1, CacheEntry::new(10)).await.unwrap();
+
+    let result = cache.get(&1).await.unwrap().unwrap();
+    assert_eq!(*result.value(), 10);
+}
+
+// -- Debug impls --
 
 #[test]
 fn transform_encoder_debug() {
@@ -316,142 +347,8 @@ fn transform_codec_debug() {
 }
 
 #[test]
-fn transform_adapter_debug() {
-    let inner = MockCache::<i32, i32>::new();
-    let adapter = TransformAdapter::new(
-        inner,
-        TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-        TransformCodec::new(
-            |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-        ),
-    );
-    let debug = format!("{adapter:?}");
-    assert!(debug.contains("TransformAdapter"));
-}
-
-// ── TransformBuilder tests ──
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn builder_transform_on_cache_builder() {
-    let clock = Clock::new_frozen();
-
-    let cache = Cache::builder::<String, String>(clock)
-        .memory()
-        .ttl(Duration::from_secs(60))
-        .transform(TransformEncoder::infallible(|k: &String| k.clone()), IdentityCodec)
-        .fallback(
-            Cache::builder::<String, String>(Clock::new_frozen())
-                .storage(MockCache::new())
-                .ttl(Duration::from_secs(300)),
-        )
-        .build();
-
-    cache.insert("key".to_string(), CacheEntry::new("value".to_string())).await.unwrap();
-
-    let result = cache.get(&"key".to_string()).await.unwrap();
-    assert_eq!(*result.unwrap().value(), "value");
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn builder_transform_with_type_mapping() {
-    let clock = Clock::new_frozen();
-
-    let l2 = Cache::builder::<String, String>(clock.clone())
-        .storage(MockCache::new())
-        .ttl(Duration::from_secs(300));
-
-    let cache = Cache::builder::<i32, i32>(clock)
-        .memory()
-        .ttl(Duration::from_secs(60))
-        .transform(
-            TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-                |v: &String| v.parse::<i32>(),
-            ),
-        )
-        .fallback(l2)
-        .build();
-
-    cache.insert(42, CacheEntry::new(100)).await.unwrap();
-
-    let result = cache.get(&42).await.unwrap();
-    assert_eq!(*result.unwrap().value(), 100);
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn builder_transform_on_fallback_builder() {
-    let clock = Clock::new_frozen();
-
-    let l2 = Cache::builder::<i32, i32>(clock.clone())
-        .storage(MockCache::new())
-        .ttl(Duration::from_secs(300));
-
-    let l3 = Cache::builder::<String, String>(clock.clone())
-        .storage(MockCache::new())
-        .ttl(Duration::from_secs(600));
-
-    let cache = Cache::builder::<i32, i32>(clock)
-        .memory()
-        .ttl(Duration::from_secs(60))
-        .fallback(l2)
-        .transform(
-            TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-                |v: &String| v.parse::<i32>(),
-            ),
-        )
-        .fallback(l3)
-        .build();
-
-    cache.insert(1, CacheEntry::new(10)).await.unwrap();
-
-    let result = cache.get(&1).await.unwrap();
-    assert_eq!(*result.unwrap().value(), 10);
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn builder_transform_chained_fallback() {
-    let clock = Clock::new_frozen();
-
-    let l2_a = Cache::builder::<String, String>(clock.clone())
-        .storage(MockCache::new())
-        .ttl(Duration::from_secs(300));
-
-    let l2_b = Cache::builder::<String, String>(clock.clone())
-        .storage(MockCache::new())
-        .ttl(Duration::from_secs(600));
-
-    let cache = Cache::builder::<i32, i32>(clock)
-        .memory()
-        .ttl(Duration::from_secs(60))
-        .transform(
-            TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-                |v: &String| v.parse::<i32>(),
-            ),
-        )
-        .fallback(l2_a)
-        .fallback(l2_b)
-        .build();
-
-    cache.insert(1, CacheEntry::new(10)).await.unwrap();
-
-    let result = cache.get(&1).await.unwrap();
-    assert_eq!(*result.unwrap().value(), 10);
-}
-
-#[test]
 fn transform_builder_debug() {
     let clock = Clock::new_frozen();
-
     let builder = Cache::builder::<i32, i32>(clock).memory().ttl(Duration::from_secs(60)).transform(
         TransformEncoder::infallible(|k: &i32| k.to_string()),
         TransformCodec::new(
@@ -459,12 +356,11 @@ fn transform_builder_debug() {
             |v: &String| v.parse::<i32>(),
         ),
     );
-
     let debug = format!("{builder:?}");
     assert!(debug.contains("TransformBuilder"));
 }
 
-// ── CacheEntry::map_value tests ──
+// -- CacheEntry::map_value tests --
 
 #[test]
 fn map_value_preserves_metadata() {

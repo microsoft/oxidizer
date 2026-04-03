@@ -16,7 +16,8 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::fallback::FallbackPromotionPolicy;
 use crate::telemetry::{CacheTelemetry, TelemetryConfig};
-use crate::{CacheTier, Codec, Encoder, TransformAdapter};
+use crate::transform::TransformAdapter;
+use crate::{CacheTier, Codec, Encoder};
 
 /// Builder that introduces a type-conversion boundary in the cache pipeline.
 ///

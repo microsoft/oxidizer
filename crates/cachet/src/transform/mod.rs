@@ -5,4 +5,5 @@ mod codec;
 mod tier;
 
 pub use codec::{Codec, Encoder};
-pub use tier::{IdentityCodec, TransformAdapter, TransformCodec, TransformEncoder};
+pub(crate) use tier::TransformAdapter;
+pub use tier::{IdentityCodec, TransformCodec, TransformEncoder};
