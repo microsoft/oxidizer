@@ -109,9 +109,9 @@ impl<T: Clone + Send + Sync> Codec<T, T> for IdentityCodec {
 /// Adapter that transforms keys and values between user types and storage types.
 ///
 /// `TransformAdapter<K, KT, V, VT, S>`:
-/// - `K, V` = user-facing types (the types the adapter exposes via `CacheTier<K, V>`)
-/// - `KT, VT` = storage types (the types used by the inner `S: CacheTier<KT, VT>`)
-/// - `key_encoder: K→KT` (one-directional), `value_codec: V↔VT` (bidirectional)
+/// - `K, V` are the user-facing types (the types the adapter exposes via `CacheTier<K, V>`)
+/// - `KT, VT` are the storage types (the types used by the inner `S: CacheTier<KT, VT>`)
+/// - `key_encoder: K->KT` (one-directional), `value_codec: V<->VT` (bidirectional)
 ///
 /// Implements `CacheTier<K, V>` by encoding keys/values to `KT, VT` for the inner tier.
 pub(crate) struct TransformAdapter<K, KT, V, VT, S>
