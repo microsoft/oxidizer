@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, CacheOp, IdentityCodec, MockCache, TransformCodec, TransformEncoder};
+use cachet::{Cache, CacheEntry, CacheOp, IdentityCodec, MockCache, TransformCodec, TransformEncoder, infallible};
 use tick::Clock;
 
 /// Builds a cache with L1 (`MockCache<String, String>`) and L2 (`MockCache<i32, i32>`)
@@ -21,10 +21,7 @@ fn build_transform_cache(
         .storage(l1)
         .transform(
             TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-            TransformCodec::new(
-                |v: &String| v.parse::<i32>(),
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            ),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(l2))
         .build()
@@ -126,10 +123,7 @@ async fn get_key_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
-            TransformCodec::new(
-                |v: &String| v.parse::<i32>(),
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            ),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -169,10 +163,7 @@ async fn insert_key_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
-            TransformCodec::new(
-                |v: &String| v.parse::<i32>(),
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            ),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -190,10 +181,7 @@ async fn insert_value_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::custom(|k: &String| k.parse::<i32>()),
-            TransformCodec::new(
-                |_v: &String| "bad".parse::<i32>(),
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            ),
+            TransformCodec::new(|_v: &String| "bad".parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -214,10 +202,7 @@ async fn invalidate_key_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
-            TransformCodec::new(
-                |v: &String| v.parse::<i32>(),
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            ),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -257,10 +242,7 @@ async fn infallible_encoder_through_builder() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(
-                |v: &i32| Ok::<_, std::convert::Infallible>(*v),
-                |v: &i32| Ok::<_, std::convert::Infallible>(*v),
-            ),
+            TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v)),
         )
         .fallback(Cache::builder::<String, i32>(clock).storage(l2.clone()))
         .build();
@@ -286,10 +268,7 @@ async fn transform_on_fallback_builder() {
         .fallback(Cache::builder::<i32, i32>(clock.clone()).storage(MockCache::new()))
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-                |v: &String| v.parse::<i32>(),
-            ),
+            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: &String| v.parse::<i32>()),
         )
         .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
         .build();
@@ -312,10 +291,7 @@ async fn chained_post_transform_fallback() {
         .ttl(Duration::from_secs(60))
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(
-                |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-                |v: &String| v.parse::<i32>(),
-            ),
+            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: &String| v.parse::<i32>()),
         )
         .fallback(Cache::builder::<String, String>(clock.clone()).storage(MockCache::new()))
         .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
@@ -338,10 +314,7 @@ fn transform_encoder_debug() {
 
 #[test]
 fn transform_codec_debug() {
-    let codec = TransformCodec::new(
-        |v: &String| v.parse::<i32>(),
-        |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-    );
+    let codec = TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string()));
     let debug = format!("{codec:?}");
     assert!(debug.contains("TransformCodec"));
 }
@@ -351,10 +324,7 @@ fn transform_builder_debug() {
     let clock = Clock::new_frozen();
     let builder = Cache::builder::<i32, i32>(clock).memory().ttl(Duration::from_secs(60)).transform(
         TransformEncoder::infallible(|k: &i32| k.to_string()),
-        TransformCodec::new(
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
-            |v: &String| v.parse::<i32>(),
-        ),
+        TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: &String| v.parse::<i32>()),
     );
     let debug = format!("{builder:?}");
     assert!(debug.contains("TransformBuilder"));

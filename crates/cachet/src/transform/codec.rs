@@ -3,6 +3,29 @@
 
 use crate::Error;
 
+/// Wraps an infallible closure so it can be used where a fallible one is expected.
+///
+/// This avoids the need to write `Ok::<_, std::convert::Infallible>(...)` in
+/// encoder/codec closures that cannot fail.
+///
+/// # Examples
+///
+/// ```
+/// use cachet::{infallible, TransformCodec};
+///
+/// // Mixed fallibility: encode is fallible, decode is infallible
+/// let codec = TransformCodec::new(
+///     |v: &String| v.parse::<i32>(),
+///     infallible(|v: &i32| v.to_string()),
+/// );
+/// ```
+pub fn infallible<A, B, F>(f: F) -> impl Fn(&A) -> Result<B, std::convert::Infallible> + Send + Sync + 'static
+where
+    F: Fn(&A) -> B + Send + Sync + 'static,
+{
+    move |a| Ok(f(a))
+}
+
 /// A one-directional encoder that converts values from type `From` to type `To`.
 ///
 /// Used by [`TransformAdapter`](super::TransformAdapter) for key encoding where
