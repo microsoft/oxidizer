@@ -215,7 +215,7 @@ mod tests {
         let inner = MockCache::with_data(data.into_iter().collect());
         let adapter = TransformAdapter::from_boxed(
             inner,
-            Box::new(TransformEncoder::infallible(|k: &String| k.len() as i32)),
+            Box::new(TransformEncoder::custom(|k: &String| k.parse::<i32>())),
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v))),
         );
         assert_eq!(adapter.len(), Some(2));
