@@ -191,13 +191,33 @@ mod tests {
         assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
         assert_eq!(codec.decode(&42).unwrap(), "42");
 
+        let key_encoder = TransformEncoder::custom(|k: &String| k.parse::<i32>());
+        // Exercise the encoder so the wrapping closure is covered.
+        assert_eq!(key_encoder.encode(&"7".to_string()).unwrap(), 7);
+
         let inner = MockCache::<i32, i32>::new();
-        let adapter = TransformAdapter::from_boxed(
-            inner,
-            Box::new(TransformEncoder::custom(|k: &String| k.parse::<i32>())),
-            Box::new(codec),
-        );
+        let adapter = TransformAdapter::from_boxed(inner, Box::new(key_encoder), Box::new(codec));
         let debug = format!("{adapter:?}");
         assert!(debug.contains("TransformAdapter"));
+    }
+
+    #[test]
+    fn infallible_encoder_closure_is_covered() {
+        let encoder = TransformEncoder::infallible(|k: &i32| k.to_string());
+        assert_eq!(encoder.encode(&42).unwrap(), "42");
+    }
+
+    #[test]
+    fn len_delegates_to_inner() {
+        use crate::infallible;
+
+        let data = vec![(1, CacheEntry::new(10)), (2, CacheEntry::new(20))];
+        let inner = MockCache::with_data(data.into_iter().collect());
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::infallible(|k: &String| k.len() as i32)),
+            Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v))),
+        );
+        assert_eq!(adapter.len(), Some(2));
     }
 }
