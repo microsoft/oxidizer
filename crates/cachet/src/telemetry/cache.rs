@@ -140,6 +140,7 @@ impl CacheTelemetry {
 
     /// Records the current cache size for the given cache name.
     #[cfg(any(feature = "metrics", test))]
+    #[expect(dead_code, reason = "will be used by future configurable size recording")]
     #[inline]
     pub(crate) fn record_size(&self, cache_name: CacheName, size: u64) {
         let attrs = [KeyValue::new(attributes::CACHE_NAME, cache_name)];
