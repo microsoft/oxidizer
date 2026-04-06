@@ -248,12 +248,14 @@ where
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone().build();
         let stampede_protection = self.stampede_protection;
-        let name = self
-            .name
-            .unwrap_or_else(|| type_name::<crate::Cache<K, V, Self::Output>>(None));
         let tier = self.build_tier(clock.clone(), telemetry);
 
-        crate::Cache::new(name, tier, clock, stampede_protection)
+        crate::Cache::new(
+            type_name::<crate::Cache<K, V, Self::Output>>(None),
+            tier,
+            clock,
+            stampede_protection,
+        )
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
