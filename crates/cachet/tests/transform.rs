@@ -329,6 +329,7 @@ fn transform_builder_debug() {
 
 // -- CacheEntry::map_value tests --
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn map_value_preserves_metadata() {
     use std::time::{Duration, SystemTime};
