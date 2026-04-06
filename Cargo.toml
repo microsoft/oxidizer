@@ -67,7 +67,7 @@ dashmap = { version = "6.1", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
-fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
+fastrand = { version = "2.4.0", default-features = false, features = ["std"] }
 foldhash = { version = "0.2.0", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
