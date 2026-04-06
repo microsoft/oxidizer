@@ -316,6 +316,7 @@ fn transform_codec_debug() {
     assert!(debug.contains("TransformCodec"));
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn transform_builder_debug() {
     let clock = Clock::new_frozen();
