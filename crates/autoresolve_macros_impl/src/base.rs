@@ -800,4 +800,14 @@ mod tests {
         let result = base(attr, input).expect("should succeed");
         insta::assert_snapshot!(pretty_print(result));
     }
+
+    #[test]
+    fn reexport_base_snapshot() {
+        let attr = quote! { helper_module_exported_as = crate::runtime::exports::builtins_helper };
+        let input = quote! {
+            pub type Builtins = super::internal::Builtins;
+        };
+        let result = reexport_base(attr, input).expect("should succeed");
+        insta::assert_snapshot!(pretty_print(result));
+    }
 }

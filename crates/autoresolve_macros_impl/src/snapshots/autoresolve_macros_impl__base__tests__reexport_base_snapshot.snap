@@ -1,0 +1,16 @@
+---
+source: crates/autoresolve_macros_impl/src/base.rs
+expression: pretty_print(result)
+---
+pub type Builtins = super::internal::Builtins;
+#[doc(hidden)]
+pub mod builtins_helper {
+    super::super::internal::Builtins!(
+        @ reexport[crate ::runtime::exports::builtins_helper],
+        __autoresolve_runtime_exports_builtins_helper, $
+    );
+    #[doc(hidden)]
+    pub use __autoresolve_runtime_exports_builtins_helper as Builtins;
+}
+#[doc(hidden)]
+pub use builtins_helper::Builtins;
