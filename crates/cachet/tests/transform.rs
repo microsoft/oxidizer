@@ -20,7 +20,7 @@ fn build_transform_cache(
     Cache::builder::<String, String>(clock.clone())
         .storage(l1)
         .transform(
-            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformEncoder::new(|k: &String| k.parse::<i32>()),
             TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(l2))
@@ -138,7 +138,7 @@ async fn get_key_encode_error_propagates() {
     let cache = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
         .transform(
-            TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
+            TransformEncoder::new(|_k: &String| "bad".parse::<i32>()),
             TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
@@ -157,7 +157,7 @@ async fn get_value_decode_error_propagates() {
     let cache = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
         .transform(
-            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformEncoder::new(|k: &String| k.parse::<i32>()),
             TransformCodec::new(
                 |v: &String| v.parse::<i32>(),
                 |_v: &i32| Err::<String, _>("bad".parse::<i32>().unwrap_err()),
@@ -178,7 +178,7 @@ async fn insert_key_encode_error_propagates() {
     let cache = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
         .transform(
-            TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
+            TransformEncoder::new(|_k: &String| "bad".parse::<i32>()),
             TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
@@ -196,7 +196,7 @@ async fn insert_value_encode_error_propagates() {
     let cache = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
         .transform(
-            TransformEncoder::custom(|k: &String| k.parse::<i32>()),
+            TransformEncoder::new(|k: &String| k.parse::<i32>()),
             TransformCodec::new(|_v: &String| "bad".parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
@@ -217,7 +217,7 @@ async fn invalidate_key_encode_error_propagates() {
     let cache = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
         .transform(
-            TransformEncoder::custom(|_k: &String| "bad".parse::<i32>()),
+            TransformEncoder::new(|_k: &String| "bad".parse::<i32>()),
             TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
@@ -304,7 +304,7 @@ async fn chained_post_transform_fallback() {
 
 #[test]
 fn transform_encoder_debug() {
-    let encoder = TransformEncoder::custom(|k: &String| k.parse::<i32>());
+    let encoder = TransformEncoder::new(|k: &String| k.parse::<i32>());
     let debug = format!("{encoder:?}");
     assert!(debug.contains("TransformEncoder"));
 }

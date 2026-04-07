@@ -14,7 +14,7 @@ pub struct TransformEncoder<A, B> {
 
 impl<A, B> TransformEncoder<A, B> {
     /// Creates a new `TransformEncoder` from a fallible closure.
-    pub fn custom<EncodeError>(encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static) -> Self
+    pub fn new<EncodeError>(encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static) -> Self
     where
         EncodeError: std::error::Error + Send + Sync + 'static,
     {
@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
         assert_eq!(codec.decode(&42).unwrap(), "42");
 
-        let key_encoder = TransformEncoder::custom(|k: &String| k.parse::<i32>());
+        let key_encoder = TransformEncoder::new(|k: &String| k.parse::<i32>());
         // Exercise the encoder so the wrapping closure is covered.
         assert_eq!(key_encoder.encode(&"7".to_string()).unwrap(), 7);
 
@@ -213,7 +213,7 @@ mod tests {
         let inner = MockCache::with_data(data.into_iter().collect());
         let adapter = TransformAdapter::from_boxed(
             inner,
-            Box::new(TransformEncoder::custom(|k: &String| k.parse::<i32>())),
+            Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v))),
         );
         assert_eq!(adapter.len(), Some(2));
