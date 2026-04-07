@@ -120,6 +120,19 @@ async fn len_returns_correct_count() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
+async fn is_empty_returns_true_if_empty() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
+
+    assert!(cache.is_empty().await.unwrap());
+
+    cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+    assert!(!cache.is_empty().await.unwrap());
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
 async fn get_or_insert_returns_cached() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().build();
