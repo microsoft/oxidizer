@@ -92,11 +92,11 @@ async fn wrapper_len_returns_correct_count() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
 
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
-    assert_eq!(cache.len().await.unwrap(), Some(1));
+    assert_eq!(cache.len().await.unwrap(), 1);
 }
 
 #[cfg_attr(miri, ignore)]

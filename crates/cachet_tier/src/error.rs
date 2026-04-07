@@ -156,6 +156,41 @@ impl Recovery for Error {
     }
 }
 
+impl From<LenError> for Error {
+    fn from(err: LenError) -> Self {
+        Self::from_source(err)
+    }
+}
+
+/// The kind of error returned by [`CacheTier::len`](crate::CacheTier::len).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LenErrorKind {
+    /// The tier does not support reporting its size.
+    Unsupported,
+    /// The underlying storage operation failed.
+    Failed,
+}
+
+/// An error from a [`CacheTier::len`](crate::CacheTier::len) operation.
+///
+/// Use the [`kind`](Self::kind) field to distinguish between tiers that don't
+/// support size reporting ([`Unsupported`](LenErrorKind::Unsupported)) and
+/// actual storage failures ([`Failed`](LenErrorKind::Failed)).
+#[ohno::error]
+#[from(Error(kind: LenErrorKind::Failed))]
+pub struct LenError {
+    /// The kind of error that occurred.
+    pub kind: LenErrorKind,
+}
+
+impl LenError {
+    /// Creates a new `LenError` indicating that the tier does not support size reporting.
+    #[must_use]
+    pub fn unsupported() -> Self {
+        Self::new(LenErrorKind::Unsupported)
+    }
+}
+
 /// A specialized [`Result`] type for cache operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -266,5 +301,26 @@ mod tests {
     fn recovery_returns_never_by_default() {
         let error = Error::from_message("permanent failure");
         assert_eq!(error.recovery(), RecoveryInfo::never());
+    }
+
+    #[test]
+    fn failed_lenerror_from_error() {
+        let error = Error::from_message("permanent failure");
+        let len_err: LenError = error.clone().into();
+        assert_eq!(LenErrorKind::Failed, len_err.kind);
+        assert_eq!(error.to_string(), len_err.source().expect("should have source error").to_string());
+    }
+
+    #[test]
+    fn unsupported_lenerror_has_unsupported_kind() {
+        let len_err = LenError::unsupported();
+        assert_eq!(LenErrorKind::Unsupported, len_err.kind);
+    }
+
+    #[test]
+    fn lenerror_converts_to_error() {
+        let len_err = LenError::unsupported();
+        let error: Error = len_err.into();
+        assert!(error.is_source::<LenError>());
     }
 }

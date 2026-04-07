@@ -12,21 +12,21 @@ use cachet_tier::{CacheEntry, CacheTier};
 #[tokio::test]
 async fn new_creates_unbounded_cache() {
     let cache = InMemoryCache::<String, i32>::new();
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn with_max_capacity_creates_bounded_cache() {
     let cache = InMemoryCache::<String, i32>::with_max_capacity(100);
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn default_creates_unbounded_cache() {
     let cache = InMemoryCache::<String, i32>::default();
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -146,17 +146,17 @@ async fn clear_returns_ok() {
 #[tokio::test]
 async fn len_returns_some_zero_for_empty_cache() {
     let cache = InMemoryCache::<String, i32>::new();
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn len_returns_some_not_none() {
+async fn len_returns_ok() {
     // Moka's entry_count() is eventually consistent, so we can't assert exact
     // counts immediately after insert. But we can verify that len() returns
-    // Some (not None), which catches the mutation `len -> None`.
+    // Ok (not Unsupported), which catches the mutation `len -> unsupported`.
     let cache = InMemoryCache::<String, i32>::new();
-    assert!(cache.len().await.unwrap().is_some());
+    cache.len().await.unwrap();
 }
 
 #[cfg_attr(miri, ignore)]
@@ -181,7 +181,7 @@ async fn clone_shares_underlying_cache() {
 #[tokio::test]
 async fn builder_default_creates_unbounded_cache() {
     let cache = InMemoryCacheBuilder::<String, i32>::default().build().expect("build failed");
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -196,5 +196,5 @@ async fn builder_all_options_combined() {
         .build()
         .expect("build failed");
 
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }

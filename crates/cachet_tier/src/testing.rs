@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use crate::{CacheEntry, CacheTier, Error};
+use crate::{CacheEntry, CacheTier, Error, LenError};
 
 /// Recorded cache operation with full context.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,8 +272,8 @@ where
         Ok(())
     }
 
-    async fn len(&self) -> Result<Option<u64>, Error> {
-        Ok(Some(self.data.lock().len() as u64))
+    async fn len(&self) -> Result<u64, LenError> {
+        Ok(self.data.lock().len() as u64)
     }
 }
 

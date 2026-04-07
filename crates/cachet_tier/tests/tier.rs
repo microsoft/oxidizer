@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 #[cfg(feature = "test-util")]
 use cachet_tier::MockCache;
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error, LenErrorKind};
 
 /// Minimal implementation that only provides required methods
 struct MinimalCache<K, V> {
@@ -103,74 +103,10 @@ async fn default_clear_returns_ok() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn default_len_returns_none() {
+async fn default_len_returns_unsupported() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
-    assert!(cache.len().await.unwrap().is_none());
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn default_is_empty_returns_none_when_len_is_none() {
-    let cache: MinimalCache<String, i32> = MinimalCache::new();
-    // is_empty delegates to len(); since len() returns None, is_empty() should too
-    assert!(cache.is_empty().await.unwrap().is_none());
-}
-
-/// Cache that implements `len()` so we can test `is_empty()` default derivation
-struct SizedCache<K, V> {
-    data: Mutex<HashMap<K, CacheEntry<V>>>,
-}
-
-impl<K, V> SizedCache<K, V> {
-    fn new() -> Self {
-        Self {
-            data: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl<K, V> CacheTier<K, V> for SizedCache<K, V>
-where
-    K: Clone + Eq + std::hash::Hash + Send + Sync,
-    V: Clone + Send + Sync,
-{
-    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        Ok(self.data.lock().expect("lock poisoned").get(key).cloned())
-    }
-
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.data.lock().expect("lock poisoned").insert(key, entry);
-        Ok(())
-    }
-
-    async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        self.data.lock().expect("lock poisoned").remove(key);
-        Ok(())
-    }
-
-    async fn clear(&self) -> Result<(), Error> {
-        self.data.lock().expect("lock poisoned").clear();
-        Ok(())
-    }
-
-    async fn len(&self) -> Result<Option<u64>, Error> {
-        Ok(Some(self.data.lock().expect("lock poisoned").len() as u64))
-    }
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn is_empty_returns_true_for_empty_cache() {
-    let cache = SizedCache::<String, i32>::new();
-    assert_eq!(cache.is_empty().await.unwrap(), Some(true));
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn is_empty_returns_false_for_non_empty_cache() {
-    let cache = SizedCache::<String, i32>::new();
-    cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(cache.is_empty().await.unwrap(), Some(false));
+    let err = cache.len().await.unwrap_err();
+    assert_eq!(err.kind, LenErrorKind::Unsupported);
 }
 
 // MockCache tests
@@ -180,16 +116,7 @@ async fn is_empty_returns_false_for_non_empty_cache() {
 #[cfg(feature = "test-util")]
 async fn mock_cache_len_empty() {
     let cache = MockCache::<String, i32>::new();
-    assert_eq!(cache.len().await.unwrap(), Some(0));
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-#[cfg(feature = "test-util")]
-async fn mock_cache_len_after_insert() {
-    let cache = MockCache::<String, i32>::new();
-    cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(cache.len().await.unwrap(), Some(1));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -199,18 +126,16 @@ async fn mock_cache_len_after_multiple_inserts() {
     let cache = MockCache::<String, i32>::new();
     cache.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
     cache.insert("b".to_string(), CacheEntry::new(2)).await.unwrap();
-    assert_eq!(cache.len().await.unwrap(), Some(2));
+    assert_eq!(cache.len().await.unwrap(), 2);
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 #[cfg(feature = "test-util")]
-async fn mock_cache_is_empty_delegates_to_len() {
+async fn mock_cache_len_after_insert() {
     let cache = MockCache::<String, i32>::new();
-    assert_eq!(cache.is_empty().await.unwrap(), Some(true));
-
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(cache.is_empty().await.unwrap(), Some(false));
+    assert_eq!(cache.len().await.unwrap(), 1);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -291,7 +216,7 @@ async fn mock_cache_clone_shares_state() {
 #[cfg(feature = "test-util")]
 async fn mock_cache_default_creates_empty() {
     let cache = MockCache::<String, i32>::default();
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -392,7 +317,7 @@ async fn dynamic_cache_len() {
     let cache = MockCache::<String, i32>::new();
     let dynamic = DynamicCache::new(cache);
 
-    assert_eq!(dynamic.len().await.unwrap(), Some(0));
+    assert_eq!(dynamic.len().await.unwrap(), 0);
     dynamic.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-    assert_eq!(dynamic.len().await.unwrap(), Some(1));
+    assert_eq!(dynamic.len().await.unwrap(), 1);
 }

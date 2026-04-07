@@ -111,11 +111,11 @@ async fn len_returns_correct_count() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
 
-    assert_eq!(cache.len().await.unwrap(), Some(0));
+    assert_eq!(cache.len().await.unwrap(), 0);
 
     cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
-    assert_eq!(cache.len().await.unwrap(), Some(1));
+    assert_eq!(cache.len().await.unwrap(), 1);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -178,20 +178,6 @@ async fn stampede_protection_returns_cached() {
     cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
     let entry = cache.get(&key).await.unwrap().expect("entry should exist");
     assert_eq!(*entry.value(), 42);
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
-async fn is_empty_returns_correct_value() {
-    // Use MockCache for immediate consistency
-    let clock = Clock::new_frozen();
-    let cache = Cache::builder(clock).storage(MockCache::<String, i32>::new()).build();
-
-    assert_eq!(cache.is_empty().await.unwrap(), Some(true));
-
-    cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-
-    assert_eq!(cache.is_empty().await.unwrap(), Some(false));
 }
 
 #[cfg_attr(miri, ignore)]

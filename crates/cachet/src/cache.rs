@@ -7,7 +7,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use cachet_tier::{CacheEntry, CacheTier};
+use cachet_tier::{CacheEntry, CacheTier, LenError};
 use tick::Clock;
 use uniflight::Merger;
 
@@ -346,21 +346,19 @@ where
     /// # Errors
     ///
     /// Returns an error if the underlying storage tier fails.
-    pub async fn len(&self) -> Result<Option<u64>, Error> {
+    pub async fn len(&self) -> Result<u64, LenError> {
         self.storage.len().await
     }
 
-    /// Returns `true` if the cache **appears** to contain no entries.
+    /// Returns `true` if the cache appears to contain no entries.
     ///
-    /// Returns `Ok(None)` if the underlying storage does not support size tracking.
-    ///
-    /// Subject to the same approximation caveats as [`len`](Self::len).
+    /// This is a convenience wrapper around [`len`](Self::len).
     ///
     /// # Errors
     ///
     /// Returns an error if the underlying storage tier fails.
-    pub async fn is_empty(&self) -> Result<Option<bool>, Error> {
-        self.storage.is_empty().await
+    pub async fn is_empty(&self) -> Result<bool, LenError> {
+        self.len().await.map(|n| n == 0)
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.
@@ -735,14 +733,12 @@ mod tests {
     }
 
     #[test]
-    fn cache_len_and_is_empty() {
+    fn cache_len() {
         block_on(async {
             let cache = build_cache();
-            assert_eq!(cache.len().await.expect("len should return Ok"), Some(0));
-            assert_eq!(cache.is_empty().await.expect("is_empty should return Ok"), Some(true));
+            assert_eq!(cache.len().await.expect("len should return Ok"), 0);
             cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
-            assert_eq!(cache.len().await.expect("len should return Ok"), Some(1));
-            assert_eq!(cache.is_empty().await.expect("is_empty should return Ok"), Some(false));
+            assert_eq!(cache.len().await.expect("len should return Ok"), 1);
         });
     }
 

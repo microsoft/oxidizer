@@ -13,7 +13,7 @@ use foldhash::fast::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
-use cachet_tier::{CacheEntry, CacheTier, Error};
+use cachet_tier::{CacheEntry, CacheTier, Error, LenError};
 use moka::Expiry;
 use moka::future::Cache;
 use thread_aware::{Arc, PerProcess, ThreadAware};
@@ -194,8 +194,8 @@ where
         Ok(())
     }
 
-    async fn len(&self) -> Result<Option<u64>, Error> {
-        Ok(Some(self.inner.entry_count()))
+    async fn len(&self) -> Result<u64, LenError> {
+        Ok(self.inner.entry_count())
     }
 }
 
@@ -236,7 +236,7 @@ mod tests {
         let cache = InMemoryCache::<String, i32>::new();
         cache.inner.insert("key".to_string(), CacheEntry::new(42)).await;
         cache.inner.run_pending_tasks().await;
-        assert!(cache.len().await.expect("len should return Ok").expect("len should return Some") > 0);
+        assert!(cache.len().await.expect("len should return Ok") > 0);
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
@@ -256,7 +256,7 @@ mod tests {
         let value = cache.get(&"key".to_string()).await.unwrap();
         assert_eq!(*value.unwrap().value(), 42);
 
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(1));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 1);
 
         cache.invalidate(&"key".to_string()).await.unwrap();
         cache.inner.run_pending_tasks().await;
@@ -437,7 +437,7 @@ mod tests {
     #[tokio::test]
     async fn len_returns_correct_count() {
         let cache = InMemoryCache::<String, i32>::new();
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(0));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 0);
 
         cache
             .insert("key1".to_string(), CacheEntry::new(42))
@@ -449,17 +449,17 @@ mod tests {
             .expect("Insert should succeed");
         cache.inner.run_pending_tasks().await;
 
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(2));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 2);
 
         cache.invalidate(&"key1".to_string()).await.expect("Invalidate should succeed");
         cache.inner.run_pending_tasks().await;
 
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(1));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 1);
 
         cache.clear().await.expect("Clear should succeed");
         cache.inner.run_pending_tasks().await;
 
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(0));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 0);
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
@@ -486,6 +486,6 @@ mod tests {
         cache.inner.run_pending_tasks().await;
 
         // The cache should only have max_capacity entries
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(capacity));
+        assert_eq!(cache.len().await.expect("len should return Ok"), capacity);
     }
 }

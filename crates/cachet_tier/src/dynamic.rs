@@ -6,6 +6,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use crate::LenError;
 use crate::tier::DynCacheTier;
 use crate::{CacheEntry, CacheTier, Error};
 
@@ -64,7 +65,7 @@ impl<K: Send + Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
         self.0.clear().await
     }
 
-    async fn len(&self) -> Result<Option<u64>, Error> {
+    async fn len(&self) -> Result<u64, LenError> {
         self.0.len().await
     }
 }

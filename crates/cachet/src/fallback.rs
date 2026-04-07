@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use cachet_tier::{CacheEntry, CacheTier};
+use cachet_tier::{CacheEntry, CacheTier, LenError};
 use futures::join;
 use tick::Clock;
 
@@ -290,7 +290,7 @@ where
         fallback_result
     }
 
-    async fn len(&self) -> Result<Option<u64>, Error> {
+    async fn len(&self) -> Result<u64, LenError> {
         // Return length of primary cache if available
         self.inner.primary.len().await
     }
@@ -544,9 +544,9 @@ mod tests {
     #[tokio::test]
     async fn fallback_len() {
         let cache = make_fallback_cache(FallbackPromotionPolicy::always());
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(0));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 0);
         cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-        assert_eq!(cache.len().await.expect("len should return Ok"), Some(1));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 1);
     }
 
     /// Exercises the background-refresh-on-get path: when a primary hit has a

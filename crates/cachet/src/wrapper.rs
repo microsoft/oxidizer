@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use cachet_tier::CacheTier;
+use cachet_tier::{CacheTier, LenError};
 use tick::Clock;
 
 use crate::cache::CacheName;
@@ -181,7 +181,7 @@ where
         timed.result
     }
 
-    async fn len(&self) -> Result<Option<u64>, Error> {
+    async fn len(&self) -> Result<u64, LenError> {
         self.inner.len().await
     }
 }
@@ -371,9 +371,9 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         let telemetry = TelemetryConfig::new().build();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry);
-        assert_eq!(wrapper.len().await.expect("len should return Ok"), Some(0));
+        assert_eq!(wrapper.len().await.expect("len should return Ok"), 0);
         wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
-        assert_eq!(wrapper.len().await.expect("len should return Ok"), Some(1));
+        assert_eq!(wrapper.len().await.expect("len should return Ok"), 1);
     }
 
     #[cfg_attr(miri, ignore)]

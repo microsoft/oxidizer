@@ -9,7 +9,7 @@
 
 use std::future::Future;
 
-use crate::{CacheEntry, Error};
+use crate::{CacheEntry, Error, LenError};
 
 /// Trait for cache tier implementations.
 ///
@@ -31,10 +31,14 @@ use crate::{CacheEntry, Error};
 /// monotonicity guarantee only applies to reads and writes through the same
 /// Rust object.
 ///
-/// `len` and `is_empty` have default implementations:
+/// `len` has a default implementation:
 /// - `len`: Returns `None` (not all tiers track size)
-/// - `is_empty`: Delegates to `len`
 #[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
+#[allow(clippy::allow_attributes, reason = "#[expect] is unfulfilled for len_without_is_empty on traits")]
+#[allow(
+    clippy::len_without_is_empty,
+    reason = "is_empty was intentionally removed; callers derive it from len"
+)]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
@@ -67,26 +71,7 @@ pub trait CacheTier<K, V>: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the underlying storage operation fails.
-    fn len(&self) -> impl Future<Output = Result<Option<u64>, Error>> + Send {
-        async { Ok(None) }
-    }
-
-    /// Returns `true` if the cache **appears** to contain no entries.
-    ///
-    /// Returns `Ok(None)` for implementations that do not track size.
-    ///
-    /// Subject to the same approximation caveat as [`len`](Self::len): a return
-    /// value of `Some(false)` does not guarantee that a subsequent `get` will find
-    /// anything, and `Some(true)` does not guarantee the cache is actually empty if
-    /// entries have expired but not yet been evicted.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying storage operation fails.
-    fn is_empty(&self) -> impl Future<Output = Result<Option<bool>, Error>> + Send {
-        async {
-            let len = self.len().await?;
-            Ok(len.map(|len| len == 0))
-        }
+    fn len(&self) -> impl Future<Output = Result<u64, LenError>> + Send {
+        async { Err(LenError::unsupported()) }
     }
 }
