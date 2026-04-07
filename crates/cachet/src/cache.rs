@@ -350,7 +350,7 @@ where
         self.storage.len().await
     }
 
-    /// Returns `true` if the cache appears to contain no entries.
+    /// Returns Ok(`true`) if the cache appears to contain no entries.
     ///
     /// This is a convenience wrapper around [`len`](Self::len).
     ///
