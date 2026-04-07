@@ -31,8 +31,9 @@ use crate::{CacheEntry, Error, LenError};
 /// monotonicity guarantee only applies to reads and writes through the same
 /// Rust object.
 ///
-/// `len` has a default implementation:
-/// - `len`: Returns `None` (not all tiers track size)
+/// `len` and `is_empty` have default implementations:
+/// - `len`: Returns `Err(LenError::unsupported())` (not all tiers track size)
+/// - `is_empty`: Returns `Err(LenError::unsupported())`
 #[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
