@@ -6,6 +6,8 @@
 use std::ops::Deref;
 use std::time::{Duration, SystemTime};
 
+use crate::Error;
+
 /// A cached value with associated metadata.
 ///
 /// `CacheEntry` wraps a value with optional TTL and timestamp information.
@@ -124,13 +126,16 @@ impl<V> CacheEntry<V> {
     }
 
     /// Transforms the value while preserving metadata (`cached_at`, `ttl`).
-    #[must_use]
-    pub fn map_value<U, F: FnOnce(V) -> U>(self, f: F) -> CacheEntry<U> {
-        CacheEntry {
-            value: f(self.value),
+    ///
+    /// # Errors
+    ///
+    /// Forwards the error returned by the input encoding function
+    pub fn try_map_value<U, F: FnOnce(V) -> Result<U, Error>>(self, f: F) -> Result<CacheEntry<U>, Error> {
+        Ok(CacheEntry {
+            value: f(self.value)?,
             cached_at: self.cached_at,
             ttl: self.ttl,
-        }
+        })
     }
 }
 

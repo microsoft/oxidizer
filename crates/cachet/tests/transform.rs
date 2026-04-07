@@ -332,13 +332,13 @@ fn transform_builder_debug() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn map_value_preserves_metadata() {
+fn try_map_value_preserves_metadata() {
     use std::time::{Duration, SystemTime};
 
     let now = SystemTime::now();
     let ttl = Duration::from_secs(60);
     let entry = CacheEntry::expires_at(42, ttl, now);
-    let mapped = entry.map_value(|v| v.to_string());
+    let mapped = entry.try_map_value(|v| Ok(v.to_string())).expect("Returns Ok");
 
     assert_eq!(*mapped.value(), "42");
     assert_eq!(mapped.cached_at(), Some(now));
@@ -346,9 +346,9 @@ fn map_value_preserves_metadata() {
 }
 
 #[test]
-fn map_value_without_metadata() {
+fn try_map_value_without_metadata() {
     let entry = CacheEntry::new(42);
-    let mapped = entry.map_value(|v| v * 2);
+    let mapped = entry.try_map_value(|v| Ok(v * 2)).expect("Returns Ok");
 
     assert_eq!(*mapped.value(), 84);
     assert_eq!(mapped.cached_at(), None);

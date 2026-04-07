@@ -133,8 +133,7 @@ where
         let mapped_key = self.key_encoder.encode(key)?;
         let entry_option = self.inner.get(&mapped_key).await?;
         if let Some(entry) = entry_option {
-            let mapped_value = self.value_codec.decode(entry.value())?;
-            Ok(Some(entry.map_value(|_| mapped_value)))
+            entry.try_map_value(|v| self.value_codec.decode(&v)).map(Some)
         } else {
             Ok(None)
         }
@@ -142,8 +141,7 @@ where
 
     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let mapped_key = self.key_encoder.encode(&key)?;
-        let mapped_value = self.value_codec.encode(entry.value())?;
-        let mapped_entry = entry.map_value(|_| mapped_value);
+        let mapped_entry = entry.try_map_value(|v| self.value_codec.encode(&v))?;
         self.inner.insert(mapped_key, mapped_entry).await
     }
 
