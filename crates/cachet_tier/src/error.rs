@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_lenerror_from_error() {
+    fn failed_len_error_from_error() {
         let error = Error::from_message("permanent failure");
         let len_err: LenError = error.clone().into();
         assert_eq!(LenErrorKind::Failed, len_err.kind);
@@ -312,13 +312,13 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_lenerror_has_unsupported_kind() {
+    fn unsupported_len_error_has_unsupported_kind() {
         let len_err = LenError::unsupported();
         assert_eq!(LenErrorKind::Unsupported, len_err.kind);
     }
 
     #[test]
-    fn lenerror_converts_to_error() {
+    fn len_error_converts_to_error() {
         let len_err = LenError::unsupported();
         let error: Error = len_err.into();
         assert!(error.is_source::<LenError>());

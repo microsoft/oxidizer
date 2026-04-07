@@ -51,7 +51,7 @@ pub trait CacheTier<K, V>: Send + Sync {
 
     /// Returns an **approximate** count of entries, if the implementation supports it.
     ///
-    /// Returns `Ok(None)` for implementations that do not track size.
+    /// Returns `Err(LenError::unsupported())` for implementations that do not track size.
     ///
     /// # Approximation
     ///
@@ -70,7 +70,7 @@ pub trait CacheTier<K, V>: Send + Sync {
         async { Err(LenError::unsupported()) }
     }
 
-    /// Returns Ok(`true`) if the cache appears to contain no entries.
+    /// Returns `Err(LenError::unsupported())` if the cache appears to contain no entries.
     ///
     /// Default implementation delegates to [`len`](Self::len).
     ///

@@ -326,8 +326,6 @@ where
 
     /// Returns an **approximate** count of entries, if supported by the underlying storage.
     ///
-    /// Returns `Ok(None)` if the underlying storage does not support size tracking.
-    ///
     /// # Approximation
     ///
     /// The count is approximate for two reasons:
@@ -345,6 +343,7 @@ where
     ///
     /// # Errors
     ///
+    /// Returns `Err(LenError::unsupported())` if the underlying storage does not support size tracking.
     /// Returns an error if the underlying storage tier fails.
     pub async fn len(&self) -> Result<u64, LenError> {
         self.storage.len().await
@@ -356,6 +355,7 @@ where
     ///
     /// # Errors
     ///
+    /// Returns `Err(LenError::unsupported())` if the underlying storage does not support size tracking.
     /// Returns an error if the underlying storage tier fails.
     pub async fn is_empty(&self) -> Result<bool, LenError> {
         self.len().await.map(|n| n == 0)
@@ -733,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_len() {
+    fn cache_len_and_is_empty() {
         block_on(async {
             let cache = build_cache();
             assert_eq!(cache.len().await.expect("len should return Ok"), 0);
