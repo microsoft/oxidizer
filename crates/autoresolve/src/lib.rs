@@ -9,6 +9,8 @@ pub(crate) mod shared_type_map;
 #[cfg(feature = "macros")]
 pub use autoresolve_macros::base;
 #[cfg(feature = "macros")]
+pub use autoresolve_macros::reexport_base;
+#[cfg(feature = "macros")]
 pub use autoresolve_macros::resolvable;
 pub use base_type::{BaseType, ScopedUnder};
 pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};

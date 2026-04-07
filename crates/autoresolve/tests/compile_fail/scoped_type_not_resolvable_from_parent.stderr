@@ -85,7 +85,7 @@ help: the following other types implement trait `ResolveFrom<T>`
    | `Request` implements `ResolveFrom<TaskBase>`
 ...
 64 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
-   | --------------------------------------------------------------------------------- in this macro invocation
+   | --------------------------------------------------------------------------------- in this attribute macro expansion
 note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
    |

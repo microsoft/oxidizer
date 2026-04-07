@@ -81,3 +81,10 @@ pub fn base(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         .unwrap_or_else(|e| e.to_compile_error())
         .into()
 }
+
+#[proc_macro_attribute]
+pub fn reexport_base(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    autoresolve_macros_impl::reexport_base(attr.into(), item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}

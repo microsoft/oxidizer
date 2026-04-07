@@ -196,6 +196,22 @@ fn to_dollar_crate_path(path: &syn::Path) -> TokenStream {
     quote! { $crate :: #(#segs)::* }
 }
 
+/// Creates a unique mangled name from the full helper path.
+///
+/// Since `#[macro_export]` macros live at the crate root, we include ALL path
+/// segments (except `crate`) joined by `_` to avoid name collisions between
+/// helpers that share the same last segment.
+fn mangled_name(prefix: &str, helper_path: &syn::Path) -> Ident {
+    let joined: String = helper_path
+        .segments
+        .iter()
+        .skip(1)
+        .map(|s| s.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("_");
+    Ident::new(&format!("{prefix}_{joined}"), Span::call_site())
+}
+
 fn generate_primary(
     attrs: &BaseAttrs,
     struct_name: &Ident,
@@ -225,8 +241,12 @@ fn generate_primary(
         })
         .collect();
 
-    let impls_body = impls_body_for(struct_name, fields, &dollar_crate_helper);
-    let insert_body = insert_body_for(fields, &dollar_crate_helper);
+    // In the generator macro, `$helper` is a metavariable that will be substituted
+    // when the generator is invoked.  `$dollar` is a metavariable that expands to
+    // the literal `$` token, allowing us to emit `$base`, `$store`, `$name` inside
+    // the generated macro.
+    let impls_body = impls_body_for_generator(struct_name, fields);
+    let insert_body = insert_body_for_generator(fields);
 
     // Canary: validate that type aliases resolve correctly.
     let canaries: Vec<_> = fields
@@ -239,7 +259,13 @@ fn generate_primary(
         })
         .collect();
 
-    let mangled_macro_name = Ident::new(&format!("__autoresolve_{helper_mod}"), Span::call_site());
+    // Selective re-exports for the `@reexport` arm: everything EXCEPT the
+    // struct-name macro, to avoid an ambiguity between the glob-imported
+    // original macro and the newly generated one.
+    let reexport_items = reexport_item_list(struct_name, fields);
+
+    let mangled_macro_name = mangled_name("__autoresolve", helper_path);
+    let mangled_gen_name = mangled_name("__autoresolve_gen", helper_path);
 
     Ok(quote! {
         #clean_struct
@@ -250,16 +276,37 @@ fn generate_primary(
 
             #(#aliases)*
 
+            // Generator macro: takes a helper path (in brackets) and emits the
+            // final macro with that path baked in.  The brackets `[...]` allow
+            // capturing the path as `$($helper:tt)*` so that `$($helper)* :: X`
+            // works — a `:path` fragment can't be extended with further segments.
             #[doc(hidden)]
             #[macro_export]
-            macro_rules! #mangled_macro_name {
-                (@impls $base:path) => {
-                    #impls_body
-                };
-                (@insert $store:ident, $name:ident) => {
-                    #insert_body
+            macro_rules! #mangled_gen_name {
+                ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+                    #[doc(hidden)]
+                    #[macro_export]
+                    macro_rules! $mangled {
+                        (@ impls $dollar base:path) => {
+                            #impls_body
+                        };
+                        (@ insert $dollar store:ident, $dollar name:ident) => {
+                            #insert_body
+                        };
+                        (@ reexport [$dollar ($dollar new_helper:tt)*], $dollar new_mangled:ident, $dollar dd:tt) => {
+                            #(pub use #dollar_crate_helper :: #reexport_items;)*
+                            #dollar_crate_helper :: __generator!([$dollar ($dollar new_helper)*], $dollar new_mangled, $dollar dd);
+                        };
+                    }
                 };
             }
+            #[doc(hidden)]
+            pub use #mangled_gen_name as __generator;
+
+            // Invoke the generator with the original helper path to produce the
+            // final macro.  Uses `crate::` (not `$crate::`) because this
+            // invocation is at item position, not inside a macro_rules body.
+            __generator!([#helper_path], #mangled_macro_name, $);
             #[doc(hidden)]
             pub use #mangled_macro_name as #struct_name;
         }
@@ -285,23 +332,28 @@ fn generate_primary(
     })
 }
 
-/// Builds the body of the `@impls` macro arm for the given fields.
+/// Builds the body of the `@impls` macro arm for the generator pattern.
 ///
-/// - `#[spread]` fields: invokes `SpreadType!(@impls $base)` (the macro is in scope by name)
-/// - Regular fields: emits `ResolveFrom<$base>` impl using `$crate::helper::AliasName`
-fn impls_body_for(struct_name: &Ident, fields: &[BaseField<'_>], dollar_crate_helper: &TokenStream) -> TokenStream {
+/// Uses `$($helper)*` (a generator metavariable repetition) for the helper path
+/// and `$dollar base` for the base type metavariable. When the generator is
+/// invoked, these expand to the concrete helper path and `$base` respectively.
+///
+/// - `#[spread]` fields: invokes `SpreadType!(@impls $dollar base)` directly —
+///   the spread macro is resolved at the expansion site, not through the helper.
+/// - Regular fields: emits `ResolveFrom<$dollar base>` impl using `$($helper)*::AliasName`
+fn impls_body_for_generator(struct_name: &Ident, fields: &[BaseField<'_>]) -> TokenStream {
     let mut regular_idx = 0usize;
     let stmts: Vec<_> = fields
         .iter()
         .map(|f| {
             if f.is_spread {
                 let macro_name = spread_macro_ident(f.ty);
-                quote! { #macro_name!(@impls $base); }
+                quote! { #macro_name!(@impls $dollar base); }
             } else {
                 let alias = part_alias_name(struct_name, regular_idx, f.ty);
                 regular_idx += 1;
                 quote! {
-                    impl ::autoresolve::ResolveFrom<$base> for #dollar_crate_helper :: #alias {
+                    impl ::autoresolve::ResolveFrom<$dollar base> for $($helper)* :: #alias {
                         type Inputs = ::autoresolve::ResolutionDepsEnd;
 
                         fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
@@ -316,11 +368,13 @@ fn impls_body_for(struct_name: &Ident, fields: &[BaseField<'_>], dollar_crate_he
     quote! { #(#stmts)* }
 }
 
-/// Builds the body of the `@insert` macro arm for the given fields.
+/// Builds the body of the `@insert` macro arm for the generator pattern.
 ///
-/// - `#[spread]` fields: delegates to `SpreadType!(@insert $store, field_name)`
-/// - Regular fields: calls `$store.store_value($name.field)`
-fn insert_body_for(fields: &[BaseField<'_>], _dollar_crate_helper: &TokenStream) -> TokenStream {
+/// Uses `$dollar store`, `$dollar name` which expand to `$store`, `$name` in the final macro.
+///
+/// - `#[spread]` fields: delegates to `$($helper)*::SpreadType!(@insert $dollar store, field_name)`
+/// - Regular fields: calls `$dollar store.store_value($dollar name.field)`
+fn insert_body_for_generator(fields: &[BaseField<'_>]) -> TokenStream {
     let stmts: Vec<_> = fields
         .iter()
         .map(|f| {
@@ -329,17 +383,42 @@ fn insert_body_for(fields: &[BaseField<'_>], _dollar_crate_helper: &TokenStream)
                 let macro_name = spread_macro_ident(f.ty);
                 quote! {
                     {
-                        let __spread = $name.#ident;
-                        #macro_name!(@insert $store, __spread);
+                        let __spread = $dollar name.#ident;
+                        #macro_name!(@insert $dollar store, __spread);
                     }
                 }
             } else {
-                quote! { $store.store_value($name.#ident); }
+                quote! { $dollar store.store_value($dollar name.#ident); }
             }
         })
         .collect();
 
     quote! { #(#stmts)* }
+}
+
+/// Builds the list of items the `@reexport` arm should selectively re-export
+/// from the original helper module into the new helper module.
+///
+/// Includes type aliases, spread field macros, and `__generator`, but
+/// deliberately **excludes** the struct-name macro (e.g. `Builtins`).  This
+/// prevents an ambiguity between the glob-imported original macro and the new
+/// macro generated by the `@reexport` invocation.
+fn reexport_item_list(struct_name: &Ident, fields: &[BaseField<'_>]) -> Vec<Ident> {
+    let mut items = Vec::new();
+
+    // Type aliases for regular (non-spread) fields.
+    let mut regular_idx = 0usize;
+    for f in fields {
+        if !f.is_spread {
+            items.push(part_alias_name(struct_name, regular_idx, f.ty));
+            regular_idx += 1;
+        }
+    }
+
+    // The `__generator` alias so the new helper can invoke it.
+    items.push(Ident::new("__generator", Span::call_site()));
+
+    items
 }
 
 /// Extracts the macro name (last path segment) for a `#[spread]` field's type.
@@ -395,8 +474,8 @@ fn generate_scoped(
         })
         .collect();
 
-    let own_impls_body = impls_body_for(struct_name, fields, &dollar_crate_helper);
-    let own_insert_body = insert_body_for(fields, &dollar_crate_helper);
+    let own_impls_body = impls_body_for_generator(struct_name, fields);
+    let own_insert_body = insert_body_for_generator(fields);
 
     let canaries: Vec<_> = fields
         .iter()
@@ -408,7 +487,13 @@ fn generate_scoped(
         })
         .collect();
 
-    let mangled_macro_name = Ident::new(&format!("__autoresolve_{helper_mod}"), Span::call_site());
+    // Selective re-exports for the `@reexport` arm.
+    let mut reexport_items = reexport_item_list(struct_name, fields);
+    // Also re-export the parent macro so delegated `@impls` calls work.
+    reexport_items.push(parent_ident.clone());
+
+    let mangled_macro_name = mangled_name("__autoresolve", helper_path);
+    let mangled_gen_name = mangled_name("__autoresolve_gen", helper_path);
 
     Ok(quote! {
         #clean_struct
@@ -418,7 +503,7 @@ fn generate_scoped(
             use super::*;
 
             // Re-export the parent macro into this helper module so that
-            // `$crate::helper::#parent_ident!()` works without an absolute path to the
+            // `$helper::#parent_ident!()` works without an absolute path to the
             // parent, avoiding the `macro_expanded_macro_exports_accessed_by_absolute_paths` lint.
             //
             // Bare ident: `pub use super::Parent;` (resolves via `use super::*;`)
@@ -427,17 +512,37 @@ fn generate_scoped(
 
             #(#aliases)*
 
+            // Generator macro for the scoped base. The `@impls` arm delegates
+            // to the parent's macro (routed through `$($helper)*`) and then
+            // emits its own impls.
             #[doc(hidden)]
             #[macro_export]
-            macro_rules! #mangled_macro_name {
-                (@impls $base:path) => {
-                    #dollar_crate_helper :: #parent_ident!(@impls $base);
-                    #own_impls_body
-                };
-                (@insert $store:ident, $name:ident) => {
-                    #own_insert_body
+            macro_rules! #mangled_gen_name {
+                ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+                    #[doc(hidden)]
+                    #[macro_export]
+                    macro_rules! $mangled {
+                        (@ impls $dollar base:path) => {
+                            $($helper)* :: #parent_ident!(@ impls $dollar base);
+                            #own_impls_body
+                        };
+                        (@ insert $dollar store:ident, $dollar name:ident) => {
+                            #own_insert_body
+                        };
+                        (@ reexport [$dollar ($dollar new_helper:tt)*], $dollar new_mangled:ident, $dollar dd:tt) => {
+                            #(pub use #dollar_crate_helper :: #reexport_items;)*
+                            #dollar_crate_helper :: __generator!([$dollar ($dollar new_helper)*], $dollar new_mangled, $dollar dd);
+                        };
+                    }
                 };
             }
+            #[doc(hidden)]
+            pub use #mangled_gen_name as __generator;
+
+            // Invoke the generator with the original helper path to produce the
+            // final macro.  Uses `crate::` (not `$crate::`) because this
+            // invocation is at item position, not inside a macro_rules body.
+            __generator!([#helper_path], #mangled_macro_name, $);
             #[doc(hidden)]
             pub use #mangled_macro_name as #struct_name;
         }
@@ -461,6 +566,106 @@ fn generate_scoped(
         const _: fn() = || {
             #(#canaries)*
         };
+    })
+}
+
+pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    // Parse the attribute: `helper_module_exported_as = crate::new::helper::path`
+    let meta_list: syn::punctuated::Punctuated<syn::Meta, syn::Token![,]> =
+        syn::parse::Parser::parse2(syn::punctuated::Punctuated::parse_terminated, attr)?;
+
+    let mut new_helper_path: Option<syn::Path> = None;
+
+    for meta in &meta_list {
+        match meta {
+            syn::Meta::NameValue(nv) if nv.path.is_ident("helper_module_exported_as") => {
+                let path: syn::Path = match &nv.value {
+                    syn::Expr::Path(ep) => syn::parse2(quote::quote! { #ep })?,
+                    other => return Err(syn::Error::new_spanned(other, "expected a path")),
+                };
+                if !is_crate_rooted(&path) {
+                    return Err(syn::Error::new_spanned(
+                        &path,
+                        "`helper_module_exported_as` must be a `crate::`-rooted path",
+                    ));
+                }
+                if path.segments.len() < 2 {
+                    return Err(syn::Error::new_spanned(
+                        &path,
+                        "`helper_module_exported_as` must have at least two segments",
+                    ));
+                }
+                new_helper_path = Some(path);
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "unexpected attribute; expected `helper_module_exported_as = ...`",
+                ));
+            }
+        }
+    }
+
+    let new_helper_path = new_helper_path.ok_or_else(|| {
+        syn::Error::new(
+            Span::call_site(),
+            "#[reexport_base] requires `helper_module_exported_as = crate::path::to::helper`",
+        )
+    })?;
+
+    // Parse the item: `pub type Foo = path::to::Original;`
+    let type_alias: syn::ItemType = syn::parse2(item)?;
+    let struct_name = &type_alias.ident;
+    let vis = &type_alias.vis;
+
+    // Extract the original type path from the alias.
+    let original_path = match type_alias.ty.as_ref() {
+        syn::Type::Path(tp) => &tp.path,
+        other => {
+            return Err(syn::Error::new_spanned(
+                other,
+                "#[reexport_base] target must be a type path",
+            ));
+        }
+    };
+
+    let new_helper_mod = helper_mod_name(&new_helper_path);
+
+    // Build a path to reach the original struct/macro from within the new helper
+    // module.  The helper module is one level deeper than the re-export site, so
+    // relative paths need an extra `super::`.
+    let original_in_helper = if is_crate_rooted(original_path) {
+        quote! { #original_path }
+    } else {
+        quote! { super::#original_path }
+    };
+
+    let mangled_macro_name = mangled_name("__autoresolve", &new_helper_path);
+
+    Ok(quote! {
+        #vis type #struct_name = #original_path;
+
+        #[doc(hidden)]
+        pub mod #new_helper_mod {
+            // NB: no `use super::*;` here.  The `@reexport` arm selectively
+            // re-imports type aliases and the `__generator` macro from the
+            // original helper — but NOT the struct-name macro, preventing an
+            // E0659 ambiguity between a glob-imported name and the new macro.
+
+            // Use the original macro's @reexport arm to:
+            // 1. Selectively re-export type aliases and macros from the original helper
+            // 2. Generate a new macro at this helper path via the generator
+            //
+            // Uses `crate::` (not `$crate::`) because this is at item position.
+            // The helper path is wrapped in brackets for the `[$($new_helper:tt)*]` pattern.
+            #original_in_helper!(@reexport [#new_helper_path], #mangled_macro_name, $);
+
+            // Shadow the glob-imported struct macro with the newly generated one.
+            #[doc(hidden)]
+            pub use #mangled_macro_name as #struct_name;
+        }
+        #[doc(hidden)]
+        #vis use #new_helper_mod :: #struct_name;
     })
 }
 

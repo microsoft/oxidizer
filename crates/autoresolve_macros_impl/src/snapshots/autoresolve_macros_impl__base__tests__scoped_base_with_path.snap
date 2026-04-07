@@ -13,18 +13,27 @@ pub mod scoped_helper {
     pub type ScopedRoots_Part0_RequestContext = RequestContext;
     #[doc(hidden)]
     #[macro_export]
-    macro_rules! __autoresolve_scoped_helper {
-        (@ impls $base:path) => {
-            $crate::scoped_helper::Base!(@ impls $base); impl ::autoresolve::ResolveFrom
-            < $base > for $crate::scoped_helper::ScopedRoots_Part0_RequestContext { type
-            Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_ :
+    macro_rules! __autoresolve_gen_scoped_helper {
+        ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+            #[doc(hidden)] #[macro_export] macro_rules! $mangled { (@ impls $dollar base
+            : path) => { $($helper)* ::Base!(@ impls $dollar base); impl
+            ::autoresolve::ResolveFrom < $dollar base > for $($helper)*
+            ::ScopedRoots_Part0_RequestContext { type Inputs =
+            ::autoresolve::ResolutionDepsEnd; fn new(_ :
             ::autoresolve::ResolutionDepsEnd) -> Self {
-            unreachable!("root types are pre-inserted into the resolver") } }
-        };
-        (@ insert $store:ident, $name:ident) => {
-            $store .store_value($name .request_context);
+            unreachable!("root types are pre-inserted into the resolver") } } }; (@
+            insert $dollar store : ident, $dollar name : ident) => { $dollar store
+            .store_value($dollar name.request_context); }; (@ reexport[$dollar ($dollar
+            new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => { pub
+            use $crate::scoped_helper::ScopedRoots_Part0_RequestContext; pub use
+            $crate::scoped_helper::__generator; pub use $crate::scoped_helper::Base;
+            $crate::scoped_helper::__generator!([$dollar ($dollar new_helper) *], $dollar
+            new_mangled, $dollar dd); }; }
         };
     }
+    #[doc(hidden)]
+    pub use __autoresolve_gen_scoped_helper as __generator;
+    __generator!([crate ::scoped_helper], __autoresolve_scoped_helper, $);
     #[doc(hidden)]
     pub use __autoresolve_scoped_helper as ScopedRoots;
 }

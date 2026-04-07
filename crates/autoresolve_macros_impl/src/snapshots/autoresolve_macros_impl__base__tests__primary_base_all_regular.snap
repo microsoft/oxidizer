@@ -15,23 +15,30 @@ pub mod base_helper {
     pub type Base_Part1_Clock = Clock;
     #[doc(hidden)]
     #[macro_export]
-    macro_rules! __autoresolve_base_helper {
-        (@ impls $base:path) => {
-            impl ::autoresolve::ResolveFrom < $base > for
-            $crate::base_helper::Base_Part0_Scheduler { type Inputs =
-            ::autoresolve::ResolutionDepsEnd; fn new(_ :
-            ::autoresolve::ResolutionDepsEnd) -> Self {
+    macro_rules! __autoresolve_gen_base_helper {
+        ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+            #[doc(hidden)] #[macro_export] macro_rules! $mangled { (@ impls $dollar base
+            : path) => { impl ::autoresolve::ResolveFrom < $dollar base > for $($helper)*
+            ::Base_Part0_Scheduler { type Inputs = ::autoresolve::ResolutionDepsEnd; fn
+            new(_ : ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("root types are pre-inserted into the resolver") } } impl
-            ::autoresolve::ResolveFrom < $base > for
-            $crate::base_helper::Base_Part1_Clock { type Inputs =
-            ::autoresolve::ResolutionDepsEnd; fn new(_ :
-            ::autoresolve::ResolutionDepsEnd) -> Self {
-            unreachable!("root types are pre-inserted into the resolver") } }
-        };
-        (@ insert $store:ident, $name:ident) => {
-            $store .store_value($name .scheduler); $store .store_value($name .clock);
+            ::autoresolve::ResolveFrom < $dollar base > for $($helper)*
+            ::Base_Part1_Clock { type Inputs = ::autoresolve::ResolutionDepsEnd; fn new(_
+            : ::autoresolve::ResolutionDepsEnd) -> Self {
+            unreachable!("root types are pre-inserted into the resolver") } } }; (@
+            insert $dollar store : ident, $dollar name : ident) => { $dollar store
+            .store_value($dollar name.scheduler); $dollar store.store_value($dollar name
+            .clock); }; (@ reexport[$dollar ($dollar new_helper : tt) *], $dollar
+            new_mangled : ident, $dollar dd : tt) => { pub use
+            $crate::base_helper::Base_Part0_Scheduler; pub use
+            $crate::base_helper::Base_Part1_Clock; pub use
+            $crate::base_helper::__generator; $crate::base_helper::__generator!([$dollar
+            ($dollar new_helper) *], $dollar new_mangled, $dollar dd); }; }
         };
     }
+    #[doc(hidden)]
+    pub use __autoresolve_gen_base_helper as __generator;
+    __generator!([crate ::base_helper], __autoresolve_base_helper, $);
     #[doc(hidden)]
     pub use __autoresolve_base_helper as Base;
 }
