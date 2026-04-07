@@ -109,6 +109,31 @@ async fn default_len_returns_unsupported() {
     assert_eq!(err.kind, LenErrorKind::Unsupported);
 }
 
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn default_is_empty_returns_unsupported_when_len_unsupported() {
+    let cache: MinimalCache<String, i32> = MinimalCache::new();
+    let err = cache.is_empty().await.unwrap_err();
+    assert_eq!(err.kind, LenErrorKind::Unsupported);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+#[cfg(feature = "test-util")]
+async fn is_empty_returns_true_for_empty_cache() {
+    let cache = MockCache::<String, i32>::new();
+    assert!(cache.is_empty().await.unwrap());
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+#[cfg(feature = "test-util")]
+async fn is_empty_returns_false_after_insert() {
+    let cache = MockCache::<String, i32>::new();
+    cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+    assert!(!cache.is_empty().await.unwrap());
+}
+
 // MockCache tests
 
 #[cfg_attr(miri, ignore)]
