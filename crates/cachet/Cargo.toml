@@ -139,5 +139,9 @@ required-features = ["memory", "service"]
 name = "service_middleware_composition"
 required-features = ["memory", "service"]
 
+[[example]]
+name = "type_mapping"
+required-features = ["memory", "test-util"]
+
 [lints]
 workspace = true
