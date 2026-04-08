@@ -1,39 +1,16 @@
-error[E0255]: the name `AppBase` is defined multiple times
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:9
-   |
-19 | #[base(helper_module_exported_as = crate::app_base_helper)]
-   | ----------------------------------------------------------- previous definition of the type `AppBase` here
-...
-24 | pub use crate::AppBase;
-   |         ^^^^^^^^^^^^^^ `AppBase` reimported here
-   |
-   = note: `AppBase` must be defined only once in the type namespace of this module
-help: you can use `as` to change the binding name of the import
-   |
-24 | pub use crate::AppBase as OtherAppBase;
-   |                        +++++++++++++++
-
-warning: unused import: `crate::AppBase`
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:9
-   |
-24 | pub use crate::AppBase;
-   |         ^^^^^^^^^^^^^^
-   |
-   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
 error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:36:26
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:34:26
    |
-36 |     let _ = parent.get::<CorrelationVector>();
+34 |     let _ = parent.get::<CorrelationVector>();
    |                    ---   ^^^^^^^^^^^^^^^^^ unsatisfied trait bound
    |                    |
    |                    required by a bound introduced by this call
    |
 help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
       but trait `ResolveFrom<RequestBase>` is implemented for it
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:26:1
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:1
    |
-26 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+24 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = help: for that trait implementation, expected `RequestBase`, found `AppBase`
 note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`

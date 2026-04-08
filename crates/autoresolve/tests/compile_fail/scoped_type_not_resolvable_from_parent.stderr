@@ -1,51 +1,7 @@
-error[E0255]: the name `AppBase` is defined multiple times
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:9
-   |
-50 | #[base(helper_module_exported_as = crate::app_base_helper)]
-   | ----------------------------------------------------------- previous definition of the type `AppBase` here
-...
-55 | pub use crate::AppBase;
-   |         ^^^^^^^^^^^^^^ `AppBase` reimported here
-   |
-   = note: `AppBase` must be defined only once in the type namespace of this module
-help: you can use `as` to change the binding name of the import
-   |
-55 | pub use crate::AppBase as OtherAppBase;
-   |                        +++++++++++++++
-
-error[E0255]: the name `RequestBase` is defined multiple times
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:62:9
-   |
-57 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
-   | -------------------------------------------------------------------------------- previous definition of the type `RequestBase` here
-...
-62 | pub use crate::RequestBase;
-   |         ^^^^^^^^^^^^^^^^^^ `RequestBase` reimported here
-   |
-   = note: `RequestBase` must be defined only once in the type namespace of this module
-help: you can use `as` to change the binding name of the import
-   |
-62 | pub use crate::RequestBase as OtherRequestBase;
-   |                            +++++++++++++++++++
-
-warning: unused import: `crate::AppBase`
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:9
-   |
-55 | pub use crate::AppBase;
-   |         ^^^^^^^^^^^^^^
-   |
-   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-warning: unused import: `crate::RequestBase`
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:62:9
-   |
-62 | pub use crate::RequestBase;
-   |         ^^^^^^^^^^^^^^^^^^
-
 error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:74:26
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
    |
-74 |     let _ = parent.get::<TaskHandler>();
+70 |     let _ = parent.get::<TaskHandler>();
    |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
    |                    |
    |                    required by a bound introduced by this call
@@ -56,15 +12,15 @@ help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
  7 | pub struct Request;
    | ^^^^^^^^^^^^^^^^^^
 help: the following other types implement trait `ResolveFrom<T>`
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:57:1
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:1
    |
-57 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+55 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    | |
    | `Request` implements `ResolveFrom<RequestBase>`
    | `Request` implements `ResolveFrom<TaskBase>`
 ...
-64 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+60 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
    | --------------------------------------------------------------------------------- in this attribute macro expansion
 note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
@@ -86,18 +42,18 @@ note: required by a bound in `Resolver::<T>::get`
    = note: this error originates in the macro `RequestBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `Task: ResolveFrom<AppBase>` is not satisfied
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:74:26
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
    |
-74 |     let _ = parent.get::<TaskHandler>();
+70 |     let _ = parent.get::<TaskHandler>();
    |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
    |                    |
    |                    required by a bound introduced by this call
    |
 help: the trait `ResolveFrom<AppBase>` is not implemented for `Task`
       but trait `ResolveFrom<TaskBase>` is implemented for it
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:64:1
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:60:1
    |
-64 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+60 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = help: for that trait implementation, expected `TaskBase`, found `AppBase`
 note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`

@@ -52,14 +52,10 @@ pub struct AppBase {
     pub scheduler: Scheduler,
 }
 
-pub use crate::AppBase;
-
 #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
 pub struct RequestBase {
     pub request: Request,
 }
-
-pub use crate::RequestBase;
 
 #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
 pub struct TaskBase {
