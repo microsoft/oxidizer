@@ -234,10 +234,11 @@ mod cache;
 mod fallback;
 mod refresh;
 mod telemetry;
+mod transform;
 mod wrapper;
 
 #[doc(inline)]
-pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder};
+pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
 #[cfg(feature = "memory")]
@@ -257,3 +258,5 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+#[doc(inline)]
+pub use transform::{Codec, Encoder, TransformCodec, TransformEncoder, infallible};
