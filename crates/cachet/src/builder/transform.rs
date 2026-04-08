@@ -54,8 +54,8 @@ impl<K, V, KT, VT, Pre: Debug, Post: Debug> Debug for TransformBuilder<K, V, KT,
 
 impl<K, V, CT> CacheBuilder<K, V, CT>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Applies a generic type transform boundary.
@@ -72,8 +72,8 @@ where
         value_codec: impl Codec<V, VT> + 'static,
     ) -> TransformBuilder<K, V, KT, VT, Self>
     where
-        KT: Clone + Hash + Eq + Send + Sync + 'static,
-        VT: Clone + Send + Sync + 'static,
+        KT: Send + Sync + 'static,
+        VT: Send + Sync + 'static,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
@@ -95,8 +95,8 @@ where
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
@@ -108,8 +108,8 @@ where
         value_codec: impl Codec<V, VT> + 'static,
     ) -> TransformBuilder<K, V, KT, VT, Self>
     where
-        KT: Clone + Hash + Eq + Send + Sync + 'static,
-        VT: Clone + Send + Sync + 'static,
+        KT: Send + Sync + 'static,
+        VT: Send + Sync + 'static,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
@@ -131,8 +131,8 @@ where
 
 impl<K, V, KT, VT, Pre> TransformBuilder<K, V, KT, VT, Pre, ()>
 where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
 {
     /// Sets the first post-transform storage tier (speaks `KT, VT`).
     pub fn fallback<FB>(self, fallback: FB) -> TransformBuilder<K, V, KT, VT, Pre, FB>
@@ -154,8 +154,8 @@ where
 
 impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
 where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
     Post: CacheTierBuilder<KT, VT>,
 {
     /// Adds another post-transform fallback tier (speaks `KT, VT`).
@@ -196,19 +196,19 @@ where
 
 impl<K, V, KT, VT, Pre, Post> Sealed for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
 {
 }
 
 impl<K, V, KT, VT, Pre, Post> CacheTierBuilder<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
 {
 }
 
@@ -219,7 +219,7 @@ impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    KT: Clone + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
     Pre: Buildable<K, V>,
     Post: Buildable<KT, VT>,
@@ -236,7 +236,7 @@ impl<K, V, KT, VT, Pre, Post> Buildable<K, V> for TransformBuilder<K, V, KT, VT,
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    KT: Clone + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
     Pre: Buildable<K, V>,
     Post: Buildable<KT, VT>,

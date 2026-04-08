@@ -241,7 +241,7 @@ mod wrapper;
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
-#[cfg(feature = "memory")]
+#[cfg(any(feature = "memory", test))]
 #[doc(inline)]
 pub use cachet_memory::InMemoryCache;
 #[cfg(feature = "service")]
