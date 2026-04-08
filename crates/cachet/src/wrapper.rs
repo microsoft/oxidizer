@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use cachet_tier::{CacheTier, LenError};
+use cachet_tier::{CacheTier, SizeError};
 use tick::Clock;
 
 use crate::cache::CacheName;
@@ -181,7 +181,7 @@ where
         timed.result
     }
 
-    async fn len(&self) -> Result<u64, LenError> {
+    async fn len(&self) -> Result<u64, SizeError> {
         self.inner.len().await
     }
 }

@@ -7,7 +7,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use cachet_tier::{CacheEntry, CacheTier, LenError};
+use cachet_tier::{CacheEntry, CacheTier, SizeError};
 use tick::Clock;
 use uniflight::Merger;
 
@@ -343,9 +343,9 @@ where
     ///
     /// # Errors
     ///
-    /// Returns `Err(LenError::unsupported())` if the underlying storage does not support size tracking.
+    /// Returns `Err(SizeError::unsupported())` if the underlying storage does not support size tracking.
     /// Returns an error if the underlying storage tier fails.
-    pub async fn len(&self) -> Result<u64, LenError> {
+    pub async fn len(&self) -> Result<u64, SizeError> {
         self.storage.len().await
     }
 
@@ -355,9 +355,9 @@ where
     ///
     /// # Errors
     ///
-    /// Returns `Err(LenError::unsupported())` if the underlying storage does not support size tracking.
+    /// Returns `Err(SizeError::unsupported())` if the underlying storage does not support size tracking.
     /// Returns an error if the underlying storage tier fails.
-    pub async fn is_empty(&self) -> Result<bool, LenError> {
+    pub async fn is_empty(&self) -> Result<bool, SizeError> {
         self.len().await.map(|n| n == 0)
     }
 

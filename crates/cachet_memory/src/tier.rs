@@ -13,7 +13,7 @@ use foldhash::fast::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
-use cachet_tier::{CacheEntry, CacheTier, Error, LenError};
+use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
 use moka::Expiry;
 use moka::future::Cache;
 use thread_aware::{Arc, PerProcess, ThreadAware};
@@ -194,7 +194,7 @@ where
         Ok(())
     }
 
-    async fn len(&self) -> Result<u64, LenError> {
+    async fn len(&self) -> Result<u64, SizeError> {
         Ok(self.inner.entry_count())
     }
 }

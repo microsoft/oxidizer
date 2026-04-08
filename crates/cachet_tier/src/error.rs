@@ -156,15 +156,15 @@ impl Recovery for Error {
     }
 }
 
-impl From<LenError> for Error {
-    fn from(err: LenError) -> Self {
+impl From<SizeError> for Error {
+    fn from(err: SizeError) -> Self {
         Self::from_source(err)
     }
 }
 
 /// The kind of error returned by [`CacheTier::len`](crate::CacheTier::len).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LenErrorKind {
+pub enum SizeErrorKind {
     /// The tier does not support reporting its size.
     Unsupported,
     /// The underlying storage operation failed.
@@ -174,20 +174,20 @@ pub enum LenErrorKind {
 /// An error from a [`CacheTier::len`](crate::CacheTier::len) operation.
 ///
 /// Use the [`kind`](Self::kind) field to distinguish between tiers that don't
-/// support size reporting ([`Unsupported`](LenErrorKind::Unsupported)) and
-/// actual storage failures ([`Failed`](LenErrorKind::Failed)).
+/// support size reporting ([`Unsupported`](SizeErrorKind::Unsupported)) and
+/// actual storage failures ([`Failed`](SizeErrorKind::Failed)).
 #[ohno::error]
-#[from(Error(kind: LenErrorKind::Failed))]
-pub struct LenError {
+#[from(Error(kind: SizeErrorKind::Failed))]
+pub struct SizeError {
     /// The kind of error that occurred.
-    pub kind: LenErrorKind,
+    pub kind: SizeErrorKind,
 }
 
-impl LenError {
-    /// Creates a new `LenError` indicating that the tier does not support size reporting.
+impl SizeError {
+    /// Creates a new `SizeError` indicating that the tier does not support size reporting.
     #[must_use]
     pub fn unsupported() -> Self {
-        Self::new(LenErrorKind::Unsupported)
+        Self::new(SizeErrorKind::Unsupported)
     }
 }
 
@@ -304,23 +304,23 @@ mod tests {
     }
 
     #[test]
-    fn failed_len_error_from_error() {
+    fn failed_size_error_from_error() {
         let error = Error::from_message("permanent failure");
-        let len_err: LenError = error.clone().into();
-        assert_eq!(LenErrorKind::Failed, len_err.kind);
+        let len_err: SizeError = error.clone().into();
+        assert_eq!(SizeErrorKind::Failed, len_err.kind);
         assert_eq!(error.to_string(), len_err.source().expect("should have source error").to_string());
     }
 
     #[test]
-    fn unsupported_len_error_has_unsupported_kind() {
-        let len_err = LenError::unsupported();
-        assert_eq!(LenErrorKind::Unsupported, len_err.kind);
+    fn unsupported_size_error_has_unsupported_kind() {
+        let len_err = SizeError::unsupported();
+        assert_eq!(SizeErrorKind::Unsupported, len_err.kind);
     }
 
     #[test]
-    fn len_error_converts_to_error() {
-        let len_err = LenError::unsupported();
+    fn size_error_converts_to_error() {
+        let len_err = SizeError::unsupported();
         let error: Error = len_err.into();
-        assert!(error.is_source::<LenError>());
+        assert!(error.is_source::<SizeError>());
     }
 }

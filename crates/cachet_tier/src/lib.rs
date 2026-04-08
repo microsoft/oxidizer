@@ -72,7 +72,7 @@ pub use dynamic::DynamicCache;
 #[doc(inline)]
 pub use entry::CacheEntry;
 #[doc(inline)]
-pub use error::{Error, LenError, LenErrorKind, Result};
+pub use error::{Error, SizeError, SizeErrorKind, Result};
 #[cfg(any(feature = "test-util", test))]
 #[doc(inline)]
 pub use testing::{CacheOp, MockCache};

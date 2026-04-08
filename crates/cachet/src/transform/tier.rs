@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, LenError};
+use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
 
 use std::fmt::Debug;
 
@@ -154,7 +154,7 @@ where
         self.inner.clear().await
     }
 
-    async fn len(&self) -> Result<u64, LenError> {
+    async fn len(&self) -> Result<u64, SizeError> {
         self.inner.len().await
     }
 }

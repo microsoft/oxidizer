@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 #[cfg(feature = "test-util")]
 use cachet_tier::MockCache;
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error, LenErrorKind};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error, SizeErrorKind};
 
 /// Minimal implementation that only provides required methods
 struct MinimalCache<K, V> {
@@ -106,7 +106,7 @@ async fn default_clear_returns_ok() {
 async fn default_len_returns_unsupported() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
     let err = cache.len().await.unwrap_err();
-    assert_eq!(err.kind, LenErrorKind::Unsupported);
+    assert_eq!(err.kind, SizeErrorKind::Unsupported);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -114,7 +114,7 @@ async fn default_len_returns_unsupported() {
 async fn default_is_empty_returns_unsupported_when_len_unsupported() {
     let cache: MinimalCache<String, i32> = MinimalCache::new();
     let err = cache.is_empty().await.unwrap_err();
-    assert_eq!(err.kind, LenErrorKind::Unsupported);
+    assert_eq!(err.kind, SizeErrorKind::Unsupported);
 }
 
 #[cfg_attr(miri, ignore)]

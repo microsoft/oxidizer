@@ -119,12 +119,12 @@ async fn adapter_clear_removes_all_entries() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn adapter_len_returns_unsupported() {
-    use cachet_tier::LenErrorKind;
+    use cachet_tier::SizeErrorKind;
 
     let service = InMemoryCacheService::<String, i32>::new();
     let adapter = ServiceAdapter::new(service);
     let err = adapter.len().await.unwrap_err();
-    assert_eq!(err.kind, LenErrorKind::Unsupported);
+    assert_eq!(err.kind, SizeErrorKind::Unsupported);
 }
 
 #[test]

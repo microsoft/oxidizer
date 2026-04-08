@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use cachet_tier::{CacheEntry, CacheTier, LenError};
+use cachet_tier::{CacheEntry, CacheTier, SizeError};
 use futures::join;
 use tick::Clock;
 
@@ -290,7 +290,7 @@ where
         fallback_result
     }
 
-    async fn len(&self) -> Result<u64, LenError> {
+    async fn len(&self) -> Result<u64, SizeError> {
         // Return length of primary cache if available
         self.inner.primary.len().await
     }

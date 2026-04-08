@@ -9,7 +9,7 @@
 
 use std::future::Future;
 
-use crate::{CacheEntry, Error, LenError};
+use crate::{CacheEntry, Error, SizeError};
 
 /// Trait for cache tier implementations.
 ///
@@ -32,8 +32,9 @@ use crate::{CacheEntry, Error, LenError};
 /// Rust object.
 ///
 /// `len` and `is_empty` have default implementations:
-/// - `len`: Returns `Err(LenError::unsupported())` (not all tiers track size)
-/// - `is_empty`: Returns `Err(LenError::unsupported())`
+/// - `len`: Returns `Err(SizeError::unsupported())` (not all tiers track size)
+/// - `is_empty`: Delegates to [`len`](Self::len), returning `Ok(true)` when
+///   the reported length is `0` and otherwise propagating any `SizeError`
 #[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
@@ -52,7 +53,7 @@ pub trait CacheTier<K, V>: Send + Sync {
 
     /// Returns an **approximate** count of entries, if the implementation supports it.
     ///
-    /// Returns `Err(LenError::unsupported())` for implementations that do not track size.
+    /// Returns `Err(SizeError::unsupported())` for implementations that do not track size.
     ///
     /// # Approximation
     ///
@@ -66,19 +67,22 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// # Errors
     ///
+    /// Returns an error if the underlying storage does not implement `len()`
     /// Returns an error if the underlying storage operation fails.
-    fn len(&self) -> impl Future<Output = Result<u64, LenError>> + Send {
-        async { Err(LenError::unsupported()) }
+    fn len(&self) -> impl Future<Output = Result<u64, SizeError>> + Send {
+        async { Err(SizeError::unsupported()) }
     }
 
-    /// Returns `Err(LenError::unsupported())` if the cache appears to contain no entries.
+    /// Returns `Ok(true)` if the cache appears to contain no entries.
     ///
     /// Default implementation delegates to [`len`](Self::len).
     ///
     /// # Errors
     ///
+    /// Returns an `Err(SizeError::unsupported())` if the underlying storage does not support
+    /// size reporting.
     /// Returns an error if the underlying storage operation fails.
-    fn is_empty(&self) -> impl Future<Output = Result<bool, LenError>> + Send {
+    fn is_empty(&self) -> impl Future<Output = Result<bool, SizeError>> + Send {
         async { self.len().await.map(|n| n == 0) }
     }
 }
