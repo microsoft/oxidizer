@@ -1,3 +1,5 @@
+#![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
+
 use autoresolve_macros::base;
 
 // Each type lives in its own module (separate file) so the generated code must

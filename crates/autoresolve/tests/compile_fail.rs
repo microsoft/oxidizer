@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Test helpers.
+
 /// Verifies that proc-macro validation and end-to-end resolution errors produce the expected compiler diagnostics.
 #[test]
 #[cfg_attr(miri, ignore)]

@@ -10,6 +10,7 @@ struct Base {
 pub mod app_base_helper {
     use super::*;
     #[doc(hidden)]
+    #[allow(non_camel_case_types)]
     pub type Base_Part0_Telemetry = Telemetry;
     #[doc(hidden)]
     #[macro_export]
@@ -24,9 +25,10 @@ pub mod app_base_helper {
             insert $dollar store : ident, $dollar name : ident) => { { let __spread =
             $dollar name.builtins; Builtins!(@ insert $dollar store, __spread); } $dollar
             store.store_value($dollar name.telemetry); }; (@ reexport[$dollar ($dollar
-            new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => { pub
-            use $crate::app_base_helper::Base_Part0_Telemetry; pub use
-            $crate::app_base_helper::__generator;
+            new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => {
+            #[allow(unused_imports)] pub use
+            $crate::app_base_helper::Base_Part0_Telemetry; #[allow(unused_imports)] pub
+            use $crate::app_base_helper::__generator;
             $crate::app_base_helper::__generator!([$dollar ($dollar new_helper) *],
             $dollar new_mangled, $dollar dd); }; }
         };

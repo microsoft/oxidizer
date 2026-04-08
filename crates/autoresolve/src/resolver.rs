@@ -29,6 +29,15 @@ pub struct Resolver<T> {
     base: PhantomData<T>,
 }
 
+impl<T> std::fmt::Debug for Resolver<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Resolver")
+            .field("ancestors", &self.ancestors.len())
+            .field("depth", &self.depth)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<T: Send + Sync + 'static> Resolver<T> {
     /// Returns the value and its ancestor index (1-based tier).
     fn lookup_in_ancestors_with_tier<O: Send + Sync + 'static>(&self) -> Option<(usize, &O)> {

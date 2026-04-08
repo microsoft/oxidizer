@@ -179,6 +179,7 @@ fn type_aliases(struct_name: &Ident, fields: &[BaseField<'_>]) -> Vec<TokenStrea
             let ty = f.ty;
             quote! {
                 #[doc(hidden)]
+                #[allow(non_camel_case_types)]
                 pub type #alias = #ty;
             }
         })
@@ -298,7 +299,7 @@ fn generate_primary(
                             #insert_body
                         };
                         (@ reexport [$dollar ($dollar new_helper:tt)*], $dollar new_mangled:ident, $dollar dd:tt) => {
-                            #(pub use #dollar_crate_helper :: #reexport_items;)*
+                            #(#[allow(unused_imports)] pub use #dollar_crate_helper :: #reexport_items;)*
                             #dollar_crate_helper :: __generator!([$dollar ($dollar new_helper)*], $dollar new_mangled, $dollar dd);
                         };
                     }
@@ -536,7 +537,7 @@ fn generate_scoped(
                             #own_insert_body
                         };
                         (@ reexport [$dollar ($dollar new_helper:tt)*], $dollar new_mangled:ident, $dollar dd:tt) => {
-                            #(pub use #dollar_crate_helper :: #reexport_items;)*
+                            #(#[allow(unused_imports)] pub use #dollar_crate_helper :: #reexport_items;)*
                             #dollar_crate_helper :: __generator!([$dollar ($dollar new_helper)*], $dollar new_mangled, $dollar dd);
                         };
                     }

@@ -1,4 +1,4 @@
-#![allow(dead_code)] // Test structs exist to exercise the DI graph, not all fields are read.
+#![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

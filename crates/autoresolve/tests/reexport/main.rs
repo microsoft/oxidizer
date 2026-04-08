@@ -1,3 +1,5 @@
+#![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
+
 use autoresolve::{Resolver, base, resolvable};
 pub use runtime::exports::Builtins;
 
@@ -11,7 +13,7 @@ pub struct UsesClock;
 
 #[resolvable]
 impl UsesClock {
-    pub fn new(clock: &Clock) -> Self {
+    pub fn new(_clock: &Clock) -> Self {
         Self
     }
 }

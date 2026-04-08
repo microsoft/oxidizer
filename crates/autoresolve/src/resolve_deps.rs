@@ -2,9 +2,11 @@ use crate::ResolveFrom;
 use crate::resolver_store::ResolverStore;
 
 /// Terminator for a heterogeneous dependency list.
+#[derive(Debug)]
 pub struct ResolutionDepsEnd;
 
 /// A node in a heterogeneous dependency list, pairing a head type `H` with a tail `T`.
+#[derive(Debug)]
 pub struct ResolutionDepsNode<H, T>(pub H, pub T);
 
 /// A heterogeneous list of dependencies that can be resolved from a [`ResolverStore`].

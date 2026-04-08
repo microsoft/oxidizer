@@ -28,14 +28,6 @@ help: you can use `as` to change the binding name of the import
 62 | pub use crate::RequestBase as OtherRequestBase;
    |                            +++++++++++++++++++
 
-warning: type `AppBase_Part0_Scheduler` should have an upper camel case name
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:52:20
-   |
-52 |     pub scheduler: Scheduler,
-   |                    ^^^^^^^^^ help: convert the identifier to upper camel case: `AppBasePart0Scheduler`
-   |
-   = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
-
 warning: unused import: `crate::AppBase`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:9
    |
@@ -44,23 +36,11 @@ warning: unused import: `crate::AppBase`
    |
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
 
-warning: type `RequestBase_Part0_Request` should have an upper camel case name
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:59:18
-   |
-59 |     pub request: Request,
-   |                  ^^^^^^^ help: convert the identifier to upper camel case: `RequestBasePart0Request`
-
 warning: unused import: `crate::RequestBase`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:62:9
    |
 62 | pub use crate::RequestBase;
    |         ^^^^^^^^^^^^^^^^^^
-
-warning: type `TaskBase_Part0_Task` should have an upper camel case name
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:66:15
-   |
-66 |     pub task: Task,
-   |               ^^^^ help: convert the identifier to upper camel case: `TaskBasePart0Task`
 
 error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:74:26

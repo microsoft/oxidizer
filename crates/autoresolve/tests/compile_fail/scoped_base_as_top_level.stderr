@@ -1,17 +1,3 @@
-warning: type `Builtins_Part0_Clock` should have an upper camel case name
- --> tests/compile_fail/scoped_base_as_top_level.rs:8:16
-  |
-8 |     pub clock: Clock,
-  |                ^^^^^ help: convert the identifier to upper camel case: `BuiltinsPart0Clock`
-  |
-  = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
-
-warning: type `MyBase_Part0_MyDep` should have an upper camel case name
-  --> tests/compile_fail/scoped_base_as_top_level.rs:13:14
-   |
-13 |     pub dep: MyDep,
-   |              ^^^^^ help: convert the identifier to upper camel case: `MyBasePart0MyDep`
-
 error[E0271]: type mismatch resolving `<MyBase as BaseType>::Parent == ()`
   --> tests/compile_fail/scoped_base_as_top_level.rs:19:48
    |

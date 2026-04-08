@@ -13,14 +13,6 @@ help: you can use `as` to change the binding name of the import
 24 | pub use crate::AppBase as OtherAppBase;
    |                        +++++++++++++++
 
-warning: type `AppBase_Part0_Scheduler` should have an upper camel case name
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:21:20
-   |
-21 |     pub scheduler: Scheduler,
-   |                    ^^^^^^^^^ help: convert the identifier to upper camel case: `AppBasePart0Scheduler`
-   |
-   = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
-
 warning: unused import: `crate::AppBase`
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:9
    |
@@ -28,12 +20,6 @@ warning: unused import: `crate::AppBase`
    |         ^^^^^^^^^^^^^^
    |
    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-warning: type `RequestBase_Part0_Request` should have an upper camel case name
-  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:28:18
-   |
-28 |     pub request: Request,
-   |                  ^^^^^^^ help: convert the identifier to upper camel case: `RequestBasePart0Request`
 
 error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
   --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:36:26

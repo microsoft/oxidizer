@@ -10,6 +10,7 @@ pub mod scoped_helper {
     use super::*;
     pub use crate::Base;
     #[doc(hidden)]
+    #[allow(non_camel_case_types)]
     pub type ScopedRoots_Part0_RequestContext = RequestContext;
     #[doc(hidden)]
     #[macro_export]
@@ -24,9 +25,11 @@ pub mod scoped_helper {
             unreachable!("root types are pre-inserted into the resolver") } } }; (@
             insert $dollar store : ident, $dollar name : ident) => { $dollar store
             .store_value($dollar name.request_context); }; (@ reexport[$dollar ($dollar
-            new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => { pub
-            use $crate::scoped_helper::ScopedRoots_Part0_RequestContext; pub use
-            $crate::scoped_helper::__generator; pub use $crate::scoped_helper::Base;
+            new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => {
+            #[allow(unused_imports)] pub use
+            $crate::scoped_helper::ScopedRoots_Part0_RequestContext;
+            #[allow(unused_imports)] pub use $crate::scoped_helper::__generator;
+            #[allow(unused_imports)] pub use $crate::scoped_helper::Base;
             $crate::scoped_helper::__generator!([$dollar ($dollar new_helper) *], $dollar
             new_mangled, $dollar dd); }; }
         };
