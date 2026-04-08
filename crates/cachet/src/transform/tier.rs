@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CacheEntry, CacheTier, Codec, Encoder, Error};
+use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, LenError};
 
 use std::fmt::Debug;
 
@@ -154,8 +154,8 @@ where
         self.inner.clear().await
     }
 
-    fn len(&self) -> Option<u64> {
-        self.inner.len()
+    async fn len(&self) -> Result<u64, LenError> {
+        self.inner.len().await
     }
 }
 
@@ -205,8 +205,9 @@ mod tests {
         assert_eq!(encoder.encode(&42).unwrap(), "42");
     }
 
-    #[test]
-    fn len_delegates_to_inner() {
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn len_delegates_to_inner() {
         use crate::infallible;
 
         let data = vec![(1, CacheEntry::new(10)), (2, CacheEntry::new(20))];
@@ -216,6 +217,6 @@ mod tests {
             Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v))),
         );
-        assert_eq!(adapter.len(), Some(2));
+        assert_eq!(adapter.len().await.expect("MockCache::len returns Ok"), 2);
     }
 }
