@@ -31,6 +31,7 @@ pub struct Base {
     pub request: Request,
 }
 
+/// Resolves a deep dependency graph through a base with `#[spread]` and regular fields.
 #[test]
 fn test_combined() {
     use clock::Clock;

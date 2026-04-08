@@ -45,7 +45,8 @@ pub mod base_helper {
 #[doc(hidden)]
 pub use base_helper::Base;
 Base!(@ impls Base);
-impl ::autoresolve::BaseType<Base> for Base {
+impl ::autoresolve::BaseType for Base {
+    type Parent = ();
     fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
         let Self { scheduler, clock } = self;
         __store.store_value(scheduler);

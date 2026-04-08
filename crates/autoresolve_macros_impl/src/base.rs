@@ -84,6 +84,10 @@ fn is_crate_rooted(path: &syn::Path) -> bool {
     path.segments.first().is_some_and(|s| s.ident == "crate")
 }
 
+/// Implements the `#[base]` attribute macro.
+///
+/// Parses the attributed struct, generates `ResolveFrom` impls for each field,
+/// a `BaseType` impl, a declarative helper macro, and module-level re-exports.
 pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let attrs = parse_attrs(attr)?;
     let the_struct: ItemStruct = syn::parse2(item)?;
@@ -319,7 +323,9 @@ fn generate_primary(
         // `macro_expanded_macro_exports_accessed_by_absolute_paths` lint.
         #struct_name!(@impls #struct_name);
 
-        impl ::autoresolve::BaseType<#struct_name> for #struct_name {
+        impl ::autoresolve::BaseType for #struct_name {
+            type Parent = ();
+
             fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
@@ -549,14 +555,12 @@ fn generate_scoped(
         #[doc(hidden)]
         pub use #helper_mod :: #struct_name;
 
-        impl ::autoresolve::ScopedUnder for #struct_name {
-            type Parent = #parent;
-        }
-
         // Self-invocation: propagate parent + own types into this scope.
         #struct_name!(@impls #struct_name);
 
-        impl ::autoresolve::BaseType<#struct_name> for #struct_name {
+        impl ::autoresolve::BaseType for #struct_name {
+            type Parent = #parent;
+
             fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
@@ -569,6 +573,10 @@ fn generate_scoped(
     })
 }
 
+/// Implements the `#[reexport_base]` attribute macro.
+///
+/// Generates a `pub type` alias and a new helper module that delegates to the
+/// original base's helper macro, enabling re-export from a different module path.
 pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     // Parse the attribute: `helper_module_exported_as = crate::new::helper::path`
     let meta_list: syn::punctuated::Punctuated<syn::Meta, syn::Token![,]> =
@@ -678,6 +686,7 @@ mod tests {
         prettyplease::unparse(&file)
     }
 
+    /// Snapshot: primary base with one `#[spread]` and one regular field.
     #[test]
     fn primary_base_with_spread_and_regular() {
         let attr = quote! { helper_module_exported_as = crate::app_base_helper };
@@ -692,6 +701,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Snapshot: primary base with all regular (non-spread) fields.
     #[test]
     fn primary_base_all_regular() {
         let attr = quote! { helper_module_exported_as = crate::base_helper };
@@ -705,6 +715,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Snapshot: scoped base with a single field.
     #[test]
     fn scoped_base() {
         let attr = quote! { scoped(Base), helper_module_exported_as = crate::scoped_helper };
@@ -717,6 +728,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Rejects a struct with no `helper_module_exported_as` attribute.
     #[test]
     fn error_on_missing_helper() {
         let attr = TokenStream::new();
@@ -729,6 +741,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Rejects a generic struct.
     #[test]
     fn error_on_generics() {
         let attr = quote! { helper_module_exported_as = crate::base_helper };
@@ -741,6 +754,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Rejects a struct with no fields.
     #[test]
     fn error_on_empty_struct() {
         let attr = quote! { helper_module_exported_as = crate::base_helper };
@@ -751,6 +765,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Snapshot: scoped base with a `#[spread]` field.
     #[test]
     fn scoped_base_with_spread() {
         let attr = quote! { scoped(Base), helper_module_exported_as = crate::scoped_helper };
@@ -765,6 +780,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Rejects an unrecognized attribute key.
     #[test]
     fn error_on_invalid_attribute() {
         let attr = quote! { something_wrong };
@@ -777,6 +793,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Rejects a `helper_module_exported_as` path not rooted with `crate::`.
     #[test]
     fn error_on_non_crate_rooted_helper() {
         let attr = quote! { helper_module_exported_as = super::base_helper };
@@ -789,6 +806,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Snapshot: scoped base with a fully-qualified `crate::Base` parent path.
     #[test]
     fn scoped_base_with_path() {
         let attr = quote! { scoped(crate::Base), helper_module_exported_as = crate::scoped_helper };
@@ -801,6 +819,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Snapshot: `#[reexport_base]` generating a type alias and delegating helper module.
     #[test]
     fn reexport_base_snapshot() {
         let attr = quote! { helper_module_exported_as = crate::runtime::exports::builtins_helper };

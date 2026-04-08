@@ -21,8 +21,10 @@ pub struct MyBase {
     pub dep: MyDep,
 }
 
+/// A base defined in a private module and re-exported via `#[reexport_base]` can seed a resolver.
 #[test]
 fn test_reexport() {
-    let mut resolver = Resolver::new(MyBase { dep: MyDep });
+    let parent = Resolver::new(Builtins { clock: Clock });
+    let mut resolver = parent.scoped(MyBase { dep: MyDep });
     resolver.get::<UsesClock>();
 }

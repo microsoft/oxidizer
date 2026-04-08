@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use type_map::concurrent::TypeMap;
 
-use crate::base_type::{BaseType, ScopedUnder};
+use crate::base_type::BaseType;
 use crate::resolve_deps::ResolutionDeps;
 use crate::resolve_from::ResolveFrom;
 use crate::resolver_store::ResolverStore;
@@ -139,13 +139,14 @@ impl<T: Send + Sync + 'static> Resolver<T> {
     /// `#[base]` proc macro to generate the [`BaseType`] implementation.
     pub fn new(base: T) -> Self
     where
-        T: BaseType<T>,
+        T: BaseType<Parent = ()>,
     {
         let mut resolver = Self::new_empty();
         base.insert_into(&mut resolver);
         resolver
     }
 
+    /// Creates an empty resolver with no pre-inserted types.
     pub fn new_empty() -> Self {
         Resolver {
             types: Arc::new(SharedTypeMap::from_type_map(TypeMap::new())),
@@ -155,10 +156,12 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         }
     }
 
+    /// Pre-inserts a value into the resolver's local store.
     pub fn insert<V: Send + Sync + 'static>(&mut self, value: V) {
         self.types.get_or_insert(value);
     }
 
+    /// Resolves a type, lazily constructing it from its dependencies if needed.
     pub fn ensure<O>(&mut self) -> &O
     where
         O: ResolveFrom<T>,
@@ -166,6 +169,7 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         self.get::<O>()
     }
 
+    /// Returns a reference to an already-resolved type, or `None` if it has not been resolved.
     pub fn try_get<O>(&self) -> Option<&O>
     where
         O: ResolveFrom<T>,
@@ -173,6 +177,7 @@ impl<T: Send + Sync + 'static> Resolver<T> {
         ResolverStore::lookup(self)
     }
 
+    /// Resolves a type, lazily constructing it from its dependencies if needed.
     pub fn get<O>(&mut self) -> &O
     where
         O: ResolveFrom<T>,
@@ -188,7 +193,7 @@ impl<T: Send + Sync + 'static> Resolver<T> {
     /// if all their dependencies came from that ancestor (or deeper).
     pub fn scoped<S>(&self, roots: S) -> Resolver<S>
     where
-        S: BaseType<S> + ScopedUnder<Parent = T>,
+        S: BaseType<Parent = T>,
     {
         let mut ancestors = Vec::with_capacity(1 + self.ancestors.len());
         ancestors.push(Arc::clone(&self.types));

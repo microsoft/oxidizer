@@ -1,12 +1,12 @@
 //! Proc macros for the `autoresolve` compile-time dependency injection framework.
 //!
-//! See the [`autoresolve`] crate for documentation and examples.
+//! See the `autoresolve` crate for documentation and examples.
 
 /// Marks an `impl` block as participating in the autoresolve dependency injection system.
 ///
 /// The `fn new(...)` method in the block defines the dependency list. Each parameter must be a
 /// shared reference `&Type`. The macro generates a generic `ResolveFrom<B>` impl that allows
-/// this type to be automatically resolved by any [`Resolver`] whose base types transitively
+/// this type to be automatically resolved by any `Resolver` whose base types transitively
 /// satisfy all dependencies.
 ///
 /// # Example
@@ -27,7 +27,7 @@ pub fn resolvable(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) 
 }
 
 /// Declares a module containing a resolver base type, generating the wiring needed to construct a
-/// [`Resolver`] from it.
+/// `Resolver` from it.
 ///
 /// The module must contain exactly one struct with named fields. The macro generates hidden
 /// re-exports (`__PartN`) so that the generated `macro_rules!` arms can reference field types via
@@ -38,7 +38,7 @@ pub fn resolvable(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) 
 ///
 /// Applied without arguments, `#[base]` generates:
 /// - `ResolveFrom<Base>` impls for each field type (`#[spread]` fields delegate to their `@impls` arm).
-/// - A [`BaseType`] impl that builds a [`Resolver`] by inserting all fields.
+/// - A `BaseType` impl that builds a `Resolver` by inserting all fields.
 /// - A same-named declarative macro with `@impls` and `@insert` arms for use with `#[spread]` and `resolver!`.
 /// - Hidden `__PartN` re-exports and friendly re-exports of field types.
 ///
@@ -62,7 +62,7 @@ pub fn resolvable(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) 
 /// # Scoped roots
 ///
 /// With `scoped(ParentBase)`, the macro generates `ResolveFrom<ScopedBase>` impls for each
-/// field type and a `ScopedUnder` impl linking to the parent, declaring its fields as root types
+/// field type and sets `BaseType::Parent` to the parent, declaring its fields as root types
 /// that will be pre-inserted into scoped resolvers.
 ///
 /// ```ignore
@@ -82,6 +82,12 @@ pub fn base(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         .into()
 }
 
+/// Re-exports a base type defined in another module, generating a new helper module at the
+/// re-export site.
+///
+/// Use this when a `#[base]` struct is defined in a private module but needs to be
+/// publicly accessible. The macro creates a `pub type` alias and a new helper module
+/// whose generated macro arms reference the re-export path.
 #[proc_macro_attribute]
 pub fn reexport_base(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     autoresolve_macros_impl::reexport_base(attr.into(), item.into())

@@ -40,7 +40,8 @@ pub mod app_base_helper {
 #[doc(hidden)]
 pub use app_base_helper::Base;
 Base!(@ impls Base);
-impl ::autoresolve::BaseType<Base> for Base {
+impl ::autoresolve::BaseType for Base {
+    type Parent = ();
     fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
         let Self { builtins, telemetry } = self;
         Builtins!(@ insert __store, builtins);

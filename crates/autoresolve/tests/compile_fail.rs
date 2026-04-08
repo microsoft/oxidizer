@@ -1,5 +1,4 @@
-#![expect(missing_docs, reason = "Test code")]
-
+/// Verifies that proc-macro validation and end-to-end resolution errors produce the expected compiler diagnostics.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn compile_fail() {
@@ -23,4 +22,5 @@ fn compile_fail() {
 
     // Base macro validation errors
     t.compile_fail("tests/compile_fail/scoped_parent_not_module_qualified.rs");
+    t.compile_fail("tests/compile_fail/scoped_base_as_top_level.rs");
 }

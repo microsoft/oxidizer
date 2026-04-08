@@ -3,6 +3,11 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{FnArg, ImplItem, ItemImpl, Pat, ReturnType, Type};
 
+/// Implements the `#[resolvable]` attribute macro.
+///
+/// Parses an inherent `impl` block containing `fn new(...)`, then generates a
+/// `ResolveFrom<B>` blanket impl that wires the constructor's `&Type` parameters
+/// into the resolver's dependency graph.
 pub fn resolvable(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let impl_block: ItemImpl = syn::parse2(item)?;
 
@@ -174,6 +179,7 @@ mod tests {
         prettyplease::unparse(&file)
     }
 
+    /// Snapshot: type with one dependency.
     #[test]
     fn single_dependency() {
         let input = quote! {
@@ -187,6 +193,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Snapshot: type with three dependencies and an extra method.
     #[test]
     fn multiple_dependencies() {
         let input = quote! {
@@ -208,6 +215,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Snapshot: type with no dependencies.
     #[test]
     fn no_dependencies() {
         let input = quote! {
@@ -221,6 +229,7 @@ mod tests {
         insta::assert_snapshot!(pretty_print(result));
     }
 
+    /// Rejects an impl block without `fn new`.
     #[test]
     fn error_missing_new() {
         let input = quote! {
@@ -235,6 +244,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("requires a `fn new("));
     }
 
+    /// Rejects a `fn new` with a non-reference parameter.
     #[test]
     fn error_non_reference_param() {
         let input = quote! {
@@ -249,6 +259,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("shared references"));
     }
 
+    /// Rejects a trait impl block.
     #[test]
     fn error_trait_impl() {
         let input = quote! {
@@ -263,6 +274,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("inherent impl blocks"));
     }
 
+    /// Rejects a generic impl block.
     #[test]
     fn error_generic_impl() {
         let input = quote! {
@@ -277,6 +289,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("does not support generic impl blocks"));
     }
 
+    /// Rejects a `fn new` with a `&self` receiver.
     #[test]
     fn error_self_receiver() {
         let input = quote! {
@@ -291,6 +304,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("must not have a self receiver"));
     }
 
+    /// Rejects a `fn new` returning a type other than `Self`.
     #[test]
     fn error_wrong_return_type() {
         let input = quote! {
@@ -305,6 +319,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("must return `Self`"));
     }
 
+    /// Rejects a `fn new` with no return type.
     #[test]
     fn error_no_return_type() {
         let input = quote! {
@@ -317,6 +332,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("must have a return type of `Self`"));
     }
 
+    /// Rejects a `fn new` with a `&mut` parameter.
     #[test]
     fn error_mut_ref_param() {
         let input = quote! {

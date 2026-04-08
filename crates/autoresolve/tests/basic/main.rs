@@ -23,6 +23,7 @@ pub struct MyBase {
     pub builtins: Builtins,
 }
 
+/// Basic end-to-end: resolves a service from a base with spread builtins.
 #[test]
 fn test_autoresolve() {
     use clock::Clock;

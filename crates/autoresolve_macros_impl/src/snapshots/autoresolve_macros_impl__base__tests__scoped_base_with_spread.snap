@@ -41,11 +41,9 @@ pub mod scoped_helper {
 }
 #[doc(hidden)]
 pub use scoped_helper::ScopedRoots;
-impl ::autoresolve::ScopedUnder for ScopedRoots {
-    type Parent = Base;
-}
 ScopedRoots!(@ impls ScopedRoots);
-impl ::autoresolve::BaseType<ScopedRoots> for ScopedRoots {
+impl ::autoresolve::BaseType for ScopedRoots {
+    type Parent = Base;
     fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<ScopedRoots>) {
         let Self { builtins, request_context } = self;
         Builtins!(@ insert __store, builtins);

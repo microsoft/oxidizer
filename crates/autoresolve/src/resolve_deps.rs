@@ -1,20 +1,27 @@
 use crate::ResolveFrom;
 use crate::resolver_store::ResolverStore;
 
+/// Terminator for a heterogeneous dependency list.
 pub struct ResolutionDepsEnd;
 
+/// A node in a heterogeneous dependency list, pairing a head type `H` with a tail `T`.
 pub struct ResolutionDepsNode<H, T>(pub H, pub T);
 
+/// A heterogeneous list of dependencies that can be resolved from a [`ResolverStore`].
 pub trait ResolutionDeps<T: 'static>: Send + Sync + 'static {
+    /// The resolved form of this dependency list, holding references to each dependency.
     type Resolved<'a>
     where
         Self: 'a,
         T: 'a;
 
+    /// Ensures every dependency in the list is resolved in the store.
     fn ensure<S: ResolverStore<T>>(store: &mut S);
 
+    /// Returns references to already-resolved dependencies without triggering resolution.
     fn get_private<S: ResolverStore<T>>(store: &S) -> Self::Resolved<'_>;
 
+    /// Ensures all dependencies are resolved, then returns references to them.
     fn get<S: ResolverStore<T>>(store: &mut S) -> Self::Resolved<'_> {
         Self::ensure(store);
         Self::get_private(store)
