@@ -229,7 +229,10 @@ impl HttpError {
     #[must_use]
     pub(crate) fn timeout_for_body(duration: Duration) -> Self {
         Self::other(
-            format!("body data was not fully received within the timeout of {}ms", duration.as_millis()),
+            format!(
+                "body data was not fully received, timeout: {}ms",
+                duration.as_millis()
+            ),
             RecoveryInfo::retry(),
             "timeout",
         )
