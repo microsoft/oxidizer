@@ -15,11 +15,11 @@ pub mod scoped_helper {
     #[doc(hidden)]
     #[macro_export]
     macro_rules! __autoresolve_gen_scoped_helper {
-        ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+        ([crate $(:: $helper_seg:ident)*], $mangled:ident, $dollar:tt) => {
             #[doc(hidden)] #[macro_export] macro_rules! $mangled { (@ impls $dollar base
-            : path) => { $($helper)* ::Base!(@ impls $dollar base); impl
-            ::autoresolve::ResolveFrom < $dollar base > for $($helper)*
-            ::ScopedRoots_Part0_RequestContext { type Inputs =
+            : path) => { $dollar crate $(:: $helper_seg)* ::Base!(@ impls $dollar base);
+            impl ::autoresolve::ResolveFrom < $dollar base > for $dollar crate $(::
+            $helper_seg)* ::ScopedRoots_Part0_RequestContext { type Inputs =
             ::autoresolve::ResolutionDepsEnd; fn new(_ :
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("root types are pre-inserted into the resolver") } } }; (@

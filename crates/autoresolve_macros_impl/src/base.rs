@@ -232,6 +232,27 @@ fn generate_primary(
     // Destructure field names for the BaseType impl.
     let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
 
+    // For each `#[spread]` field, re-export the spread macro under a
+    // `__spread_`-prefixed alias inside the helper module.  The prefix avoids
+    // E0659 ambiguity with the original macro name brought in by `use super::*;`.
+    //
+    // `pub use super::MacroName as __spread_MacroName;` works both same-crate
+    // and cross-crate because the caller is required to bring the spread type
+    // into scope (e.g. via `pub use other_crate::FrameworkBase;`), so
+    // `super::FrameworkBase` resolves through that re-export.
+    let spread_helper_items: Vec<_> = fields
+        .iter()
+        .filter(|f| f.is_spread)
+        .map(|f| {
+            let macro_name = spread_macro_ident(f.ty);
+            let alias = spread_helper_alias(f.ty);
+            quote! {
+                #[doc(hidden)]
+                pub use super :: #macro_name as #alias;
+            }
+        })
+        .collect();
+
     // Insertion logic: spread fields delegate to their macro, regular fields use store_value.
     let insert_stmts: Vec<_> = fields
         .iter()
@@ -246,9 +267,9 @@ fn generate_primary(
         })
         .collect();
 
-    // In the generator macro, `$helper` is a metavariable that will be substituted
-    // when the generator is invoked.  `$dollar` is a metavariable that expands to
-    // the literal `$` token, allowing us to emit `$base`, `$store`, `$name` inside
+    // In the generator macro, `$helper_seg` captures the path segments after
+    // `crate::`.  `$dollar` is a metavariable that expands to the literal `$`
+    // token, allowing us to emit `$crate`, `$base`, `$store`, `$name` inside
     // the generated macro.
     let impls_body = impls_body_for_generator(struct_name, fields);
     let insert_body = insert_body_for_generator(fields);
@@ -281,14 +302,18 @@ fn generate_primary(
 
             #(#aliases)*
 
-            // Generator macro: takes a helper path (in brackets) and emits the
-            // final macro with that path baked in.  The brackets `[...]` allow
-            // capturing the path as `$($helper:tt)*` so that `$($helper)* :: X`
-            // works — a `:path` fragment can't be extended with further segments.
+            #(#spread_helper_items)*
+
+            // Generator macro: takes a `crate::`-rooted helper path in brackets
+            // and emits the final macro with `$crate::` path segments baked in.
+            // The pattern `[crate $(:: $helper_seg:ident)*]` strips the leading
+            // `crate` keyword; the generated macro uses `$crate $(:: $helper_seg)*`
+            // so the path resolves to the *defining* crate — crucial for cross-crate
+            // usage where `crate::` would incorrectly resolve to the expansion site.
             #[doc(hidden)]
             #[macro_export]
             macro_rules! #mangled_gen_name {
-                ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+                ([crate $(:: $helper_seg:ident)*], $mangled:ident, $dollar:tt) => {
                     #[doc(hidden)]
                     #[macro_export]
                     macro_rules! $mangled {
@@ -309,8 +334,8 @@ fn generate_primary(
             pub use #mangled_gen_name as __generator;
 
             // Invoke the generator with the original helper path to produce the
-            // final macro.  Uses `crate::` (not `$crate::`) because this
-            // invocation is at item position, not inside a macro_rules body.
+            // final macro.  The generator strips `crate` and uses `$crate` so the
+            // generated macro resolves paths cross-crate.
             __generator!([#helper_path], #mangled_macro_name, $);
             #[doc(hidden)]
             pub use #mangled_macro_name as #struct_name;
@@ -339,28 +364,28 @@ fn generate_primary(
     })
 }
 
-/// Builds the body of the `@impls` macro arm for the generator pattern.
+/// Builds the `@impls` body for the generator pattern.
 ///
-/// Uses `$($helper)*` (a generator metavariable repetition) for the helper path
-/// and `$dollar base` for the base type metavariable. When the generator is
-/// invoked, these expand to the concrete helper path and `$base` respectively.
+/// Uses `$dollar crate $(:: $helper_seg)*` to produce `$crate::path::to::helper`
+/// in the generated macro.
 ///
-/// - `#[spread]` fields: invokes `SpreadType!(@impls $dollar base)` directly —
-///   the spread macro is resolved at the expansion site, not through the helper.
-/// - Regular fields: emits `ResolveFrom<$dollar base>` impl using `$($helper)*::AliasName`
+/// - `#[spread]` fields: invokes `$crate::helper::__spread_MacroName!(@impls $base)`.
+///   The helper module contains `pub use super::MacroName as __spread_MacroName;`,
+///   which resolves both same-crate and cross-crate.
+/// - Regular fields: emits `ResolveFrom` impl using `$crate::helper::AliasName`
 fn impls_body_for_generator(struct_name: &Ident, fields: &[BaseField<'_>]) -> TokenStream {
     let mut regular_idx = 0usize;
     let stmts: Vec<_> = fields
         .iter()
         .map(|f| {
             if f.is_spread {
-                let macro_name = spread_macro_ident(f.ty);
-                quote! { #macro_name!(@impls $dollar base); }
+                let alias = spread_helper_alias(f.ty);
+                quote! { $dollar crate $(:: $helper_seg)* :: #alias!(@ impls $dollar base); }
             } else {
                 let alias = part_alias_name(struct_name, regular_idx, f.ty);
                 regular_idx += 1;
                 quote! {
-                    impl ::autoresolve::ResolveFrom<$dollar base> for $($helper)* :: #alias {
+                    impl ::autoresolve::ResolveFrom<$dollar base> for $dollar crate $(:: $helper_seg)* :: #alias {
                         type Inputs = ::autoresolve::ResolutionDepsEnd;
 
                         fn new(_: ::autoresolve::ResolutionDepsEnd) -> Self {
@@ -377,9 +402,7 @@ fn impls_body_for_generator(struct_name: &Ident, fields: &[BaseField<'_>]) -> To
 
 /// Builds the body of the `@insert` macro arm for the generator pattern.
 ///
-/// Uses `$dollar store`, `$dollar name` which expand to `$store`, `$name` in the final macro.
-///
-/// - `#[spread]` fields: delegates to `$($helper)*::SpreadType!(@insert $dollar store, field_name)`
+/// - `#[spread]` fields: delegates to `$crate::helper::__spread_MacroName!(@insert ...)`
 /// - Regular fields: calls `$dollar store.store_value($dollar name.field)`
 fn insert_body_for_generator(fields: &[BaseField<'_>]) -> TokenStream {
     let stmts: Vec<_> = fields
@@ -387,11 +410,11 @@ fn insert_body_for_generator(fields: &[BaseField<'_>]) -> TokenStream {
         .map(|f| {
             let ident = f.ident;
             if f.is_spread {
-                let macro_name = spread_macro_ident(f.ty);
+                let alias = spread_helper_alias(f.ty);
                 quote! {
                     {
                         let __spread = $dollar name.#ident;
-                        #macro_name!(@insert $dollar store, __spread);
+                        $dollar crate $(:: $helper_seg)* :: #alias!(@ insert $dollar store, __spread);
                     }
                 }
             } else {
@@ -413,10 +436,14 @@ fn insert_body_for_generator(fields: &[BaseField<'_>]) -> TokenStream {
 fn reexport_item_list(struct_name: &Ident, fields: &[BaseField<'_>]) -> Vec<Ident> {
     let mut items = Vec::new();
 
-    // Type aliases for regular (non-spread) fields.
+    // Type aliases for regular (non-spread) fields and `__spread_`-prefixed
+    // aliases for spread field forwarding macros.
     let mut regular_idx = 0usize;
     for f in fields {
-        if !f.is_spread {
+        if f.is_spread {
+            // Re-export the `__spread_`-prefixed forwarding alias.
+            items.push(spread_helper_alias(f.ty));
+        } else {
             items.push(part_alias_name(struct_name, regular_idx, f.ty));
             regular_idx += 1;
         }
@@ -434,6 +461,16 @@ fn spread_macro_ident(ty: &Type) -> &Ident {
         Type::Path(tp) => &tp.path.segments.last().expect("guarded by path validation above").ident,
         _ => panic!("guarded by path validation above"),
     }
+}
+
+/// Returns the `__spread_`-prefixed alias name used inside the helper module
+/// for a spread field's forwarding macro.
+///
+/// Using a `__spread_` prefix avoids E0659 ambiguity with the original macro
+/// name brought in by `use super::*;`.
+fn spread_helper_alias(ty: &Type) -> Ident {
+    let macro_name = spread_macro_ident(ty);
+    Ident::new(&format!("__spread_{macro_name}"), macro_name.span())
 }
 
 fn generate_scoped(
@@ -466,6 +503,20 @@ fn generate_scoped(
     let aliases = type_aliases(struct_name, fields);
 
     let field_idents: Vec<_> = fields.iter().map(|f| f.ident).collect();
+
+    // Spread re-exports (same rationale as generate_primary).
+    let spread_helper_items: Vec<_> = fields
+        .iter()
+        .filter(|f| f.is_spread)
+        .map(|f| {
+            let macro_name = spread_macro_ident(f.ty);
+            let alias = spread_helper_alias(f.ty);
+            quote! {
+                #[doc(hidden)]
+                pub use super :: #macro_name as #alias;
+            }
+        })
+        .collect();
 
     // Insertion logic.
     let insert_stmts: Vec<_> = fields
@@ -510,7 +561,7 @@ fn generate_scoped(
             use super::*;
 
             // Re-export the parent macro into this helper module so that
-            // `$helper::#parent_ident!()` works without an absolute path to the
+            // `$crate::helper::#parent_ident!()` works without an absolute path to the
             // parent, avoiding the `macro_expanded_macro_exports_accessed_by_absolute_paths` lint.
             //
             // Bare ident: `pub use super::Parent;` (resolves via `use super::*;`)
@@ -519,18 +570,20 @@ fn generate_scoped(
 
             #(#aliases)*
 
+            #(#spread_helper_items)*
+
             // Generator macro for the scoped base. The `@impls` arm delegates
-            // to the parent's macro (routed through `$($helper)*`) and then
+            // to the parent's macro (routed through `$crate::helper`) and then
             // emits its own impls.
             #[doc(hidden)]
             #[macro_export]
             macro_rules! #mangled_gen_name {
-                ([$($helper:tt)*], $mangled:ident, $dollar:tt) => {
+                ([crate $(:: $helper_seg:ident)*], $mangled:ident, $dollar:tt) => {
                     #[doc(hidden)]
                     #[macro_export]
                     macro_rules! $mangled {
                         (@ impls $dollar base:path) => {
-                            $($helper)* :: #parent_ident!(@ impls $dollar base);
+                            $dollar crate $(:: $helper_seg)* :: #parent_ident!(@ impls $dollar base);
                             #own_impls_body
                         };
                         (@ insert $dollar store:ident, $dollar name:ident) => {
@@ -547,8 +600,7 @@ fn generate_scoped(
             pub use #mangled_gen_name as __generator;
 
             // Invoke the generator with the original helper path to produce the
-            // final macro.  Uses `crate::` (not `$crate::`) because this
-            // invocation is at item position, not inside a macro_rules body.
+            // final macro.
             __generator!([#helper_path], #mangled_macro_name, $);
             #[doc(hidden)]
             pub use #mangled_macro_name as #struct_name;
@@ -631,10 +683,7 @@ pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     let original_path = match type_alias.ty.as_ref() {
         syn::Type::Path(tp) => &tp.path,
         other => {
-            return Err(syn::Error::new_spanned(
-                other,
-                "#[reexport_base] target must be a type path",
-            ));
+            return Err(syn::Error::new_spanned(other, "#[reexport_base] target must be a type path"));
         }
     };
 
@@ -665,8 +714,8 @@ pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
             // 1. Selectively re-export type aliases and macros from the original helper
             // 2. Generate a new macro at this helper path via the generator
             //
-            // Uses `crate::` (not `$crate::`) because this is at item position.
-            // The helper path is wrapped in brackets for the `[$($new_helper:tt)*]` pattern.
+            // Passes `crate::`-rooted path; the generator strips `crate` and uses
+            // `$crate` so the generated macro resolves paths cross-crate.
             #original_in_helper!(@reexport [#new_helper_path], #mangled_macro_name, $);
 
             // Shadow the glob-imported struct macro with the newly generated one.

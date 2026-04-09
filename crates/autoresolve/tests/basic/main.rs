@@ -17,7 +17,7 @@ mod config;
 mod my_service;
 mod validator;
 
-use runtime::Builtins;
+pub use runtime::Builtins;
 
 #[base(helper_module_exported_as = crate::my_base_helper)]
 pub struct MyBase {

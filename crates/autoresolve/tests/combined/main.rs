@@ -20,7 +20,7 @@ mod sdk_provider;
 mod validator;
 
 use http::request::Request;
-use runtime::Builtins;
+pub use runtime::Builtins;
 use telemetry::Telemetry;
 
 #[base(helper_module_exported_as = crate::base_helper)]
