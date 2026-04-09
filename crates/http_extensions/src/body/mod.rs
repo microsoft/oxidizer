@@ -33,7 +33,7 @@ use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
 use crate::{HttpError, Result};
 
 mod builder;
-pub use builder::HttpBodyBuilder;
+pub use builder::{BodyOptions, HttpBodyBuilder};
 
 pub(crate) mod timeout_body;
 
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn custom_body_is_not_cloneable() {
-        let body = HttpBodyBuilder::new_fake().custom_body(http_body_util::Empty::new());
+        let body = HttpBodyBuilder::new_fake().body(http_body_util::Empty::new(), &BodyOptions::default());
 
         assert!(body.try_clone().is_none());
 
@@ -671,9 +671,10 @@ mod tests {
     #[test]
     fn body_error_propagation() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = builder.custom_body(StreamBody::new(futures::stream::once(async {
-            Err(HttpError::validation("test error"))
-        })));
+        let body = builder.body(
+            StreamBody::new(futures::stream::once(async { Err(HttpError::validation("test error")) })),
+            &BodyOptions::default(),
+        );
 
         let error = block_on(body.into_buffered()).unwrap_err();
         assert_eq!(error.message(), "test error");
@@ -760,7 +761,7 @@ mod tests {
     #[test]
     fn try_clone_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.custom_body(http_body_util::Empty::new());
+        let custom_body = builder.body(http_body_util::Empty::new(), &BodyOptions::default());
 
         assert!(custom_body.try_clone().is_none());
     }
@@ -788,7 +789,7 @@ mod tests {
     #[test]
     fn into_bytes_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.custom_body(http_body_util::Empty::new());
+        let custom_body = builder.body(http_body_util::Empty::new(), &BodyOptions::default());
 
         BytesView::try_from(custom_body).unwrap_err();
     }
@@ -925,7 +926,7 @@ mod tests {
     fn is_end_stream_custom_body_empty() {
         let builder = HttpBodyBuilder::new_fake();
         let custom = http_body_util::Empty::new();
-        let body = builder.custom_body(custom);
+        let body = builder.body(custom, &BodyOptions::default());
 
         assert!(body.is_end_stream());
     }
@@ -935,7 +936,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let data = Bytes::from_static(b"test data");
         let custom = http_body_util::Full::new(data.into());
-        let body = builder.custom_body(custom);
+        let body = builder.body(custom, &BodyOptions::default());
 
         assert!(!body.is_end_stream());
     }

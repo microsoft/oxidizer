@@ -112,7 +112,7 @@ mod tests {
     use tick::ClockControl;
 
     use crate::testing::create_stream_body;
-    use crate::{HttpBodyBuilder, HttpError, Result};
+    use crate::{BodyOptions, HttpBodyBuilder, HttpError, Result};
 
     #[test]
     fn stream_body_returns_data_before_deadline() {
@@ -133,7 +133,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
 
         // A body that never yields data.
-        let body = builder.custom_body_with_timeout(PendingBody, Duration::from_millis(100), &clock);
+        let body = builder.body_with_timeout(PendingBody, Duration::from_millis(100), &clock);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
             err.to_string().contains("body data was not fully received"),
@@ -142,14 +142,14 @@ mod tests {
     }
 
     #[test]
-    fn custom_body_with_timeout_chains_with_response_buffer_limit() {
+    fn body_with_timeout_chains_with_response_buffer_limit() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
         let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
 
         assert_eq!(builder.response_buffer_limit, Some(1024));
 
         // Timeout is applied per-body, not on the builder.
-        let body = builder.custom_body_with_timeout(PendingBody, Duration::from_secs(30), &clock);
+        let body = builder.body_with_timeout(PendingBody, Duration::from_secs(30), &clock);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(err.to_string().contains("body data was not fully received"));
     }
@@ -170,7 +170,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
 
         // Full body has an exact size hint; verify it passes through TimeoutBody.
-        let body = builder.custom_body_with_timeout(
+        let body = builder.body_with_timeout(
             http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
             Duration::from_secs(30),
             &clock,
@@ -185,7 +185,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
 
-        let body = builder.custom_body_with_timeout(http_body_util::Empty::new(), Duration::from_secs(1), &clock);
+        let body = builder.body_with_timeout(http_body_util::Empty::new(), Duration::from_secs(1), &clock);
         assert!(body.is_end_stream());
     }
 
@@ -194,7 +194,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
 
-        let body = builder.custom_body_with_timeout(
+        let body = builder.body_with_timeout(
             http_body_util::Full::new(BytesView::copied_from_slice(b"data", &builder)),
             Duration::from_secs(1),
             &clock,
@@ -207,7 +207,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
 
-        let body = builder.custom_body_with_timeout(
+        let body = builder.body_with_timeout(
             http_body_util::Full::new(BytesView::copied_from_slice(b"payload", &builder)),
             Duration::from_secs(30),
             &clock,
@@ -223,7 +223,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
 
         // Construct with a short timeout so the deadline is near.
-        let body = builder.custom_body_with_timeout(PendingBody, Duration::from_millis(1), &clock);
+        let body = builder.body_with_timeout(PendingBody, Duration::from_millis(1), &clock);
 
         // Advance the clock well past the deadline before polling.
         control.advance(Duration::from_secs(60));
@@ -242,7 +242,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
 
         // Use a body that has data immediately available (Full is always ready).
-        let body = builder.custom_body_with_timeout(
+        let body = builder.body_with_timeout(
             http_body_util::Full::new(BytesView::copied_from_slice(b"ready data", &builder)),
             Duration::from_millis(1),
             &clock,
@@ -279,7 +279,7 @@ mod tests {
         };
 
         let timeout_body = super::TimeoutBody::new(body, deadline, timeout, &clock);
-        let http_body = HttpBodyBuilder::new_fake().custom_body(timeout_body);
+        let http_body = HttpBodyBuilder::new_fake().body(timeout_body, &BodyOptions::default());
 
         let err = block_on(http_body.into_bytes()).unwrap_err();
         assert!(

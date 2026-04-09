@@ -3,13 +3,13 @@
 
 use std::time::Duration;
 
-/// A request-level timeout that can be attached to HTTP requests as an extension.
+/// A body-level timeout that can be attached to HTTP requests as an extension.
 ///
-/// This timeout represents the maximum time allowed for the entire request/response cycle,
-/// including receiving the response headers and reading all data from the HTTP body. This
-/// is different from the body timeout that only limits the time spent streaming the
-/// response body. Use this to set a per-request deadline that covers connection, sending,
-/// and receiving.
+/// This timeout represents the maximum time allowed for streaming the response body after
+/// the response headers have already been received. This is different from the request
+/// timeout that covers the entire request/response cycle including connection setup and
+/// header reception. Use this to limit how long the client will wait for the body data
+/// to be fully received.
 ///
 /// # Example
 ///
@@ -20,15 +20,15 @@ use std::time::Duration;
 ///
 /// let request = HttpRequestBuilder::new_fake()
 ///     .get("https://example.com")
-///     .request_timeout(Duration::from_secs(30))
+///     .body_timeout(Duration::from_secs(60))
 ///     .build()
 ///     .unwrap();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RequestTimeout(Duration);
+pub struct BodyTimeout(Duration);
 
-impl RequestTimeout {
-    /// Creates a new `RequestTimeout` with the given duration.
+impl BodyTimeout {
+    /// Creates a new `BodyTimeout` with the given duration.
     #[must_use]
     pub fn new(duration: Duration) -> Self {
         Self(duration)
@@ -41,7 +41,7 @@ impl RequestTimeout {
     }
 }
 
-impl From<Duration> for RequestTimeout {
+impl From<Duration> for BodyTimeout {
     fn from(duration: Duration) -> Self {
         Self::new(duration)
     }
@@ -54,25 +54,25 @@ mod tests {
 
     #[test]
     fn new_creates_timeout_with_given_duration() {
-        let timeout = RequestTimeout::new(Duration::from_secs(30));
+        let timeout = BodyTimeout::new(Duration::from_secs(30));
         assert_eq!(timeout.duration(), Duration::from_secs(30));
     }
 
     #[test]
     fn duration_returns_inner_value() {
-        let timeout = RequestTimeout::new(Duration::from_millis(500));
+        let timeout = BodyTimeout::new(Duration::from_millis(500));
         assert_eq!(timeout.duration(), Duration::from_millis(500));
     }
 
     #[test]
     fn from_duration() {
-        let timeout: RequestTimeout = Duration::from_secs(10).into();
+        let timeout: BodyTimeout = Duration::from_secs(10).into();
         assert_eq!(timeout.duration(), Duration::from_secs(10));
     }
 
     #[test]
     fn clone_and_copy() {
-        let timeout = RequestTimeout::new(Duration::from_secs(5));
+        let timeout = BodyTimeout::new(Duration::from_secs(5));
         let cloned = timeout;
         let copied = timeout;
 
@@ -82,9 +82,9 @@ mod tests {
 
     #[test]
     fn debug_formatting() {
-        let timeout = RequestTimeout::new(Duration::from_secs(42));
+        let timeout = BodyTimeout::new(Duration::from_secs(42));
         let debug = format!("{timeout:?}");
-        assert!(debug.contains("RequestTimeout"));
+        assert!(debug.contains("BodyTimeout"));
         assert!(debug.contains("42"));
     }
 }

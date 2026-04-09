@@ -9,7 +9,7 @@ use http::header::CONTENT_TYPE;
 use http::{HeaderName, HeaderValue, Version};
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
-use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Result};
+use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Result};
 
 /// A fluent builder for creating HTTP responses.
 ///
@@ -414,7 +414,7 @@ impl HttpResponseBuilder<'_> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.creator.custom_body(body);
+        let body = self.creator.body(body, &BodyOptions::default());
         self.body(body)
     }
 

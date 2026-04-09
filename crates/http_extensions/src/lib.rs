@@ -191,7 +191,7 @@ mod error;
 pub use error::{HttpError, Result};
 
 mod body;
-pub use body::{HttpBody, HttpBodyBuilder};
+pub use body::{BodyOptions, HttpBody, HttpBodyBuilder};
 
 #[cfg(any(feature = "json", test))]
 mod json;
@@ -218,6 +218,9 @@ pub use url_template_label::UrlTemplateLabel;
 
 mod request_timeout;
 pub use request_timeout::RequestTimeout;
+
+mod body_timeout;
+pub use body_timeout::BodyTimeout;
 
 mod http_response_builder;
 pub use http_response_builder::HttpResponseBuilder;

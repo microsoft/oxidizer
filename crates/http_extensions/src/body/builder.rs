@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::time::Duration;
+
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
@@ -15,6 +17,40 @@ use crate::{HttpError, Result};
 
 use super::timeout_body::TimeoutBody;
 use super::{HttpBody, Kind};
+
+/// Options for configuring body-level behavior.
+///
+/// This is passed to [`HttpBodyBuilder::body`] and [`HttpBodyBuilder::stream`] so that
+/// the builder can apply body-specific policies such as a download timeout.
+///
+/// Use [`Default::default()`] when no special behavior is needed.
+///
+/// # Example
+///
+/// ```
+/// use std::time::Duration;
+///
+/// use http_extensions::BodyOptions;
+///
+/// let options = BodyOptions::default()
+///     .timeout(Duration::from_secs(60));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BodyOptions {
+    timeout: Option<Duration>,
+}
+
+impl BodyOptions {
+    /// Sets the body timeout.
+    ///
+    /// The timeout limits how long the client will wait for the response body data
+    /// to be fully received after headers have arrived.
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+}
 
 /// Builder for creating optimized HTTP bodies.
 ///
@@ -95,7 +131,7 @@ impl HttpBodyBuilder {
         self
     }
 
-    /// Creates an `HttpBody` from any custom body implementation.
+    /// Creates an `HttpBody` from any body implementation.
     ///
     /// Use this to integrate custom types that implement [`http_body::Body`] with the
     /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
@@ -104,7 +140,7 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpBody};
+    /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
     /// # use std::task::{Context, Poll};
@@ -129,10 +165,10 @@ impl HttpBodyBuilder {
     /// # fn example(create_body: &HttpBodyBuilder) {
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
-    /// let body = create_body.custom_body(custom_body);
+    /// let body = create_body.body(custom_body, &BodyOptions::default());
     /// # }
     /// ```
-    pub fn custom_body<B>(&self, body: B) -> HttpBody
+    pub fn body<B>(&self, body: B, _options: &BodyOptions) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
@@ -140,20 +176,20 @@ impl HttpBodyBuilder {
         HttpBody::new(Kind::Body(Box::pin(body)), self.clone())
     }
 
-    /// Creates an `HttpBody` from a custom body implementation with a total download timeout.
+    /// Creates an `HttpBody` from a body implementation with a total download timeout.
     ///
-    /// This behaves like [`custom_body`][Self::custom_body] but enforces a deadline on the
-    /// entire data reception. If the body is not fully received within the specified duration
-    /// a timeout error is returned.
+    /// This behaves like [`body`][Self::body] but enforces a deadline on the entire data
+    /// reception. If the body is not fully received within the specified duration a timeout
+    /// error is returned.
     ///
     /// The deadline is computed once at construction time; successive polls see a shrinking
     /// remaining time rather than a fixed per-poll timeout.
     ///
     /// If `timeout` is so large that adding it to the current instant overflows, the timeout
-    /// is silently dropped and the body behaves as if created via [`custom_body`][Self::custom_body].
+    /// is silently dropped and the body behaves as if created via [`body`][Self::body].
     /// In practice such a duration (e.g. [`Duration::MAX`][std::time::Duration::MAX]) is far longer than any realistic
     /// connection lifetime, so the timeout would never fire anyway.
-    pub fn custom_body_with_timeout<B>(&self, body: B, timeout: std::time::Duration, clock: &Clock) -> HttpBody
+    pub fn body_with_timeout<B>(&self, body: B, timeout: Duration, clock: &Clock) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
@@ -162,18 +198,8 @@ impl HttpBodyBuilder {
         // check that the timeout is valid (i.e. the deadline does not overflow)
         match clock.instant().checked_add(timeout) {
             Some(deadline) => HttpBody::new(Kind::Body(Box::pin(TimeoutBody::new(body, deadline, timeout, clock))), self.clone()),
-            None => self.custom_body(body),
+            None => self.body(body, &BodyOptions::default()),
         }
-    }
-
-    /// Use [`custom_body`][Self::custom_body] instead.
-    #[deprecated(note = "use `custom_body` instead")]
-    #[doc(hidden)]
-    pub fn external<B>(&self, body: B) -> HttpBody
-    where
-        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
-    {
-        self.custom_body(body)
     }
 
     /// Creates a body from a stream of byte chunks.
@@ -203,7 +229,7 @@ impl HttpBodyBuilder {
         use http_body_util::StreamBody;
 
         let framed = stream.map_ok(Frame::data);
-        self.custom_body(StreamBody::new(framed))
+        self.body(StreamBody::new(framed), &BodyOptions::default())
     }
 
     /// Creates a body from a stream of byte chunks with a total download timeout.
@@ -214,14 +240,14 @@ impl HttpBodyBuilder {
     ///
     /// The deadline is computed once at construction time; successive polls see a shrinking
     /// remaining time rather than a fixed per-poll timeout.
-    pub fn stream_with_timeout<S>(&self, stream: S, timeout: std::time::Duration, clock: &Clock) -> HttpBody
+    pub fn stream_with_timeout<S>(&self, stream: S, timeout: Duration, clock: &Clock) -> HttpBody
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
         use http_body_util::StreamBody;
 
         let framed = stream.map_ok(Frame::data);
-        self.custom_body_with_timeout(StreamBody::new(framed), timeout, clock)
+        self.body_with_timeout(StreamBody::new(framed), timeout, clock)
     }
 
     /// Creates a body from text.
@@ -379,8 +405,6 @@ impl Memory for MemoryWrapper {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Duration;
-
     use bytes::Bytes;
     use bytesbuf::mem::testing::TransparentMemory;
     use futures::executor::block_on;
@@ -547,27 +571,16 @@ mod tests {
     }
 
     #[test]
-    fn custom_body_with_timeout_falls_back_when_deadline_overflows() {
+    fn body_with_timeout_falls_back_when_deadline_overflows() {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
-        let body = builder.custom_body_with_timeout(
+        let body = builder.body_with_timeout(
             http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
             Duration::MAX,
             &clock,
         );
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"hello");
-    }
-
-    // ── Deprecated methods ───────────────────────────────────────────────
-
-    #[expect(deprecated, reason = "required by code coverage")]
-    #[test]
-    fn external_delegates_to_custom_body() {
-        let builder = HttpBodyBuilder::new_fake();
-        let body = builder.external(http_body_util::Full::new(BytesView::copied_from_slice(b"test", &builder)));
-        let bytes = block_on(body.into_bytes()).unwrap();
-        assert_eq!(bytes, b"test");
     }
 
     // ── JSON body creation ───────────────────────────────────────────────
@@ -615,5 +628,37 @@ mod tests {
             block_count <= 5,
             "expected at most 5 memory blocks for ~30 KB JSON serialization, got {block_count}"
         );
+    }
+
+    // ── BodyOptions ──────────────────────────────────────────────────────
+
+    #[test]
+    fn body_options_default_has_no_timeout() {
+        let options = BodyOptions::default();
+        assert_eq!(options.timeout, None);
+    }
+
+    #[test]
+    fn body_options_with_timeout() {
+        let options = BodyOptions::default().timeout(Duration::from_secs(60));
+        assert_eq!(options.timeout, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn body_options_clone_and_copy() {
+        let options = BodyOptions::default().timeout(Duration::from_secs(5));
+        let cloned = options;
+        let copied = options;
+
+        assert_eq!(options, cloned);
+        assert_eq!(options, copied);
+    }
+
+    #[test]
+    fn body_options_debug_formatting() {
+        let options = BodyOptions::default().timeout(Duration::from_secs(42));
+        let debug = format!("{options:?}");
+        assert!(debug.contains("BodyOptions"));
+        assert!(debug.contains("42"));
     }
 }
