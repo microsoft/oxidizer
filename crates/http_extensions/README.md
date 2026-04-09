@@ -39,7 +39,7 @@ The crate provides extension traits that add convenience methods to standard HTT
 * [`HttpRequestExt`][__link13] - Request cloning with body support
 * [`HeaderMapExt`][__link14] - Header value extraction and parsing
 * [`HeaderValueExt`][__link15] - Construction of [`HeaderValue`][__link16] from [`Bytes`][__link17]
-* [`ExtensionsExt`][__link30] - Extensions for [`http::Extensions`][__link31] to extract URL template labels
+* [`ExtensionsExt`][__link18] - Extensions for [`Extensions`][__link19] to extract URL template labels
 
 ## Quick Start
 
@@ -76,17 +76,17 @@ println!("response status: {}", validated_response.status());
 
 **Note**: This example uses the `test-util` feature to create a `FakeHandler` for testing.
 In production code, you would use a real HTTP client that implements the
-[`RequestHandler`][__link18] trait, but the workflow remains the same: build requests with
-[`HttpRequestBuilder`][__link19], send them through a handler, and validate responses with
-[`StatusExt::ensure_success`][__link20].
+[`RequestHandler`][__link20] trait, but the workflow remains the same: build requests with
+[`HttpRequestBuilder`][__link21], send them through a handler, and validate responses with
+[`StatusExt::ensure_success`][__link22].
 
 ## Integration with the HTTP Ecosystem
 
-This crate builds on the popular [`http`][__link21] crate rather than inventing new types:
+This crate builds on the popular [`http`][__link23] crate rather than inventing new types:
 
-* Uses [`http::Request`][__link22] and [`http::Response`][__link23] as base types
-* Reuses [`http::Method`][__link24], [`http::StatusCode`][__link25], and [`http::HeaderMap`][__link26]
-* Implements standard traits like [`http_body::Body`][__link27] for ecosystem compatibility
+* Uses [`http::Request`][__link24] and [`http::Response`][__link25] as base types
+* Reuses [`http::Method`][__link26], [`http::StatusCode`][__link27], and [`http::HeaderMap`][__link28]
+* Implements standard traits like [`http_body::Body`][__link29] for ecosystem compatibility
 * Works seamlessly with other Rust HTTP libraries
 
 ## Examples
@@ -160,7 +160,7 @@ that depends on HTTP clients.
 
 ## Memory Management
 
-Bodies created through [`HttpBodyBuilder`][__link28] use memory pools from [`bytesbuf`][__link29] to
+Bodies created through [`HttpBodyBuilder`][__link30] use memory pools from [`bytesbuf`][__link31] to
 reduce allocation overhead. When body data is consumed, memory is automatically recycled
 for future requests. This makes the crate particularly efficient for high-throughput scenarios.
 
@@ -170,7 +170,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyKlgL27uQutG5NWANIkKYuiGyYWve9aLfqWG7wgKrc4ZtdfYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4xgmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7VtAvLOXpMBG6b2jIcXjgwRG6Gb9qQAqKTHG-yGFxUnRDPcYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4xgmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjIuMQ
  [__link0]: https://crates.io/crates/http/1.4.0
  [__link1]: https://docs.rs/http_extensions/0.2.1/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=StatusExt
@@ -181,22 +181,22 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link15]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HeaderValueExt
  [__link16]: https://docs.rs/http/1.4.0/http/?search=HeaderValue
  [__link17]: https://docs.rs/bytes/1.11.1/bytes/?search=Bytes
- [__link18]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=RequestHandler
- [__link19]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpRequestBuilder
+ [__link18]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=ExtensionsExt
+ [__link19]: https://docs.rs/http/1.4.0/http/?search=Extensions
  [__link2]: https://docs.rs/http_extensions/0.2.1/http_extensions/type.HttpResponse.html
- [__link20]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=StatusExt::ensure_success
- [__link21]: https://crates.io/crates/http/1.4.0
- [__link22]: https://docs.rs/http/1.4.0/http/?search=Request
- [__link23]: https://docs.rs/http/1.4.0/http/?search=Response
- [__link24]: https://docs.rs/http/1.4.0/http/?search=Method
- [__link25]: https://docs.rs/http/1.4.0/http/?search=StatusCode
- [__link26]: https://docs.rs/http/1.4.0/http/?search=HeaderMap
- [__link27]: https://docs.rs/http_body/1.0.1/http_body/?search=Body
- [__link28]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBodyBuilder
- [__link29]: https://crates.io/crates/bytesbuf/0.4.1
+ [__link20]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=RequestHandler
+ [__link21]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpRequestBuilder
+ [__link22]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=StatusExt::ensure_success
+ [__link23]: https://crates.io/crates/http/1.4.0
+ [__link24]: https://docs.rs/http/1.4.0/http/?search=Request
+ [__link25]: https://docs.rs/http/1.4.0/http/?search=Response
+ [__link26]: https://docs.rs/http/1.4.0/http/?search=Method
+ [__link27]: https://docs.rs/http/1.4.0/http/?search=StatusCode
+ [__link28]: https://docs.rs/http/1.4.0/http/?search=HeaderMap
+ [__link29]: https://docs.rs/http_body/1.0.1/http_body/?search=Body
  [__link3]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBody
- [__link30]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=ExtensionsExt
- [__link31]: https://docs.rs/http/1.4.0/http/?search=Extensions
+ [__link30]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBodyBuilder
+ [__link31]: https://crates.io/crates/bytesbuf/0.4.1
  [__link4]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpRequestBuilder
  [__link5]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpResponseBuilder
  [__link6]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=HttpBody
