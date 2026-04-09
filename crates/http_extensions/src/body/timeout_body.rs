@@ -155,12 +155,61 @@ mod tests {
     }
 
     #[test]
+    fn size_hint_delegates_through_timeout_body() {
+        let clock = ClockControl::new().to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+
+        // Full body has an exact size hint; verify it passes through TimeoutBody.
+        let body = builder.custom_body_with_timeout(
+            http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
+            Duration::from_secs(30),
+            &clock,
+        );
+        let hint = body.size_hint();
+        assert_eq!(hint.lower(), 5);
+        assert_eq!(hint.upper(), Some(5));
+    }
+
+    #[test]
     fn is_end_stream_delegates_to_inner() {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
 
         let body = builder.custom_body_with_timeout(http_body_util::Empty::new(), Duration::from_secs(1), &clock);
         assert!(body.is_end_stream());
+    }
+
+    #[test]
+    fn poll_frame_returns_data_through_timeout_body() {
+        let clock = ClockControl::new().to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+
+        let body = builder.custom_body_with_timeout(
+            http_body_util::Full::new(BytesView::copied_from_slice(b"payload", &builder)),
+            Duration::from_secs(30),
+            &clock,
+        );
+        let bytes = block_on(body.into_bytes()).unwrap();
+        assert_eq!(bytes, b"payload");
+    }
+
+    #[test]
+    fn poll_frame_times_out_immediately_when_deadline_already_passed() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+
+        // Construct with a short timeout so the deadline is near.
+        let body = builder.custom_body_with_timeout(PendingBody, Duration::from_millis(1), &clock);
+
+        // Advance the clock well past the deadline before polling.
+        control.advance(Duration::from_secs(60));
+
+        let err = block_on(body.into_bytes()).unwrap_err();
+        assert!(
+            err.to_string().contains("body data was not fully received within the timeout"),
+            "expected body timeout error, got: {err}"
+        );
     }
 
     /// Body that always returns [`Poll::Pending`] to simulate a stalled download.

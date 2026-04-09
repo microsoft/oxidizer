@@ -374,11 +374,15 @@ impl Memory for MemoryWrapper {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::time::Duration;
+
     use bytes::Bytes;
     use bytesbuf::mem::testing::TransparentMemory;
     use futures::executor::block_on;
+    use futures::stream;
     use serde::Serialize;
     use static_assertions::assert_impl_all;
+    use tick::ClockControl;
 
     use super::*;
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
@@ -521,6 +525,44 @@ mod tests {
         let body = create_stream_body(&builder, b"");
         let bytes = block_on(body.into_bytes()).unwrap();
         assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn stream_with_timeout_returns_data_before_deadline() {
+        let clock = ClockControl::new().to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+        let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
+            .iter()
+            .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
+            .collect();
+        let body = builder.stream_with_timeout(stream::iter(chunks), Duration::from_secs(30), &clock);
+        assert_eq!(body.content_length(), None);
+        let text = block_on(body.into_text()).unwrap();
+        assert_eq!(text, "hello world");
+    }
+
+    #[test]
+    fn custom_body_with_timeout_falls_back_when_deadline_overflows() {
+        let clock = ClockControl::new().to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+        let body = builder.custom_body_with_timeout(
+            http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
+            Duration::MAX,
+            &clock,
+        );
+        let bytes = block_on(body.into_bytes()).unwrap();
+        assert_eq!(bytes, b"hello");
+    }
+
+    // ── Deprecated methods ───────────────────────────────────────────────
+
+    #[allow(deprecated)]
+    #[test]
+    fn external_delegates_to_custom_body() {
+        let builder = HttpBodyBuilder::new_fake();
+        let body = builder.external(http_body_util::Full::new(BytesView::copied_from_slice(b"test", &builder)));
+        let bytes = block_on(body.into_bytes()).unwrap();
+        assert_eq!(bytes, b"test");
     }
 
     // ── JSON body creation ───────────────────────────────────────────────
