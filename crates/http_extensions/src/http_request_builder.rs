@@ -239,10 +239,12 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// Sets a request-level timeout for the entire request/response cycle.
     ///
     /// This attaches a [`RequestTimeout`] extension to the request, which middleware
-    /// or HTTP clients can use to enforce a maximum duration for the request.
+    /// or HTTP clients can use to enforce a maximum duration for the request. The
+    /// timeout applies to the entire request/response cycle, including receiving the
+    /// response headers and reading all data from the HTTP body.
     ///
-    /// This is different from the body timeout configured via
-    /// [`HttpBodyBuilder::with_timeout`] — the body timeout limits how long
+    /// This is different from the body timeout applied via
+    /// [`HttpBodyBuilder::custom_body_with_timeout`] — the body timeout limits how long
     /// streaming body data can take, while this timeout covers the entire
     /// request/response cycle.
     ///

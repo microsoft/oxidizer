@@ -8,17 +8,9 @@ use std::time::{Duration, Instant};
 use bytesbuf::BytesView;
 use http_body::{Body, Frame, SizeHint};
 use pin_project::pin_project;
-use thread_aware::ThreadAware;
 use tick::{Clock, Delay};
 
 use crate::{HttpError, Result};
-
-/// Configuration for body download timeout.
-#[derive(Debug, Clone, ThreadAware)]
-pub(crate) struct BodyTimeout {
-    pub(crate) duration: Duration,
-    pub(crate) clock: Clock,
-}
 
 /// Wraps a streaming body to enforce a total timeout on data reception.
 ///
@@ -117,40 +109,8 @@ mod tests {
     use crate::{HttpBodyBuilder, HttpError, Result};
 
     #[test]
-    fn does_not_affect_buffered_text_body() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_millis(1), &clock);
-
-        let body = builder.text("hello");
-        let text = block_on(body.into_text()).unwrap();
-        assert_eq!(text, "hello");
-    }
-
-    #[test]
-    fn does_not_affect_buffered_bytes_body() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_millis(1), &clock);
-
-        let body = builder.slice(&[1, 2, 3]);
-        let bytes = block_on(body.into_bytes()).unwrap();
-        assert_eq!(bytes, &[1, 2, 3]);
-    }
-
-    #[test]
-    fn does_not_affect_empty_body() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_millis(1), &clock);
-
-        let body = builder.empty();
-        assert!(body.is_empty());
-        let bytes = block_on(body.into_bytes()).unwrap();
-        assert_eq!(bytes.len(), 0);
-    }
-
-    #[test]
     fn stream_body_returns_data_before_deadline() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_secs(60), &clock);
+        let builder = HttpBodyBuilder::new_fake();
 
         // Stream yields data immediately — well within the timeout.
         let body = create_stream_body(&builder, b"streamed data");
@@ -161,10 +121,10 @@ mod tests {
     #[test]
     fn stream_body_times_out_when_pending() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_millis(100), &clock);
+        let builder = HttpBodyBuilder::new_fake();
 
         // A body that never yields data.
-        let body = builder.custom_body(PendingBody);
+        let body = builder.custom_body_with_timeout(PendingBody, Duration::from_millis(100), &clock);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
             err.to_string().contains("body data was not fully received within the timeout"),
@@ -173,20 +133,21 @@ mod tests {
     }
 
     #[test]
-    fn chains_with_response_buffer_limit() {
+    fn custom_body_with_timeout_chains_with_response_buffer_limit() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new_fake()
-            .with_response_buffer_limit(Some(1024))
-            .with_timeout(Duration::from_secs(30), &clock);
+        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
 
         assert_eq!(builder.response_buffer_limit, Some(1024));
-        assert!(builder.timeout.is_some());
+
+        // Timeout is applied per-body, not on the builder.
+        let body = builder.custom_body_with_timeout(PendingBody, Duration::from_secs(30), &clock);
+        let err = block_on(body.into_bytes()).unwrap_err();
+        assert!(err.to_string().contains("body data was not fully received within the timeout"));
     }
 
     #[test]
     fn size_hint_delegates_to_inner() {
-        let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_secs(1), &clock);
+        let builder = HttpBodyBuilder::new_fake();
 
         // Stream body has unknown size hint.
         let body = create_stream_body(&builder, b"hello");
@@ -197,9 +158,9 @@ mod tests {
     #[test]
     fn is_end_stream_delegates_to_inner() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_secs(1), &clock);
+        let builder = HttpBodyBuilder::new_fake();
 
-        let body = builder.custom_body(http_body_util::Empty::new());
+        let body = builder.custom_body_with_timeout(http_body_util::Empty::new(), Duration::from_secs(1), &clock);
         assert!(body.is_end_stream());
     }
 

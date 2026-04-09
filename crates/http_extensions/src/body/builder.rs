@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::time::Duration;
-
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
@@ -15,7 +13,7 @@ use tick::Clock;
 use crate::json::JsonError;
 use crate::{HttpError, Result};
 
-use super::timeout_body::{BodyTimeout, TimeoutBody};
+use super::timeout_body::TimeoutBody;
 use super::{HttpBody, Kind};
 
 /// Builder for creating optimized HTTP bodies.
@@ -45,7 +43,6 @@ use super::{HttpBody, Kind};
 pub struct HttpBodyBuilder {
     memory: MemoryWrapper,
     pub(super) response_buffer_limit: Option<usize>,
-    pub(super) timeout: Option<BodyTimeout>,
 }
 
 impl HttpBodyBuilder {
@@ -76,7 +73,6 @@ impl HttpBodyBuilder {
         Self {
             memory: MemoryWrapper::Global(memory),
             response_buffer_limit: None,
-            timeout: None,
         }
     }
 
@@ -89,7 +85,6 @@ impl HttpBodyBuilder {
         Self {
             memory: MemoryWrapper::Opaque(Unaware(OpaqueMemory::new(memory))),
             response_buffer_limit: None,
-            timeout: None,
         }
     }
 
@@ -97,38 +92,6 @@ impl HttpBodyBuilder {
     #[must_use]
     pub const fn with_response_buffer_limit(mut self, limit: Option<usize>) -> Self {
         self.response_buffer_limit = limit;
-        self
-    }
-
-    /// Configures a timeout for streaming bodies created by this builder.
-    ///
-    /// When set, all streaming bodies (created via [`custom_body()`][Self::custom_body] or
-    /// [`stream()`][Self::stream]) enforce a total timeout for receiving body data.
-    /// If the body is not fully received within the specified duration, a timeout
-    /// error is returned from [`poll_frame`][http_body::Body::poll_frame].
-    ///
-    /// Buffered bodies (created via [`text()`][Self::text], [`slice()`][Self::slice],
-    /// [`bytes()`][Self::bytes], or [`empty()`][Self::empty]) are **not** affected by
-    /// the timeout because their data is already in memory.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::time::Duration;
-    /// use tick::Clock;
-    /// use http_extensions::HttpBodyBuilder;
-    ///
-    /// # fn example(clock: &Clock) {
-    /// let builder = HttpBodyBuilder::new_fake()
-    ///     .with_timeout(Duration::from_secs(30), clock);
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn with_timeout(mut self, timeout: Duration, clock: &Clock) -> Self {
-        self.timeout = Some(BodyTimeout {
-            duration: timeout,
-            clock: clock.clone(),
-        });
         self
     }
 
@@ -174,15 +137,23 @@ impl HttpBodyBuilder {
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
         let body = body.map_err(Into::into);
+        HttpBody::new(Kind::Body(Box::pin(body)), self.clone())
+    }
 
-        if let Some(timeout) = &self.timeout {
-            HttpBody::new(
-                Kind::Body(Box::pin(TimeoutBody::new(body, timeout.duration, &timeout.clock))),
-                self.clone(),
-            )
-        } else {
-            HttpBody::new(Kind::Body(Box::pin(body)), self.clone())
-        }
+    /// Creates an `HttpBody` from a custom body implementation with a total download timeout.
+    ///
+    /// This behaves like [`custom_body`][Self::custom_body] but enforces a deadline on the
+    /// entire data reception. If the body is not fully received within the specified duration
+    /// a timeout error is returned.
+    ///
+    /// The deadline is computed once at construction time; successive polls see a shrinking
+    /// remaining time rather than a fixed per-poll timeout.
+    pub fn custom_body_with_timeout<B>(&self, body: B, timeout: std::time::Duration, clock: &Clock) -> HttpBody
+    where
+        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
+    {
+        let body = body.map_err(Into::into);
+        HttpBody::new(Kind::Body(Box::pin(TimeoutBody::new(body, timeout, clock))), self.clone())
     }
 
     /// Use [`custom_body`][Self::custom_body] instead.
@@ -197,9 +168,8 @@ impl HttpBodyBuilder {
 
     /// Creates a body from a stream of byte chunks.
     ///
-    /// This is a convenience wrapper around [`custom_body`][Self::custom_body] that accepts
-    /// a [`Stream`][futures::Stream] of [`BytesView`] chunks. It avoids the need to
-    /// manually wrap the stream in a [`StreamBody`][http_body_util::StreamBody].
+    /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
+    /// body from them.
     ///
     /// # Examples
     ///
@@ -224,6 +194,24 @@ impl HttpBodyBuilder {
 
         let framed = stream.map_ok(Frame::data);
         self.custom_body(StreamBody::new(framed))
+    }
+
+    /// Creates a body from a stream of byte chunks with a total download timeout.
+    ///
+    /// This behaves like [`stream`][Self::stream] but enforces a deadline on the entire
+    /// data reception. If the stream is not fully consumed within the specified duration
+    /// a timeout error is returned.
+    ///
+    /// The deadline is computed once at construction time; successive polls see a shrinking
+    /// remaining time rather than a fixed per-poll timeout.
+    pub fn stream_with_timeout<S>(&self, stream: S, timeout: std::time::Duration, clock: &Clock) -> HttpBody
+    where
+        S: Stream<Item = Result<BytesView>> + Send + 'static,
+    {
+        use http_body_util::StreamBody;
+
+        let framed = stream.map_ok(Frame::data);
+        self.custom_body_with_timeout(StreamBody::new(framed), timeout, clock)
     }
 
     /// Creates a body from text.
