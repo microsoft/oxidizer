@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-/// A request-level timeout that can be attached to HTTP requests as an extension.
+/// A response-level timeout that can be attached to HTTP requests as an extension.
 ///
 /// This timeout represents the maximum time allowed for receiving the response headers,
 /// including connection setup and sending the request. It does not cover reading the
@@ -19,15 +19,15 @@ use std::time::Duration;
 ///
 /// let request = HttpRequestBuilder::new_fake()
 ///     .get("https://example.com")
-///     .request_timeout(Duration::from_secs(30))
+///     .response_timeout(Duration::from_secs(30))
 ///     .build()
 ///     .unwrap();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RequestTimeout(Duration);
+pub struct ResponseTimeout(Duration);
 
-impl RequestTimeout {
-    /// Creates a new `RequestTimeout` with the given duration.
+impl ResponseTimeout {
+    /// Creates a new `ResponseTimeout` with the given duration.
     #[must_use]
     pub fn new(duration: Duration) -> Self {
         Self(duration)
@@ -40,7 +40,7 @@ impl RequestTimeout {
     }
 }
 
-impl From<Duration> for RequestTimeout {
+impl From<Duration> for ResponseTimeout {
     fn from(duration: Duration) -> Self {
         Self::new(duration)
     }
@@ -53,25 +53,25 @@ mod tests {
 
     #[test]
     fn new_creates_timeout_with_given_duration() {
-        let timeout = RequestTimeout::new(Duration::from_secs(30));
+        let timeout = ResponseTimeout::new(Duration::from_secs(30));
         assert_eq!(timeout.duration(), Duration::from_secs(30));
     }
 
     #[test]
     fn duration_returns_inner_value() {
-        let timeout = RequestTimeout::new(Duration::from_millis(500));
+        let timeout = ResponseTimeout::new(Duration::from_millis(500));
         assert_eq!(timeout.duration(), Duration::from_millis(500));
     }
 
     #[test]
     fn from_duration() {
-        let timeout: RequestTimeout = Duration::from_secs(10).into();
+        let timeout: ResponseTimeout = Duration::from_secs(10).into();
         assert_eq!(timeout.duration(), Duration::from_secs(10));
     }
 
     #[test]
     fn clone_and_copy() {
-        let timeout = RequestTimeout::new(Duration::from_secs(5));
+        let timeout = ResponseTimeout::new(Duration::from_secs(5));
         let cloned = timeout;
         let copied = timeout;
 
@@ -81,9 +81,9 @@ mod tests {
 
     #[test]
     fn debug_formatting() {
-        let timeout = RequestTimeout::new(Duration::from_secs(42));
+        let timeout = ResponseTimeout::new(Duration::from_secs(42));
         let debug = format!("{timeout:?}");
-        assert!(debug.contains("RequestTimeout"));
+        assert!(debug.contains("ResponseTimeout"));
         assert!(debug.contains("42"));
     }
 }

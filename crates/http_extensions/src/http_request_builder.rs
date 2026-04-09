@@ -13,9 +13,8 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
 use templated_uri::Uri;
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
-use crate::{
-    BodyOptions, BodyTimeout, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, RequestTimeout, Result,
-};
+use crate::timeout::{BodyTimeout, ResponseTimeout};
+use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
 
 /// A fluent builder for creating HTTP requests.
 ///
@@ -238,15 +237,15 @@ impl<R> HttpRequestBuilder<'_, R> {
         self
     }
 
-    /// Sets a request-level timeout for receiving the response.
+    /// Sets a response-level timeout for receiving the response.
     ///
-    /// This attaches a [`RequestTimeout`] extension to the request, which middleware
-    /// or HTTP clients can use to enforce a maximum duration for the request. The
-    /// timeout covers connection, sending the request, and receiving the response
+    /// This attaches a [`ResponseTimeout`] extension to the request, which middleware
+    /// or HTTP clients can use to enforce a maximum duration for receiving the response.
+    /// The timeout covers connection, sending the request, and receiving the response
     /// headers. It does not cover reading data from the response body — use
     /// [`body_timeout`](Self::body_timeout) for that.
-    pub fn request_timeout(self, duration: Duration) -> Self {
-        self.extension(RequestTimeout::new(duration))
+    pub fn response_timeout(self, duration: Duration) -> Self {
+        self.extension(ResponseTimeout::new(duration))
     }
 
     /// Sets a body-level timeout for streaming the response body.
@@ -258,13 +257,13 @@ impl<R> HttpRequestBuilder<'_, R> {
         self.extension(BodyTimeout::new(duration))
     }
 
-    /// Sets both the request timeout and the body timeout to the same duration.
+    /// Sets both the response timeout and the body timeout to the same duration.
     ///
     /// This is a convenience method equivalent to calling both
-    /// [`request_timeout`](Self::request_timeout) and
+    /// [`response_timeout`](Self::response_timeout) and
     /// [`body_timeout`](Self::body_timeout) with the same value.
     pub fn timeout(self, duration: Duration) -> Self {
-        self.request_timeout(duration).body_timeout(duration)
+        self.response_timeout(duration).body_timeout(duration)
     }
 
     /// Sets a plain text body for the request.
@@ -1383,10 +1382,10 @@ mod tests {
     }
 
     #[test]
-    fn timeout_sets_both_request_and_body_timeout() {
+    fn timeout_sets_both_response_and_body_timeout() {
         use std::time::Duration;
 
-        use crate::{BodyTimeout, RequestTimeout};
+        use crate::timeout::{BodyTimeout, ResponseTimeout};
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api")
@@ -1394,11 +1393,11 @@ mod tests {
             .build()
             .unwrap();
 
-        let request_timeout = request
+        let response_timeout = request
             .extensions()
-            .get::<RequestTimeout>()
-            .expect("request timeout extension should be present");
-        assert_eq!(request_timeout.duration(), Duration::from_secs(30));
+            .get::<ResponseTimeout>()
+            .expect("response timeout extension should be present");
+        assert_eq!(response_timeout.duration(), Duration::from_secs(30));
 
         let body_timeout = request
             .extensions()
@@ -1408,21 +1407,21 @@ mod tests {
     }
 
     #[test]
-    fn request_timeout_attaches_to_request() {
+    fn response_timeout_attaches_to_request() {
         use std::time::Duration;
 
-        use crate::RequestTimeout;
+        use crate::timeout::ResponseTimeout;
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api")
-            .request_timeout(Duration::from_secs(15))
+            .response_timeout(Duration::from_secs(15))
             .build()
             .unwrap();
 
         let timeout = request
             .extensions()
-            .get::<RequestTimeout>()
-            .expect("request timeout extension should be present");
+            .get::<ResponseTimeout>()
+            .expect("response timeout extension should be present");
         assert_eq!(timeout.duration(), Duration::from_secs(15));
     }
 
@@ -1430,7 +1429,7 @@ mod tests {
     fn body_timeout_attaches_to_request() {
         use std::time::Duration;
 
-        use crate::BodyTimeout;
+        use crate::timeout::BodyTimeout;
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api")

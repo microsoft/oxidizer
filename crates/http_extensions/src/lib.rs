@@ -216,11 +216,7 @@ pub use extensions::{HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, R
 mod url_template_label;
 pub use url_template_label::UrlTemplateLabel;
 
-mod request_timeout;
-pub use request_timeout::RequestTimeout;
-
-mod body_timeout;
-pub use body_timeout::BodyTimeout;
+pub mod timeout;
 
 mod http_response_builder;
 pub use http_response_builder::HttpResponseBuilder;
