@@ -25,7 +25,7 @@ use std::time::Duration;
 ///     .unwrap();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RequestTimeout(pub Duration);
+pub struct RequestTimeout(Duration);
 
 impl RequestTimeout {
     /// Creates a new `RequestTimeout` with the given duration.
@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn new_creates_timeout_with_given_duration() {
         let timeout = RequestTimeout::new(Duration::from_secs(30));
-        assert_eq!(timeout.0, Duration::from_secs(30));
+        assert_eq!(timeout.duration(), Duration::from_secs(30));
     }
 
     #[test]

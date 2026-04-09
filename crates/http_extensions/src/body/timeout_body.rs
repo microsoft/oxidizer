@@ -136,7 +136,7 @@ mod tests {
         let body = builder.custom_body_with_timeout(PendingBody, Duration::from_millis(100), &clock);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
-            err.to_string().contains("body data was not fully received within the timeout"),
+            err.to_string().contains("body data was not fully received"),
             "expected body timeout error, got: {err}"
         );
     }
@@ -151,7 +151,7 @@ mod tests {
         // Timeout is applied per-body, not on the builder.
         let body = builder.custom_body_with_timeout(PendingBody, Duration::from_secs(30), &clock);
         let err = block_on(body.into_bytes()).unwrap_err();
-        assert!(err.to_string().contains("body data was not fully received within the timeout"));
+        assert!(err.to_string().contains("body data was not fully received"));
     }
 
     #[test]
@@ -217,7 +217,7 @@ mod tests {
 
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
-            err.to_string().contains("body data was not fully received within the timeout"),
+            err.to_string().contains("body data was not fully received"),
             "expected body timeout error, got: {err}"
         );
     }
@@ -242,7 +242,7 @@ mod tests {
         // must take precedence and produce a timeout error.
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
-            err.to_string().contains("body data was not fully received within the timeout"),
+            err.to_string().contains("body data was not fully received"),
             "expected body timeout error, got: {err}"
         );
     }
@@ -270,7 +270,7 @@ mod tests {
 
         let err = block_on(http_body.into_bytes()).unwrap_err();
         assert!(
-            err.to_string().contains("body data was not fully received within the timeout"),
+            err.to_string().contains("body data was not fully received"),
             "expected body timeout error, got: {err}"
         );
     }

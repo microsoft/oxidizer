@@ -229,10 +229,7 @@ impl HttpError {
     #[must_use]
     pub(crate) fn timeout_for_body(duration: Duration) -> Self {
         Self::other(
-            format!(
-                "body data was not fully received, timeout: {}ms",
-                duration.as_millis()
-            ),
+            format!("body data was not fully received, timeout: {}ms", duration.as_millis()),
             RecoveryInfo::retry(),
             "timeout",
         )
@@ -381,7 +378,7 @@ mod tests {
         let error = HttpError::timeout_for_body(duration);
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
-        assert_eq!(error.message(), "body data was not fully received within the timeout of 2500ms");
+        assert_eq!(error.message(), "body data was not fully received, timeout: 2500ms");
         assert_eq!(error.label(), "timeout");
     }
 
