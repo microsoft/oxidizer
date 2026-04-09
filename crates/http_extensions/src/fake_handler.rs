@@ -374,6 +374,7 @@ mod tests {
     use tick::{ClockControl, FutureExt};
 
     use super::*;
+    use crate::BodyOptions;
     use crate::HttpResponseBuilder;
     use crate::http_request_builder_ext::HttpRequestBuilderExt;
 
@@ -532,7 +533,7 @@ mod tests {
     fn from_response_unbuffered_error() {
         let response = HttpResponseBuilder::new_fake()
             .status(StatusCode::OK)
-            .custom_body(Empty::new())
+            .custom_body(Empty::new(), &BodyOptions::default())
             .build()
             .unwrap();
 

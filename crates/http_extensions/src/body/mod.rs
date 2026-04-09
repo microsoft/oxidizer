@@ -858,7 +858,7 @@ mod tests {
 
         let builder = HttpBodyBuilder::new_fake();
         let stream = futures::stream::iter(Vec::<Result<BytesView>>::new());
-        let body = builder.stream(stream);
+        let body = builder.stream(stream, &BodyOptions::default());
         let debug_str = format!("{body:?}");
         assert!(debug_str.contains("Body"), "{debug_str}");
     }
@@ -946,7 +946,7 @@ mod tests {
     #[test]
     fn external_body_into_bytes() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"raw bytes");
+        let body = create_stream_body(&builder, b"raw bytes", &BodyOptions::default());
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"raw bytes");
     }
@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn external_body_empty_into_bytes() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"");
+        let body = create_stream_body(&builder, b"", &BodyOptions::default());
         let bytes = block_on(body.into_bytes()).unwrap();
         assert!(bytes.is_empty());
     }
@@ -963,7 +963,7 @@ mod tests {
     fn external_body_into_json_owned() {
         let builder = HttpBodyBuilder::new_fake();
         let json_bytes = br#"{"id":42,"name":"alice"}"#;
-        let body = create_stream_body(&builder, json_bytes);
+        let body = create_stream_body(&builder, json_bytes, &BodyOptions::default());
         let model: Model = block_on(body.into_json_owned()).unwrap();
         assert_eq!(
             model,
@@ -977,28 +977,28 @@ mod tests {
     #[test]
     fn external_body_try_clone_returns_none() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"no clone");
+        let body = create_stream_body(&builder, b"no clone", &BodyOptions::default());
         assert!(body.try_clone().is_none());
     }
 
     #[test]
     fn external_body_into_bytes_view_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"not buffered");
+        let body = create_stream_body(&builder, b"not buffered", &BodyOptions::default());
         BytesView::try_from(body).unwrap_err();
     }
 
     #[test]
     fn external_body_into_bytes_no_buffering_returns_none() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"data");
+        let body = create_stream_body(&builder, b"data", &BodyOptions::default());
         assert!(body.into_bytes_no_buffering().is_none());
     }
 
     #[test]
     fn external_body_buffered_then_clone() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"clone me");
+        let body = create_stream_body(&builder, b"clone me", &BodyOptions::default());
 
         let buffered = block_on(body.into_buffered()).unwrap();
         let cloned = buffered.try_clone().unwrap();
@@ -1010,7 +1010,7 @@ mod tests {
     #[test]
     fn external_body_with_buffer_limit_exceeded() {
         let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(5));
-        let body = create_stream_body(&builder, b"this exceeds the limit");
+        let body = create_stream_body(&builder, b"this exceeds the limit", &BodyOptions::default());
 
         let err = block_on(body.into_buffered()).unwrap_err();
         assert!(err.to_string().contains("body size exceeds the limit"));
@@ -1019,7 +1019,7 @@ mod tests {
     #[test]
     fn external_body_with_buffer_limit_ok() {
         let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
-        let body = create_stream_body(&builder, b"fits");
+        let body = create_stream_body(&builder, b"fits", &BodyOptions::default());
 
         let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "fits");
@@ -1028,7 +1028,7 @@ mod tests {
     #[test]
     fn external_body_is_end_stream_with_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"data");
+        let body = create_stream_body(&builder, b"data", &BodyOptions::default());
         // A stream body with content is not at end-of-stream.
         assert!(!body.is_end_stream());
     }
@@ -1036,7 +1036,7 @@ mod tests {
     #[test]
     fn external_body_poll_frame_yields_correct_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let mut body = pin!(create_stream_body(&builder, b"exact"));
+        let mut body = pin!(create_stream_body(&builder, b"exact", &BodyOptions::default()));
         let mut cx = Context::from_waker(Waker::noop());
 
         if let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) {

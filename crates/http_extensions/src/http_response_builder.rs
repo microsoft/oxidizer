@@ -383,7 +383,7 @@ impl HttpResponseBuilder<'_> {
     /// # use std::pin::Pin;
     /// # use std::task::{Context, Poll};
     /// # use http_body::Body;
-    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
+    /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use bytesbuf::BytesView;
     /// // Your custom body type
     /// #[derive(Default)]
@@ -406,15 +406,15 @@ impl HttpResponseBuilder<'_> {
     /// # fn example(creator: &HttpBodyBuilder) -> Result<(), HttpError> {
     /// let response_builder = HttpResponseBuilder::new(creator)
     ///     .status(200)
-    ///     .custom_body(CustomBody::default());
+    ///     .custom_body(CustomBody::default(), &BodyOptions::default());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn custom_body<B>(self, body: B) -> Self
+    pub fn custom_body<B>(self, body: B, options: &BodyOptions) -> Self
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.creator.body(body, &BodyOptions::default());
+        let body = self.creator.body(body, options);
         self.body(body)
     }
 
@@ -430,7 +430,7 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
+    /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use bytesbuf::BytesView;
     /// # fn example(body_builder: &HttpBodyBuilder) -> Result<(), HttpError> {
     /// let chunks = vec![
@@ -439,16 +439,16 @@ impl HttpResponseBuilder<'_> {
     /// ];
     /// let response = HttpResponseBuilder::new(body_builder)
     ///     .status(200)
-    ///     .stream(futures::stream::iter(chunks))
+    ///     .stream(futures::stream::iter(chunks), &BodyOptions::default())
     ///     .build()?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn stream<S>(self, stream: S) -> Self
+    pub fn stream<S>(self, stream: S, options: &BodyOptions) -> Self
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
-        let body = self.creator.stream(stream);
+        let body = self.creator.stream(stream, options);
         self.body(body)
     }
 }
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn custom_body_functionality() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"]);
+        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"], &BodyOptions::default());
 
         let response = HttpResponseBuilder::new_fake().body(body).build().unwrap();
 
@@ -626,7 +626,10 @@ mod tests {
 
         let response = HttpResponseBuilder::new_fake()
             .status(200)
-            .custom_body(SingleChunkBody::new(BytesView::copied_from_slice(b"custom payload", &builder)))
+            .custom_body(
+                SingleChunkBody::new(BytesView::copied_from_slice(b"custom payload", &builder)),
+                &BodyOptions::default(),
+            )
             .build()
             .unwrap();
 
@@ -644,7 +647,7 @@ mod tests {
 
         let response = HttpResponseBuilder::new_fake()
             .status(200)
-            .stream(futures::stream::iter(chunks))
+            .stream(futures::stream::iter(chunks), &BodyOptions::default())
             .build()
             .unwrap();
 
