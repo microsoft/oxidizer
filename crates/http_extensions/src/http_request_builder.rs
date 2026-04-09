@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::future::ready;
+use std::time::Duration;
 
 use bytesbuf::BytesView;
 use futures::Stream;
@@ -12,7 +13,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
 use templated_uri::Uri;
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
-use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
+use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, RequestTimeout, Result};
 
 /// A fluent builder for creating HTTP requests.
 ///
@@ -233,6 +234,31 @@ impl<R> HttpRequestBuilder<'_, R> {
     {
         self.builder = self.builder.extension(extension);
         self
+    }
+
+    /// Sets a request-level timeout for the entire request/response cycle.
+    ///
+    /// This attaches a [`RequestTimeout`] extension to the request, which middleware
+    /// or HTTP clients can use to enforce a maximum duration for the request.
+    ///
+    /// This is different from the body timeout configured via
+    /// [`HttpBodyBuilder::with_timeout`] — the body timeout limits how long
+    /// streaming body data can take, while this timeout covers the entire
+    /// request/response cycle.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::time::Duration;
+    /// # use http_extensions::HttpRequestBuilder;
+    /// let request = HttpRequestBuilder::new_fake()
+    ///     .get("https://example.com/api")
+    ///     .timeout(Duration::from_secs(30))
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn timeout(self, duration: Duration) -> Self {
+        self.extension(RequestTimeout::new(duration))
     }
 
     /// Sets a plain text body for the request.
@@ -1348,6 +1374,25 @@ mod tests {
 
         let id = request.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
+    }
+
+    #[test]
+    fn timeout_attaches_to_request() {
+        use std::time::Duration;
+
+        use crate::RequestTimeout;
+
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/api")
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+
+        let timeout = request
+            .extensions()
+            .get::<RequestTimeout>()
+            .expect("timeout extension should be present");
+        assert_eq!(timeout.duration(), Duration::from_secs(30));
     }
 
     #[test]

@@ -222,6 +222,19 @@ impl HttpError {
         )
     }
 
+    /// Creates a timeout error for body data retrieval.
+    ///
+    /// Used when streaming body data is not fully received within the configured timeout.
+    /// The error is classified as retryable.
+    #[must_use]
+    pub(crate) fn timeout_for_body(duration: Duration) -> Self {
+        Self::other(
+            format!("body data was not fully received within the timeout of {}ms", duration.as_millis()),
+            RecoveryInfo::retry(),
+            "timeout",
+        )
+    }
+
     /// Attaches HTTP request to this error.
     ///
     /// Useful for rejected requests that you may want to retry later.
@@ -357,6 +370,16 @@ mod tests {
             "request timed out while receiving the response, timeout: 1500ms"
         );
         assert_eq!(timeout_error.label(), "timeout");
+    }
+
+    #[test]
+    fn timeout_for_body_error() {
+        let duration = Duration::from_millis(2500);
+        let error = HttpError::timeout_for_body(duration);
+
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        assert_eq!(error.message(), "body data was not fully received within the timeout of 2500ms");
+        assert_eq!(error.label(), "timeout");
     }
 
     #[test]
