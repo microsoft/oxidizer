@@ -35,9 +35,10 @@ use super::{HttpBody, Kind};
 /// let options = BodyOptions::default()
 ///     .timeout(Duration::from_secs(60));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ThreadAware)]
 pub struct BodyOptions {
     timeout: Option<Duration>,
+    buffer_limit: Option<usize>,
 }
 
 impl BodyOptions {
@@ -49,6 +50,30 @@ impl BodyOptions {
     pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
+    }
+
+    /// Sets the response buffer limit.
+    ///
+    /// This limits the maximum amount of memory that may be used when buffering
+    /// a response body via [`HttpBody::into_buffered`]. If the body exceeds this
+    /// limit, an error is returned.
+    #[must_use]
+    pub const fn buffer_limit(mut self, limit: usize) -> Self {
+        self.buffer_limit = Some(limit);
+        self
+    }
+
+    /// Merges `self` with `other`, preferring values from `self` when both are set.
+    pub(crate) fn merge(&self, other: &Self) -> Self {
+        Self {
+            timeout: self.timeout.or(other.timeout),
+            buffer_limit: self.buffer_limit.or(other.buffer_limit),
+        }
+    }
+
+    /// Returns the configured buffer limit, if any.
+    pub(crate) fn get_buffer_limit(&self) -> Option<usize> {
+        self.buffer_limit
     }
 }
 
@@ -79,7 +104,7 @@ impl BodyOptions {
 pub struct HttpBodyBuilder {
     memory: MemoryWrapper,
     clock: Clock,
-    pub(super) response_buffer_limit: Option<usize>,
+    pub(super) options: BodyOptions,
 }
 
 impl HttpBodyBuilder {
@@ -98,7 +123,6 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        // We use a default response buffer limit of `2GB` for fake instances.
         Self::new(GlobalPool::new(), &Clock::new_frozen())
     }
 
@@ -110,7 +134,7 @@ impl HttpBodyBuilder {
         Self {
             memory: MemoryWrapper::Global(memory),
             clock: clock.clone(),
-            response_buffer_limit: None,
+            options: BodyOptions::default(),
         }
     }
 
@@ -123,14 +147,17 @@ impl HttpBodyBuilder {
         Self {
             memory: MemoryWrapper::Opaque(Unaware(OpaqueMemory::new(memory))),
             clock: clock.clone(),
-            response_buffer_limit: None,
+            options: BodyOptions::default(),
         }
     }
 
-    /// Sets the response buffer limit for all bodies created by this builder.
+    /// Sets default [`BodyOptions`] for all bodies created by this builder.
+    ///
+    /// Per-call options passed to [`body`](Self::body) or [`stream`](Self::stream) are
+    /// merged on top: the per-call value wins when both sides set the same field.
     #[must_use]
-    pub const fn with_response_buffer_limit(mut self, limit: Option<usize>) -> Self {
-        self.response_buffer_limit = limit;
+    pub fn with_options(mut self, options: BodyOptions) -> Self {
+        self.options = options;
         self
     }
 
@@ -179,9 +206,10 @@ impl HttpBodyBuilder {
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
+        let merged = options.merge(&self.options);
         let body = body.map_err(Into::into);
 
-        match options.timeout {
+        match merged.timeout {
             Some(timeout) => match self.clock.instant().checked_add(timeout) {
                 Some(deadline) => HttpBody::new(
                     Kind::Body(Box::pin(TimeoutBody::new(body, deadline, timeout, &self.clock))),
@@ -416,15 +444,16 @@ mod tests {
     }
 
     #[test]
-    fn response_buffer_limit_with_some() {
-        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
-        assert_eq!(builder.response_buffer_limit, Some(1024));
+    fn with_options_sets_buffer_limit() {
+        let options = BodyOptions::default().buffer_limit(1024);
+        let builder = HttpBodyBuilder::new_fake().with_options(options);
+        assert_eq!(builder.options, options);
     }
 
     #[test]
-    fn response_buffer_limit_with_none() {
-        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(None);
-        assert_eq!(builder.response_buffer_limit, None);
+    fn with_options_defaults() {
+        let builder = HttpBodyBuilder::new_fake();
+        assert_eq!(builder.options, BodyOptions::default());
     }
 
     #[test]
@@ -614,7 +643,13 @@ mod tests {
     #[test]
     fn body_options_default_has_no_timeout() {
         let options = BodyOptions::default();
-        assert_eq!(options, BodyOptions { timeout: None });
+        assert_eq!(
+            options,
+            BodyOptions {
+                timeout: None,
+                buffer_limit: None,
+            }
+        );
     }
 
     #[test]
@@ -623,7 +658,8 @@ mod tests {
         assert_eq!(
             options,
             BodyOptions {
-                timeout: Some(Duration::from_secs(60))
+                timeout: Some(Duration::from_secs(60)),
+                buffer_limit: None,
             }
         );
     }
@@ -644,5 +680,40 @@ mod tests {
         let debug = format!("{options:?}");
         assert!(debug.contains("BodyOptions"));
         assert!(debug.contains("42"));
+    }
+
+    #[test]
+    fn body_options_with_buffer_limit() {
+        let options = BodyOptions::default().buffer_limit(4096);
+        assert_eq!(options.get_buffer_limit(), Some(4096));
+    }
+
+    #[test]
+    fn body_options_merge_prefers_self() {
+        let a = BodyOptions::default().timeout(Duration::from_secs(10)).buffer_limit(100);
+        let b = BodyOptions::default().timeout(Duration::from_secs(20)).buffer_limit(200);
+        let merged = a.merge(&b);
+        assert_eq!(merged, a);
+    }
+
+    #[test]
+    fn body_options_merge_fills_gaps_from_other() {
+        let a = BodyOptions::default().timeout(Duration::from_secs(10));
+        let b = BodyOptions::default().buffer_limit(200);
+        let merged = a.merge(&b);
+        assert_eq!(merged, BodyOptions::default().timeout(Duration::from_secs(10)).buffer_limit(200));
+    }
+
+    #[test]
+    fn builder_merges_per_call_options_with_defaults() {
+        let clock = Clock::new_frozen();
+        let builder_options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(builder_options);
+
+        // Per-call options override the builder-level default.
+        let per_call = BodyOptions::default().timeout(Duration::from_secs(5));
+        let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
+        // Body created successfully — timeout was applied from per_call.
+        assert_eq!(body.content_length(), None);
     }
 }

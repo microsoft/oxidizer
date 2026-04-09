@@ -145,11 +145,11 @@ mod tests {
     }
 
     #[test]
-    fn body_timeout_chains_with_response_buffer_limit() {
+    fn body_timeout_chains_with_buffer_limit() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_response_buffer_limit(Some(1024));
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(BodyOptions::default().buffer_limit(1024));
 
-        assert_eq!(builder.response_buffer_limit, Some(1024));
+        assert_eq!(builder.options, BodyOptions::default().buffer_limit(1024));
 
         // Timeout is applied per-body, not on the builder.
         let options = BodyOptions::default().timeout(Duration::from_secs(30));

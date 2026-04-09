@@ -82,7 +82,7 @@ pub(crate) mod timeout_body;
 ///
 /// Buffering has a configurable memory limit (default: 2 GB) to prevent out-of-memory issues
 /// with extremely large responses. If a response exceeds this limit, you'll get an error.
-/// You can customize this limit via [`HttpBodyBuilder::with_response_buffer_limit`].
+/// You can customize this limit via [`BodyOptions::buffer_limit`].
 ///
 /// # Streaming
 ///
@@ -216,7 +216,7 @@ impl HttpBody {
     /// - Clone a body that couldn't be cloned before
     /// - Preload data to avoid connection issues later
     ///
-    /// To change the memory limit, use [`HttpBodyBuilder::with_response_buffer_limit`].
+    /// To change the memory limit, use [`BodyOptions::buffer_limit`] when constructing the builder
     /// By default, it's capped at `2GB` to prevent memory issues.
     ///
     /// # Caveats
@@ -243,7 +243,7 @@ impl HttpBody {
     /// ```
     pub async fn into_buffered(self) -> Result<Self> {
         let builder = self.builder;
-        let limit = builder.response_buffer_limit;
+        let limit = builder.options.get_buffer_limit();
 
         match self.kind {
             Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
@@ -1009,7 +1009,7 @@ mod tests {
 
     #[test]
     fn external_body_with_buffer_limit_exceeded() {
-        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(5));
+        let builder = HttpBodyBuilder::new_fake().with_options(BodyOptions::default().buffer_limit(5));
         let body = create_stream_body(&builder, b"this exceeds the limit", &BodyOptions::default());
 
         let err = block_on(body.into_buffered()).unwrap_err();
@@ -1018,7 +1018,7 @@ mod tests {
 
     #[test]
     fn external_body_with_buffer_limit_ok() {
-        let builder = HttpBodyBuilder::new_fake().with_response_buffer_limit(Some(1024));
+        let builder = HttpBodyBuilder::new_fake().with_options(BodyOptions::default().buffer_limit(1024));
         let body = create_stream_body(&builder, b"fits", &BodyOptions::default());
 
         let text = block_on(body.into_text()).unwrap();
