@@ -9,7 +9,7 @@
 
 use std::future::Future;
 
-use crate::{CacheEntry, Error};
+use crate::{CacheEntry, Error, SizeError};
 
 /// Trait for cache tier implementations.
 ///
@@ -32,8 +32,9 @@ use crate::{CacheEntry, Error};
 /// Rust object.
 ///
 /// `len` and `is_empty` have default implementations:
-/// - `len`: Returns `None` (not all tiers track size)
-/// - `is_empty`: Delegates to `len`
+/// - `len`: Returns `Err(SizeError::unsupported())` (not all tiers track size)
+/// - `is_empty`: Delegates to [`len`](Self::len), returning `Ok(true)` when
+///   the reported length is `0` and otherwise propagating any `SizeError`
 #[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
@@ -52,7 +53,7 @@ pub trait CacheTier<K, V>: Send + Sync {
 
     /// Returns an **approximate** count of entries, if the implementation supports it.
     ///
-    /// Returns `None` for implementations that do not track size.
+    /// Returns `Err(SizeError::unsupported())` for implementations that do not track size.
     ///
     /// # Approximation
     ///
@@ -63,19 +64,28 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// Do not use this value for exact bookkeeping or correctness decisions. It is
     /// suitable for approximate capacity monitoring, metrics, and health checks.
-    fn len(&self) -> Option<u64> {
-        None
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(SizeError::unsupported())` if the tier does not support size
+    /// reporting.
+    /// Returns an error with [`Failed`](crate::SizeErrorKind::Failed) kind if the
+    /// underlying storage operation fails.
+    fn len(&self) -> impl Future<Output = Result<u64, SizeError>> + Send {
+        async { Err(SizeError::unsupported()) }
     }
 
-    /// Returns `true` if the cache **appears** to contain no entries.
+    /// Returns `Ok(true)` if the cache appears to contain no entries.
     ///
-    /// Returns `None` for implementations that do not track size.
+    /// Default implementation delegates to [`len`](Self::len).
     ///
-    /// Subject to the same approximation caveat as [`len`](Self::len): a return
-    /// value of `false` does not guarantee that a subsequent `get` will find anything,
-    /// and a return value of `true` does not guarantee the cache is actually empty if
-    /// entries have expired but not yet been evicted.
-    fn is_empty(&self) -> Option<bool> {
-        self.len().map(|len| len == 0)
+    /// # Errors
+    ///
+    /// Returns `Err(SizeError::unsupported())` if the tier does not support size
+    /// reporting.
+    /// Returns an error with [`Failed`](crate::SizeErrorKind::Failed) kind if the
+    /// underlying storage operation fails.
+    fn is_empty(&self) -> impl Future<Output = Result<bool, SizeError>> + Send {
+        async { self.len().await.map(|n| n == 0) }
     }
 }
