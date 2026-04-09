@@ -181,12 +181,25 @@ mod tests {
     }
 
     #[test]
-    fn is_end_stream_delegates_to_inner() {
+    fn is_end_stream_true_when_inner_is_empty() {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
 
         let body = builder.custom_body_with_timeout(http_body_util::Empty::new(), Duration::from_secs(1), &clock);
         assert!(body.is_end_stream());
+    }
+
+    #[test]
+    fn is_end_stream_false_when_inner_has_data() {
+        let clock = ClockControl::new().to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+
+        let body = builder.custom_body_with_timeout(
+            http_body_util::Full::new(BytesView::copied_from_slice(b"data", &builder)),
+            Duration::from_secs(1),
+            &clock,
+        );
+        assert!(!body.is_end_stream());
     }
 
     #[test]
