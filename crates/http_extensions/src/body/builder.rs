@@ -561,7 +561,7 @@ mod tests {
 
     // ── Deprecated methods ───────────────────────────────────────────────
 
-    #[allow(deprecated)]
+    #[expect(deprecated, reason = "required by code coverage")]
     #[test]
     fn external_delegates_to_custom_body() {
         let builder = HttpBodyBuilder::new_fake();

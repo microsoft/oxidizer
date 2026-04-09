@@ -260,7 +260,7 @@ mod tests {
         // delay fire on re-poll while `remaining` at the top of poll_frame is
         // still non-zero, exercising the delay-fires path.
         let body = ClockAdvancingBody {
-            control: control.clone(),
+            control,
             advance_by: Duration::from_secs(60),
             poll_count: AtomicU32::new(0),
         };

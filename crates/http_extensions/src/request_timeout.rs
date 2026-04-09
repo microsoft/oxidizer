@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn clone_and_copy() {
         let timeout = RequestTimeout::new(Duration::from_secs(5));
-        let cloned = timeout.clone();
+        let cloned = timeout;
         let copied = timeout;
 
         assert_eq!(timeout, cloned);
