@@ -358,7 +358,7 @@ where
     /// Returns `Err(SizeError::unsupported())` if the underlying storage does not support size tracking.
     /// Returns an error if the underlying storage tier fails.
     pub async fn is_empty(&self) -> Result<bool, SizeError> {
-        self.len().await.map(|n| n == 0)
+        self.storage.is_empty().await
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.
