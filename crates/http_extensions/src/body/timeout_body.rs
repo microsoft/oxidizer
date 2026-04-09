@@ -102,6 +102,7 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::task::{Context, Poll};
     use std::time::Duration;
 
@@ -246,6 +247,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn poll_frame_times_out_via_delay_when_inner_body_advances_clock() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let timeout = Duration::from_millis(100);
+        let deadline = clock.instant().checked_add(timeout).expect("timeout does not overflow");
+
+        // Body that returns Pending on the first poll (so the delay is created
+        // and registered), then advances the clock past the deadline on the
+        // second poll before returning Pending again. This makes the cached
+        // delay fire on re-poll while `remaining` at the top of poll_frame is
+        // still non-zero, exercising the delay-fires path.
+        let body = ClockAdvancingBody {
+            control: control.clone(),
+            advance_by: Duration::from_secs(60),
+            poll_count: AtomicU32::new(0),
+        };
+
+        let timeout_body = super::TimeoutBody::new(body, deadline, timeout, &clock);
+        let http_body = HttpBodyBuilder::new_fake().custom_body(timeout_body);
+
+        let err = block_on(http_body.into_bytes()).unwrap_err();
+        assert!(
+            err.to_string().contains("body data was not fully received within the timeout"),
+            "expected body timeout error, got: {err}"
+        );
+    }
+
     /// Body that always returns [`Poll::Pending`] to simulate a stalled download.
     struct PendingBody;
 
@@ -254,6 +283,31 @@ mod tests {
         type Error = HttpError;
 
         fn poll_frame(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
+            Poll::Pending
+        }
+    }
+
+    /// Body that returns [`Poll::Pending`] but advances the clock on the second poll,
+    /// allowing the cached delay to fire before the `remaining.is_zero()` check catches it.
+    struct ClockAdvancingBody {
+        control: ClockControl,
+        advance_by: Duration,
+        poll_count: AtomicU32,
+    }
+
+    impl Body for ClockAdvancingBody {
+        type Data = BytesView;
+        type Error = HttpError;
+
+        fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
+            let count = self.poll_count.fetch_add(1, Ordering::Relaxed);
+            if count >= 1 {
+                // On the second (and subsequent) polls, advance the clock past
+                // the deadline so the already-registered delay expires.
+                self.control.advance(self.advance_by);
+            }
+            // Wake ourselves so the executor re-polls after the first Pending.
+            cx.waker().wake_by_ref();
             Poll::Pending
         }
     }
