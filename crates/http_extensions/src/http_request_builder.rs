@@ -242,23 +242,6 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// or HTTP clients can use to enforce a maximum duration for the request. The
     /// timeout applies to the entire request/response cycle, including receiving the
     /// response headers and reading all data from the HTTP body.
-    ///
-    /// This is different from the body timeout applied via
-    /// [`HttpBodyBuilder::custom_body_with_timeout`] — the body timeout limits how long
-    /// streaming body data can take, while this timeout covers the entire
-    /// request/response cycle.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use std::time::Duration;
-    /// # use http_extensions::HttpRequestBuilder;
-    /// let request = HttpRequestBuilder::new_fake()
-    ///     .get("https://example.com/api")
-    ///     .timeout(Duration::from_secs(30))
-    ///     .build()
-    ///     .unwrap();
-    /// ```
     pub fn timeout(self, duration: Duration) -> Self {
         self.extension(RequestTimeout::new(duration))
     }
