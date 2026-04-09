@@ -282,10 +282,11 @@ impl ValidationError {
         (init as u64 > max).then(|| Self::new(format!("initial_capacity ({init}) exceeds max_capacity ({max})")))
     }
 
-    fn invalid_time_to(ttl: Option<Duration>, tti: Option<Duration>) -> Option<Self> {
-        let tti = tti?;
-        let ttl = ttl?;
-        (tti > ttl).then(|| Self::new(format!("time to idle ({tti:?}) exceeds time to live ({ttl:?}).")))
+    fn invalid_time_to(time_to_live: Option<Duration>, time_to_idle: Option<Duration>) -> Option<Self> {
+        let time_to_idle = time_to_idle?;
+        let time_to_live = time_to_live?;
+        (time_to_idle > time_to_live)
+            .then(|| Self::new(format!("time to idle ({time_to_idle:?}) exceeds time to live ({time_to_live:?}).")))
     }
 }
 

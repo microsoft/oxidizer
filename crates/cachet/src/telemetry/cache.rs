@@ -139,23 +139,14 @@ impl CacheTelemetry {
     }
 
     /// Records the current cache size for the given cache name.
-    #[cfg_attr(
-        not(any(feature = "metrics", test)),
-        expect(unused_variables, reason = "No-op when metrics are disabled")
-    )]
-    #[cfg_attr(
-        not(any(feature = "metrics", test)),
-        expect(clippy::unused_self, reason = "self is used under feature flags")
-    )]
+    #[cfg(any(feature = "metrics", test))]
+    #[cfg_attr(not(test), expect(dead_code, reason = "TODO will be used by future configurable size recording"))]
     #[inline]
     pub(crate) fn record_size(&self, cache_name: CacheName, size: u64) {
-        #[cfg(any(feature = "metrics", test))]
-        {
-            let attrs = [KeyValue::new(attributes::CACHE_NAME, cache_name)];
+        let attrs = [KeyValue::new(attributes::CACHE_NAME, cache_name)];
 
-            if let Some(g) = &self.inner.cache_size {
-                g.record(size, &attrs);
-            }
+        if let Some(g) = &self.inner.cache_size {
+            g.record(size, &attrs);
         }
     }
 

@@ -66,6 +66,8 @@ C-NEWTYPE
 C-NUM-FMT
 codebase
 codebases
+codec
+codecs
 composability
 composable
 combinators
@@ -161,6 +163,7 @@ Kubernetes
 L1
 L2
 L3
+len
 LFU
 libc
 libs

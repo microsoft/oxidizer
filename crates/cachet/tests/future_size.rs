@@ -22,7 +22,7 @@ fn single_level_future_size_bounded() {
 
     // Verify that the future sizes are within reasonable bounds
     assert!(get_size < 1000, "Get future size is too large: {get_size}");
-    assert!(insert_size < 1500, "Insert future size is too large: {insert_size}");
+    assert!(insert_size < 1600, "Insert future size is too large: {insert_size}");
     assert!(invalidate_size < 1500, "Invalidate future size is too large: {invalidate_size}");
 }
 

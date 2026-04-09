@@ -156,6 +156,41 @@ impl Recovery for Error {
     }
 }
 
+impl From<SizeError> for Error {
+    fn from(err: SizeError) -> Self {
+        Self::from_source(err)
+    }
+}
+
+/// The kind of error returned by [`CacheTier::len`](crate::CacheTier::len).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SizeErrorKind {
+    /// The tier does not support reporting its size.
+    Unsupported,
+    /// The underlying storage operation failed.
+    Failed,
+}
+
+/// An error from a [`CacheTier::len`](crate::CacheTier::len) operation.
+///
+/// Use the [`kind`](Self::kind) field to distinguish between tiers that don't
+/// support size reporting ([`Unsupported`](SizeErrorKind::Unsupported)) and
+/// actual storage failures ([`Failed`](SizeErrorKind::Failed)).
+#[ohno::error]
+#[from(Error(kind: SizeErrorKind::Failed))]
+pub struct SizeError {
+    /// The kind of error that occurred.
+    pub kind: SizeErrorKind,
+}
+
+impl SizeError {
+    /// Creates a new `SizeError` indicating that the tier does not support size reporting.
+    #[must_use]
+    pub fn unsupported() -> Self {
+        Self::new(SizeErrorKind::Unsupported)
+    }
+}
+
 /// A specialized [`Result`] type for cache operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -266,5 +301,26 @@ mod tests {
     fn recovery_returns_never_by_default() {
         let error = Error::from_message("permanent failure");
         assert_eq!(error.recovery(), RecoveryInfo::never());
+    }
+
+    #[test]
+    fn failed_size_error_from_error() {
+        let error = Error::from_message("permanent failure");
+        let len_err: SizeError = error.clone().into();
+        assert_eq!(SizeErrorKind::Failed, len_err.kind);
+        assert_eq!(error.to_string(), len_err.source().expect("should have source error").to_string());
+    }
+
+    #[test]
+    fn unsupported_size_error_has_unsupported_kind() {
+        let len_err = SizeError::unsupported();
+        assert_eq!(SizeErrorKind::Unsupported, len_err.kind);
+    }
+
+    #[test]
+    fn size_error_converts_to_error() {
+        let len_err = SizeError::unsupported();
+        let error: Error = len_err.into();
+        assert!(error.is_source::<SizeError>());
     }
 }
