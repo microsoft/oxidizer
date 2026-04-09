@@ -67,8 +67,10 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying storage does not implement `len()`
-    /// Returns an error if the underlying storage operation fails.
+    /// Returns `Err(SizeError::unsupported())` if the tier does not support size
+    /// reporting.
+    /// Returns an error with [`SizeErrorKind::Failed`] if the underlying storage
+    /// operation fails.
     fn len(&self) -> impl Future<Output = Result<u64, SizeError>> + Send {
         async { Err(SizeError::unsupported()) }
     }
@@ -79,9 +81,10 @@ pub trait CacheTier<K, V>: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns an `Err(SizeError::unsupported())` if the underlying storage does not support
-    /// size reporting.
-    /// Returns an error if the underlying storage operation fails.
+    /// Returns `Err(SizeError::unsupported())` if the tier does not support size
+    /// reporting.
+    /// Returns an error with [`SizeErrorKind::Failed`] if the underlying storage
+    /// operation fails.
     fn is_empty(&self) -> impl Future<Output = Result<bool, SizeError>> + Send {
         async { self.len().await.map(|n| n == 0) }
     }

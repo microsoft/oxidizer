@@ -349,7 +349,7 @@ where
         self.storage.len().await
     }
 
-    /// Returns Ok(`true`) if the cache appears to contain no entries.
+    /// Returns `Ok(true)` if the cache appears to contain no entries.
     ///
     /// This is a convenience wrapper around [`len`](Self::len).
     ///
@@ -737,8 +737,10 @@ mod tests {
         block_on(async {
             let cache = build_cache();
             assert_eq!(cache.len().await.expect("len should return Ok"), 0);
+            assert!(cache.is_empty().await.expect("is_empty should return Ok"));
             cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
             assert_eq!(cache.len().await.expect("len should return Ok"), 1);
+            assert!(!cache.is_empty().await.expect("is_empty should return Ok"));
         });
     }
 
