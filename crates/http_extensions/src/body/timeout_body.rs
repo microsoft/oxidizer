@@ -15,12 +15,15 @@ use crate::{HttpError, Result};
 /// Wraps a streaming body to enforce a total timeout on data reception.
 ///
 /// The deadline is an absolute `Instant` computed once at construction time.
-/// When [`poll_frame`][Body::poll_frame] is called and the inner body is not
-/// ready, a [`Delay`] is created for the remaining time until the deadline and
-/// cached for subsequent polls. The cached delay is cleared whenever the inner
-/// body yields a frame, so the next pending poll will create a new delay with
-/// the updated remaining time. This means the timeout shrinks as time passes
-/// rather than resetting on every poll.
+/// On every [`poll_frame`][Body::poll_frame] call the deadline is checked
+/// **before** the inner body is polled; if the deadline has already elapsed a
+/// timeout error is returned immediately, even if the inner body would have
+/// data ready. When the inner body is not ready, a [`Delay`] is created for
+/// the remaining time until the deadline and cached for subsequent polls. The
+/// cached delay is cleared whenever the inner body yields a frame, so the next
+/// pending poll will create a new delay with the updated remaining time. This
+/// means the timeout shrinks as time passes rather than resetting on every
+/// poll.
 #[pin_project]
 pub(crate) struct TimeoutBody<B> {
     #[pin]
@@ -55,14 +58,9 @@ where
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
         let this = self.project();
 
-        // If the inner body has data ready, return it regardless of the deadline.
-        // Drop any in-flight delay so the next poll recomputes the remaining time.
-        if let Poll::Ready(result) = this.inner.poll_frame(cx) {
-            *this.current_delay = None;
-            return Poll::Ready(result);
-        }
-
-        // Inner body is pending — check the remaining time until the deadline.
+        // Check the deadline *before* accepting any data from the inner body so
+        // that frames arriving after the deadline consistently yield a timeout
+        // error rather than silently slipping through.
         let now = this.clock.instant();
         let remaining = this.deadline_at.saturating_duration_since(now);
 
@@ -71,6 +69,14 @@ where
             return Poll::Ready(Some(Err(HttpError::timeout_for_body(*this.timeout_duration))));
         }
 
+        // Deadline has not elapsed yet — poll the inner body for data.
+        // Drop any in-flight delay so the next poll recomputes the remaining time.
+        if let Poll::Ready(result) = this.inner.poll_frame(cx) {
+            *this.current_delay = None;
+            return Poll::Ready(result);
+        }
+
+        // Inner body is pending — enforce the deadline via a delay.
         // Reuse the existing delay if we are re-polled without the inner body
         // making progress, or create a new one for the remaining time.
         let delay = this.current_delay.get_or_insert_with(|| Delay::new(this.clock, remaining));
@@ -208,6 +214,31 @@ mod tests {
         // Advance the clock well past the deadline before polling.
         control.advance(Duration::from_secs(60));
 
+        let err = block_on(body.into_bytes()).unwrap_err();
+        assert!(
+            err.to_string().contains("body data was not fully received within the timeout"),
+            "expected body timeout error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn poll_frame_times_out_even_when_inner_body_has_data_ready() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let builder = HttpBodyBuilder::new_fake();
+
+        // Use a body that has data immediately available (Full is always ready).
+        let body = builder.custom_body_with_timeout(
+            http_body_util::Full::new(BytesView::copied_from_slice(b"ready data", &builder)),
+            Duration::from_millis(1),
+            &clock,
+        );
+
+        // Advance the clock well past the deadline before polling.
+        control.advance(Duration::from_secs(60));
+
+        // Even though the inner body would return data, the elapsed deadline
+        // must take precedence and produce a timeout error.
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
             err.to_string().contains("body data was not fully received within the timeout"),
