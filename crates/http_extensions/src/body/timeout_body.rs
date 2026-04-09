@@ -79,6 +79,8 @@ where
         // Inner body is pending — enforce the deadline via a delay.
         // Reuse the existing delay if we are re-polled without the inner body
         // making progress, or create a new one for the remaining time.
+        // `Delay` implements `Unpin` (a deliberate guarantee from the `tick` crate),
+        // so we can poll it through `Pin::new` without needing a pinned projection.
         let delay = this.current_delay.get_or_insert_with(|| Delay::new(this.clock, remaining));
 
         if Pin::new(delay).poll(cx).is_ready() {

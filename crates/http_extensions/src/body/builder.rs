@@ -87,7 +87,7 @@ impl BodyOptions {
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// # use http_extensions::{HttpBody, HttpBodyBuilder};
 /// # fn example(builder: &HttpBodyBuilder) {
 /// // Create different body types
@@ -168,12 +168,11 @@ impl HttpBodyBuilder {
     /// implementations.
     ///
     /// When `options` contains a timeout, the body is wrapped with a deadline that limits
-    /// how long the data reception may take. If the timeout duration overflows when added
-    /// to the current instant, it is silently ignored.
+    /// how long the data reception may take.
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
@@ -209,6 +208,10 @@ impl HttpBodyBuilder {
         let merged = options.merge(&self.options);
         let body = body.map_err(Into::into);
 
+        // If the timeout duration is so large that adding it to the current instant
+        // overflows, silently skip the timeout wrapper. In practice such a duration
+        // (e.g. Duration::MAX) is far longer than any realistic connection lifetime,
+        // so the timeout would never fire anyway.
         match merged.timeout {
             Some(timeout) => match self.clock.instant().checked_add(timeout) {
                 Some(deadline) => HttpBody::new(
@@ -231,7 +234,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
     /// # fn example(builder: &HttpBodyBuilder) {
@@ -260,7 +263,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
     /// #
     /// # fn example(builder: &HttpBodyBuilder) {
@@ -286,7 +289,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use http_extensions::HttpBodyBuilder;
     /// #
     /// # fn example(builder: &HttpBodyBuilder) {
@@ -314,7 +317,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use http_extensions::HttpBodyBuilder;
     /// # use bytesbuf::BytesView;
     /// #
@@ -348,7 +351,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// # use http_extensions::{HttpBodyBuilder, HttpError};
     /// # use serde::Serialize;
     /// #

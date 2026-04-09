@@ -46,7 +46,7 @@ impl AsRef<HttpBodyBuilder> for CustomClient {
 impl Default for CustomClient {
     fn default() -> Self {
         Self {
-            builder: HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen()),
+            builder: HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio()),
         }
     }
 }

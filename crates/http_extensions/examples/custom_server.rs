@@ -26,7 +26,7 @@ use tokio::net::TcpListener;
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
     // In a real application, the application framework would provide the global memory pool.
-    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio());
     let body_builder_clone = body_builder.clone();
 
     // Define an execution stack of middlewares

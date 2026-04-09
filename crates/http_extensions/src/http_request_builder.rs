@@ -242,7 +242,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// This attaches a [`ResponseTimeout`] extension to the request, which middleware
     /// or HTTP clients can use to enforce a maximum duration for receiving the response.
     /// The timeout covers connection, sending the request, and receiving the response
-    /// headers. It does not cover reading data from the response body — use
+    /// headers. It does not cover reading data from the response body; use
     /// [`body_timeout`](Self::body_timeout) for that.
     pub fn response_timeout(self, duration: Duration) -> Self {
         self.extension(ResponseTimeout::new(duration))

@@ -7,8 +7,9 @@ use std::time::Duration;
 ///
 /// This timeout represents the maximum time allowed for receiving the response headers,
 /// including connection setup and sending the request. It does not cover reading the
-/// response body — use the body timeout for that. Use this to set a per-request deadline
-/// that covers connection, sending, and receiving the initial response.
+/// HTTP response body, use [`BodyTimeout`](crate::timeout::BodyTimeout) for that.
+/// Use this to set a per-request deadline that covers connection, sending, and receiving
+/// the initial response.
 ///
 /// # Example
 ///
