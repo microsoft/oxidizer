@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn custom_body_is_not_cloneable() {
-        let body = HttpBodyBuilder::new_fake().external(http_body_util::Empty::new());
+        let body = HttpBodyBuilder::new_fake().custom_body(http_body_util::Empty::new());
 
         assert!(body.try_clone().is_none());
 
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn body_error_propagation() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = builder.external(StreamBody::new(futures::stream::once(async {
+        let body = builder.custom_body(StreamBody::new(futures::stream::once(async {
             Err(HttpError::validation("test error"))
         })));
 
@@ -762,7 +762,7 @@ mod tests {
     #[test]
     fn try_clone_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.external(http_body_util::Empty::new());
+        let custom_body = builder.custom_body(http_body_util::Empty::new());
 
         assert!(custom_body.try_clone().is_none());
     }
@@ -790,7 +790,7 @@ mod tests {
     #[test]
     fn into_bytes_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.external(http_body_util::Empty::new());
+        let custom_body = builder.custom_body(http_body_util::Empty::new());
 
         BytesView::try_from(custom_body).unwrap_err();
     }
@@ -927,7 +927,7 @@ mod tests {
     fn is_end_stream_custom_body_empty() {
         let builder = HttpBodyBuilder::new_fake();
         let custom = http_body_util::Empty::new();
-        let body = builder.external(custom);
+        let body = builder.custom_body(custom);
 
         assert!(body.is_end_stream());
     }
@@ -937,7 +937,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let data = Bytes::from_static(b"test data");
         let custom = http_body_util::Full::new(data.into());
-        let body = builder.external(custom);
+        let body = builder.custom_body(custom);
 
         assert!(!body.is_end_stream());
     }

@@ -414,7 +414,7 @@ impl HttpResponseBuilder<'_> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.creator.external(body);
+        let body = self.creator.custom_body(body);
         self.body(body)
     }
 

@@ -362,7 +362,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.body_builder.external(body);
+        let body = self.body_builder.custom_body(body);
         self.body(body)
     }
 

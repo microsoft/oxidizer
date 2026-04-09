@@ -102,7 +102,7 @@ impl HttpBodyBuilder {
 
     /// Configures a timeout for streaming bodies created by this builder.
     ///
-    /// When set, all streaming bodies (created via [`external()`][Self::external] or
+    /// When set, all streaming bodies (created via [`custom_body()`][Self::custom_body] or
     /// [`stream()`][Self::stream]) enforce a total timeout for receiving body data.
     /// If the body is not fully received within the specified duration, a timeout
     /// error is returned from [`poll_frame`][http_body::Body::poll_frame].
@@ -134,8 +134,9 @@ impl HttpBodyBuilder {
 
     /// Creates an `HttpBody` from any custom body implementation.
     ///
-    /// Use this to integrate custom types that implement `http_body::Body` with the `HttpBody` system.
-    /// Useful for third-party libraries or your own custom body implementations.
+    /// Use this to integrate custom types that implement [`http_body::Body`] with the
+    /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
+    /// implementations.
     ///
     /// # Examples
     ///
@@ -165,10 +166,10 @@ impl HttpBodyBuilder {
     /// # fn example(create_body: &HttpBodyBuilder) {
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
-    /// let body = create_body.external(custom_body);
+    /// let body = create_body.custom_body(custom_body);
     /// # }
     /// ```
-    pub fn external<B>(&self, body: B) -> HttpBody
+    pub fn custom_body<B>(&self, body: B) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
@@ -184,9 +185,19 @@ impl HttpBodyBuilder {
         }
     }
 
+    /// Use [`custom_body`][Self::custom_body] instead.
+    #[deprecated(note = "use `custom_body` instead")]
+    #[doc(hidden)]
+    pub fn external<B>(&self, body: B) -> HttpBody
+    where
+        B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
+    {
+        self.custom_body(body)
+    }
+
     /// Creates a body from a stream of byte chunks.
     ///
-    /// This is a convenience wrapper around [`external`][Self::external] that accepts
+    /// This is a convenience wrapper around [`custom_body`][Self::custom_body] that accepts
     /// a [`Stream`][futures::Stream] of [`BytesView`] chunks. It avoids the need to
     /// manually wrap the stream in a [`StreamBody`][http_body_util::StreamBody].
     ///
@@ -212,7 +223,7 @@ impl HttpBodyBuilder {
         use http_body_util::StreamBody;
 
         let framed = stream.map_ok(Frame::data);
-        self.external(StreamBody::new(framed))
+        self.custom_body(StreamBody::new(framed))
     }
 
     /// Creates a body from text.

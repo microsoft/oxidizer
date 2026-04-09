@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn clone_http_request_non_cloneable() {
-        let body = HttpBodyBuilder::new_fake().external(Empty::default());
+        let body = HttpBodyBuilder::new_fake().custom_body(Empty::default());
         let request = Request::new(body);
 
         assert!(request.try_clone().is_none());

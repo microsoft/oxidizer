@@ -164,7 +164,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_millis(100), &clock);
 
         // A body that never yields data.
-        let body = builder.external(PendingBody);
+        let body = builder.custom_body(PendingBody);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
             err.to_string().contains("body data was not fully received within the timeout"),
@@ -199,7 +199,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake().with_timeout(Duration::from_secs(1), &clock);
 
-        let body = builder.external(http_body_util::Empty::new());
+        let body = builder.custom_body(http_body_util::Empty::new());
         assert!(body.is_end_stream());
     }
 
