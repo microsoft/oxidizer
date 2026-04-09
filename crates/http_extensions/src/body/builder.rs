@@ -153,7 +153,12 @@ impl HttpBodyBuilder {
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
         let body = body.map_err(Into::into);
-        HttpBody::new(Kind::Body(Box::pin(TimeoutBody::new(body, timeout, clock))), self.clone())
+
+        // check that the timeout is valid (i.e. the deadline does not overflow)
+        match clock.instant().checked_add(timeout) {
+            Some(deadline) => HttpBody::new(Kind::Body(Box::pin(TimeoutBody::new(body, deadline, timeout, clock))), self.clone()),
+            None => self.custom_body(body),
+        }
     }
 
     /// Use [`custom_body`][Self::custom_body] instead.
@@ -370,9 +375,7 @@ impl Memory for MemoryWrapper {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use bytes::Bytes;
-    use bytesbuf::BytesView;
     use bytesbuf::mem::testing::TransparentMemory;
-    use bytesbuf::mem::{GlobalPool, HasMemory, Memory};
     use futures::executor::block_on;
     use serde::Serialize;
     use static_assertions::assert_impl_all;

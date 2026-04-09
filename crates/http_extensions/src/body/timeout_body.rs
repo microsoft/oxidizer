@@ -15,9 +15,12 @@ use crate::{HttpError, Result};
 /// Wraps a streaming body to enforce a total timeout on data reception.
 ///
 /// The deadline is an absolute `Instant` computed once at construction time.
-/// On each [`poll_frame`][Body::poll_frame] call a fresh [`Delay`] is created
-/// for the remaining time until the deadline, so the timeout shrinks as time
-/// passes rather than resetting on every poll.
+/// When [`poll_frame`][Body::poll_frame] is called and the inner body is not
+/// ready, a [`Delay`] is created for the remaining time until the deadline and
+/// cached for subsequent polls. The cached delay is cleared whenever the inner
+/// body yields a frame, so the next pending poll will create a new delay with
+/// the updated remaining time. This means the timeout shrinks as time passes
+/// rather than resetting on every poll.
 #[pin_project]
 pub(crate) struct TimeoutBody<B> {
     #[pin]
@@ -25,21 +28,17 @@ pub(crate) struct TimeoutBody<B> {
     deadline_at: Instant,
     timeout_duration: Duration,
     clock: Clock,
-    /// Per-poll delay; rebuilt on each `poll_frame` with the remaining time.
+    /// Cached delay for the remaining time; created on the first pending poll
+    /// and reused until the inner body makes progress or the delay fires.
     current_delay: Option<Delay>,
 }
 
 impl<B> TimeoutBody<B> {
-    pub(crate) fn new(inner: B, timeout: Duration, clock: &Clock) -> Self {
-        let deadline_at = clock
-            .instant()
-            .checked_add(timeout)
-            .expect("timeout duration overflows the monotonic clock");
-
+    pub(crate) fn new(inner: B, deadline_at: Instant, timeout_duration: Duration, clock: &Clock) -> Self {
         Self {
             inner,
             deadline_at,
-            timeout_duration: timeout,
+            timeout_duration,
             clock: clock.clone(),
             current_delay: None,
         }
@@ -72,8 +71,8 @@ where
             return Poll::Ready(Some(Err(HttpError::timeout_for_body(*this.timeout_duration))));
         }
 
-        // Create a fresh delay for the remaining time (or reuse the existing one
-        // if we are re-polled without the inner body making progress).
+        // Reuse the existing delay if we are re-polled without the inner body
+        // making progress, or create a new one for the remaining time.
         let delay = this.current_delay.get_or_insert_with(|| Delay::new(this.clock, remaining));
 
         if Pin::new(delay).poll(cx).is_ready() {

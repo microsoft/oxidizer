@@ -543,17 +543,15 @@ mod tests {
     use std::task::Waker;
 
     use bytes::Bytes;
-    use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;
-    use http_body::Body;
     use http_body_util::StreamBody;
     use ohno::ErrorExt;
     use serde::{Deserialize, Serialize};
     use static_assertions::assert_impl_all;
 
     use super::*;
-    use crate::testing::{create_stream_body, create_stream_body_from_chunks};
+    use crate::testing::create_stream_body;
 
     // Model for JSON serialization/deserialization tests
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
