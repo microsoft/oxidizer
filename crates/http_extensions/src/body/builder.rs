@@ -212,12 +212,12 @@ impl HttpBodyBuilder {
         match merged.timeout {
             Some(timeout) => match self.clock.instant().checked_add(timeout) {
                 Some(deadline) => HttpBody::new(
-                    Kind::Body(Box::pin(TimeoutBody::new(body, deadline, timeout, &self.clock))),
+                    Kind::Body(Box::pin(TimeoutBody::new(body, deadline, timeout, &self.clock)), merged),
                     self.clone(),
                 ),
-                None => HttpBody::new(Kind::Body(Box::pin(body)), self.clone()),
+                None => HttpBody::new(Kind::Body(Box::pin(body), merged), self.clone()),
             },
-            None => HttpBody::new(Kind::Body(Box::pin(body)), self.clone()),
+            None => HttpBody::new(Kind::Body(Box::pin(body), merged), self.clone()),
         }
     }
 

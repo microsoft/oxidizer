@@ -243,13 +243,13 @@ impl HttpBody {
     /// ```
     pub async fn into_buffered(self) -> Result<Self> {
         let builder = self.builder;
-        let limit = builder.options.get_buffer_limit();
 
         match self.kind {
             Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
             Kind::Bytes(None) => Err(HttpError::validation("body cannot be buffered because it is already consumed")),
             Kind::Empty => Ok(builder.empty()),
-            Kind::Body(b) => {
+            Kind::Body(b, options) => {
+                let limit = options.get_buffer_limit();
                 let data = collect_with_limit(b.into_data_stream(), limit).await?;
                 Ok(builder.bytes(data))
             }
@@ -369,7 +369,7 @@ impl HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => Some(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => Some(0),
-            Kind::Body(b) => b.size_hint().exact(),
+            Kind::Body(b, _) => b.size_hint().exact(),
         }
     }
 
@@ -408,7 +408,7 @@ impl HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => Some(self.builder.bytes(bytes.clone())),
             Kind::Empty => Some(self.builder.empty()),
-            Kind::Body(_) | Kind::Bytes(None) => None,
+            Kind::Body(..) | Kind::Bytes(None) => None,
         }
     }
 
@@ -469,7 +469,7 @@ impl Body for HttpBody {
                 .take()
                 .map_or_else(|| Ready(None), |bytes| Ready((!bytes.is_empty()).then(|| Ok(Frame::data(bytes))))),
             BodyInnerProj::Empty => Ready(None),
-            BodyInnerProj::Body(body) => body.as_mut().poll_frame(cx),
+            BodyInnerProj::Body(body, _) => body.as_mut().poll_frame(cx),
         }
     }
 
@@ -477,7 +477,7 @@ impl Body for HttpBody {
         match &self.kind {
             Kind::Bytes(Some(bytes)) => SizeHint::with_exact(bytes.len() as u64),
             Kind::Bytes(None) | Kind::Empty => SizeHint::with_exact(0),
-            Kind::Body(b) => b.size_hint(),
+            Kind::Body(b, _) => b.size_hint(),
         }
     }
 
@@ -485,7 +485,7 @@ impl Body for HttpBody {
         match &self.kind {
             Kind::Bytes(Some(x)) => x.is_empty(),
             Kind::Bytes(None) | Kind::Empty => true,
-            Kind::Body(b) => b.is_end_stream(),
+            Kind::Body(b, _) => b.is_end_stream(),
         }
     }
 }
@@ -498,7 +498,7 @@ impl Body for HttpBody {
 enum Kind {
     Bytes(Option<BytesView>),
     Empty,
-    Body(Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>),
+    Body(Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, BodyOptions),
 }
 
 impl Debug for Kind {
@@ -506,7 +506,7 @@ impl Debug for Kind {
         match self {
             Self::Bytes(_) => f.debug_struct("Bytes").finish(),
             Self::Empty => f.debug_struct("Empty").finish(),
-            Self::Body(_) => f.debug_struct("Body").finish(),
+            Self::Body(_, _) => f.debug_struct("Body").finish(),
         }
     }
 }
