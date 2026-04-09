@@ -6,24 +6,7 @@ use std::time::Duration;
 /// A body-level timeout that can be attached to HTTP requests as an extension.
 ///
 /// This timeout represents the maximum time allowed for streaming the response body after
-/// the response headers have already been received. This is different from the request
-/// timeout that covers the entire request/response cycle including connection setup and
-/// header reception. Use this to limit how long the client will wait for the body data
-/// to be fully received.
-///
-/// # Example
-///
-/// ```
-/// use std::time::Duration;
-///
-/// use http_extensions::HttpRequestBuilder;
-///
-/// let request = HttpRequestBuilder::new_fake()
-///     .get("https://example.com")
-///     .body_timeout(Duration::from_secs(60))
-///     .build()
-///     .unwrap();
-/// ```
+/// the response headers have already been received.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BodyTimeout(Duration);
 

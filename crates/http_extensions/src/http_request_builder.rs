@@ -363,11 +363,11 @@ impl<R> HttpRequestBuilder<'_, R> {
     ///
     /// This is useful when you have a custom body implementation that implements
     /// the `http_body::Body` trait and want to use it with the `HttpRequestBuilder`.
-    pub fn custom_body<B>(self, body: B, options: &BodyOptions) -> Self
+    pub fn custom_body<B>(self, body: B) -> Self
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.body_builder.body(body, options);
+        let body = self.body_builder.body(body, &BodyOptions::default());
         self.body(body)
     }
 
@@ -383,7 +383,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpRequestBuilder};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder};
     /// # use bytesbuf::BytesView;
     /// # fn example(body_builder: &HttpBodyBuilder) -> Result<(), HttpError> {
     /// let chunks = vec![
@@ -392,16 +392,16 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// ];
     /// let request = HttpRequestBuilder::new(body_builder)
     ///     .post("https://example.com/upload")
-    ///     .stream(futures::stream::iter(chunks), &BodyOptions::default())
+    ///     .stream(futures::stream::iter(chunks))
     ///     .build()?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn stream<S>(self, stream: S, options: &BodyOptions) -> Self
+    pub fn stream<S>(self, stream: S) -> Self
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
-        let body = self.body_builder.stream(stream, options);
+        let body = self.body_builder.stream(stream, &BodyOptions::default());
         self.body(body)
     }
 }
@@ -866,10 +866,7 @@ mod tests {
 
         let request = HttpRequestBuilder::new_fake()
             .post("https://example.com/upload")
-            .custom_body(
-                SingleChunkBody::new(BytesView::copied_from_slice(b"external payload", &builder)),
-                &BodyOptions::default(),
-            )
+            .custom_body(SingleChunkBody::new(BytesView::copied_from_slice(b"external payload", &builder)))
             .build()
             .unwrap();
 
@@ -887,7 +884,7 @@ mod tests {
 
         let request = HttpRequestBuilder::new_fake()
             .post("https://example.com/upload")
-            .stream(futures::stream::iter(chunks), &BodyOptions::default())
+            .stream(futures::stream::iter(chunks))
             .build()
             .unwrap();
 
