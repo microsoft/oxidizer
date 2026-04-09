@@ -162,8 +162,11 @@ impl From<SizeError> for Error {
     }
 }
 
-/// The kind of error returned by [`CacheTier::len`](crate::CacheTier::len).
+/// The kind of error returned by size reporting operations
+/// ([`CacheTier::len`](crate::CacheTier::len) and
+/// [`CacheTier::is_empty`](crate::CacheTier::is_empty)).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SizeErrorKind {
     /// The tier does not support reporting its size.
     Unsupported,
@@ -171,7 +174,9 @@ pub enum SizeErrorKind {
     Failed,
 }
 
-/// An error from a [`CacheTier::len`](crate::CacheTier::len) operation.
+/// An error from a size reporting operation
+/// ([`CacheTier::len`](crate::CacheTier::len) or
+/// [`CacheTier::is_empty`](crate::CacheTier::is_empty)).
 ///
 /// Use the [`kind`](Self::kind) field to distinguish between tiers that don't
 /// support size reporting ([`Unsupported`](SizeErrorKind::Unsupported)) and
@@ -187,7 +192,10 @@ impl SizeError {
     /// Creates a new `SizeError` indicating that the tier does not support size reporting.
     #[must_use]
     pub fn unsupported() -> Self {
-        Self::new(SizeErrorKind::Unsupported)
+        Self {
+            ohno_core: OhnoCore::from("cache tier does not support size reporting"),
+            kind: SizeErrorKind::Unsupported,
+        }
     }
 }
 
