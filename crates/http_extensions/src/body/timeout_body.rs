@@ -109,10 +109,13 @@ mod tests {
 
     #[test]
     fn stream_body_returns_data_before_deadline() {
+        let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new_fake();
 
-        // Stream yields data immediately — well within the timeout.
-        let body = create_stream_body(&builder, b"streamed data");
+        // Stream yields data immediately — well within the generous timeout,
+        // exercising the TimeoutBody happy path via stream_with_timeout.
+        let chunks: Vec<Result<BytesView>> = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
+        let body = builder.stream_with_timeout(futures::stream::iter(chunks), Duration::from_secs(30), &clock);
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"streamed data");
     }

@@ -148,6 +148,11 @@ impl HttpBodyBuilder {
     ///
     /// The deadline is computed once at construction time; successive polls see a shrinking
     /// remaining time rather than a fixed per-poll timeout.
+    ///
+    /// If `timeout` is so large that adding it to the current instant overflows, the timeout
+    /// is silently dropped and the body behaves as if created via [`custom_body`][Self::custom_body].
+    /// In practice such a duration (e.g. [`Duration::MAX`]) is far longer than any realistic
+    /// connection lifetime, so the timeout would never fire anyway.
     pub fn custom_body_with_timeout<B>(&self, body: B, timeout: std::time::Duration, clock: &Clock) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
