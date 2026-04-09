@@ -151,16 +151,6 @@ async fn len_returns_some_zero_for_empty_cache() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn len_returns_ok() {
-    // Moka's entry_count() is eventually consistent, so we can't assert exact
-    // counts immediately after insert. But we can verify that len() returns
-    // Ok (not Unsupported), which catches the mutation `len -> unsupported`.
-    let cache = InMemoryCache::<String, i32>::new();
-    cache.len().await.unwrap();
-}
-
-#[cfg_attr(miri, ignore)]
-#[tokio::test]
 async fn clone_shares_underlying_cache() {
     let cache1 = InMemoryCache::<String, i32>::new();
     let cache2 = cache1.clone();
