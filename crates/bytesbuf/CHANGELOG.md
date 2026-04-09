@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.2] - 2026-04-09
+
+- ✨ Features
+
+  - add bytesbuf_global_pool_instances_total metric ([#352](https://github.com/microsoft/oxidizer/pull/352))
+
 ## [0.4.1] - 2026-03-20
 
 - ✔️ Tasks
