@@ -89,11 +89,11 @@ impl BodyOptions {
 ///
 /// ```
 /// # use http_extensions::{HttpBody, HttpBodyBuilder};
-/// # fn example(create_body: &HttpBodyBuilder) {
+/// # fn example(builder: &HttpBodyBuilder) {
 /// // Create different body types
-/// let text_body: HttpBody = create_body.text("Hello world");
-/// let empty_body: HttpBody = create_body.empty();
-/// let binary_body: HttpBody = create_body.slice(&[1, 2, 3, 4]);
+/// let text_body: HttpBody = builder.text("Hello world");
+/// let empty_body: HttpBody = builder.empty();
+/// let binary_body: HttpBody = builder.slice(&[1, 2, 3, 4]);
 /// # }
 /// ```
 ///
@@ -196,10 +196,10 @@ impl HttpBodyBuilder {
     ///     }
     /// }
     ///
-    /// # fn example(create_body: &HttpBodyBuilder) {
+    /// # fn example(builder: &HttpBodyBuilder) {
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
-    /// let body = create_body.body(custom_body, &BodyOptions::default());
+    /// let body = builder.body(custom_body, &BodyOptions::default());
     /// # }
     /// ```
     pub fn body<B>(&self, body: B, options: &BodyOptions) -> HttpBody
@@ -234,12 +234,12 @@ impl HttpBodyBuilder {
     /// ```
     /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
-    /// # fn example(create_body: &HttpBodyBuilder) {
+    /// # fn example(builder: &HttpBodyBuilder) {
     /// let chunks = vec![
-    ///     Ok(BytesView::copied_from_slice(b"hello ", create_body)),
-    ///     Ok(BytesView::copied_from_slice(b"world", create_body)),
+    ///     Ok(BytesView::copied_from_slice(b"hello ", builder)),
+    ///     Ok(BytesView::copied_from_slice(b"world", builder)),
     /// ];
-    /// let body = create_body.stream(futures::stream::iter(chunks), &BodyOptions::default());
+    /// let body = builder.stream(futures::stream::iter(chunks), &BodyOptions::default());
     ///
     /// assert_eq!(body.content_length(), None); // unknown length for streams
     /// # }
@@ -263,9 +263,9 @@ impl HttpBodyBuilder {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
     /// #
-    /// # fn example(create_body: &HttpBodyBuilder) {
-    /// let body1 = create_body.text("Hello, world!"); // From &str
-    /// let body2 = create_body.text(String::from("Hello, world!")); // From String
+    /// # fn example(builder: &HttpBodyBuilder) {
+    /// let body1 = builder.text("Hello, world!"); // From &str
+    /// let body2 = builder.text(String::from("Hello, world!")); // From String
     ///
     /// assert_eq!(body1.content_length(), body2.content_length());
     /// # }
@@ -289,10 +289,10 @@ impl HttpBodyBuilder {
     /// ```
     /// # use http_extensions::HttpBodyBuilder;
     /// #
-    /// # fn example(create_body: &HttpBodyBuilder) {
+    /// # fn example(builder: &HttpBodyBuilder) {
     /// // "Hello" in ASCII
     /// let data = [0x48, 0x65, 0x6C, 0x6C, 0x6F];
-    /// let body = create_body.slice(&data);
+    /// let body = builder.slice(&data);
     ///
     /// assert_eq!(body.content_length(), Some(5));
     /// # }
@@ -318,9 +318,9 @@ impl HttpBodyBuilder {
     /// # use http_extensions::HttpBodyBuilder;
     /// # use bytesbuf::BytesView;
     /// #
-    /// # fn example(create_body: &HttpBodyBuilder) {
+    /// # fn example(builder: &HttpBodyBuilder) {
     /// // Create a body from existing bytes of data
-    /// let body = create_body.bytes(BytesView::new());
+    /// let body = builder.bytes(BytesView::new());
     /// assert_eq!(body.content_length(), Some(0));
     /// # }
     /// ```
@@ -358,14 +358,14 @@ impl HttpBodyBuilder {
     ///     name: String,
     /// }
     ///
-    /// # fn example(create_body: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
     /// let user = User {
     ///     id: 1,
     ///     name: String::from("Alice"),
     /// };
     ///
     /// // Create a body containing the JSON representation of user
-    /// let body = create_body.json(&user)?;
+    /// let body = builder.json(&user)?;
     /// # Ok(())
     /// # }
     /// ```

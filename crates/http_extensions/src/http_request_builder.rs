@@ -33,8 +33,8 @@ use crate::{
 ///    ```
 ///    # use http::Method;
 ///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
-///    # fn example(body_creator: &HttpBodyBuilder) -> Result<(), HttpError> {
-///    let request_builder = HttpRequestBuilder::new(body_creator);
+///    # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+///    let request_builder = HttpRequestBuilder::new(builder);
 ///    let request: HttpRequest = request_builder
 ///        .method(Method::POST)
 ///        .uri("https://example.com/api")
@@ -52,9 +52,9 @@ use crate::{
 ///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, RequestHandler, HttpRequestBuilder};
 ///    # async fn example<R: RequestHandler + Clone>(
 ///    #     request_handler: &R,
-///    #     body_creator: &HttpBodyBuilder
+///    #     builder: &HttpBodyBuilder
 ///    # ) -> Result<(), HttpError> {
-///    let response: HttpResponse = HttpRequestBuilder::with_request_handler(request_handler, body_creator)
+///    let response: HttpResponse = HttpRequestBuilder::with_request_handler(request_handler, builder)
 ///        .get("https://example.com/api")
 ///        .fetch()
 ///        .await?;
@@ -76,7 +76,7 @@ impl HttpRequestBuilder<'static> {
     /// Creates a new request builder instance for testing.
     ///
     /// This method provides a convenient way to create a `HttpRequestBuilder` for tests
-    /// without needing an existing body creator. The request builder is ready to be
+    /// without needing an existing body builder. The request builder is ready to be
     /// configured with headers, method, URI, and body.
     ///
     /// The `test-util` feature must be enabled to use this method.
@@ -108,10 +108,10 @@ impl HttpRequestBuilder<'static> {
 }
 
 impl<'a> HttpRequestBuilder<'a> {
-    /// Creates a new request builder instance with the given body creator.
-    pub fn new(creator: &'a HttpBodyBuilder) -> Self {
+    /// Creates a new request builder instance with the given body builder.
+    pub fn new(builder: &'a HttpBodyBuilder) -> Self {
         Self {
-            body_builder: Cow::Borrowed(creator),
+            body_builder: Cow::Borrowed(builder),
             builder: http::request::Builder::new(),
             uri: None,
             body: None,
@@ -122,7 +122,7 @@ impl<'a> HttpRequestBuilder<'a> {
 }
 
 impl<'a, R> HttpRequestBuilder<'a, R> {
-    /// Creates a new request builder instance with the given body creator and request handler.
+    /// Creates a new request builder instance with the given body builder and request handler.
     pub fn with_request_handler(request_handler: &'a R, body_builder: &'a HttpBodyBuilder) -> Self {
         Self {
             builder: http::request::Builder::new(),
@@ -662,9 +662,9 @@ mod tests {
     use crate::{FakeHandler, HeaderMapExt, HttpResponseBuilder, RequestExt};
 
     #[test]
-    fn new_with_borrowed_creator() {
-        let creator = HttpBodyBuilder::new_fake();
-        let request_builder = HttpRequestBuilder::new(&creator);
+    fn new_with_borrowed_builder() {
+        let body_builder = HttpBodyBuilder::new_fake();
+        let request_builder = HttpRequestBuilder::new(&body_builder);
         let request = request_builder
             .method(Method::GET)
             .uri("https://example.com")

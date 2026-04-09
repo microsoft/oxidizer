@@ -356,11 +356,11 @@ impl HttpBody {
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
-    /// # fn example(create_body: &HttpBodyBuilder) {
-    /// let text_body = create_body.text("Hello, world!");
+    /// # fn example(builder: &HttpBodyBuilder) {
+    /// let text_body = builder.text("Hello, world!");
     /// assert_eq!(text_body.content_length(), Some(13));
     ///
-    /// let empty_body = create_body.empty();
+    /// let empty_body = builder.empty();
     /// assert_eq!(empty_body.content_length(), Some(0));
     /// # }
     /// ```
@@ -382,11 +382,11 @@ impl HttpBody {
     ///
     /// ```
     /// # use http_extensions::HttpBodyBuilder;
-    /// # fn example(create_body: &HttpBodyBuilder) {
-    /// let empty_body = create_body.empty();
+    /// # fn example(builder: &HttpBodyBuilder) {
+    /// let empty_body = builder.empty();
     /// assert!(empty_body.is_empty());
     ///
-    /// let text_body = create_body.text("Hello");
+    /// let text_body = builder.text("Hello");
     /// assert!(!text_body.is_empty());
     /// # }
     /// ```
