@@ -178,7 +178,7 @@ impl HttpError {
         Self::other(msg.into(), RecoveryInfo::never(), "validation")
     }
 
-    /// Creates error that indicates a service is currently unavailable.
+    /// Creates an error that indicates a service is currently unavailable.
     ///
     /// This indicates that the service is currently down, unreachable, or
     /// experiencing an increased rate of failures.

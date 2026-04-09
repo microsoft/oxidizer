@@ -14,7 +14,7 @@ use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Res
 /// A fluent builder for creating HTTP responses.
 ///
 /// `HttpResponseBuilder` simplifies the process of building HTTP responses by providing a chainable API.
-/// It handles setting headers, different body types, and offers convenient methods for common
+/// It handles setting headers and different body types, and offers convenient methods for common
 /// response handling patterns.
 ///
 /// > **Note**: While useful in application code, `HttpResponseBuilder` is primarily designed for testing HTTP handlers

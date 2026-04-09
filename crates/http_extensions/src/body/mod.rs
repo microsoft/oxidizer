@@ -216,7 +216,7 @@ impl HttpBody {
     /// - Clone a body that couldn't be cloned before
     /// - Preload data to avoid connection issues later
     ///
-    /// To change the memory limit, use [`BodyOptions::buffer_limit`] when constructing the builder
+    /// To change the memory limit, use [`BodyOptions::buffer_limit`] when constructing the builder.
     /// By default, it's capped at `2GB` to prevent memory issues.
     ///
     /// # Caveats

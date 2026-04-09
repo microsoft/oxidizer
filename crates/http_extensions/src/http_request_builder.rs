@@ -20,7 +20,7 @@ use crate::{
 /// A fluent builder for creating HTTP requests.
 ///
 /// `HttpRequestBuilder` simplifies the process of building HTTP requests by providing a chainable API.
-/// It handles setting headers, different body types, and offers convenient methods for common
+/// It handles setting headers and different body types, and offers convenient methods for common
 /// request building patterns.
 ///
 /// # Creating a Request Builder

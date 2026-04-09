@@ -49,7 +49,7 @@ impl UrlTemplateLabel {
         &self.0
     }
 
-    /// Convert the template into `Cow<'static, str>`.
+    /// Converts the template into `Cow<'static, str>`.
     #[must_use]
     pub fn into_cow(self) -> Cow<'static, str> {
         self.0
