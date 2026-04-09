@@ -238,12 +238,13 @@ impl<R> HttpRequestBuilder<'_, R> {
         self
     }
 
-    /// Sets a request-level timeout for the entire request/response cycle.
+    /// Sets a request-level timeout for receiving the response.
     ///
     /// This attaches a [`RequestTimeout`] extension to the request, which middleware
     /// or HTTP clients can use to enforce a maximum duration for the request. The
-    /// timeout applies to the entire request/response cycle, including receiving the
-    /// response headers and reading all data from the HTTP body.
+    /// timeout covers connection, sending the request, and receiving the response
+    /// headers. It does not cover reading data from the response body — use
+    /// [`body_timeout`](Self::body_timeout) for that.
     pub fn request_timeout(self, duration: Duration) -> Self {
         self.extension(RequestTimeout::new(duration))
     }

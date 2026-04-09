@@ -5,11 +5,10 @@ use std::time::Duration;
 
 /// A request-level timeout that can be attached to HTTP requests as an extension.
 ///
-/// This timeout represents the maximum time allowed for the entire request/response cycle,
-/// including receiving the response headers and reading all data from the HTTP body. This
-/// is different from the body timeout that only limits the time spent streaming the
-/// response body. Use this to set a per-request deadline that covers connection, sending,
-/// and receiving.
+/// This timeout represents the maximum time allowed for receiving the response headers,
+/// including connection setup and sending the request. It does not cover reading the
+/// response body — use the body timeout for that. Use this to set a per-request deadline
+/// that covers connection, sending, and receiving the initial response.
 ///
 /// # Example
 ///
