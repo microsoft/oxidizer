@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::future::ready;
+use std::time::Duration;
 
 use bytesbuf::BytesView;
 use futures::Stream;
@@ -12,12 +13,13 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
 use templated_uri::Uri;
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
-use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
+use crate::timeout::{BodyTimeout, ResponseTimeout};
+use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
 
 /// A fluent builder for creating HTTP requests.
 ///
 /// `HttpRequestBuilder` simplifies the process of building HTTP requests by providing a chainable API.
-/// It handles setting headers, different body types, and offers convenient methods for common
+/// It handles setting headers and different body types, and offers convenient methods for common
 /// request building patterns.
 ///
 /// # Creating a Request Builder
@@ -30,15 +32,14 @@ use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Req
 ///    ```
 ///    # use http::Method;
 ///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
-///    # fn example(body_creator: &HttpBodyBuilder) -> Result<(), HttpError> {
-///    let request_builder = HttpRequestBuilder::new(body_creator);
+///    # let builder = HttpBodyBuilder::new_fake();
+///    let request_builder = HttpRequestBuilder::new(&builder);
 ///    let request: HttpRequest = request_builder
 ///        .method(Method::POST)
 ///        .uri("https://example.com/api")
 ///        .text("Hello world")
 ///        .build()?;
-///    # Ok(())
-///    # }
+///    # Ok::<(), HttpError>(())
 ///    ```
 ///
 /// 2. **With a request handler** - Use [`with_request_handler`](Self::with_request_handler) to create
@@ -46,12 +47,15 @@ use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Req
 ///    [`fetch_text`](Self::fetch_text):
 ///
 ///    ```
-///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, RequestHandler, HttpRequestBuilder};
-///    # async fn example<R: RequestHandler + Clone>(
-///    #     request_handler: &R,
-///    #     body_creator: &HttpBodyBuilder
-///    # ) -> Result<(), HttpError> {
-///    let response: HttpResponse = HttpRequestBuilder::with_request_handler(request_handler, body_creator)
+///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder,
+///    #     HttpRequestBuilderExt, FakeHandler, HttpRequestBuilder};
+///    # #[tokio::main]
+///    # async fn main() -> Result<(), HttpError> {
+///    # let bb = HttpBodyBuilder::new_fake();
+///    # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+///    # let request_handler = &handler;
+///    # let builder = &bb;
+///    let response: HttpResponse = HttpRequestBuilder::with_request_handler(request_handler, builder)
 ///        .get("https://example.com/api")
 ///        .fetch()
 ///        .await?;
@@ -73,7 +77,7 @@ impl HttpRequestBuilder<'static> {
     /// Creates a new request builder instance for testing.
     ///
     /// This method provides a convenient way to create a `HttpRequestBuilder` for tests
-    /// without needing an existing body creator. The request builder is ready to be
+    /// without needing an existing body builder. The request builder is ready to be
     /// configured with headers, method, URI, and body.
     ///
     /// The `test-util` feature must be enabled to use this method.
@@ -83,13 +87,11 @@ impl HttpRequestBuilder<'static> {
     /// ```
     /// # use http::Method;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
-    /// # fn example() -> Result<(), HttpError> {
     /// let request = HttpRequestBuilder::new_fake()
     ///     .method(Method::GET)
     ///     .uri("https://example.com")
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     #[cfg(any(feature = "test-util", test))]
     pub fn new_fake() -> Self {
@@ -105,10 +107,10 @@ impl HttpRequestBuilder<'static> {
 }
 
 impl<'a> HttpRequestBuilder<'a> {
-    /// Creates a new request builder instance with the given body creator.
-    pub fn new(creator: &'a HttpBodyBuilder) -> Self {
+    /// Creates a new request builder instance with the given body builder.
+    pub fn new(builder: &'a HttpBodyBuilder) -> Self {
         Self {
-            body_builder: Cow::Borrowed(creator),
+            body_builder: Cow::Borrowed(builder),
             builder: http::request::Builder::new(),
             uri: None,
             body: None,
@@ -119,7 +121,7 @@ impl<'a> HttpRequestBuilder<'a> {
 }
 
 impl<'a, R> HttpRequestBuilder<'a, R> {
-    /// Creates a new request builder instance with the given body creator and request handler.
+    /// Creates a new request builder instance with the given body builder and request handler.
     pub fn with_request_handler(request_handler: &'a R, body_builder: &'a HttpBodyBuilder) -> Self {
         Self {
             builder: http::request::Builder::new(),
@@ -235,6 +237,36 @@ impl<R> HttpRequestBuilder<'_, R> {
         self
     }
 
+    /// Sets a response-level timeout for receiving the response.
+    ///
+    /// This attaches a [`ResponseTimeout`] extension to the request, which middleware
+    /// or HTTP clients can use to enforce a maximum duration for receiving the response.
+    /// The timeout covers connection, sending the request, and receiving the response
+    /// headers. It does not cover reading data from the response body; use
+    /// [`body_timeout`](Self::body_timeout) for that.
+    pub fn response_timeout(self, duration: Duration) -> Self {
+        self.extension(ResponseTimeout::new(duration))
+    }
+
+    /// Sets a body-level idle timeout for streaming the response body.
+    ///
+    /// This attaches a [`BodyTimeout`] extension to the request, which middleware
+    /// or HTTP clients can use to limit how long the client will wait between
+    /// chunks of body data. The timer resets every time the body makes progress,
+    /// so only idle periods (no data received) count toward the timeout.
+    pub fn body_timeout(self, duration: Duration) -> Self {
+        self.extension(BodyTimeout::new(duration))
+    }
+
+    /// Sets both the response timeout and the body timeout to the same duration.
+    ///
+    /// This is a convenience method equivalent to calling both
+    /// [`response_timeout`](Self::response_timeout) and
+    /// [`body_timeout`](Self::body_timeout) with the same value.
+    pub fn timeout(self, duration: Duration) -> Self {
+        self.response_timeout(duration).body_timeout(duration)
+    }
+
     /// Sets a plain text body for the request.
     ///
     /// Automatically sets the `Content-Type` header to `text/plain`.
@@ -336,7 +368,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.body_builder.external(body);
+        let body = self.body_builder.body(body, &HttpBodyOptions::default());
         self.body(body)
     }
 
@@ -354,23 +386,22 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder};
     /// # use bytesbuf::BytesView;
-    /// # fn example(body_builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # let body_builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
-    ///     Ok(BytesView::copied_from_slice(b"hello ", body_builder)),
-    ///     Ok(BytesView::copied_from_slice(b"world", body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"hello ", &body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"world", &body_builder)),
     /// ];
-    /// let request = HttpRequestBuilder::new(body_builder)
+    /// let request = HttpRequestBuilder::new(&body_builder)
     ///     .post("https://example.com/upload")
     ///     .stream(futures::stream::iter(chunks))
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn stream<S>(self, stream: S) -> Self
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
-        let body = self.body_builder.stream(stream);
+        let body = self.body_builder.stream(stream, &HttpBodyOptions::default());
         self.body(body)
     }
 }
@@ -386,8 +417,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: HttpResponse = request_builder.get("https://example.com").fetch().await?;
     /// # Ok(())
     /// # }
@@ -421,8 +457,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: HttpResponse = request_builder.get("https://example.com").fetch_buffered().await?;
     /// # Ok(())
     /// # }
@@ -460,8 +501,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).text("hello").build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: Response<String> = request_builder.get("https://example.com").fetch_text().await?;
     /// # Ok(())
     /// # }
@@ -498,10 +544,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # use bytesbuf::BytesView;
-    /// async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: Response<BytesView> = request_builder.get("https://example.com").fetch_bytes().await?;
     /// # Ok(())
     /// # }
@@ -533,12 +584,19 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use http::Response;
     /// # use serde::Deserialize;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, RequestHandler};
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # #[derive(Deserialize)]
     /// # struct User { id: u32, name: String }
     /// #
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(
+    /// #     HttpResponseBuilder::new(&bb).status(200).text(r#"{"id":42,"name":"Alice"}"#).build()?
+    /// # );
+    /// # let request_builder = handler.request_builder();
     /// let response: Response<User> = request_builder
     ///     .get("https://example.com/users/42")
     ///     .fetch_json_owned::<User>()
@@ -583,12 +641,19 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use serde::Deserialize;
     /// # use std::borrow::Cow;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, Json, RequestHandler};
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, Json, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # #[derive(Deserialize)]
     /// # struct User<'a> { id: u32, #[serde(borrow)] name: Cow<'a, str> }
     /// #
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(
+    /// #     HttpResponseBuilder::new(&bb).status(200).text(r#"{"id":42,"name":"Alice"}"#).build()?
+    /// # );
+    /// # let request_builder = handler.request_builder();
     /// let mut response: Json<User> = request_builder
     ///     .get("https://example.com/users/42")
     ///     .fetch_json::<User>()
@@ -631,9 +696,9 @@ mod tests {
     use crate::{FakeHandler, HeaderMapExt, HttpResponseBuilder, RequestExt};
 
     #[test]
-    fn new_with_borrowed_creator() {
-        let creator = HttpBodyBuilder::new_fake();
-        let request_builder = HttpRequestBuilder::new(&creator);
+    fn new_with_borrowed_builder() {
+        let body_builder = HttpBodyBuilder::new_fake();
+        let request_builder = HttpRequestBuilder::new(&body_builder);
         let request = request_builder
             .method(Method::GET)
             .uri("https://example.com")
@@ -817,7 +882,7 @@ mod tests {
     #[test]
     fn custom_body_functionality() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"]);
+        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"], &HttpBodyOptions::default());
 
         let request = HttpRequestBuilder::new_fake()
             .method(Method::POST)
@@ -1348,6 +1413,69 @@ mod tests {
 
         let id = request.extensions().get::<RequestId>().expect("extension should be present");
         assert_eq!(id.0, "req-123");
+    }
+
+    #[test]
+    fn timeout_sets_both_response_and_body_timeout() {
+        use std::time::Duration;
+
+        use crate::timeout::{BodyTimeout, ResponseTimeout};
+
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/api")
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+
+        let response_timeout = request
+            .extensions()
+            .get::<ResponseTimeout>()
+            .expect("response timeout extension should be present");
+        assert_eq!(response_timeout.duration(), Duration::from_secs(30));
+
+        let body_timeout = request
+            .extensions()
+            .get::<BodyTimeout>()
+            .expect("body timeout extension should be present");
+        assert_eq!(body_timeout.duration(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn response_timeout_attaches_to_request() {
+        use std::time::Duration;
+
+        use crate::timeout::ResponseTimeout;
+
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/api")
+            .response_timeout(Duration::from_secs(15))
+            .build()
+            .unwrap();
+
+        let timeout = request
+            .extensions()
+            .get::<ResponseTimeout>()
+            .expect("response timeout extension should be present");
+        assert_eq!(timeout.duration(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn body_timeout_attaches_to_request() {
+        use std::time::Duration;
+
+        use crate::timeout::BodyTimeout;
+
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/api")
+            .body_timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+
+        let timeout = request
+            .extensions()
+            .get::<BodyTimeout>()
+            .expect("body timeout extension should be present");
+        assert_eq!(timeout.duration(), Duration::from_secs(60));
     }
 
     #[test]

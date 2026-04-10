@@ -9,6 +9,7 @@
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpRequestBuilderExt, HttpResponse, HttpResponseBuilder, StatusExt};
 use layered::Service;
+use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
@@ -45,7 +46,7 @@ impl AsRef<HttpBodyBuilder> for CustomClient {
 impl Default for CustomClient {
     fn default() -> Self {
         Self {
-            builder: HttpBodyBuilder::new(GlobalPool::new()),
+            builder: HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio()),
         }
     }
 }

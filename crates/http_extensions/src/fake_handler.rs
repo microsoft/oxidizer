@@ -331,7 +331,7 @@ impl Inner {
                 .ok_or_else(|| HttpError::validation("all responses used by fake handler are already consumed")),
             Self::Custom(handler) => handler(request).await,
             Self::NeverCompletes => std::future::pending().await,
-            Self::StatusCode(code, creator) => Ok(Response::builder().status(code).body(creator.empty()).expect("works")),
+            Self::StatusCode(code, builder) => Ok(Response::builder().status(code).body(builder.empty()).expect("works")),
         }
     }
 }

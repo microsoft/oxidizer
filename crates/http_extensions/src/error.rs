@@ -40,6 +40,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///         println!("temporary error, let's retry");
 ///     }
 /// }
+/// # check_error(HttpError::unavailable("test"));
 /// ```
 ///
 /// # Error Interoperability
@@ -178,7 +179,7 @@ impl HttpError {
         Self::other(msg.into(), RecoveryInfo::never(), "validation")
     }
 
-    /// Creates error that indicates a service is currently unavailable.
+    /// Creates an error that indicates a service is currently unavailable.
     ///
     /// This indicates that the service is currently down, unreachable, or
     /// experiencing an increased rate of failures.
@@ -190,7 +191,10 @@ impl HttpError {
     ///
     /// ```
     /// # use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder};
-    /// # fn example(http_request: HttpRequest) {
+    /// # let http_request = HttpRequestBuilder::new_fake()
+    /// #     .get("https://example.com")
+    /// #     .build()
+    /// #     .unwrap();
     /// // attach the request
     /// let mut error = HttpError::unavailable("service is down").with_request(http_request);
     /// // later you can try to extract the request
@@ -198,7 +202,6 @@ impl HttpError {
     ///    // execute the retry
     ///    execute_retry(request);
     /// }
-    /// # }
     /// # fn execute_retry(http_request: HttpRequest) {}
     /// ```
     #[must_use]
@@ -217,6 +220,19 @@ impl HttpError {
                 "request timed out while receiving the response, timeout: {}ms",
                 duration.as_millis()
             ),
+            RecoveryInfo::retry(),
+            "timeout",
+        )
+    }
+
+    /// Creates a timeout error for body data retrieval.
+    ///
+    /// Used when streaming body data is not fully received within the configured timeout.
+    /// The error is classified as retryable.
+    #[must_use]
+    pub(crate) fn timeout_for_body(duration: Duration) -> Self {
+        Self::other(
+            format!("body data was not fully received, timeout: {}ms", duration.as_millis()),
             RecoveryInfo::retry(),
             "timeout",
         )
@@ -357,6 +373,16 @@ mod tests {
             "request timed out while receiving the response, timeout: 1500ms"
         );
         assert_eq!(timeout_error.label(), "timeout");
+    }
+
+    #[test]
+    fn timeout_for_body_error() {
+        let duration = Duration::from_millis(2500);
+        let error = HttpError::timeout_for_body(duration);
+
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        assert_eq!(error.message(), "body data was not fully received, timeout: 2500ms");
+        assert_eq!(error.label(), "timeout");
     }
 
     #[test]
