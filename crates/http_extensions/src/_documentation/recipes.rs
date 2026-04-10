@@ -128,15 +128,13 @@
 //! ```
 //! use http_extensions::HttpRequestBuilder;
 //!
-//! # fn example() -> Result<(), http_extensions::HttpError> {
 //! for _ in 0..100 {
 //!     // Parses and allocates a new Uri each iteration.
 //!     let request = HttpRequestBuilder::new_fake()
 //!         .get("https://api.example.com/health")
 //!         .build()?;
 //! }
-//! # Ok(())
-//! # }
+//! # Ok::<(), http_extensions::HttpError>(())
 //! ```
 //!
 //! **Prefer** to parse once, clone per request:
@@ -145,15 +143,13 @@
 //! use http_extensions::HttpRequestBuilder;
 //! use templated_uri::Uri;
 //!
-//! # fn example() -> Result<(), http_extensions::HttpError> {
 //! let uri: Uri = "https://api.example.com/health".try_into()?;
 //! for _ in 0..100 {
 //!     let request = HttpRequestBuilder::new_fake()
 //!         .get(uri.clone())
 //!         .build()?;
 //! }
-//! # Ok(())
-//! # }
+//! # Ok::<(), http_extensions::HttpError>(())
 //! ```
 //!
 //! # Use Templated URIs
@@ -174,12 +170,11 @@
 //! ```
 //! use http_extensions::HttpRequestBuilder;
 //!
-//! # fn example(user_id: &str) -> Result<(), http_extensions::HttpError> {
+//! # let user_id = "test-user";
 //! let request = HttpRequestBuilder::new_fake()
 //!     .get(format!("https://api.example.com/users/{user_id}/profile"))
 //!     .build()?;
-//! # Ok(())
-//! # }
+//! # Ok::<(), http_extensions::HttpError>(())
 //! ```
 //!
 //! **Prefer** a templated URI struct that is validated, low-allocation, and telemetry-ready:
@@ -195,12 +190,11 @@
 //!     user_id: Uuid,
 //! }
 //!
-//! # fn example(user_id: Uuid) -> Result<(), http_extensions::HttpError> {
+//! # let user_id = Uuid::nil();
 //! let request = HttpRequestBuilder::new_fake()
 //!     .get(UserProfilePath { user_id })
 //!     .build()?;
-//! # Ok(())
-//! # }
+//! # Ok::<(), http_extensions::HttpError>(())
 //! ```
 //!
 //! Templated paths are relative; set a base URI on the client so the final

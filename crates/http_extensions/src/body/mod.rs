@@ -47,12 +47,11 @@ pub(crate) mod timeout_body;
 ///
 /// ```
 /// # use http_extensions::HttpBodyBuilder;
-/// # async fn example(builder: &HttpBodyBuilder) {
+/// # let builder = HttpBodyBuilder::new_fake();
 /// // Create different body types
 /// let text_body = builder.text("Hello world");
 /// let binary_body = builder.slice(&[1, 2, 3, 4]);
 /// let empty_body = builder.empty();
-/// # }
 /// ```
 ///
 /// # How does `HttpBody` work?
@@ -98,7 +97,7 @@ pub(crate) mod timeout_body;
 /// ```
 /// use futures::TryStreamExt; // For stream operations
 /// use http_body_util::BodyExt; // For into_data_stream() method
-/// use http_extensions::{HttpBody, HttpError};
+/// use http_extensions::{HttpBody, HttpBodyBuilder, HttpError};
 ///
 /// async fn download_to_file(
 ///     body: HttpBody,
@@ -115,6 +114,13 @@ pub(crate) mod timeout_body;
 ///
 ///     Ok(())
 /// }
+/// # #[tokio::main]
+/// # async fn main() {
+/// #     let path = std::env::temp_dir().join("http_extensions_doctest");
+/// #     let mut file = std::fs::File::create(&path).unwrap();
+/// #     download_to_file(HttpBodyBuilder::new_fake().text("test"), &mut file).await.unwrap();
+/// #     std::fs::remove_file(path).ok();
+/// # }
 /// ```
 ///
 /// To simplify processing, you convert the `HttpBody` into a [`Stream`][futures::Stream] by calling
@@ -154,13 +160,17 @@ impl HttpBody {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpBody, HttpError};
+    /// # use http_extensions::{HttpBody, HttpBodyBuilder, HttpError};
     ///
     /// async fn example(body: HttpBody) -> Result<(), HttpError> {
     ///     let body_bytes = body.into_bytes().await?;
     ///     println!("Received {} bytes", body_bytes.len());
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
+    /// # }
     /// ```
     pub async fn into_bytes(self) -> Result<BytesView> {
         self.into_buffered()
@@ -188,13 +198,17 @@ impl HttpBody {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpBody, HttpError};
+    /// # use http_extensions::{HttpBody, HttpBodyBuilder, HttpError};
     ///
     /// async fn example(body: HttpBody) -> Result<(), HttpError> {
     ///     let text = body.into_text().await?;
     ///     println!("Received: {}", text);
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
+    /// # }
     /// ```
     #[expect(clippy::cast_possible_truncation, reason = "size_hint is used for capacity, not exact size")]
     pub async fn into_text(self) -> Result<String> {
@@ -240,6 +254,10 @@ impl HttpBody {
     ///     // Now you can work with it multiple times...
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
+    /// # }
     /// ```
     pub async fn into_buffered(self) -> Result<Self> {
         let builder = self.builder;
@@ -286,6 +304,12 @@ impl HttpBody {
     ///     // Process the user data...
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake()
+    /// #         .text(r#"{"id": 1, "name": "Alice", "is_active": true}"#);
+    /// #     example(body).await.unwrap();
+    /// # }
     /// ```
     #[cfg(any(feature = "json", test))]
     pub async fn into_json_owned<T: serde_core::de::DeserializeOwned>(self) -> Result<T> {
@@ -337,6 +361,12 @@ impl HttpBody {
     ///     // avoiding unnecessary string allocations for better performance
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake()
+    /// #         .text(r#"{"id": 1, "name": "Alice", "email": "alice@example.com", "is_active": true}"#);
+    /// #     example(body).await.unwrap();
+    /// # }
     /// ```
     ///
     /// For types that don't need borrowing, prefer [`into_json_owned`][HttpBody::into_json_owned] for simpler usage.
@@ -356,13 +386,12 @@ impl HttpBody {
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// let text_body = builder.text("Hello, world!");
     /// assert_eq!(text_body.content_length(), Some(13));
     ///
     /// let empty_body = builder.empty();
     /// assert_eq!(empty_body.content_length(), Some(0));
-    /// # }
     /// ```
     #[must_use]
     pub fn content_length(&self) -> Option<u64> {
@@ -382,13 +411,12 @@ impl HttpBody {
     ///
     /// ```
     /// # use http_extensions::HttpBodyBuilder;
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// let empty_body = builder.empty();
     /// assert!(empty_body.is_empty());
     ///
     /// let text_body = builder.text("Hello");
     /// assert!(!text_body.is_empty());
-    /// # }
     /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -422,7 +450,7 @@ impl HttpBody {
     ///
     /// ```
     /// use futures::TryStreamExt;
-    /// use http_extensions::{HttpBody, HttpError};
+    /// use http_extensions::{HttpBody, HttpBodyBuilder, HttpError};
     ///
     /// async fn process_body(body: HttpBody) -> Result<(), HttpError> {
     ///     let mut stream = body.into_stream();
@@ -433,6 +461,10 @@ impl HttpBody {
     ///
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     process_body(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
+    /// # }
     /// ```
     pub fn into_stream(self) -> impl Stream<Item = Result<BytesView>> {
         self.into_data_stream()

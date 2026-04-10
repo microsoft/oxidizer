@@ -40,6 +40,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///         println!("temporary error, let's retry");
 ///     }
 /// }
+/// # check_error(HttpError::unavailable("test"));
 /// ```
 ///
 /// # Error Interoperability
@@ -190,7 +191,10 @@ impl HttpError {
     ///
     /// ```
     /// # use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder};
-    /// # fn example(http_request: HttpRequest) {
+    /// # let http_request = HttpRequestBuilder::new_fake()
+    /// #     .get("https://example.com")
+    /// #     .build()
+    /// #     .unwrap();
     /// // attach the request
     /// let mut error = HttpError::unavailable("service is down").with_request(http_request);
     /// // later you can try to extract the request
@@ -198,7 +202,6 @@ impl HttpError {
     ///    // execute the retry
     ///    execute_retry(request);
     /// }
-    /// # }
     /// # fn execute_retry(http_request: HttpRequest) {}
     /// ```
     #[must_use]

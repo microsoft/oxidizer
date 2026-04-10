@@ -351,7 +351,6 @@ impl HttpBodyBuilder {
     ///     name: String,
     /// }
     ///
-    /// # fn main() -> Result<(), HttpError> {
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let user = User {
     ///     id: 1,
@@ -360,8 +359,7 @@ impl HttpBodyBuilder {
     ///
     /// // Create a body containing the JSON representation of user
     /// let body = builder.json(&user)?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn json<T: serde_core::ser::Serialize>(&self, data: &T) -> std::result::Result<HttpBody, JsonError> {
         let builder = BytesBuf::new();

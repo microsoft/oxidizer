@@ -25,9 +25,9 @@ use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Res
 ///
 /// ```
 /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder};
-/// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+/// # let builder = HttpBodyBuilder::new_fake();
 /// // Create a response builder
-/// let response_builder = HttpResponseBuilder::new(builder);
+/// let response_builder = HttpResponseBuilder::new(&builder);
 ///
 /// // Customize the response builder
 /// let response_builder = response_builder
@@ -38,8 +38,7 @@ use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpResponse, Res
 /// // Build the response
 /// let response: HttpResponse = response_builder.build()?;
 ///
-/// # Ok(())
-/// # }
+/// # Ok::<(), HttpError>(())
 /// ```
 #[derive(Debug)]
 #[must_use]
@@ -63,13 +62,11 @@ impl HttpResponseBuilder<'static> {
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
-    /// # fn example() -> Result<(), HttpError> {
     /// let response = HttpResponseBuilder::new_fake()
     ///     .status(200)
     ///     .text("Test response")
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     #[cfg(any(feature = "test-util", test))]
     pub fn new_fake() -> Self {
@@ -106,13 +103,12 @@ impl HttpResponseBuilder<'_> {
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-    /// let response_builder = HttpResponseBuilder::new(builder)
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let response_builder = HttpResponseBuilder::new(&builder)
     ///     .status(200)
     ///     .text("Hello world");
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn text(mut self, data: impl AsRef<str>) -> Self {
         let body = self.body_builder.text(data);
@@ -130,14 +126,13 @@ impl HttpResponseBuilder<'_> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use bytesbuf::BytesView;
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// // Create a BytesView over some bytes
-    /// let payload = BytesView::copied_from_slice(b"hello world", builder);
+    /// let payload = BytesView::copied_from_slice(b"hello world", &builder);
     ///
-    /// let response_builder = HttpResponseBuilder::new(builder).status(200).bytes(payload);
+    /// let response_builder = HttpResponseBuilder::new(&builder).status(200).bytes(payload);
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn bytes(self, b: impl Into<BytesView>) -> Self {
         let body = self.body_builder.bytes(b);
@@ -158,14 +153,13 @@ impl HttpResponseBuilder<'_> {
     /// ```
     /// # use serde_json::json;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// let json_value = json!({ "id": 42, "name": "Alice" });
-    /// let response_builder = HttpResponseBuilder::new(builder)
+    /// let response_builder = HttpResponseBuilder::new(&builder)
     ///     .status(200)
     ///     .json(&json_value);
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     ///
     /// # Errors
@@ -185,13 +179,12 @@ impl HttpResponseBuilder<'_> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use http::StatusCode;
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-    /// let response_builder = HttpResponseBuilder::new(builder)
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let response_builder = HttpResponseBuilder::new(&builder)
     ///     .status(StatusCode::OK)
     ///     .status(200); // You can also use integers
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn status(mut self, status: impl TryInto<http::StatusCode, Error: Into<http::Error>>) -> Self {
         self.builder = self.builder.status(status);
@@ -205,11 +198,10 @@ impl HttpResponseBuilder<'_> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use http::Version;
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-    /// let response_builder = HttpResponseBuilder::new(builder).version(Version::HTTP_2);
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let response_builder = HttpResponseBuilder::new(&builder).version(Version::HTTP_2);
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn version(mut self, version: Version) -> Self {
         self.builder = self.builder.version(version);
@@ -258,16 +250,15 @@ impl HttpResponseBuilder<'_> {
     /// # use http::header::CACHE_CONTROL;
     /// # use http::HeaderValue;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// // Pre-create a HeaderValue to avoid parsing overhead
     /// let header_value = HeaderValue::from_static("no-cache");
     ///
-    /// let response_builder = HttpResponseBuilder::new(builder)
+    /// let response_builder = HttpResponseBuilder::new(&builder)
     ///     .header(CACHE_CONTROL, header_value.clone()) // Using a pre-created HeaderValue
     ///     .header("X-Custom-Header", "value");
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn header(
         mut self,
@@ -289,15 +280,14 @@ impl HttpResponseBuilder<'_> {
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-    /// let mut response_builder = HttpResponseBuilder::new(builder);
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let mut response_builder = HttpResponseBuilder::new(&builder);
     ///
     /// if let Some(headers) = response_builder.headers_mut() {
     ///     headers.insert("X-Custom-Header", "value".parse().unwrap());
     /// }
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn headers_mut(&mut self) -> Option<&mut http::HeaderMap<HeaderValue>> {
         self.builder.headers_mut()
@@ -314,11 +304,11 @@ impl HttpResponseBuilder<'_> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use http_extensions::HttpBody;
-    /// # fn example(builder: &HttpBodyBuilder, custom_body: HttpBody) -> Result<(), HttpError> {
-    /// let response_builder = HttpResponseBuilder::new(builder).body(custom_body);
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// # let custom_body = builder.text("custom");
+    /// let response_builder = HttpResponseBuilder::new(&builder).body(custom_body);
     ///
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn body(self, body: HttpBody) -> Self {
         self.body_result(Ok(body))
@@ -342,13 +332,12 @@ impl HttpResponseBuilder<'_> {
     ///
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder};
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-    /// let response: HttpResponse = HttpResponseBuilder::new(builder)
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let response: HttpResponse = HttpResponseBuilder::new(&builder)
     ///     .status(200)
     ///     .text("Success")
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     ///
     /// # Errors
@@ -403,12 +392,10 @@ impl HttpResponseBuilder<'_> {
     ///     }
     /// }
     ///
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-    /// let response_builder = HttpResponseBuilder::new(builder)
+    /// # let builder = HttpBodyBuilder::new_fake();
+    /// let response_builder = HttpResponseBuilder::new(&builder)
     ///     .status(200)
     ///     .custom_body(CustomBody::default());
-    /// # Ok(())
-    /// # }
     /// ```
     pub fn custom_body<B>(self, body: B) -> Self
     where
@@ -432,17 +419,16 @@ impl HttpResponseBuilder<'_> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use bytesbuf::BytesView;
-    /// # fn example(body_builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # let body_builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
-    ///     Ok(BytesView::copied_from_slice(b"hello ", body_builder)),
-    ///     Ok(BytesView::copied_from_slice(b"world", body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"hello ", &body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"world", &body_builder)),
     /// ];
-    /// let response = HttpResponseBuilder::new(body_builder)
+    /// let response = HttpResponseBuilder::new(&body_builder)
     ///     .status(200)
     ///     .stream(futures::stream::iter(chunks))
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn stream<S>(self, stream: S) -> Self
     where

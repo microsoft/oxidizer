@@ -108,7 +108,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     /// # use serde::Deserialize;
     /// # use bytesbuf::BytesView;
     /// # use std::borrow::Cow;
-    /// # use http_extensions::{HttpError, Json};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, Json};
     ///
     /// #[derive(Deserialize)]
     /// struct Person<'a> {
@@ -121,6 +121,12 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///     let person: Person = json.read()?;
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
+    /// #     let mut json = body.into_json::<Person>().await.unwrap();
+    /// #     handle_json(&mut json).unwrap();
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -152,7 +158,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// ```
     /// # use serde::Deserialize;
     /// # use bytesbuf::BytesView;
-    /// # use http_extensions::{Json, HttpError};
+    /// # use http_extensions::{Json, HttpBodyBuilder, HttpError};
     ///
     /// #[derive(Deserialize)]
     /// struct Person {
@@ -164,6 +170,11 @@ impl<T: DeserializeOwned> Json<T> {
     ///     let person: Person = json.read_owned()?; // Consumes the parser
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
+    /// #     handle_json(body.into_json().await.unwrap()).unwrap();
+    /// # }
     /// ```
     ///
     /// # Errors

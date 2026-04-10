@@ -32,15 +32,14 @@ use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, Http
 ///    ```
 ///    # use http::Method;
 ///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
-///    # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
-///    let request_builder = HttpRequestBuilder::new(builder);
+///    # let builder = HttpBodyBuilder::new_fake();
+///    let request_builder = HttpRequestBuilder::new(&builder);
 ///    let request: HttpRequest = request_builder
 ///        .method(Method::POST)
 ///        .uri("https://example.com/api")
 ///        .text("Hello world")
 ///        .build()?;
-///    # Ok(())
-///    # }
+///    # Ok::<(), HttpError>(())
 ///    ```
 ///
 /// 2. **With a request handler** - Use [`with_request_handler`](Self::with_request_handler) to create
@@ -48,11 +47,14 @@ use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, Http
 ///    [`fetch_text`](Self::fetch_text):
 ///
 ///    ```
-///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, RequestHandler, HttpRequestBuilder};
-///    # async fn example<R: RequestHandler + Clone>(
-///    #     request_handler: &R,
-///    #     builder: &HttpBodyBuilder
-///    # ) -> Result<(), HttpError> {
+///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder,
+///    #     HttpRequestBuilderExt, FakeHandler, HttpRequestBuilder};
+///    # #[tokio::main]
+///    # async fn main() -> Result<(), HttpError> {
+///    # let bb = HttpBodyBuilder::new_fake();
+///    # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+///    # let request_handler = &handler;
+///    # let builder = &bb;
 ///    let response: HttpResponse = HttpRequestBuilder::with_request_handler(request_handler, builder)
 ///        .get("https://example.com/api")
 ///        .fetch()
@@ -85,13 +87,11 @@ impl HttpRequestBuilder<'static> {
     /// ```
     /// # use http::Method;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
-    /// # fn example() -> Result<(), HttpError> {
     /// let request = HttpRequestBuilder::new_fake()
     ///     .method(Method::GET)
     ///     .uri("https://example.com")
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     #[cfg(any(feature = "test-util", test))]
     pub fn new_fake() -> Self {
@@ -386,17 +386,16 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder};
     /// # use bytesbuf::BytesView;
-    /// # fn example(body_builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # let body_builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
-    ///     Ok(BytesView::copied_from_slice(b"hello ", body_builder)),
-    ///     Ok(BytesView::copied_from_slice(b"world", body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"hello ", &body_builder)),
+    ///     Ok(BytesView::copied_from_slice(b"world", &body_builder)),
     /// ];
-    /// let request = HttpRequestBuilder::new(body_builder)
+    /// let request = HttpRequestBuilder::new(&body_builder)
     ///     .post("https://example.com/upload")
     ///     .stream(futures::stream::iter(chunks))
     ///     .build()?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), HttpError>(())
     /// ```
     pub fn stream<S>(self, stream: S) -> Self
     where
@@ -418,8 +417,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: HttpResponse = request_builder.get("https://example.com").fetch().await?;
     /// # Ok(())
     /// # }
@@ -453,8 +457,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: HttpResponse = request_builder.get("https://example.com").fetch_buffered().await?;
     /// # Ok(())
     /// # }
@@ -492,8 +501,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).text("hello").build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: Response<String> = request_builder.get("https://example.com").fetch_text().await?;
     /// # Ok(())
     /// # }
@@ -530,10 +544,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, RequestHandler};
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # use bytesbuf::BytesView;
-    /// async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
+    /// # let request_builder = handler.request_builder();
     /// let response: Response<BytesView> = request_builder.get("https://example.com").fetch_bytes().await?;
     /// # Ok(())
     /// # }
@@ -565,12 +584,19 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use http::Response;
     /// # use serde::Deserialize;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, RequestHandler};
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # #[derive(Deserialize)]
     /// # struct User { id: u32, name: String }
     /// #
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(
+    /// #     HttpResponseBuilder::new(&bb).status(200).text(r#"{"id":42,"name":"Alice"}"#).build()?
+    /// # );
+    /// # let request_builder = handler.request_builder();
     /// let response: Response<User> = request_builder
     ///     .get("https://example.com/users/42")
     ///     .fetch_json_owned::<User>()
@@ -615,12 +641,19 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use serde::Deserialize;
     /// # use std::borrow::Cow;
-    /// # use http_extensions::{HttpError, HttpRequestBuilder, Json, RequestHandler};
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, Json, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # #[derive(Deserialize)]
     /// # struct User<'a> { id: u32, #[serde(borrow)] name: Cow<'a, str> }
     /// #
-    /// # async fn example<R: RequestHandler + Clone>(request_builder: HttpRequestBuilder<'_, R>) -> Result<(), HttpError> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(
+    /// #     HttpResponseBuilder::new(&bb).status(200).text(r#"{"id":42,"name":"Alice"}"#).build()?
+    /// # );
+    /// # let request_builder = handler.request_builder();
     /// let mut response: Json<User> = request_builder
     ///     .get("https://example.com/users/42")
     ///     .fetch_json::<User>()
