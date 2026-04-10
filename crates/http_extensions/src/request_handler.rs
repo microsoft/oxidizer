@@ -5,13 +5,12 @@ use layered::Service;
 
 use crate::{HttpRequest, HttpResponse, Result};
 
-/// Trait alias for `Service<HttpRequest, Out = Result<HttpResponse>>`.
+/// Trait alias for [`Service<HttpRequest, Out = Result<HttpResponse>>`][layered::Service].
 ///
 /// Use `RequestHandler` as a trait bound to avoid spelling out the full
-/// `Service<HttpRequest, Out = Result<HttpResponse>>` constraint.
-///
-/// `RequestHandler` is sealed — implement [`Service<HttpRequest>`][layered::Service]
-/// with `Out = Result<HttpResponse>` and it is derived automatically.
+/// `Service<HttpRequest, Out = Result<HttpResponse>>` constraint. Any type that
+/// implements [`Service<HttpRequest>`][layered::Service] with `Out = Result<HttpResponse>`
+/// automatically implements `RequestHandler`.
 ///
 /// # Examples
 ///
