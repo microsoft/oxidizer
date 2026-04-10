@@ -33,11 +33,13 @@ impl ExtensionsExt for Extensions {
 }
 
 pub(crate) mod sealed {
+    #[expect(unnameable_types, reason = "intentional, sealed trait pattern")]
     pub trait Sealed {}
     impl Sealed for super::Extensions {}
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
