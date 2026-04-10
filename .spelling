@@ -238,6 +238,7 @@ RAII
 RDME
 reallocation
 reallocations
+recency
 recoverability
 recoverable
 Redis
@@ -298,6 +299,7 @@ templating
 testability
 timestamp
 timestamps
+TinyLFU
 TOCTOU
 Tokio
 Tokio's
