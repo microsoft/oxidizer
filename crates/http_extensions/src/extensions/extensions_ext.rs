@@ -55,13 +55,34 @@ mod tests {
     }
 
     #[test]
-    fn returns_label_from_target_path_and_query() {
+    fn returns_template_as_fallback_from_target_path_and_query() {
         let mut extensions = Extensions::new();
         extensions.insert(TargetPathAndQuery::from_path_and_query("/path".parse().unwrap()));
 
         assert_eq!(
             extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
             Some("/path")
+        );
+    }
+
+    #[test]
+    fn returns_label_from_templated_target_path_and_query() {
+        use templated_uri::{UriSafeString, templated};
+
+        #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
+        #[derive(Clone)]
+        struct UserPosts {
+            user_id: UriSafeString,
+        }
+
+        let mut extensions = Extensions::new();
+        extensions.insert(TargetPathAndQuery::from_templated(UserPosts {
+            user_id: UriSafeString::from_static("123"),
+        }));
+
+        assert_eq!(
+            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
+            Some("user_posts")
         );
     }
 
