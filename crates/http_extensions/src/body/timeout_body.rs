@@ -13,19 +13,11 @@ use tick::{Clock, Delay};
 use crate::{HttpError, Result};
 
 /// Wraps a streaming body to enforce an idle timeout on data reception.
-///
-/// Each time the inner body returns [`Poll::Pending`], a [`Delay`] for the
-/// configured `timeout` duration is created (or reused from a previous pending
-/// poll). If the delay fires before the inner body produces a frame, a timeout
-/// error is returned. When the inner body yields a frame the cached delay is
-/// cleared, so the next pending poll starts a fresh timer with the full timeout
-/// duration. This means the timeout resets every time the inner body makes
-/// progress.
 #[pin_project]
 pub(crate) struct TimeoutBody<B> {
     /// The inner body, or `None` once the idle timeout has fired. After a
     /// timeout the inner body is dropped and every subsequent poll returns
-    /// the timeout error.
+    /// `None`, consistent with [`is_end_stream`] returning `true`.
     #[pin]
     inner: Option<B>,
     timeout: Duration,
@@ -56,11 +48,11 @@ where
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
         let mut this = self.project();
 
-        // Once the timeout has fired the inner body is `None`. Every
-        // subsequent poll consistently returns the timeout error so
-        // callers never observe frames after a timeout.
+        // Once the timeout has fired the inner body is `None`. Return
+        // `None` to signal end-of-stream, consistent with `is_end_stream`
+        // returning `true` when `inner` is `None`.
         let Some(inner) = this.inner.as_mut().as_pin_mut() else {
-            return Poll::Ready(Some(Err(HttpError::timeout_for_body(*this.timeout))));
+            return Poll::Ready(None);
         };
 
         // Poll the inner body for data first. Clear any in-flight delay when
@@ -295,9 +287,10 @@ mod tests {
         let result = Pin::new(&mut timeout_body).poll_frame(&mut cx);
         assert!(matches!(result, Poll::Ready(Some(Err(_)))));
 
-        // Third poll: inner is gone, must still return the timeout error.
+        // Third poll: inner is gone, returns None (end-of-stream) consistent
+        // with is_end_stream returning true when inner is None.
         let result = Pin::new(&mut timeout_body).poll_frame(&mut cx);
-        assert!(matches!(result, Poll::Ready(Some(Err(_)))));
+        assert!(matches!(result, Poll::Ready(None)));
     }
 
     /// Body that always returns [`Poll::Pending`] to simulate a stalled download.
