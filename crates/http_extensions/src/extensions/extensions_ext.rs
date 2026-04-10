@@ -59,8 +59,10 @@ mod tests {
         let mut extensions = Extensions::new();
         extensions.insert(TargetPathAndQuery::from_path_and_query("/path".parse().unwrap()));
 
-        let result = extensions.url_template_label();
-        assert!(result.is_some());
+        assert_eq!(
+            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
+            Some("/path")
+        );
     }
 
     #[test]
