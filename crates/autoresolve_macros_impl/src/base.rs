@@ -236,19 +236,19 @@ fn generate_primary(
     // `__spread_`-prefixed alias inside the helper module.  The prefix avoids
     // E0659 ambiguity with the original macro name brought in by `use super::*;`.
     //
-    // `pub use super::MacroName as __spread_MacroName;` works both same-crate
-    // and cross-crate because the caller is required to bring the spread type
-    // into scope (e.g. via `pub use other_crate::FrameworkBase;`), so
-    // `super::FrameworkBase` resolves through that re-export.
+    // - Single-segment type (bare ident): `pub use super::Name as __spread_Name;`
+    //   requires the caller to `pub use` the spread type into scope.
+    // - Qualified path (e.g. `runtime::core::Builtins`): `pub use runtime::core::Builtins as ...;`
+    //   works directly because the source path is already public.
     let spread_helper_items: Vec<_> = fields
         .iter()
         .filter(|f| f.is_spread)
         .map(|f| {
-            let macro_name = spread_macro_ident(f.ty);
+            let reexport_src = spread_reexport_path(f.ty);
             let alias = spread_helper_alias(f.ty);
             quote! {
                 #[doc(hidden)]
-                pub use super :: #macro_name as #alias;
+                pub use #reexport_src as #alias;
             }
         })
         .collect();
@@ -259,8 +259,8 @@ fn generate_primary(
         .map(|f| {
             let ident = f.ident;
             if f.is_spread {
-                let macro_name = spread_macro_ident(f.ty);
-                quote! { #macro_name!(@insert __store, #ident); }
+                let path = spread_macro_path(f.ty);
+                quote! { #path!(@insert __store, #ident); }
             } else {
                 quote! { __store.store_value(#ident); }
             }
@@ -463,6 +463,16 @@ fn spread_macro_ident(ty: &Type) -> &Ident {
     }
 }
 
+/// Returns the full path for a `#[spread]` field's type, for use in macro calls.
+///
+/// Handles both bare `Builtins` and qualified `runtime::core::Builtins`.
+fn spread_macro_path(ty: &Type) -> &syn::Path {
+    match ty {
+        Type::Path(tp) => &tp.path,
+        _ => panic!("guarded by path validation above"),
+    }
+}
+
 /// Returns the `__spread_`-prefixed alias name used inside the helper module
 /// for a spread field's forwarding macro.
 ///
@@ -471,6 +481,27 @@ fn spread_macro_ident(ty: &Type) -> &Ident {
 fn spread_helper_alias(ty: &Type) -> Ident {
     let macro_name = spread_macro_ident(ty);
     Ident::new(&format!("__spread_{macro_name}"), macro_name.span())
+}
+
+/// Returns the source path for `pub use ... as __spread_MacroName;` inside
+/// the helper module.
+///
+/// - Single-segment type (bare ident, e.g. `Builtins`) → `super::Builtins`
+///   (resolved through the caller's `use` import via `use super::*;`)
+/// - Multi-segment type (qualified path, e.g. `runtime::core::Builtins`) →
+///   `runtime::core::Builtins` (the full path, used as-is)
+fn spread_reexport_path(ty: &Type) -> TokenStream {
+    match ty {
+        Type::Path(tp) if tp.path.segments.len() == 1 => {
+            let macro_name = spread_macro_ident(ty);
+            quote! { super :: #macro_name }
+        }
+        Type::Path(tp) => {
+            let path = &tp.path;
+            quote! { #path }
+        }
+        _ => panic!("guarded by path validation above"),
+    }
 }
 
 fn generate_scoped(
@@ -509,11 +540,11 @@ fn generate_scoped(
         .iter()
         .filter(|f| f.is_spread)
         .map(|f| {
-            let macro_name = spread_macro_ident(f.ty);
+            let reexport_src = spread_reexport_path(f.ty);
             let alias = spread_helper_alias(f.ty);
             quote! {
                 #[doc(hidden)]
-                pub use super :: #macro_name as #alias;
+                pub use #reexport_src as #alias;
             }
         })
         .collect();
@@ -524,8 +555,8 @@ fn generate_scoped(
         .map(|f| {
             let ident = f.ident;
             if f.is_spread {
-                let macro_name = spread_macro_ident(f.ty);
-                quote! { #macro_name!(@insert __store, #ident); }
+                let path = spread_macro_path(f.ty);
+                quote! { #path!(@insert __store, #ident); }
             } else {
                 quote! { __store.store_value(#ident); }
             }
