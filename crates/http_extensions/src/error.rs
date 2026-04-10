@@ -19,6 +19,8 @@ use crate::http_utils::SyncHolder;
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
 
+use crate::HttpErrorLabel;
+
 /// A unified HTTP error type.
 ///
 /// Combines various HTTP-related errors into a single type with useful features:
@@ -26,7 +28,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// - Captures backtraces automatically
 /// - Tells you if an error is temporary (transient) or permanent
 /// - Works with `http` crate errors out of the box
-/// - Provides access to status codes
+/// - Carries a low-cardinality [`HttpErrorLabel`] for metrics and logging
 ///
 /// # Examples
 ///
@@ -99,18 +101,18 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// ```
 #[ohno::error]
 #[from(
-    http::Error(label: "http_error", recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: "invalid_uri_parts", recovery: RecoveryInfo::never()),
-    InvalidUri(label: "invalid_uri", recovery: RecoveryInfo::never()),
-    InvalidHeaderValue(label: "invalid_header_value", recovery: RecoveryInfo::never()),
-    InvalidMethod(label: "invalid_method", recovery: RecoveryInfo::never()),
-    InvalidStatusCode(label: "invalid_status_code", recovery: RecoveryInfo::never()),
-    MaxSizeReached(label: "max_size_reached", recovery: RecoveryInfo::never()),
-    std::io::Error(label: "io", recovery: crate::resilience::detect_io_recovery(error.kind())),
-    templated_uri::ValidationError(label: "invalid_uri", recovery: RecoveryInfo::never())
+    http::Error(label: HttpErrorLabel::from("http_error"), recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: HttpErrorLabel::from("invalid_uri_parts"), recovery: RecoveryInfo::never()),
+    InvalidUri(label: HttpErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never()),
+    InvalidHeaderValue(label: HttpErrorLabel::from("invalid_header_value"), recovery: RecoveryInfo::never()),
+    InvalidMethod(label: HttpErrorLabel::from("invalid_method"), recovery: RecoveryInfo::never()),
+    InvalidStatusCode(label: HttpErrorLabel::from("invalid_status_code"), recovery: RecoveryInfo::never()),
+    MaxSizeReached(label: HttpErrorLabel::from("max_size_reached"), recovery: RecoveryInfo::never()),
+    std::io::Error(label: HttpErrorLabel::from(error.kind()), recovery: crate::resilience::detect_io_recovery(error.kind())),
+    templated_uri::ValidationError(label: HttpErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
-    label: &'static str,
+    label: HttpErrorLabel,
     recovery: RecoveryInfo,
     // NOTE: Boxed to keep the size of HttpError small and wrapped
     // in SyncHolder to make HttpError Sync even if HttpRequest is not Sync.
@@ -125,26 +127,24 @@ impl ThreadAware for HttpError {
 }
 
 impl HttpError {
-    /// Creates a new Error from any error type.
+    /// Wraps any error type into an [`HttpError`] with the given `recovery`
+    /// strategy and a low-cardinality `label` for metrics and logging.
     ///
-    /// A flexible way to wrap your own errors in our Error type.
-    ///
-    /// # Parameters
-    ///
-    /// - `error`: Any error that can become a boxed error trait object
-    /// - `recovery`: Recovery information for this error
-    /// - `label`: A low-cardinality label for this error (for metrics/logging)
-    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: &'static str) -> Self {
+    /// The `label` accepts anything that implements `Into<HttpErrorLabel>`,
+    /// such as `&'static str`, `String`, or [`HttpErrorLabel`] itself.
+    pub fn other(
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+        recovery: RecoveryInfo,
+        label: impl Into<HttpErrorLabel>,
+    ) -> Self {
         Self::caused_by(label, recovery, None, error)
     }
 
-    /// Creates a new error from any error type that implements `Recovery`.
+    /// Wraps an error that implements [`Recovery`] into an [`HttpError`],
+    /// extracting recovery information automatically via [`Recovery::recovery()`].
     ///
-    /// # Parameters
-    ///
-    /// - `error`: Any error that can become a boxed error trait object
-    /// - `label`: A low-cardinality label for this error (for metrics/logging)
-    pub fn other_with_recovery<E>(error: E, label: &'static str) -> Self
+    /// The `label` accepts anything that implements `Into<HttpErrorLabel>`.
+    pub fn other_with_recovery<E>(error: E, label: impl Into<HttpErrorLabel>) -> Self
     where
         E: std::error::Error + Send + Sync + Recovery + 'static,
     {
@@ -153,14 +153,8 @@ impl HttpError {
         Self::other(error, recovery, label)
     }
 
-    /// Creates a new Error with a specific HTTP status code.
-    ///
-    /// Use this when you receive an unsuccessful HTTP status code as a response.
-    ///
-    /// # Parameters
-    ///
-    /// - `code`: The HTTP status code
-    /// - `recovery`: Recovery information for this error
+    /// Creates an error from an unsuccessful HTTP status `code` with the given
+    /// `recovery` strategy.
     #[must_use]
     pub fn invalid_status_code(code: StatusCode, recovery: RecoveryInfo) -> Self {
         Self::other(
@@ -247,12 +241,12 @@ impl HttpError {
         self
     }
 
-    /// Low-cardinality label for this error.
+    /// Returns the [`HttpErrorLabel`] attached to this error.
     ///
-    /// Useful for metrics and logging.
+    /// Labels are low-cardinality identifiers useful for metrics and logging.
     #[must_use]
-    pub fn label(&self) -> &'static str {
-        self.label
+    pub fn label(&self) -> &HttpErrorLabel {
+        &self.label
     }
 
     /// Extracts the HTTP request from this error, if any.
@@ -289,7 +283,7 @@ mod tests {
     #[test]
     fn assert_size_small() {
         // Keep the size of HttpError small to avoid excessive stack usage.
-        assert_eq!(size_of::<HttpError>(), 56);
+        assert_eq!(size_of::<HttpError>(), 64);
     }
 
     #[test]
@@ -333,7 +327,11 @@ mod tests {
         let error = HttpError::from(std::io::Error::other("test"));
         assert_eq!(error.message(), "test");
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "io");
+        assert_eq!(error.label(), "other error");
+
+        let error = HttpError::from(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "some message"));
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        assert_eq!(error.label(), "broken pipe");
     }
 
     #[test]
@@ -425,5 +423,12 @@ mod tests {
 
         assert_eq!(relocated.message(), "relocated test");
         assert_eq!(relocated.label(), "validation");
+    }
+
+    #[test]
+    fn other_with_owned_label() {
+        let owned_label = String::from("dynamic_label");
+        let error = HttpError::other(std::io::Error::other("some error"), RecoveryInfo::never(), owned_label);
+        assert_eq!(error.label(), "dynamic_label");
     }
 }
