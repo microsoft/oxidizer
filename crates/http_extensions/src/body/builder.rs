@@ -88,14 +88,13 @@ impl BodyOptions {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 /// # use http_extensions::{HttpBody, HttpBodyBuilder};
-/// # fn example(builder: &HttpBodyBuilder) {
+/// # let builder = HttpBodyBuilder::new_fake();
 /// // Create different body types
 /// let text_body: HttpBody = builder.text("Hello world");
 /// let empty_body: HttpBody = builder.empty();
 /// let binary_body: HttpBody = builder.slice(&[1, 2, 3, 4]);
-/// # }
 /// ```
 ///
 /// # Testing
@@ -175,7 +174,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
@@ -198,11 +197,10 @@ impl HttpBodyBuilder {
     ///     }
     /// }
     ///
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
     /// let body = builder.body(custom_body, &BodyOptions::default());
-    /// # }
     /// ```
     pub fn body<B>(&self, body: B, options: &BodyOptions) -> HttpBody
     where
@@ -230,18 +228,17 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
-    ///     Ok(BytesView::copied_from_slice(b"hello ", builder)),
-    ///     Ok(BytesView::copied_from_slice(b"world", builder)),
+    ///     Ok(BytesView::copied_from_slice(b"hello ", &builder)),
+    ///     Ok(BytesView::copied_from_slice(b"world", &builder)),
     /// ];
     /// let body = builder.stream(futures::stream::iter(chunks), &BodyOptions::default());
     ///
     /// assert_eq!(body.content_length(), None); // unknown length for streams
-    /// # }
     /// ```
     pub fn stream<S>(&self, stream: S, options: &BodyOptions) -> HttpBody
     where
@@ -259,15 +256,14 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
     /// #
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// let body1 = builder.text("Hello, world!"); // From &str
     /// let body2 = builder.text(String::from("Hello, world!")); // From String
     ///
     /// assert_eq!(body1.content_length(), body2.content_length());
-    /// # }
     /// ```
     pub fn text(&self, str: impl AsRef<str>) -> HttpBody {
         self.slice(str.as_ref().as_bytes())
@@ -285,16 +281,15 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// # use http_extensions::HttpBodyBuilder;
     /// #
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// // "Hello" in ASCII
     /// let data = [0x48, 0x65, 0x6C, 0x6C, 0x6F];
     /// let body = builder.slice(&data);
     ///
     /// assert_eq!(body.content_length(), Some(5));
-    /// # }
     /// ```
     pub fn slice(&self, data: impl AsRef<[u8]>) -> HttpBody {
         let mut builder = self.reserve(data.as_ref().len());
@@ -313,15 +308,14 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// # use http_extensions::HttpBodyBuilder;
     /// # use bytesbuf::BytesView;
     /// #
-    /// # fn example(builder: &HttpBodyBuilder) {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// // Create a body from existing bytes of data
     /// let body = builder.bytes(BytesView::new());
     /// assert_eq!(body.content_length(), Some(0));
-    /// # }
     /// ```
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
         HttpBody::new(Kind::Bytes(Some(b.into())), self.clone())
@@ -347,7 +341,7 @@ impl HttpBodyBuilder {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// # use http_extensions::{HttpBodyBuilder, HttpError};
     /// # use serde::Serialize;
     /// #
@@ -357,7 +351,8 @@ impl HttpBodyBuilder {
     ///     name: String,
     /// }
     ///
-    /// # fn example(builder: &HttpBodyBuilder) -> Result<(), HttpError> {
+    /// # fn main() -> Result<(), HttpError> {
+    /// # let builder = HttpBodyBuilder::new_fake();
     /// let user = User {
     ///     id: 1,
     ///     name: String::from("Alice"),
