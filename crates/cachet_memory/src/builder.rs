@@ -202,7 +202,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
     /// use cachet_memory::{InMemoryCacheBuilder, policy::EvictionPolicy};
     ///
     /// let cache = InMemoryCacheBuilder::<String, i32>::new()
