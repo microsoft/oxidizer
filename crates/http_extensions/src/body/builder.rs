@@ -114,6 +114,8 @@ impl HttpBodyBuilder {
     /// Useful for unit tests. Available with the `test-util` feature, this allows creating and
     /// working with HTTP bodies without any real network or server setup.
     ///
+    /// Uses a frozen clock, so body data receive timeouts will never fire.
+    ///
     /// # Examples
     ///
     /// ```
@@ -712,5 +714,16 @@ mod tests {
         let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
         // Body created successfully — timeout was applied from per_call.
         assert_eq!(body.content_length(), None);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn fake_builder_works_with_timeouts() {
+        let options = BodyOptions::default().timeout(Duration::from_secs(1));
+        let builder = HttpBodyBuilder::new_fake();
+
+        let result = create_stream_body(&builder, b"Hello World", &options).into_text().await.unwrap();
+
+        assert_eq!(result, "Hello World");
     }
 }
