@@ -22,18 +22,22 @@ use crate::{HttpRequest, HttpResponse, Result};
 ///
 /// # Examples
 ///
+/// Implement [`Service`] (not `RequestHandler` directly) to create middleware.
+/// Use `RequestHandler` as a trait bound on the inner service to constrain it
+/// to request-handler–compatible types without spelling out the full
+/// `Service<HttpRequest, Out = Result<HttpResponse>>` bound. Call
+/// [`execute_request`](RequestHandler::execute_request) to delegate:
+///
 /// ```rust
 /// # use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 /// # use layered::Service;
 /// struct MyHandler<S>(S);
 ///
-/// // My handler wraps another service constrained to `RequestHandler`
-/// // and implements the `Service` trait with particular input and output types.
 /// impl<S: RequestHandler> Service<HttpRequest> for MyHandler<S> {
 ///     type Out = Result<HttpResponse>;
 ///
 ///     async fn execute(&self, request: HttpRequest) -> Self::Out {
-///         // do some custom processing and call the inner handler
+///         // Custom processing, then delegate to the inner handler.
 ///         self.0.execute_request(request).await
 ///     }
 /// }
