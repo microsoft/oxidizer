@@ -33,7 +33,9 @@ use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
 use crate::{HttpError, Result};
 
 mod builder;
-pub use builder::{BodyOptions, HttpBodyBuilder};
+pub(crate) mod options;
+pub use builder::HttpBodyBuilder;
+pub use options::BodyOptions;
 
 pub(crate) mod timeout_body;
 
@@ -267,7 +269,7 @@ impl HttpBody {
             Kind::Bytes(None) => Err(HttpError::validation("body cannot be buffered because it is already consumed")),
             Kind::Empty => Ok(builder.empty()),
             Kind::Body(b, options) => {
-                let limit = options.get_buffer_limit();
+                let limit = options.buffer_limit;
                 let data = collect_with_limit(b.into_data_stream(), limit).await?;
                 Ok(builder.bytes(data))
             }

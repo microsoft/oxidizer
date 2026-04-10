@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::time::Duration;
-
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaqueMemory};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
@@ -15,68 +13,9 @@ use tick::Clock;
 use crate::json::JsonError;
 use crate::{HttpError, Result};
 
+use super::options::BodyOptions;
 use super::timeout_body::TimeoutBody;
 use super::{HttpBody, Kind};
-
-/// Options for configuring body-level behavior.
-///
-/// This is passed to [`HttpBodyBuilder::body`] and [`HttpBodyBuilder::stream`] so that
-/// the builder can apply body-specific policies such as a download timeout.
-///
-/// Use [`Default::default()`] when no special behavior is needed.
-///
-/// # Example
-///
-/// ```
-/// use std::time::Duration;
-///
-/// use http_extensions::BodyOptions;
-///
-/// let options = BodyOptions::default()
-///     .timeout(Duration::from_secs(60));
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ThreadAware)]
-pub struct BodyOptions {
-    timeout: Option<Duration>,
-    buffer_limit: Option<usize>,
-}
-
-impl BodyOptions {
-    /// Sets the body idle timeout.
-    ///
-    /// The timeout limits how long the client will wait between chunks of body
-    /// data. The timer resets every time the body makes progress, so only idle
-    /// periods (no data received) count toward the timeout.
-    #[must_use]
-    pub const fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
-    /// Sets the response buffer limit.
-    ///
-    /// This limits the maximum amount of memory that may be used when buffering
-    /// a response body via [`HttpBody::into_buffered`]. If the body exceeds this
-    /// limit, an error is returned.
-    #[must_use]
-    pub const fn buffer_limit(mut self, limit: usize) -> Self {
-        self.buffer_limit = Some(limit);
-        self
-    }
-
-    /// Merges `self` with `other`, preferring values from `self` when both are set.
-    pub(crate) fn merge(&self, other: &Self) -> Self {
-        Self {
-            timeout: self.timeout.or(other.timeout),
-            buffer_limit: self.buffer_limit.or(other.buffer_limit),
-        }
-    }
-
-    /// Returns the configured buffer limit, if any.
-    pub(crate) fn get_buffer_limit(&self) -> Option<usize> {
-        self.buffer_limit
-    }
-}
 
 /// Builder for creating optimized HTTP bodies.
 ///
@@ -170,7 +109,7 @@ impl HttpBodyBuilder {
     /// implementations.
     ///
     /// When `options` contains a timeout, the body is wrapped with an idle timeout that limits
-    /// how long the data reception may stall.
+    /// how long the body may go without yielding a frame.
     ///
     /// # Examples
     ///
@@ -224,7 +163,7 @@ impl HttpBodyBuilder {
     /// body from them.
     ///
     /// When `options` contains a timeout, the stream is wrapped with an idle timeout that limits
-    /// how long the data reception may stall.
+    /// how long the body may go without yielding a frame.
     ///
     /// # Examples
     ///
@@ -408,6 +347,8 @@ mod tests {
     use serde::Serialize;
     use static_assertions::assert_impl_all;
     use tick::ClockControl;
+
+    use std::time::Duration;
 
     use super::*;
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
@@ -628,72 +569,6 @@ mod tests {
             block_count <= 5,
             "expected at most 5 memory blocks for ~30 KB JSON serialization, got {block_count}"
         );
-    }
-
-    // ── BodyOptions ──────────────────────────────────────────────────────
-
-    #[test]
-    fn body_options_default_has_no_timeout() {
-        let options = BodyOptions::default();
-        assert_eq!(
-            options,
-            BodyOptions {
-                timeout: None,
-                buffer_limit: None,
-            }
-        );
-    }
-
-    #[test]
-    fn body_options_with_timeout() {
-        let options = BodyOptions::default().timeout(Duration::from_secs(60));
-        assert_eq!(
-            options,
-            BodyOptions {
-                timeout: Some(Duration::from_secs(60)),
-                buffer_limit: None,
-            }
-        );
-    }
-
-    #[test]
-    fn body_options_clone_and_copy() {
-        let options = BodyOptions::default().timeout(Duration::from_secs(5));
-        let cloned = options;
-        let copied = options;
-
-        assert_eq!(options, cloned);
-        assert_eq!(options, copied);
-    }
-
-    #[test]
-    fn body_options_debug_formatting() {
-        let options = BodyOptions::default().timeout(Duration::from_secs(42));
-        let debug = format!("{options:?}");
-        assert!(debug.contains("BodyOptions"));
-        assert!(debug.contains("42"));
-    }
-
-    #[test]
-    fn body_options_with_buffer_limit() {
-        let options = BodyOptions::default().buffer_limit(4096);
-        assert_eq!(options.get_buffer_limit(), Some(4096));
-    }
-
-    #[test]
-    fn body_options_merge_prefers_self() {
-        let a = BodyOptions::default().timeout(Duration::from_secs(10)).buffer_limit(100);
-        let b = BodyOptions::default().timeout(Duration::from_secs(20)).buffer_limit(200);
-        let merged = a.merge(&b);
-        assert_eq!(merged, a);
-    }
-
-    #[test]
-    fn body_options_merge_fills_gaps_from_other() {
-        let a = BodyOptions::default().timeout(Duration::from_secs(10));
-        let b = BodyOptions::default().buffer_limit(200);
-        let merged = a.merge(&b);
-        assert_eq!(merged, BodyOptions::default().timeout(Duration::from_secs(10)).buffer_limit(200));
     }
 
     #[test]
