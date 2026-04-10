@@ -439,7 +439,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
         let handler = self.request_handler;
 
         match self.build() {
-            Ok(request) => Either::Left(handler.execute_request(request)),
+            Ok(request) => Either::Left(handler.execute(request)),
             Err(err) => Either::Right(ready(Err(err))),
         }
     }

@@ -79,7 +79,7 @@ async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder:
                 let request = request.map(|incoming| map_incoming_to_http_body(incoming, &body_builder));
                 let service_cloned = Arc::clone(&service_cloned);
 
-                async move { service_cloned.execute_request(request).await }
+                async move { service_cloned.execute(request).await }
             });
 
             // Configure the hyper server connection
