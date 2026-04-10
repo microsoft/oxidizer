@@ -23,8 +23,11 @@ use crate::{HttpError, Result};
 /// progress.
 #[pin_project]
 pub(crate) struct TimeoutBody<B> {
+    /// The inner body, or `None` once the idle timeout has fired. After a
+    /// timeout the inner body is dropped and every subsequent poll returns
+    /// the timeout error.
     #[pin]
-    inner: B,
+    inner: Option<B>,
     timeout: Duration,
     clock: Clock,
     /// Cached delay; created on the first pending poll and reused until
@@ -35,7 +38,7 @@ pub(crate) struct TimeoutBody<B> {
 impl<B> TimeoutBody<B> {
     pub(crate) fn new(inner: B, timeout: Duration, clock: &Clock) -> Self {
         Self {
-            inner,
+            inner: Some(inner),
             timeout,
             clock: clock.clone(),
             current_delay: None,
@@ -51,11 +54,18 @@ where
     type Error = HttpError;
 
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>>>> {
-        let this = self.project();
+        let mut this = self.project();
+
+        // Once the timeout has fired the inner body is `None`. Every
+        // subsequent poll consistently returns the timeout error so
+        // callers never observe frames after a timeout.
+        let Some(inner) = this.inner.as_mut().as_pin_mut() else {
+            return Poll::Ready(Some(Err(HttpError::timeout_for_body(*this.timeout))));
+        };
 
         // Poll the inner body for data first. Clear any in-flight delay when
         // data arrives so the next pending poll starts a fresh timer.
-        if let Poll::Ready(result) = this.inner.poll_frame(cx) {
+        if let Poll::Ready(result) = inner.poll_frame(cx) {
             *this.current_delay = None;
             return Poll::Ready(result);
         }
@@ -69,6 +79,7 @@ where
 
         if Pin::new(delay).poll(cx).is_ready() {
             *this.current_delay = None;
+            this.inner.set(None);
             return Poll::Ready(Some(Err(HttpError::timeout_for_body(*this.timeout))));
         }
 
@@ -76,11 +87,11 @@ where
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.inner.size_hint()
+        self.inner.as_ref().map(http_body::Body::size_hint).unwrap_or_default()
     }
 
     fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
+        self.inner.as_ref().is_none_or(http_body::Body::is_end_stream)
     }
 }
 
@@ -266,6 +277,27 @@ mod tests {
             err.to_string().contains("body data was not fully received"),
             "expected body timeout error, got: {err}"
         );
+    }
+
+    #[test]
+    fn poll_frame_returns_error_after_timeout() {
+        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let timeout = Duration::from_millis(50);
+
+        let mut timeout_body = super::TimeoutBody::new(PendingBody, timeout, &clock);
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // First poll: inner returns Pending, delay is created and auto-advanced.
+        assert!(Pin::new(&mut timeout_body).poll_frame(&mut cx).is_pending());
+
+        // Second poll: delay has fired → timeout error, inner is dropped.
+        let result = Pin::new(&mut timeout_body).poll_frame(&mut cx);
+        assert!(matches!(result, Poll::Ready(Some(Err(_)))));
+
+        // Third poll: inner is gone, must still return the timeout error.
+        let result = Pin::new(&mut timeout_body).poll_frame(&mut cx);
+        assert!(matches!(result, Poll::Ready(Some(Err(_)))));
     }
 
     /// Body that always returns [`Poll::Pending`] to simulate a stalled download.
