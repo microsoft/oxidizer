@@ -115,7 +115,7 @@ impl Default for HttpErrorLabel {
 
 impl From<ErrorKind> for HttpErrorLabel {
     fn from(s: ErrorKind) -> Self {
-        Self(Cow::Owned(s.to_string()))
+        format!("io.{}", s.to_string().replace(' ', "_")).into()
     }
 }
 
