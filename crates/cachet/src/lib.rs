@@ -250,7 +250,7 @@ pub use cachet_service::{CacheOperation, CacheResponse, CacheServiceExt, GetRequ
 #[doc(inline)]
 pub use cachet_tier::DynamicCache;
 #[doc(inline)]
-pub use cachet_tier::{CacheEntry, CacheTier, Error, Result};
+pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 #[cfg(any(feature = "test-util", test))]
 #[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};

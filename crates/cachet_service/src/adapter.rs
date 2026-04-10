@@ -10,7 +10,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use cachet_tier::{CacheEntry, CacheTier, Error};
+use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
 use layered::Service;
 
 use crate::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
@@ -95,9 +95,9 @@ where
         }
     }
 
-    fn len(&self) -> Option<u64> {
+    async fn len(&self) -> Result<u64, SizeError> {
         // Service-based tiers typically don't expose length information
-        None
+        Err(SizeError::unsupported())
     }
 }
 
@@ -170,10 +170,14 @@ mod tests {
         assert!(result.is_ok(), "clear should succeed");
     }
 
-    #[test]
-    fn adapter_len() {
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn adapter_len() {
+        use cachet_tier::SizeErrorKind;
+
         let adapter = ServiceAdapter::<String, i32, _>::new(MockService);
-        assert_eq!(adapter.len(), None);
+        let err = adapter.len().await.unwrap_err();
+        assert_eq!(err.kind, SizeErrorKind::Unsupported);
     }
 
     #[test]
