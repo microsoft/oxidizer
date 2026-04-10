@@ -67,14 +67,15 @@ impl Recovery for JsonError {
 /// The type supports two parsing modes:
 ///
 /// - **Lifetime-aware parsing** via [`read`](Self::read): Can borrow from the buffer when possible.
-///   Multiple read calls can be made, and the returned value, if it contains lifetime, is tied to the lifetime
+///   Multiple read calls can be made, and the returned value, if it contains a lifetime, is tied to the lifetime
 ///   of the parser.
 ///
 /// - **Owned parsing** via [`read_owned`](Self::read_owned): For types that own their data, the parser consumes itself
 ///   and returns an owned deserialized value.
 ///
-/// See the `JSON Support` section in `http_extensions` documentation for more details and examples on
-/// how to use this type.
+/// See the [`HttpBody::into_json`](crate::HttpBody::into_json) and
+/// [`HttpBody::into_json_owned`](crate::HttpBody::into_json_owned) methods for more details and
+/// examples on how to use this type.
 #[derive(Debug)]
 pub struct Json<T> {
     state: JsonState,
@@ -99,7 +100,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     /// containers, it creates new values as needed.
     ///
     /// The returned value is tied to the lifetime of this parser, but that doesn't
-    /// mean all fields must be borrowed - you can mix borrowed and owned fields
+    /// mean all fields must be borrowed - you can mix borrowed and owned fields.
     ///
     /// # Examples
     ///
@@ -107,7 +108,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     /// # use serde::Deserialize;
     /// # use bytesbuf::BytesView;
     /// # use std::borrow::Cow;
-    /// # use http_extensions::{HttpError, Json};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, Json};
     ///
     /// #[derive(Deserialize)]
     /// struct Person<'a> {
@@ -120,6 +121,12 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///     let person: Person = json.read()?;
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
+    /// #     let mut json = body.into_json::<Person>().await.unwrap();
+    /// #     handle_json(&mut json).unwrap();
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -151,7 +158,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// ```
     /// # use serde::Deserialize;
     /// # use bytesbuf::BytesView;
-    /// # use http_extensions::{Json, HttpError};
+    /// # use http_extensions::{Json, HttpBodyBuilder, HttpError};
     ///
     /// #[derive(Deserialize)]
     /// struct Person {
@@ -163,6 +170,11 @@ impl<T: DeserializeOwned> Json<T> {
     ///     let person: Person = json.read_owned()?; // Consumes the parser
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
+    /// #     handle_json(body.into_json().await.unwrap()).unwrap();
+    /// # }
     /// ```
     ///
     /// # Errors

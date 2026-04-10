@@ -51,7 +51,7 @@ all-features = true
 [features]
 default = []
 json = ["dep:serde_core", "dep:serde_json"]
-test-util = []
+test-util = ["tick/test-util"]
 
 [dependencies]
 bytes = { workspace = true }
@@ -60,7 +60,7 @@ futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-layered = { workspace = true, features = ["dynamic-service"] }
+layered = { workspace = true }
 ohno = { workspace = true }
 pin-project = { workspace = true }
 recoverable = { workspace = true }
@@ -78,7 +78,7 @@ data_privacy = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
-layered = { workspace = true, features = ["intercept"] }
+layered = { workspace = true, features = ["intercept", "dynamic-service"] }
 mutants = { workspace = true }
 ohno = { workspace = true, features = ["test-util", "app-err"] }
 serde = { workspace = true, features = ["derive"] }
@@ -86,7 +86,7 @@ serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 templated_uri = { workspace = true, features = ["uuid"] }
-tick = { workspace = true, features = ["test-util"] }
+tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
 

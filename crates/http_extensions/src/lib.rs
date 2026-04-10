@@ -46,7 +46,8 @@
 //! #     HttpRequestBuilder, HttpResponseBuilder, HttpBodyBuilder, HttpRequestBuilderExt,
 //! #     FakeHandler, StatusExt, Result,
 //! # };
-//! # async fn example() -> Result<()> {
+//! # #[tokio::main]
+//! # async fn main() -> Result<()> {
 //! // Create a body builder for constructing request/response bodies
 //! let body_builder = HttpBodyBuilder::new_fake();
 //!
@@ -95,48 +96,44 @@
 //!
 //! ## Validating Response Status
 //! ```rust
-//! # use http_extensions::{StatusExt, HttpResponse};
-//! # fn example(response: HttpResponse) -> Result<(), http_extensions::HttpError> {
+//! # use http_extensions::{StatusExt, HttpResponse, HttpResponseBuilder, HttpError};
+//! # let response: HttpResponse = HttpResponseBuilder::new_fake().status(200).build().unwrap();
 //! // Check if the response succeeded and return an error if not
 //! let validated_response = response.ensure_success()?;
-//! # Ok(())
-//! # }
+//! # Ok::<(), HttpError>(())
 //! ```
 //!
 //! ## Creating Request Bodies
 //! ```rust
 //! # use http_extensions::HttpBodyBuilder;
-//! # async fn example(builder: &HttpBodyBuilder) {
+//! # let builder = HttpBodyBuilder::new_fake();
 //! // Create different body types
 //! let text_body = builder.text("Hello, world!");
 //! let binary_body = builder.slice(&[1, 2, 3, 4]);
 //! let empty_body = builder.empty();
-//! # }
 //! ```
 //!
 //! ## Building HTTP Requests
 //! ```rust
 //! # use http_extensions::{HttpRequestBuilder, HttpBodyBuilder};
-//! # async fn example(body_builder: &HttpBodyBuilder) {
-//! let request = HttpRequestBuilder::new(body_builder)
+//! # let body_builder = HttpBodyBuilder::new_fake();
+//! let request = HttpRequestBuilder::new(&body_builder)
 //!     .get("https://api.example.com/data")
 //!     .text("Hello World")
 //!     .build()
 //!     .unwrap();
-//! # }
 //! ```
 //!
 //! ## Building HTTP Responses
 //! ```rust
 //! # use http_extensions::{HttpResponseBuilder, HttpBodyBuilder};
-//! # async fn example(body_builder: &HttpBodyBuilder) {
-//! let response = HttpResponseBuilder::new(body_builder)
+//! # let body_builder = HttpBodyBuilder::new_fake();
+//! let response = HttpResponseBuilder::new(&body_builder)
 //!     .status(200)
 //!     .header("Content-Type", "text/plain")
 //!     .body(body_builder.text("Success"))
 //!     .build()
 //!     .unwrap();
-//! # }
 //! ```
 //!
 //! ## Building Middleware with `RequestHandler`
@@ -192,7 +189,7 @@ mod error;
 pub use error::{HttpError, Result};
 
 mod body;
-pub use body::{HttpBody, HttpBodyBuilder};
+pub use body::{HttpBody, HttpBodyBuilder, HttpBodyOptions};
 
 #[cfg(any(feature = "json", test))]
 mod json;
@@ -205,9 +202,6 @@ mod constants;
 mod request_handler;
 pub use request_handler::RequestHandler;
 
-mod request_handler_ext;
-pub use request_handler_ext::RequestHandlerExt;
-
 mod http_request_builder_ext;
 pub use http_request_builder_ext::HttpRequestBuilderExt;
 
@@ -216,6 +210,8 @@ pub use extensions::{ExtensionsExt, HeaderMapExt, HeaderValueExt, HttpRequestExt
 
 mod url_template_label;
 pub use url_template_label::UrlTemplateLabel;
+
+pub mod timeout;
 
 mod http_response_builder;
 pub use http_response_builder::HttpResponseBuilder;

@@ -47,7 +47,7 @@ mod tests {
     use http_body_util::Empty;
 
     use super::*;
-    use crate::HttpBodyBuilder;
+    use crate::{HttpBodyBuilder, HttpBodyOptions};
 
     #[test]
     fn clone_http_request_ok() {
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn clone_http_request_non_cloneable() {
-        let body = HttpBodyBuilder::new_fake().external(Empty::default());
+        let body = HttpBodyBuilder::new_fake().body(Empty::default(), &HttpBodyOptions::default());
         let request = Request::new(body);
 
         assert!(request.try_clone().is_none());
