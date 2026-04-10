@@ -7,7 +7,7 @@
 //! High-performance in-memory cache tier.
 //!
 //! This crate provides [`InMemoryCache`], a concurrent in-memory cache with
-//! configurable eviction policies (TinyLFU by default) for excellent hit rates.
+//! configurable eviction policies (`TinyLFU` by default) for excellent hit rates.
 //! Use [`InMemoryCacheBuilder`] to configure capacity, TTL, TTI, and eviction policy.
 //!
 //! # Quick Start
@@ -38,7 +38,7 @@
 //! # Features
 //!
 //! - **Capacity limits**: Set maximum entry count with automatic eviction
-//! - **Eviction policies**: Choose between TinyLFU (default) and LRU via
+//! - **Eviction policies**: Choose between `TinyLFU` (default) and LRU via
 //!   [`EvictionPolicy`](policy::EvictionPolicy)
 //! - **TTL/TTI**: Configure time-to-live and time-to-idle expiration
 //! - **Per-entry TTL**: Honors [`CacheEntry::expires_after`][cachet_tier::CacheEntry::expires_after]

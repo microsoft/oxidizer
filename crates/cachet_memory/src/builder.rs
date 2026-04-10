@@ -393,4 +393,11 @@ mod tests {
             .build();
         result.unwrap();
     }
+
+    #[test]
+    fn build_eviction_policy_stores_value() {
+        let policy = EvictionPolicy::lru();
+        let builder = InMemoryCacheBuilder::<String, i32>::new().eviction_policy(policy.clone());
+        assert_eq!(builder.eviction_policy, policy);
+    }
 }

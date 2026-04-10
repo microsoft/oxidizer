@@ -10,19 +10,19 @@ use std::fmt;
 ///
 /// # Policies
 ///
-/// - **TinyLFU** (default): Combines frequency and recency for excellent hit rates.
-///   Best for most workloads — keeps frequently accessed items even if not recently used.
+/// - **`TinyLFU`** (default): Combines frequency and recency for excellent hit rates.
+///   Best for most workloads - keeps frequently accessed items even if not recently used.
 /// - **LRU**: Evicts the least recently used entry. Simpler and more predictable,
 ///   but may evict frequently accessed items that haven't been touched recently.
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct EvictionPolicy {
     pub(crate) inner: EvictionPolicyInner,
 }
 
 impl EvictionPolicy {
-    /// Creates a TinyLFU eviction policy (the default).
+    /// Creates a `TinyLFU` eviction policy (the default).
     ///
-    /// TinyLFU combines frequency and recency tracking to achieve high cache
+    /// `TinyLFU` combines frequency and recency tracking to achieve high cache
     /// hit rates across a wide range of workloads.
     #[must_use]
     pub fn tiny_lfu() -> Self {
@@ -34,7 +34,7 @@ impl EvictionPolicy {
     /// Creates an LRU (Least Recently Used) eviction policy.
     ///
     /// LRU evicts the entry that was accessed least recently. This is simpler
-    /// than TinyLFU and may be preferred when access patterns are highly temporal
+    /// than `TinyLFU` and may be preferred when access patterns are highly temporal
     /// (e.g., streaming or scanning workloads).
     #[must_use]
     pub fn lru() -> Self {
