@@ -4,7 +4,7 @@
 [package]
 name = "cachet_service"
 description = "Layered service integration for the cachet caching library."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
