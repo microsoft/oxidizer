@@ -12,7 +12,7 @@ Initial release.
 
   - use eprintln in cachet dynamic bench to avoid breaking nextest ([#333](https://github.com/microsoft/oxidizer/pull/333))
 
-- ✔️ Taks
+- ✔️ Tasks
 
   - replace futures::executor::block_on in async cachet tests with tokio::test ([#354](https://github.com/microsoft/oxidizer/pull/354))
 
