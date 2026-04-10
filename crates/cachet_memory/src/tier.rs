@@ -168,7 +168,7 @@ where
                 moka_builder
                     .expire_after(EntryExpiry)
                     .eviction_policy(builder.eviction_policy.into_moka_policy())
-                    .build_with_hasher(builder.hasher.clone()),
+                    .build_with_hasher(builder.hasher),
             ),
         }
     }
