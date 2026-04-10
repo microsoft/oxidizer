@@ -109,7 +109,7 @@ let empty_body = builder.empty();
 ### Building HTTP Requests
 
 ```rust
-let request = HttpRequestBuilder::new(body_builder)
+let request = HttpRequestBuilder::new(&body_builder)
     .get("https://api.example.com/data")
     .text("Hello World")
     .build()
@@ -119,7 +119,7 @@ let request = HttpRequestBuilder::new(body_builder)
 ### Building HTTP Responses
 
 ```rust
-let response = HttpResponseBuilder::new(body_builder)
+let response = HttpResponseBuilder::new(&body_builder)
     .status(200)
     .header("Content-Type", "text/plain")
     .body(body_builder.text("Success"))
@@ -169,7 +169,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyKlgL27uQutG5NWANIkKYuiGyYWve9aLfqWG7wgKrc4ZtdfYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4ygmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3LPHG9fwZLvG6-sWflLbuqmGw7XLgkwT8lqG42aoC3iq2gqYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4ygmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjIuMQ
  [__link0]: https://crates.io/crates/http/1.4.0
  [__link1]: https://docs.rs/http_extensions/0.2.1/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.2.1/http_extensions/?search=StatusExt

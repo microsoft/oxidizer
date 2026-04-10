@@ -14,18 +14,19 @@ use bytesbuf::mem::GlobalPool;
 use futures::TryStreamExt;
 use http::Request;
 use http_body_util::BodyExt;
-use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
+use http_extensions::{HttpBodyBuilder, HttpBodyOptions, HttpRequest, HttpResponse, HttpResponseBuilder, RequestHandler};
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
 use layered::{Execute, Intercept, Stack};
 use ohno::ErrorExt;
+use tick::Clock;
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
     // In a real application, the application framework would provide the global memory pool.
-    let body_builder = HttpBodyBuilder::new(GlobalPool::new());
+    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio());
     let body_builder_clone = body_builder.clone();
 
     // Define an execution stack of middlewares
@@ -59,7 +60,7 @@ fn map_incoming_to_http_body(incoming: Incoming, body_builder: &HttpBodyBuilder)
         .map_ok(BytesView::from)
         .map_err(|e| http_extensions::HttpError::other(e, recoverable::RecoveryInfo::unknown(), "hyper"));
 
-    body_builder.stream(stream)
+    body_builder.stream(stream, &HttpBodyOptions::default())
 }
 
 async fn serve_with_hyper<T: RequestHandler + 'static>(service: T, body_builder: HttpBodyBuilder) -> Result<(), ohno::AppError> {
