@@ -188,7 +188,7 @@ mod error;
 pub use error::{HttpError, Result};
 
 mod body;
-pub use body::{BodyOptions, HttpBody, HttpBodyBuilder};
+pub use body::{HttpBody, HttpBodyBuilder, HttpBodyOptions};
 
 #[cfg(any(feature = "json", test))]
 mod json;

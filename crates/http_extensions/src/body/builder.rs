@@ -13,7 +13,7 @@ use tick::Clock;
 use crate::json::JsonError;
 use crate::{HttpError, Result};
 
-use super::options::BodyOptions;
+use super::options::HttpBodyOptions;
 use super::timeout_body::TimeoutBody;
 use super::{HttpBody, Kind};
 
@@ -43,7 +43,7 @@ use super::{HttpBody, Kind};
 pub struct HttpBodyBuilder {
     memory: MemoryWrapper,
     clock: Clock,
-    pub(super) options: BodyOptions,
+    pub(super) options: HttpBodyOptions,
 }
 
 impl HttpBodyBuilder {
@@ -75,7 +75,7 @@ impl HttpBodyBuilder {
         Self {
             memory: MemoryWrapper::Global(memory),
             clock: clock.clone(),
-            options: BodyOptions::default(),
+            options: HttpBodyOptions::default(),
         }
     }
 
@@ -88,16 +88,16 @@ impl HttpBodyBuilder {
         Self {
             memory: MemoryWrapper::Opaque(Unaware(OpaqueMemory::new(memory))),
             clock: clock.clone(),
-            options: BodyOptions::default(),
+            options: HttpBodyOptions::default(),
         }
     }
 
-    /// Sets default [`BodyOptions`] for all bodies created by this builder.
+    /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
     ///
     /// Per-call options passed to [`body`](Self::body) or [`stream`](Self::stream) are
     /// merged on top: the per-call value wins when both sides set the same field.
     #[must_use]
-    pub fn with_options(mut self, options: BodyOptions) -> Self {
+    pub fn with_options(mut self, options: HttpBodyOptions) -> Self {
         self.options = options;
         self
     }
@@ -114,7 +114,7 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError, HttpBody};
+    /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
     /// # use std::task::{Context, Poll};
@@ -139,9 +139,9 @@ impl HttpBodyBuilder {
     /// # let builder = HttpBodyBuilder::new_fake();
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
-    /// let body = builder.body(custom_body, &BodyOptions::default());
+    /// let body = builder.body(custom_body, &HttpBodyOptions::default());
     /// ```
-    pub fn body<B>(&self, body: B, options: &BodyOptions) -> HttpBody
+    pub fn body<B>(&self, body: B, options: &HttpBodyOptions) -> HttpBody
     where
         B: Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
@@ -168,18 +168,18 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{BodyOptions, HttpBodyBuilder, HttpError};
+    /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let chunks = vec![
     ///     Ok(BytesView::copied_from_slice(b"hello ", &builder)),
     ///     Ok(BytesView::copied_from_slice(b"world", &builder)),
     /// ];
-    /// let body = builder.stream(futures::stream::iter(chunks), &BodyOptions::default());
+    /// let body = builder.stream(futures::stream::iter(chunks), &HttpBodyOptions::default());
     ///
     /// assert_eq!(body.content_length(), None); // unknown length for streams
     /// ```
-    pub fn stream<S>(&self, stream: S, options: &BodyOptions) -> HttpBody
+    pub fn stream<S>(&self, stream: S, options: &HttpBodyOptions) -> HttpBody
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn with_options_sets_buffer_limit() {
-        let options = BodyOptions::default().buffer_limit(1024);
+        let options = HttpBodyOptions::default().buffer_limit(1024);
         let builder = HttpBodyBuilder::new_fake().with_options(options);
         assert_eq!(builder.options, options);
     }
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn with_options_defaults() {
         let builder = HttpBodyBuilder::new_fake();
-        assert_eq!(builder.options, BodyOptions::default());
+        assert_eq!(builder.options, HttpBodyOptions::default());
     }
 
     #[test]
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn stream_body_creation() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body_from_chunks(&builder, &[b"hello ", b"world"], &BodyOptions::default());
+        let body = create_stream_body_from_chunks(&builder, &[b"hello ", b"world"], &HttpBodyOptions::default());
         assert_eq!(body.content_length(), None);
         let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "hello world");
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn stream_body_empty() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"", &HttpBodyOptions::default());
         let bytes = block_on(body.into_bytes()).unwrap();
         assert!(bytes.is_empty());
     }
@@ -504,7 +504,7 @@ mod tests {
             .iter()
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
             .collect();
-        let options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.stream(stream::iter(chunks), &options);
         assert_eq!(body.content_length(), None);
         let text = block_on(body.into_text()).unwrap();
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn body_with_max_duration_timeout_still_returns_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let options = BodyOptions::default().timeout(Duration::MAX);
+        let options = HttpBodyOptions::default().timeout(Duration::MAX);
         let body = builder.body(
             http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
             &options,
@@ -574,11 +574,11 @@ mod tests {
     #[test]
     fn builder_merges_per_call_options_with_defaults() {
         let clock = Clock::new_frozen();
-        let builder_options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let builder_options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(builder_options);
 
         // Per-call options override the builder-level default.
-        let per_call = BodyOptions::default().timeout(Duration::from_secs(5));
+        let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
         let body = builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), &per_call);
         // Body created successfully — timeout was applied from per_call.
         assert_eq!(body.content_length(), None);
@@ -587,7 +587,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fake_builder_works_with_timeouts() {
-        let options = BodyOptions::default().timeout(Duration::from_secs(1));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
         let builder = HttpBodyBuilder::new_fake();
 
         let result = create_stream_body(&builder, b"Hello World", &options).into_text().await.unwrap();

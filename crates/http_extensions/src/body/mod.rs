@@ -35,7 +35,7 @@ use crate::{HttpError, Result};
 mod builder;
 pub(crate) mod options;
 pub use builder::HttpBodyBuilder;
-pub use options::BodyOptions;
+pub use options::HttpBodyOptions;
 
 pub(crate) mod timeout_body;
 
@@ -83,7 +83,7 @@ pub(crate) mod timeout_body;
 ///
 /// Buffering has a configurable memory limit (default: 2 GB) to prevent out-of-memory issues
 /// with extremely large responses. If a response exceeds this limit, you'll get an error.
-/// You can customize this limit via [`BodyOptions::buffer_limit`].
+/// You can customize this limit via [`HttpBodyOptions::buffer_limit`].
 ///
 /// # Streaming
 ///
@@ -232,7 +232,7 @@ impl HttpBody {
     /// - Clone a body that couldn't be cloned before
     /// - Preload data to avoid connection issues later
     ///
-    /// To change the memory limit, use [`BodyOptions::buffer_limit`] when constructing the builder.
+    /// To change the memory limit, use [`HttpBodyOptions::buffer_limit`] when constructing the builder.
     /// By default, it's capped at `2GB` to prevent memory issues.
     ///
     /// # Caveats
@@ -532,7 +532,7 @@ impl Body for HttpBody {
 enum Kind {
     Bytes(Option<BytesView>),
     Empty,
-    Body(Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, BodyOptions),
+    Body(Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, HttpBodyOptions),
 }
 
 impl Debug for Kind {
@@ -679,7 +679,7 @@ mod tests {
 
     #[test]
     fn custom_body_is_not_cloneable() {
-        let body = HttpBodyBuilder::new_fake().body(http_body_util::Empty::new(), &BodyOptions::default());
+        let body = HttpBodyBuilder::new_fake().body(http_body_util::Empty::new(), &HttpBodyOptions::default());
 
         assert!(body.try_clone().is_none());
 
@@ -707,7 +707,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let body = builder.body(
             StreamBody::new(futures::stream::once(async { Err(HttpError::validation("test error")) })),
-            &BodyOptions::default(),
+            &HttpBodyOptions::default(),
         );
 
         let error = block_on(body.into_buffered()).unwrap_err();
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn try_clone_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.body(http_body_util::Empty::new(), &BodyOptions::default());
+        let custom_body = builder.body(http_body_util::Empty::new(), &HttpBodyOptions::default());
 
         assert!(custom_body.try_clone().is_none());
     }
@@ -823,7 +823,7 @@ mod tests {
     #[test]
     fn into_bytes_custom_body_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let custom_body = builder.body(http_body_util::Empty::new(), &BodyOptions::default());
+        let custom_body = builder.body(http_body_util::Empty::new(), &HttpBodyOptions::default());
 
         BytesView::try_from(custom_body).unwrap_err();
     }
@@ -892,7 +892,7 @@ mod tests {
 
         let builder = HttpBodyBuilder::new_fake();
         let stream = futures::stream::iter(Vec::<Result<BytesView>>::new());
-        let body = builder.stream(stream, &BodyOptions::default());
+        let body = builder.stream(stream, &HttpBodyOptions::default());
         let debug_str = format!("{body:?}");
         assert!(debug_str.contains("Body"), "{debug_str}");
     }
@@ -960,7 +960,7 @@ mod tests {
     fn is_end_stream_custom_body_empty() {
         let builder = HttpBodyBuilder::new_fake();
         let custom = http_body_util::Empty::new();
-        let body = builder.body(custom, &BodyOptions::default());
+        let body = builder.body(custom, &HttpBodyOptions::default());
 
         assert!(body.is_end_stream());
     }
@@ -970,7 +970,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let data = Bytes::from_static(b"test data");
         let custom = http_body_util::Full::new(data.into());
-        let body = builder.body(custom, &BodyOptions::default());
+        let body = builder.body(custom, &HttpBodyOptions::default());
 
         assert!(!body.is_end_stream());
     }
@@ -980,7 +980,7 @@ mod tests {
     #[test]
     fn external_body_into_bytes() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"raw bytes", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"raw bytes", &HttpBodyOptions::default());
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"raw bytes");
     }
@@ -988,7 +988,7 @@ mod tests {
     #[test]
     fn external_body_empty_into_bytes() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"", &HttpBodyOptions::default());
         let bytes = block_on(body.into_bytes()).unwrap();
         assert!(bytes.is_empty());
     }
@@ -997,7 +997,7 @@ mod tests {
     fn external_body_into_json_owned() {
         let builder = HttpBodyBuilder::new_fake();
         let json_bytes = br#"{"id":42,"name":"alice"}"#;
-        let body = create_stream_body(&builder, json_bytes, &BodyOptions::default());
+        let body = create_stream_body(&builder, json_bytes, &HttpBodyOptions::default());
         let model: Model = block_on(body.into_json_owned()).unwrap();
         assert_eq!(
             model,
@@ -1011,28 +1011,28 @@ mod tests {
     #[test]
     fn external_body_try_clone_returns_none() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"no clone", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"no clone", &HttpBodyOptions::default());
         assert!(body.try_clone().is_none());
     }
 
     #[test]
     fn external_body_into_bytes_view_fails() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"not buffered", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"not buffered", &HttpBodyOptions::default());
         BytesView::try_from(body).unwrap_err();
     }
 
     #[test]
     fn external_body_into_bytes_no_buffering_returns_none() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"data", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"data", &HttpBodyOptions::default());
         assert!(body.into_bytes_no_buffering().is_none());
     }
 
     #[test]
     fn external_body_buffered_then_clone() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"clone me", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"clone me", &HttpBodyOptions::default());
 
         let buffered = block_on(body.into_buffered()).unwrap();
         let cloned = buffered.try_clone().unwrap();
@@ -1043,8 +1043,8 @@ mod tests {
 
     #[test]
     fn external_body_with_buffer_limit_exceeded() {
-        let builder = HttpBodyBuilder::new_fake().with_options(BodyOptions::default().buffer_limit(5));
-        let body = create_stream_body(&builder, b"this exceeds the limit", &BodyOptions::default());
+        let builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(5));
+        let body = create_stream_body(&builder, b"this exceeds the limit", &HttpBodyOptions::default());
 
         let err = block_on(body.into_buffered()).unwrap_err();
         assert!(err.to_string().contains("body size exceeds the limit"));
@@ -1052,8 +1052,8 @@ mod tests {
 
     #[test]
     fn external_body_with_buffer_limit_ok() {
-        let builder = HttpBodyBuilder::new_fake().with_options(BodyOptions::default().buffer_limit(1024));
-        let body = create_stream_body(&builder, b"fits", &BodyOptions::default());
+        let builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(1024));
+        let body = create_stream_body(&builder, b"fits", &HttpBodyOptions::default());
 
         let text = block_on(body.into_text()).unwrap();
         assert_eq!(text, "fits");
@@ -1062,7 +1062,7 @@ mod tests {
     #[test]
     fn external_body_is_end_stream_with_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body(&builder, b"data", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"data", &HttpBodyOptions::default());
         // A stream body with content is not at end-of-stream.
         assert!(!body.is_end_stream());
     }
@@ -1070,7 +1070,7 @@ mod tests {
     #[test]
     fn external_body_poll_frame_yields_correct_data() {
         let builder = HttpBodyBuilder::new_fake();
-        let mut body = pin!(create_stream_body(&builder, b"exact", &BodyOptions::default()));
+        let mut body = pin!(create_stream_body(&builder, b"exact", &HttpBodyOptions::default()));
         let mut cx = Context::from_waker(Waker::noop());
 
         if let Poll::Ready(Some(Ok(frame))) = body.as_mut().poll_frame(&mut cx) {

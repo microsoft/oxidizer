@@ -110,7 +110,7 @@ mod tests {
     use tick::ClockControl;
 
     use crate::testing::create_stream_body;
-    use crate::{BodyOptions, HttpBodyBuilder, HttpError, Result};
+    use crate::{HttpBodyBuilder, HttpBodyOptions, HttpError, Result};
 
     #[test]
     fn stream_body_returns_data_before_timeout() {
@@ -120,7 +120,7 @@ mod tests {
         // Stream yields data immediately — well within the generous timeout,
         // exercising the TimeoutBody happy path via stream with timeout options.
         let chunks: Vec<Result<BytesView>> = vec![Ok(BytesView::copied_from_slice(b"streamed data", &builder))];
-        let options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.stream(futures::stream::iter(chunks), &options);
         let bytes = block_on(body.into_bytes()).unwrap();
         assert_eq!(bytes, b"streamed data");
@@ -132,7 +132,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
         // A body that never yields data.
-        let options = BodyOptions::default().timeout(Duration::from_millis(100));
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(100));
         let body = builder.body(PendingBody, &options);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(
@@ -144,12 +144,12 @@ mod tests {
     #[test]
     fn body_timeout_chains_with_buffer_limit() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(BodyOptions::default().buffer_limit(1024));
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(HttpBodyOptions::default().buffer_limit(1024));
 
-        assert_eq!(builder.options, BodyOptions::default().buffer_limit(1024));
+        assert_eq!(builder.options, HttpBodyOptions::default().buffer_limit(1024));
 
         // Timeout is applied per-body, not on the builder.
-        let options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.body(PendingBody, &options);
         let err = block_on(body.into_bytes()).unwrap_err();
         assert!(err.to_string().contains("body data was not fully received"));
@@ -160,7 +160,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
 
         // Stream body has unknown size hint.
-        let body = create_stream_body(&builder, b"hello", &BodyOptions::default());
+        let body = create_stream_body(&builder, b"hello", &HttpBodyOptions::default());
         let hint = body.size_hint();
         assert_eq!(hint.lower(), 0);
     }
@@ -171,7 +171,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
         // Full body has an exact size hint; verify it passes through TimeoutBody.
-        let options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.body(
             http_body_util::Full::new(BytesView::copied_from_slice(b"hello", &builder)),
             &options,
@@ -186,7 +186,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
-        let options = BodyOptions::default().timeout(Duration::from_secs(1));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
         let body = builder.body(http_body_util::Empty::new(), &options);
         assert!(body.is_end_stream());
     }
@@ -196,7 +196,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
-        let options = BodyOptions::default().timeout(Duration::from_secs(1));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(1));
         let body = builder.body(http_body_util::Full::new(BytesView::copied_from_slice(b"data", &builder)), &options);
         assert!(!body.is_end_stream());
     }
@@ -206,7 +206,7 @@ mod tests {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
-        let options = BodyOptions::default().timeout(Duration::from_secs(30));
+        let options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
         let body = builder.body(
             http_body_util::Full::new(BytesView::copied_from_slice(b"payload", &builder)),
             &options,
@@ -221,7 +221,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
         // A body that never yields data with a very short timeout.
-        let options = BodyOptions::default().timeout(Duration::from_millis(1));
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(1));
         let body = builder.body(PendingBody, &options);
 
         let err = block_on(body.into_bytes()).unwrap_err();
@@ -238,7 +238,7 @@ mod tests {
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
         // Use a body that has data immediately available (Full is always ready).
-        let options = BodyOptions::default().timeout(Duration::from_millis(1));
+        let options = HttpBodyOptions::default().timeout(Duration::from_millis(1));
         let body = builder.body(
             http_body_util::Full::new(BytesView::copied_from_slice(b"ready data", &builder)),
             &options,
@@ -270,7 +270,7 @@ mod tests {
         };
 
         let timeout_body = super::TimeoutBody::new(body, timeout, &clock);
-        let http_body = HttpBodyBuilder::new_fake().body(timeout_body, &BodyOptions::default());
+        let http_body = HttpBodyBuilder::new_fake().body(timeout_body, &HttpBodyOptions::default());
 
         let err = block_on(http_body.into_bytes()).unwrap_err();
         assert!(

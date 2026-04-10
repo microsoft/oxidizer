@@ -14,7 +14,7 @@ use templated_uri::Uri;
 
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
 use crate::timeout::{BodyTimeout, ResponseTimeout};
-use crate::{BodyOptions, HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
+use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
 
 /// A fluent builder for creating HTTP requests.
 ///
@@ -368,7 +368,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     where
         B: http_body::Body<Data = BytesView, Error: Into<HttpError>> + Send + 'static,
     {
-        let body = self.body_builder.body(body, &BodyOptions::default());
+        let body = self.body_builder.body(body, &HttpBodyOptions::default());
         self.body(body)
     }
 
@@ -401,7 +401,7 @@ impl<R> HttpRequestBuilder<'_, R> {
     where
         S: Stream<Item = Result<BytesView>> + Send + 'static,
     {
-        let body = self.body_builder.stream(stream, &BodyOptions::default());
+        let body = self.body_builder.stream(stream, &HttpBodyOptions::default());
         self.body(body)
     }
 }
@@ -882,7 +882,7 @@ mod tests {
     #[test]
     fn custom_body_functionality() {
         let builder = HttpBodyBuilder::new_fake();
-        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"], &BodyOptions::default());
+        let body = create_stream_body_from_chunks(&builder, &[b"custom", b" body", b" content"], &HttpBodyOptions::default());
 
         let request = HttpRequestBuilder::new_fake()
             .method(Method::POST)

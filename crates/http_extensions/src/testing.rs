@@ -8,9 +8,9 @@ use bytesbuf::BytesView;
 use futures::stream;
 use http_body::Frame;
 
-use crate::{BodyOptions, HttpBodyBuilder, HttpError, Result};
+use crate::{HttpBodyBuilder, HttpBodyOptions, HttpError, Result};
 
-pub(crate) fn create_stream_body(builder: &HttpBodyBuilder, body: impl AsRef<[u8]>, options: &BodyOptions) -> crate::HttpBody {
+pub(crate) fn create_stream_body(builder: &HttpBodyBuilder, body: impl AsRef<[u8]>, options: &HttpBodyOptions) -> crate::HttpBody {
     let data = body.as_ref();
     if data.is_empty() {
         builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), options)
@@ -20,7 +20,7 @@ pub(crate) fn create_stream_body(builder: &HttpBodyBuilder, body: impl AsRef<[u8
     }
 }
 
-pub(crate) fn create_stream_body_from_chunks(builder: &HttpBodyBuilder, chunks: &[&[u8]], options: &BodyOptions) -> crate::HttpBody {
+pub(crate) fn create_stream_body_from_chunks(builder: &HttpBodyBuilder, chunks: &[&[u8]], options: &HttpBodyOptions) -> crate::HttpBody {
     let items: Vec<Result<BytesView>> = chunks
         .iter()
         .map(|chunk| Ok(BytesView::copied_from_slice(chunk, builder)))
