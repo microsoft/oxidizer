@@ -148,7 +148,7 @@
 //!
 //!     async fn execute(&self, request: HttpRequest) -> Self::Out {
 //!         println!("Processing request to: {}", request.uri());
-//!         let response = self.inner.execute_request(request).await?;
+//!         let response = self.inner.execute(request).await?;
 //!         println!("Response status: {}", response.status());
 //!         Ok(response)
 //!     }
@@ -200,9 +200,6 @@ mod constants;
 
 mod request_handler;
 pub use request_handler::RequestHandler;
-
-mod request_handler_ext;
-pub use request_handler_ext::RequestHandlerExt;
 
 mod http_request_builder_ext;
 pub use http_request_builder_ext::HttpRequestBuilderExt;
