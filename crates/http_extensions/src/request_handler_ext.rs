@@ -25,7 +25,7 @@ impl<T: crate::RequestHandler> Service<HttpRequest> for ServiceAdapter<T> {
     type Out = crate::Result<HttpResponse>;
 
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
-        self.0.execute(input)
+        self.0.execute_request(input)
     }
 }
 

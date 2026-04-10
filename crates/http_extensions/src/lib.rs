@@ -148,7 +148,7 @@
 //!
 //!     async fn execute(&self, request: HttpRequest) -> Self::Out {
 //!         println!("Processing request to: {}", request.uri());
-//!         let response = self.inner.execute(request).await?;
+//!         let response = self.inner.execute_request(request).await?;
 //!         println!("Response status: {}", response.status());
 //!         Ok(response)
 //!     }

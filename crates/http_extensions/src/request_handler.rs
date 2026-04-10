@@ -34,20 +34,20 @@ use crate::{HttpRequest, HttpResponse, Result};
 ///
 ///     async fn execute(&self, request: HttpRequest) -> Self::Out {
 ///         // do some custom processing and call the inner handler
-///         self.0.execute(request).await
+///         self.0.execute_request(request).await
 ///     }
 /// }
 /// ```
 pub trait RequestHandler: Send + Sync + sealed::Sealed {
     /// Processes an HTTP request and returns a response.
-    fn execute(&self, request: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send;
+    fn execute_request(&self, request: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send;
 }
 
 impl<S> RequestHandler for S
 where
     S: Service<HttpRequest, Out = Result<HttpResponse>>,
 {
-    fn execute(&self, request: HttpRequest) -> impl Future<Output = S::Out> + Send {
+    fn execute_request(&self, request: HttpRequest) -> impl Future<Output = S::Out> + Send {
         Service::execute(self, request)
     }
 }
