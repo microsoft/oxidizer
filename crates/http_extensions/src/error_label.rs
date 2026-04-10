@@ -43,7 +43,7 @@ impl HttpErrorLabel {
         let mut parts = parts.into_iter();
         let mut result = match parts.next() {
             Some(first) => String::from(first.as_ref()),
-            None => return Self(Cow::Borrowed("")),
+            None => return Self::default()
         };
         for part in parts {
             result.push('.');
@@ -86,6 +86,12 @@ impl From<String> for HttpErrorLabel {
 impl From<Cow<'static, str>> for HttpErrorLabel {
     fn from(s: Cow<'static, str>) -> Self {
         Self(s)
+    }
+}
+
+impl From<HttpErrorLabel> for Cow<'static, str> {
+    fn from(s: HttpErrorLabel) -> Self {
+        s.0
     }
 }
 
