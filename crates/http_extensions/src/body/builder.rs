@@ -42,10 +42,11 @@ pub struct BodyOptions {
 }
 
 impl BodyOptions {
-    /// Sets the body timeout.
+    /// Sets the body idle timeout.
     ///
-    /// The timeout limits how long the client will wait for the response body data
-    /// to be fully received after headers have arrived.
+    /// The timeout limits how long the client will wait between chunks of body
+    /// data. The timer resets every time the body makes progress, so only idle
+    /// periods (no data received) count toward the timeout.
     #[must_use]
     pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -167,8 +168,8 @@ impl HttpBodyBuilder {
     /// [`HttpBody`] system. Useful for third-party libraries or your own custom body
     /// implementations.
     ///
-    /// When `options` contains a timeout, the body is wrapped with a deadline that limits
-    /// how long the data reception may take.
+    /// When `options` contains a timeout, the body is wrapped with an idle timeout that limits
+    /// how long the data reception may stall.
     ///
     /// # Examples
     ///
@@ -208,18 +209,11 @@ impl HttpBodyBuilder {
         let merged = options.merge(&self.options);
         let body = body.map_err(Into::into);
 
-        // If the timeout duration is so large that adding it to the current instant
-        // overflows, silently skip the timeout wrapper. In practice such a duration
-        // (e.g. Duration::MAX) is far longer than any realistic connection lifetime,
-        // so the timeout would never fire anyway.
         match merged.timeout {
-            Some(timeout) => match self.clock.instant().checked_add(timeout) {
-                Some(deadline) => HttpBody::new(
-                    Kind::Body(Box::pin(TimeoutBody::new(body, deadline, timeout, &self.clock)), merged),
-                    self.clone(),
-                ),
-                None => HttpBody::new(Kind::Body(Box::pin(body), merged), self.clone()),
-            },
+            Some(timeout) => HttpBody::new(
+                Kind::Body(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), merged),
+                self.clone(),
+            ),
             None => HttpBody::new(Kind::Body(Box::pin(body), merged), self.clone()),
         }
     }
@@ -229,8 +223,8 @@ impl HttpBodyBuilder {
     /// Accepts a [`Stream`][futures::Stream] of [`BytesView`] chunks and creates a streaming
     /// body from them.
     ///
-    /// When `options` contains a timeout, the stream is wrapped with a deadline that limits
-    /// how long the data reception may take.
+    /// When `options` contains a timeout, the stream is wrapped with an idle timeout that limits
+    /// how long the data reception may stall.
     ///
     /// # Examples
     ///
@@ -567,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_with_timeout_returns_data_before_deadline() {
+    fn stream_with_timeout_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
         let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
@@ -582,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn body_with_timeout_falls_back_when_deadline_overflows() {
+    fn body_with_max_duration_timeout_still_returns_data() {
         let builder = HttpBodyBuilder::new_fake();
         let options = BodyOptions::default().timeout(Duration::MAX);
         let body = builder.body(

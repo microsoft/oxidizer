@@ -248,11 +248,12 @@ impl<R> HttpRequestBuilder<'_, R> {
         self.extension(ResponseTimeout::new(duration))
     }
 
-    /// Sets a body-level timeout for streaming the response body.
+    /// Sets a body-level idle timeout for streaming the response body.
     ///
     /// This attaches a [`BodyTimeout`] extension to the request, which middleware
-    /// or HTTP clients can use to limit how long the client will wait for the
-    /// response body data to be fully received after headers have arrived.
+    /// or HTTP clients can use to limit how long the client will wait between
+    /// chunks of body data. The timer resets every time the body makes progress,
+    /// so only idle periods (no data received) count toward the timeout.
     pub fn body_timeout(self, duration: Duration) -> Self {
         self.extension(BodyTimeout::new(duration))
     }

@@ -3,10 +3,11 @@
 
 use std::time::Duration;
 
-/// A body-level timeout that can be attached to HTTP requests as an extension.
+/// A body-level idle timeout that can be attached to HTTP requests as an extension.
 ///
-/// This timeout represents the maximum time allowed for streaming the response body after
-/// the response headers have already been received.
+/// This timeout limits how long the client will wait between chunks of response body
+/// data. The timer resets every time the body makes progress, so only idle periods
+/// (no data received) count toward the timeout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BodyTimeout(Duration);
 
