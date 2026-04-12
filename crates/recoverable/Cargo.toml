@@ -4,7 +4,7 @@
 [package]
 name = "recoverable"
 description = "Recovery information and classification for resilience patterns."
-version = "0.1.1"
+version = "0.1.2"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "metadata", "classification", "oxidizer"]
 categories = ["data-structures"]
@@ -22,8 +22,10 @@ all-features = true
 [dependencies]
 
 [dev-dependencies]
+insta.workspace = true
 ohno.workspace = true
 static_assertions.workspace = true
+testing_aids.workspace = true
 
 [lints]
 workspace = true

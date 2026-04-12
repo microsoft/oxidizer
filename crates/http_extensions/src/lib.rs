@@ -219,8 +219,6 @@ pub use http_response_builder::HttpResponseBuilder;
 mod http_request_builder;
 pub(crate) mod http_utils;
 
-pub(crate) mod resilience;
-
 pub use http_request_builder::HttpRequestBuilder;
 
 #[cfg(any(feature = "test-util", test))]
