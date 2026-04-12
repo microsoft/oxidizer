@@ -81,6 +81,8 @@
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
+mod io;
+
 // Naming Convention for Get/Set:
 //
 // This type uses an unconventional naming pattern where setters use plain names (e.g., `delay()`)
