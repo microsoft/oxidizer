@@ -20,18 +20,18 @@ impl From<ErrorKind> for RecoveryInfo {
     /// The following are considered transient and will return [`RecoveryInfo::retry`]. These
     /// errors typically resolve quickly (seconds to minutes) without external intervention:
     ///
-    /// - [`ErrorKind::WouldBlock`] — resource temporarily unavailable
-    /// - [`ErrorKind::TimedOut`] — individual request timeout
-    /// - [`ErrorKind::ConnectionReset`] — connection dropped by remote
-    /// - [`ErrorKind::ConnectionAborted`] — connection terminated by remote
-    /// - [`ErrorKind::NotConnected`] — socket not yet connected
-    /// - [`ErrorKind::ConnectionRefused`] — server not listening (e.g. service restarting)
-    /// - [`ErrorKind::AddrInUse`] — address temporarily occupied
-    /// - [`ErrorKind::AddrNotAvailable`] — interface temporarily unavailable
-    /// - [`ErrorKind::BrokenPipe`] — reader closed, reconnect may help
-    /// - [`ErrorKind::Interrupted`] — signal interrupted syscall
-    /// - [`ErrorKind::StaleNetworkFileHandle`] — NFS handle invalidated, re-open may succeed
-    /// - [`ErrorKind::ResourceBusy`] — resource locked, may become available shortly
+    /// - [`ErrorKind::WouldBlock`]: resource temporarily unavailable
+    /// - [`ErrorKind::TimedOut`]: individual request timeout
+    /// - [`ErrorKind::ConnectionReset`]: connection dropped by remote
+    /// - [`ErrorKind::ConnectionAborted`]: connection terminated by remote
+    /// - [`ErrorKind::NotConnected`]: socket not yet connected
+    /// - [`ErrorKind::ConnectionRefused`]: server not listening (e.g. service restarting)
+    /// - [`ErrorKind::AddrInUse`]: address temporarily occupied
+    /// - [`ErrorKind::AddrNotAvailable`]: interface temporarily unavailable
+    /// - [`ErrorKind::BrokenPipe`]: reader closed, reconnect may help
+    /// - [`ErrorKind::Interrupted`]: signal interrupted syscall
+    /// - [`ErrorKind::StaleNetworkFileHandle`]: NFS handle invalidated, re-open may succeed
+    /// - [`ErrorKind::ResourceBusy`]: resource locked, may become available shortly
     ///
     /// # Unavailable
     ///
@@ -39,9 +39,9 @@ impl From<ErrorKind> for RecoveryInfo {
     /// [`RecoveryInfo::unavailable`]. These errors may take an extended period to resolve
     /// (minutes to hours) and suggest circuit-breaker patterns or fallback strategies:
     ///
-    /// - [`ErrorKind::HostUnreachable`] — routing or infrastructure problem
-    /// - [`ErrorKind::NetworkUnreachable`] — entire network segment unreachable
-    /// - [`ErrorKind::NetworkDown`] — network interface is down
+    /// - [`ErrorKind::HostUnreachable`]: routing or infrastructure problem
+    /// - [`ErrorKind::NetworkUnreachable`]: entire network segment unreachable
+    /// - [`ErrorKind::NetworkDown`]: network interface is down
     ///
     /// # Never
     ///

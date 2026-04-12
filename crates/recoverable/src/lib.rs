@@ -392,7 +392,7 @@ impl RecoveryInfo {
 /// its state. This allows consistent handling of recoverable conditions across various
 /// types in resilience middleware.
 ///
-/// Typical implementors are error types whose variants can be classified as transient or
+/// Typical implementers are error types whose variants can be classified as transient or
 /// permanent, depending on the specific error condition.
 ///
 /// # Examples

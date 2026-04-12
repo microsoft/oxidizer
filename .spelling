@@ -201,6 +201,7 @@ msvc
 mutex
 Namespace
 NeutralMemoryPool
+NFS
 NewRelic
 newtype
 newtypes
