@@ -1921,8 +1921,10 @@ dependencies = [
 name = "recoverable"
 version = "0.1.2"
 dependencies = [
+ "insta",
  "ohno 0.3.1",
  "static_assertions",
+ "testing_aids",
 ]
 
 [[package]]
