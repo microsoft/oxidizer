@@ -25,6 +25,7 @@ all-features = true
 insta.workspace = true
 ohno.workspace = true
 static_assertions.workspace = true
+testing_aids.workspace = true
 
 [lints]
 workspace = true
