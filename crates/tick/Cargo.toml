@@ -48,6 +48,7 @@ thread_aware.workspace = true
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
+#internal
 ohno = { workspace = true, features = ["app-err"] }
 
 #external
@@ -95,6 +96,10 @@ required-features = ["test-util"]
 [[example]]
 name = "interop_jiff"
 required-features = ["test-util"]
+
+[[example]]
+name = "timed_result"
+required-features = ["tokio"]
 
 [[bench]]
 name = "clock_bench"

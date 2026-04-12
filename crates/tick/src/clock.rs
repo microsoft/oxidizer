@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
+use crate::Timed;
 use crate::state::ClockState;
 use crate::timers::TimerKey;
 
@@ -459,6 +460,37 @@ impl Clock {
         crate::Stopwatch::new(self)
     }
 
+    /// Wraps a future so that its execution time is measured.
+    ///
+    /// Returns a [`Timed`] future whose output is a [`TimedResult`][crate::TimedResult]
+    /// containing both the inner future's result and the elapsed duration.
+    ///
+    /// The measurement uses the same clock as the [`Stopwatch`][crate::Stopwatch],
+    /// so time can be controlled in tests via [`ClockControl`][crate::ClockControl].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::{Clock, TimedResult};
+    ///
+    /// # async fn timed_example(clock: &Clock) {
+    /// let TimedResult { result, duration } = clock.timed(async { 42 }).await;
+    /// assert_eq!(result, 42);
+    /// assert!(duration >= Duration::from_millis(0));
+    /// # }
+    /// ```
+    pub fn timed<F>(&self, f: F) -> Timed<F>
+    where
+        F: Future,
+    {
+        Timed {
+            inner: f,
+            watch: self.stopwatch(),
+        }
+    }
+
     pub(super) fn register_timer(&self, when: Instant, waker: Waker) -> TimerKey {
         match self.clock_state() {
             #[cfg(any(feature = "test-util", test))]
@@ -780,5 +812,59 @@ mod tests {
         control.register_timer(Instant::now() + Duration::from_secs(200), Waker::noop().clone());
 
         insta::assert_debug_snapshot!(clock);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn timed_measures_duration() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+
+        let timed = clock
+            .timed(async {
+                control.advance(Duration::from_millis(100));
+                42
+            })
+            .await;
+
+        assert_eq!(timed.result, 42);
+        assert_eq!(timed.duration, Duration::from_millis(100));
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn timed_handles_pending() {
+        use std::pin::Pin;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::task::{Context, Poll};
+
+        /// A future that returns Pending on the first poll, then Ready on the second.
+        struct YieldOnce {
+            yielded: Arc<AtomicBool>,
+        }
+
+        impl std::future::Future for YieldOnce {
+            type Output = i32;
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<i32> {
+                if self.yielded.swap(true, Ordering::SeqCst) {
+                    Poll::Ready(99)
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            }
+        }
+
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+
+        let timed = clock
+            .timed(YieldOnce {
+                yielded: Arc::new(AtomicBool::new(false)),
+            })
+            .await;
+
+        assert_eq!(timed.result, 99);
     }
 }
