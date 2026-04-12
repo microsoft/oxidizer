@@ -75,58 +75,60 @@ impl From<ErrorKind> for RecoveryInfo {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::io::ErrorKind;
+    use super::*;
 
-    use crate::RecoveryInfo;
+    /// All [`ErrorKind`] variants paired with their [`RecoveryInfo`] classification.
+    ///
+    /// Used by tests to snapshot the full mapping. Keep this in sync when new variants are added.
+    const ALL_ERROR_KINDS: &[ErrorKind] = &[
+        // retry
+        ErrorKind::WouldBlock,
+        ErrorKind::TimedOut,
+        ErrorKind::ConnectionReset,
+        ErrorKind::ConnectionAborted,
+        ErrorKind::NotConnected,
+        ErrorKind::ConnectionRefused,
+        ErrorKind::AddrInUse,
+        ErrorKind::AddrNotAvailable,
+        ErrorKind::BrokenPipe,
+        ErrorKind::Interrupted,
+        ErrorKind::StaleNetworkFileHandle,
+        ErrorKind::ResourceBusy,
+        // unavailable
+        ErrorKind::HostUnreachable,
+        ErrorKind::NetworkUnreachable,
+        ErrorKind::NetworkDown,
+        // never
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::AlreadyExists,
+        ErrorKind::InvalidData,
+        ErrorKind::InvalidInput,
+        ErrorKind::UnexpectedEof,
+        ErrorKind::WriteZero,
+        ErrorKind::Unsupported,
+        ErrorKind::OutOfMemory,
+        ErrorKind::NotADirectory,
+        ErrorKind::IsADirectory,
+        ErrorKind::DirectoryNotEmpty,
+        ErrorKind::ReadOnlyFilesystem,
+        ErrorKind::StorageFull,
+        ErrorKind::NotSeekable,
+        ErrorKind::QuotaExceeded,
+        ErrorKind::FileTooLarge,
+        ErrorKind::ExecutableFileBusy,
+        ErrorKind::Deadlock,
+        ErrorKind::CrossesDevices,
+        ErrorKind::TooManyLinks,
+        ErrorKind::InvalidFilename,
+        ErrorKind::ArgumentListTooLong,
+        ErrorKind::Other,
+    ];
 
     #[test]
-    fn from_io_error_kind_never() {
-        assert_eq!(RecoveryInfo::from(ErrorKind::NotFound), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::PermissionDenied), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::AlreadyExists), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::InvalidData), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::InvalidInput), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::UnexpectedEof), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::WriteZero), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::Unsupported), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::OutOfMemory), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::NotADirectory), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::IsADirectory), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::DirectoryNotEmpty), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ReadOnlyFilesystem), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::StorageFull), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::NotSeekable), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::QuotaExceeded), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::FileTooLarge), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ExecutableFileBusy), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::Deadlock), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::CrossesDevices), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::TooManyLinks), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::InvalidFilename), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ArgumentListTooLong), RecoveryInfo::never());
-        assert_eq!(RecoveryInfo::from(ErrorKind::Other), RecoveryInfo::never());
-    }
+    fn from_io_error_kind() {
+        let classifications: Vec<_> = ALL_ERROR_KINDS.iter().map(|&kind| (kind, RecoveryInfo::from(kind))).collect();
 
-    #[test]
-    fn from_io_error_kind_retry() {
-        assert_eq!(RecoveryInfo::from(ErrorKind::WouldBlock), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::TimedOut), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ConnectionReset), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ConnectionAborted), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::NotConnected), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ConnectionRefused), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::AddrInUse), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::AddrNotAvailable), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::BrokenPipe), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::Interrupted), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::StaleNetworkFileHandle), RecoveryInfo::retry());
-        assert_eq!(RecoveryInfo::from(ErrorKind::ResourceBusy), RecoveryInfo::retry());
-    }
-
-    #[test]
-    fn from_io_error_kind_unavailable() {
-        assert_eq!(RecoveryInfo::from(ErrorKind::HostUnreachable), RecoveryInfo::unavailable());
-        assert_eq!(RecoveryInfo::from(ErrorKind::NetworkUnreachable), RecoveryInfo::unavailable());
-        assert_eq!(RecoveryInfo::from(ErrorKind::NetworkDown), RecoveryInfo::unavailable());
+        insta::assert_debug_snapshot!(classifications);
     }
 }
