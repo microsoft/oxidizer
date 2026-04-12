@@ -150,8 +150,49 @@ impl AsRef<str> for HttpErrorLabel {
 }
 
 impl From<ErrorKind> for HttpErrorLabel {
-    fn from(s: ErrorKind) -> Self {
-        format!("io.{}", s.to_string().replace(' ', "_")).into()
+    fn from(kind: ErrorKind) -> Self {
+        match kind {
+            ErrorKind::NotFound => "io.not_found".into(),
+            ErrorKind::PermissionDenied => "io.permission_denied".into(),
+            ErrorKind::ConnectionRefused => "io.connection_refused".into(),
+            ErrorKind::ConnectionReset => "io.connection_reset".into(),
+            ErrorKind::HostUnreachable => "io.host_unreachable".into(),
+            ErrorKind::NetworkUnreachable => "io.network_unreachable".into(),
+            ErrorKind::ConnectionAborted => "io.connection_aborted".into(),
+            ErrorKind::NotConnected => "io.not_connected".into(),
+            ErrorKind::AddrInUse => "io.addr_in_use".into(),
+            ErrorKind::AddrNotAvailable => "io.addr_not_available".into(),
+            ErrorKind::NetworkDown => "io.network_down".into(),
+            ErrorKind::BrokenPipe => "io.broken_pipe".into(),
+            ErrorKind::AlreadyExists => "io.already_exists".into(),
+            ErrorKind::WouldBlock => "io.would_block".into(),
+            ErrorKind::NotADirectory => "io.not_a_directory".into(),
+            ErrorKind::IsADirectory => "io.is_a_directory".into(),
+            ErrorKind::DirectoryNotEmpty => "io.directory_not_empty".into(),
+            ErrorKind::ReadOnlyFilesystem => "io.read_only_filesystem".into(),
+            ErrorKind::StaleNetworkFileHandle => "io.stale_network_file_handle".into(),
+            ErrorKind::InvalidInput => "io.invalid_input".into(),
+            ErrorKind::InvalidData => "io.invalid_data".into(),
+            ErrorKind::TimedOut => "io.timed_out".into(),
+            ErrorKind::WriteZero => "io.write_zero".into(),
+            ErrorKind::StorageFull => "io.storage_full".into(),
+            ErrorKind::NotSeekable => "io.not_seekable".into(),
+            ErrorKind::QuotaExceeded => "io.quota_exceeded".into(),
+            ErrorKind::FileTooLarge => "io.file_too_large".into(),
+            ErrorKind::ResourceBusy => "io.resource_busy".into(),
+            ErrorKind::ExecutableFileBusy => "io.executable_file_busy".into(),
+            ErrorKind::Deadlock => "io.deadlock".into(),
+            ErrorKind::CrossesDevices => "io.crosses_devices".into(),
+            ErrorKind::TooManyLinks => "io.too_many_links".into(),
+            ErrorKind::InvalidFilename => "io.invalid_filename".into(),
+            ErrorKind::ArgumentListTooLong => "io.argument_list_too_long".into(),
+            ErrorKind::Interrupted => "io.interrupted".into(),
+            ErrorKind::Unsupported => "io.unsupported".into(),
+            ErrorKind::UnexpectedEof => "io.unexpected_eof".into(),
+            ErrorKind::OutOfMemory => "io.out_of_memory".into(),
+            ErrorKind::Other => "io.other".into(),
+            _ => format!("io.{}", kind.to_string().replace(' ', "_")).into(),
+        }
     }
 }
 
@@ -170,6 +211,8 @@ fn get_label_from_error(error: &(dyn Error + 'static)) -> Option<HttpErrorLabel>
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    
+
     use super::*;
 
     #[test]
@@ -259,7 +302,7 @@ mod tests {
         let label = HttpErrorLabel::from_error_chain(&http_err);
         // The HttpError itself is recognized ("my_label"), plus the wrapped
         // io::Error is also recognized ("io.other_error").
-        assert_eq!(label, "my_label.io.other_error");
+        assert_eq!(label, "my_label.io.other");
     }
 
     #[test]
@@ -287,5 +330,54 @@ mod tests {
         // validation wraps a Cow string via HttpError::other, so the inner
         // source is a plain string — only the HttpError label is recognized.
         assert_eq!(label, "validation");
+    }
+
+    #[test]
+    fn error_kind_all_variants() {
+        let all_kinds = [
+            ErrorKind::NotFound,
+            ErrorKind::PermissionDenied,
+            ErrorKind::ConnectionRefused,
+            ErrorKind::ConnectionReset,
+            ErrorKind::HostUnreachable,
+            ErrorKind::NetworkUnreachable,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::NotConnected,
+            ErrorKind::AddrInUse,
+            ErrorKind::AddrNotAvailable,
+            ErrorKind::NetworkDown,
+            ErrorKind::BrokenPipe,
+            ErrorKind::AlreadyExists,
+            ErrorKind::WouldBlock,
+            ErrorKind::NotADirectory,
+            ErrorKind::IsADirectory,
+            ErrorKind::DirectoryNotEmpty,
+            ErrorKind::ReadOnlyFilesystem,
+            ErrorKind::StaleNetworkFileHandle,
+            ErrorKind::InvalidInput,
+            ErrorKind::InvalidData,
+            ErrorKind::TimedOut,
+            ErrorKind::WriteZero,
+            ErrorKind::StorageFull,
+            ErrorKind::NotSeekable,
+            ErrorKind::QuotaExceeded,
+            ErrorKind::FileTooLarge,
+            ErrorKind::ResourceBusy,
+            ErrorKind::ExecutableFileBusy,
+            ErrorKind::Deadlock,
+            ErrorKind::CrossesDevices,
+            ErrorKind::TooManyLinks,
+            ErrorKind::InvalidFilename,
+            ErrorKind::ArgumentListTooLong,
+            ErrorKind::Interrupted,
+            ErrorKind::Unsupported,
+            ErrorKind::UnexpectedEof,
+            ErrorKind::OutOfMemory,
+            ErrorKind::Other,
+        ];
+
+        let kind_map: Vec<_> = all_kinds.iter().map(|v| (*v, HttpErrorLabel::from(*v))).collect();
+
+        insta::assert_debug_snapshot!(kind_map);
     }
 }
