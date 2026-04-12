@@ -50,7 +50,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// ## Standard Library Errors
 ///
-/// - [`std::io::Error`] - Auto-classified as temporary or permanent
+/// - [`std::io::Error`] - Auto-classified as retry, unavailable, or never based on error kind
 /// - [`std::convert::Infallible`] - Handled for pattern matching completeness
 ///
 /// ## Works with `http` crate

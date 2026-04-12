@@ -45,9 +45,11 @@ impl From<ErrorKind> for RecoveryInfo {
     ///
     /// # Never
     ///
-    /// All other error kinds will return [`RecoveryInfo::never`], as they represent permanent
-    /// conditions that retrying cannot resolve (e.g. file not found, permission denied, invalid
-    /// data).
+    /// All other error kinds will return [`RecoveryInfo::never`] by default. Many of these
+    /// represent permanent conditions that retrying cannot resolve (e.g. file not found, permission
+    /// denied, invalid data), but the catch-all also covers ambiguous variants like
+    /// [`ErrorKind::Other`] that may include transient errors. If your use case encounters
+    /// transient errors reported as uncategorized kinds, implement your own conversion logic.
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::WouldBlock
