@@ -185,6 +185,9 @@ pub type HttpRequest = Request<HttpBody>;
 /// This is a type alias for [`Response<HttpBody>`].
 pub type HttpResponse = Response<HttpBody>;
 
+mod error_label;
+pub use error_label::HttpErrorLabel;
+
 mod error;
 pub use error::{HttpError, Result};
 
