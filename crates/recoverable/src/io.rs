@@ -32,6 +32,9 @@ impl From<ErrorKind> for RecoveryInfo {
     /// - [`ErrorKind::Interrupted`]: signal interrupted syscall
     /// - [`ErrorKind::StaleNetworkFileHandle`]: NFS handle invalidated, re-open may succeed
     /// - [`ErrorKind::ResourceBusy`]: resource locked, may become available shortly
+    /// - [`ErrorKind::Deadlock`]: OS prevented deadlock, retry with different lock ordering may succeed
+    /// - [`ErrorKind::ExecutableFileBusy`]: file is being executed, will become available when process exits
+    /// - [`ErrorKind::QuotaExceeded`]: resource quota hit, may resolve with quota increase or usage decrease
     ///
     /// # Unavailable
     ///
@@ -42,6 +45,8 @@ impl From<ErrorKind> for RecoveryInfo {
     /// - [`ErrorKind::HostUnreachable`]: routing or infrastructure problem
     /// - [`ErrorKind::NetworkUnreachable`]: entire network segment unreachable
     /// - [`ErrorKind::NetworkDown`]: network interface is down
+    /// - [`ErrorKind::StorageFull`]: disk or storage exhausted, may resolve with cleanup
+    /// - [`ErrorKind::OutOfMemory`]: system memory exhausted, may resolve as other processes release memory
     ///
     /// # Never
     ///
@@ -63,9 +68,16 @@ impl From<ErrorKind> for RecoveryInfo {
             | ErrorKind::BrokenPipe
             | ErrorKind::Interrupted
             | ErrorKind::StaleNetworkFileHandle
-            | ErrorKind::ResourceBusy => Self::retry(),
+            | ErrorKind::ResourceBusy
+            | ErrorKind::Deadlock
+            | ErrorKind::ExecutableFileBusy
+            | ErrorKind::QuotaExceeded => Self::retry(),
 
-            ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable | ErrorKind::NetworkDown => Self::unavailable(),
+            ErrorKind::HostUnreachable
+            | ErrorKind::NetworkUnreachable
+            | ErrorKind::NetworkDown
+            | ErrorKind::StorageFull
+            | ErrorKind::OutOfMemory => Self::unavailable(),
 
             _ => Self::never(),
         }

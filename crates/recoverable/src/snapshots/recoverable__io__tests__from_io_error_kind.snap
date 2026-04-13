@@ -167,7 +167,7 @@ expression: classifications
     (
         OutOfMemory,
         RecoveryInfo {
-            kind: Never,
+            kind: Unavailable,
             delay: None,
         },
     ),
@@ -202,7 +202,7 @@ expression: classifications
     (
         StorageFull,
         RecoveryInfo {
-            kind: Never,
+            kind: Unavailable,
             delay: None,
         },
     ),
@@ -216,7 +216,7 @@ expression: classifications
     (
         QuotaExceeded,
         RecoveryInfo {
-            kind: Never,
+            kind: Retry,
             delay: None,
         },
     ),
@@ -230,14 +230,14 @@ expression: classifications
     (
         ExecutableFileBusy,
         RecoveryInfo {
-            kind: Never,
+            kind: Retry,
             delay: None,
         },
     ),
     (
         Deadlock,
         RecoveryInfo {
-            kind: Never,
+            kind: Retry,
             delay: None,
         },
     ),
