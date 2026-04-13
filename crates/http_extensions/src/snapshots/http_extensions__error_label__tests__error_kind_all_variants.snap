@@ -6,235 +6,235 @@ expression: kind_map
     (
         NotFound,
         HttpErrorLabel(
-            "io.not_found",
+            "not_found",
         ),
     ),
     (
         PermissionDenied,
         HttpErrorLabel(
-            "io.permission_denied",
+            "permission_denied",
         ),
     ),
     (
         ConnectionRefused,
         HttpErrorLabel(
-            "io.connection_refused",
+            "connection_refused",
         ),
     ),
     (
         ConnectionReset,
         HttpErrorLabel(
-            "io.connection_reset",
+            "connection_reset",
         ),
     ),
     (
         HostUnreachable,
         HttpErrorLabel(
-            "io.host_unreachable",
+            "host_unreachable",
         ),
     ),
     (
         NetworkUnreachable,
         HttpErrorLabel(
-            "io.network_unreachable",
+            "network_unreachable",
         ),
     ),
     (
         ConnectionAborted,
         HttpErrorLabel(
-            "io.connection_aborted",
+            "connection_aborted",
         ),
     ),
     (
         NotConnected,
         HttpErrorLabel(
-            "io.not_connected",
+            "not_connected",
         ),
     ),
     (
         AddrInUse,
         HttpErrorLabel(
-            "io.addr_in_use",
+            "addr_in_use",
         ),
     ),
     (
         AddrNotAvailable,
         HttpErrorLabel(
-            "io.addr_not_available",
+            "addr_not_available",
         ),
     ),
     (
         NetworkDown,
         HttpErrorLabel(
-            "io.network_down",
+            "network_down",
         ),
     ),
     (
         BrokenPipe,
         HttpErrorLabel(
-            "io.broken_pipe",
+            "broken_pipe",
         ),
     ),
     (
         AlreadyExists,
         HttpErrorLabel(
-            "io.already_exists",
+            "already_exists",
         ),
     ),
     (
         WouldBlock,
         HttpErrorLabel(
-            "io.would_block",
+            "would_block",
         ),
     ),
     (
         NotADirectory,
         HttpErrorLabel(
-            "io.not_a_directory",
+            "not_a_directory",
         ),
     ),
     (
         IsADirectory,
         HttpErrorLabel(
-            "io.is_a_directory",
+            "is_a_directory",
         ),
     ),
     (
         DirectoryNotEmpty,
         HttpErrorLabel(
-            "io.directory_not_empty",
+            "directory_not_empty",
         ),
     ),
     (
         ReadOnlyFilesystem,
         HttpErrorLabel(
-            "io.read_only_filesystem",
+            "read_only_filesystem",
         ),
     ),
     (
         StaleNetworkFileHandle,
         HttpErrorLabel(
-            "io.stale_network_file_handle",
+            "stale_network_file_handle",
         ),
     ),
     (
         InvalidInput,
         HttpErrorLabel(
-            "io.invalid_input",
+            "invalid_input",
         ),
     ),
     (
         InvalidData,
         HttpErrorLabel(
-            "io.invalid_data",
+            "invalid_data",
         ),
     ),
     (
         TimedOut,
         HttpErrorLabel(
-            "io.timed_out",
+            "timed_out",
         ),
     ),
     (
         WriteZero,
         HttpErrorLabel(
-            "io.write_zero",
+            "write_zero",
         ),
     ),
     (
         StorageFull,
         HttpErrorLabel(
-            "io.storage_full",
+            "storage_full",
         ),
     ),
     (
         NotSeekable,
         HttpErrorLabel(
-            "io.not_seekable",
+            "not_seekable",
         ),
     ),
     (
         QuotaExceeded,
         HttpErrorLabel(
-            "io.quota_exceeded",
+            "quota_exceeded",
         ),
     ),
     (
         FileTooLarge,
         HttpErrorLabel(
-            "io.file_too_large",
+            "file_too_large",
         ),
     ),
     (
         ResourceBusy,
         HttpErrorLabel(
-            "io.resource_busy",
+            "resource_busy",
         ),
     ),
     (
         ExecutableFileBusy,
         HttpErrorLabel(
-            "io.executable_file_busy",
+            "executable_file_busy",
         ),
     ),
     (
         Deadlock,
         HttpErrorLabel(
-            "io.deadlock",
+            "deadlock",
         ),
     ),
     (
         CrossesDevices,
         HttpErrorLabel(
-            "io.crosses_devices",
+            "crosses_devices",
         ),
     ),
     (
         TooManyLinks,
         HttpErrorLabel(
-            "io.too_many_links",
+            "too_many_links",
         ),
     ),
     (
         InvalidFilename,
         HttpErrorLabel(
-            "io.invalid_filename",
+            "invalid_filename",
         ),
     ),
     (
         ArgumentListTooLong,
         HttpErrorLabel(
-            "io.argument_list_too_long",
+            "argument_list_too_long",
         ),
     ),
     (
         Interrupted,
         HttpErrorLabel(
-            "io.interrupted",
+            "interrupted",
         ),
     ),
     (
         Unsupported,
         HttpErrorLabel(
-            "io.unsupported",
+            "unsupported",
         ),
     ),
     (
         UnexpectedEof,
         HttpErrorLabel(
-            "io.unexpected_eof",
+            "unexpected_eof",
         ),
     ),
     (
         OutOfMemory,
         HttpErrorLabel(
-            "io.out_of_memory",
+            "out_of_memory",
         ),
     ),
     (
         Other,
         HttpErrorLabel(
-            "io.other",
+            "other",
         ),
     ),
 ]

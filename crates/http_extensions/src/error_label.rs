@@ -64,7 +64,7 @@ impl HttpErrorLabel {
     ///
     /// - [`HttpError`](crate::HttpError) — uses its [`label`](crate::HttpError::label).
     /// - [`std::io::Error`] — uses a label derived from its [`ErrorKind`](std::io::ErrorKind)
-    ///   (e.g. `io.connection_refused`).
+    ///   (e.g. `connection_refused`).
     ///
     /// Unrecognized error types are skipped. If no error in the chain is
     /// recognized, the returned label is empty.
@@ -79,7 +79,7 @@ impl HttpErrorLabel {
     /// let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
     /// let http_err = HttpError::other(io_err, RecoveryInfo::retry(), "connect");
     /// let label = HttpErrorLabel::from_error_chain(&http_err);
-    /// assert_eq!(label, "connect.io.connection_refused");
+    /// assert_eq!(label, "connect.connection_refused");
     /// ```
     #[must_use]
     pub fn from_error_chain(error: &(dyn Error + 'static)) -> Self {
@@ -94,7 +94,7 @@ impl HttpErrorLabel {
         &self.0
     }
 
-    /// Consumes the label and returns the inner [`Cow<'static, str>`].
+    /// Consumes the label and returns [`Cow<'static, str>`].
     #[must_use]
     pub fn into_cow(self) -> Cow<'static, str> {
         self.0
@@ -152,46 +152,46 @@ impl AsRef<str> for HttpErrorLabel {
 impl From<ErrorKind> for HttpErrorLabel {
     fn from(kind: ErrorKind) -> Self {
         match kind {
-            ErrorKind::NotFound => "io.not_found".into(),
-            ErrorKind::PermissionDenied => "io.permission_denied".into(),
-            ErrorKind::ConnectionRefused => "io.connection_refused".into(),
-            ErrorKind::ConnectionReset => "io.connection_reset".into(),
-            ErrorKind::HostUnreachable => "io.host_unreachable".into(),
-            ErrorKind::NetworkUnreachable => "io.network_unreachable".into(),
-            ErrorKind::ConnectionAborted => "io.connection_aborted".into(),
-            ErrorKind::NotConnected => "io.not_connected".into(),
-            ErrorKind::AddrInUse => "io.addr_in_use".into(),
-            ErrorKind::AddrNotAvailable => "io.addr_not_available".into(),
-            ErrorKind::NetworkDown => "io.network_down".into(),
-            ErrorKind::BrokenPipe => "io.broken_pipe".into(),
-            ErrorKind::AlreadyExists => "io.already_exists".into(),
-            ErrorKind::WouldBlock => "io.would_block".into(),
-            ErrorKind::NotADirectory => "io.not_a_directory".into(),
-            ErrorKind::IsADirectory => "io.is_a_directory".into(),
-            ErrorKind::DirectoryNotEmpty => "io.directory_not_empty".into(),
-            ErrorKind::ReadOnlyFilesystem => "io.read_only_filesystem".into(),
-            ErrorKind::StaleNetworkFileHandle => "io.stale_network_file_handle".into(),
-            ErrorKind::InvalidInput => "io.invalid_input".into(),
-            ErrorKind::InvalidData => "io.invalid_data".into(),
-            ErrorKind::TimedOut => "io.timed_out".into(),
-            ErrorKind::WriteZero => "io.write_zero".into(),
-            ErrorKind::StorageFull => "io.storage_full".into(),
-            ErrorKind::NotSeekable => "io.not_seekable".into(),
-            ErrorKind::QuotaExceeded => "io.quota_exceeded".into(),
-            ErrorKind::FileTooLarge => "io.file_too_large".into(),
-            ErrorKind::ResourceBusy => "io.resource_busy".into(),
-            ErrorKind::ExecutableFileBusy => "io.executable_file_busy".into(),
-            ErrorKind::Deadlock => "io.deadlock".into(),
-            ErrorKind::CrossesDevices => "io.crosses_devices".into(),
-            ErrorKind::TooManyLinks => "io.too_many_links".into(),
-            ErrorKind::InvalidFilename => "io.invalid_filename".into(),
-            ErrorKind::ArgumentListTooLong => "io.argument_list_too_long".into(),
-            ErrorKind::Interrupted => "io.interrupted".into(),
-            ErrorKind::Unsupported => "io.unsupported".into(),
-            ErrorKind::UnexpectedEof => "io.unexpected_eof".into(),
-            ErrorKind::OutOfMemory => "io.out_of_memory".into(),
-            ErrorKind::Other => "io.other".into(),
-            _ => format!("io.{}", kind.to_string().replace(' ', "_")).into(),
+            ErrorKind::NotFound => "not_found".into(),
+            ErrorKind::PermissionDenied => "permission_denied".into(),
+            ErrorKind::ConnectionRefused => "connection_refused".into(),
+            ErrorKind::ConnectionReset => "connection_reset".into(),
+            ErrorKind::HostUnreachable => "host_unreachable".into(),
+            ErrorKind::NetworkUnreachable => "network_unreachable".into(),
+            ErrorKind::ConnectionAborted => "connection_aborted".into(),
+            ErrorKind::NotConnected => "not_connected".into(),
+            ErrorKind::AddrInUse => "addr_in_use".into(),
+            ErrorKind::AddrNotAvailable => "addr_not_available".into(),
+            ErrorKind::NetworkDown => "network_down".into(),
+            ErrorKind::BrokenPipe => "broken_pipe".into(),
+            ErrorKind::AlreadyExists => "already_exists".into(),
+            ErrorKind::WouldBlock => "would_block".into(),
+            ErrorKind::NotADirectory => "not_a_directory".into(),
+            ErrorKind::IsADirectory => "is_a_directory".into(),
+            ErrorKind::DirectoryNotEmpty => "directory_not_empty".into(),
+            ErrorKind::ReadOnlyFilesystem => "read_only_filesystem".into(),
+            ErrorKind::StaleNetworkFileHandle => "stale_network_file_handle".into(),
+            ErrorKind::InvalidInput => "invalid_input".into(),
+            ErrorKind::InvalidData => "invalid_data".into(),
+            ErrorKind::TimedOut => "timed_out".into(),
+            ErrorKind::WriteZero => "write_zero".into(),
+            ErrorKind::StorageFull => "storage_full".into(),
+            ErrorKind::NotSeekable => "not_seekable".into(),
+            ErrorKind::QuotaExceeded => "quota_exceeded".into(),
+            ErrorKind::FileTooLarge => "file_too_large".into(),
+            ErrorKind::ResourceBusy => "resource_busy".into(),
+            ErrorKind::ExecutableFileBusy => "executable_file_busy".into(),
+            ErrorKind::Deadlock => "deadlock".into(),
+            ErrorKind::CrossesDevices => "crosses_devices".into(),
+            ErrorKind::TooManyLinks => "too_many_links".into(),
+            ErrorKind::InvalidFilename => "invalid_filename".into(),
+            ErrorKind::ArgumentListTooLong => "argument_list_too_long".into(),
+            ErrorKind::Interrupted => "interrupted".into(),
+            ErrorKind::Unsupported => "unsupported".into(),
+            ErrorKind::UnexpectedEof => "unexpected_eof".into(),
+            ErrorKind::OutOfMemory => "out_of_memory".into(),
+            ErrorKind::Other => "other".into(),
+            _ => kind.to_string().replace(' ', "_").into(),
         }
     }
 }
@@ -211,7 +211,6 @@ fn get_label_from_error(error: &(dyn Error + 'static)) -> Option<HttpErrorLabel>
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    
 
     use super::*;
 
@@ -293,7 +292,7 @@ mod tests {
     fn from_error_chain_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
         let label = HttpErrorLabel::from_error_chain(&io_err);
-        assert_eq!(label, "io.connection_refused");
+        assert_eq!(label, "connection_refused");
     }
 
     #[test]
@@ -301,8 +300,8 @@ mod tests {
         let http_err = HttpError::other(std::io::Error::other("fail"), recoverable::RecoveryInfo::never(), "my_label");
         let label = HttpErrorLabel::from_error_chain(&http_err);
         // The HttpError itself is recognized ("my_label"), plus the wrapped
-        // io::Error is also recognized ("io.other_error").
-        assert_eq!(label, "my_label.io.other");
+        // io::Error is also recognized ("other_error").
+        assert_eq!(label, "my_label.other");
     }
 
     #[test]
@@ -310,9 +309,9 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
         let http_err = HttpError::from(io_err);
         let label = HttpErrorLabel::from_error_chain(&http_err);
-        // HttpError converted from io::Error gets label "io.broken_pipe",
-        // and the inner io::Error also contributes "io.broken_pipe".
-        assert_eq!(label, "io.broken_pipe.io.broken_pipe");
+        // HttpError converted from io::Error gets label "broken_pipe",
+        // and the inner io::Error also contributes "broken_pipe".
+        assert_eq!(label, "broken_pipe.broken_pipe");
     }
 
     #[test]

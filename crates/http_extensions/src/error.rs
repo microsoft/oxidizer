@@ -327,11 +327,11 @@ mod tests {
         let error = HttpError::from(std::io::Error::other("test"));
         assert_eq!(error.message(), "test");
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "io.other");
+        assert_eq!(error.label(), "other");
 
         let error = HttpError::from(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "some message"));
         assert_eq!(error.recovery(), RecoveryInfo::retry());
-        assert_eq!(error.label(), "io.broken_pipe");
+        assert_eq!(error.label(), "broken_pipe");
     }
 
     #[test]
