@@ -91,6 +91,7 @@ mod tests {
 
     use testing_aids::ALL_ERROR_KINDS;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn from_io_error_kind() {
         let classifications: Vec<_> = ALL_ERROR_KINDS.iter().map(|&kind| (kind, RecoveryInfo::from(kind))).collect();
