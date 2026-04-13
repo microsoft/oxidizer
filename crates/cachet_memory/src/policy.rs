@@ -60,6 +60,15 @@ impl fmt::Debug for EvictionPolicy {
     }
 }
 
+impl fmt::Display for EvictionPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.inner {
+            EvictionPolicyInner::TinyLfu => write!(f, "TinyLFU"),
+            EvictionPolicyInner::Lru => write!(f, "LRU"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum EvictionPolicyInner {
     #[default]
