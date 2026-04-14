@@ -150,13 +150,13 @@ expression: kind_map
     (
         NotADirectory,
         ErrorLabel(
-            "not_a_directory",
+            "not_directory",
         ),
     ),
     (
         IsADirectory,
         ErrorLabel(
-            "is_a_directory",
+            "is_directory",
         ),
     ),
     (
