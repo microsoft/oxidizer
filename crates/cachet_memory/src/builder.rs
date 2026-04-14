@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use foldhash::fast::RandomState;
 
+use crate::policy::EvictionPolicy;
 use crate::tier::InMemoryCache;
 
 /// Builder for configuring an `InMemoryCache`.
@@ -42,6 +43,7 @@ pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) time_to_live: Option<Duration>,
     pub(crate) time_to_idle: Option<Duration>,
     pub(crate) name: Option<&'static str>,
+    pub(crate) eviction_policy: EvictionPolicy,
     pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
 }
@@ -65,6 +67,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             time_to_live: None,
             time_to_idle: None,
             name: None,
+            eviction_policy: EvictionPolicy::default(),
             hasher: RandomState::default(),
             _phantom: PhantomData,
         }
@@ -192,6 +195,28 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
         self
     }
 
+    /// Sets the eviction policy for the cache.
+    ///
+    /// Controls how entries are chosen for eviction when the cache reaches its
+    /// maximum capacity. Defaults to [`EvictionPolicy::tiny_lfu()`].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet_memory::{InMemoryCacheBuilder, policy::EvictionPolicy};
+    ///
+    /// let cache = InMemoryCacheBuilder::<String, i32>::new()
+    ///     .max_capacity(1000)
+    ///     .eviction_policy(EvictionPolicy::lru())
+    ///     .build()
+    ///     .expect("Failed to build cache");
+    /// ```
+    #[must_use]
+    pub fn eviction_policy(mut self, policy: EvictionPolicy) -> Self {
+        self.eviction_policy = policy;
+        self
+    }
+
     /// Sets a custom hash builder for the cache.
     ///
     /// By default, the cache uses [`foldhash::fast::RandomState`] for high-performance
@@ -217,6 +242,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
             time_to_live: self.time_to_live,
             time_to_idle: self.time_to_idle,
             name: self.name,
+            eviction_policy: self.eviction_policy,
             hasher,
             _phantom: PhantomData,
         }
@@ -250,7 +276,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
         H: BuildHasher + Clone + Send + Sync + 'static,
     {
         self.validate()?;
-        Ok(InMemoryCache::from_builder(&self))
+        Ok(InMemoryCache::from_builder(self))
     }
 
     fn validate(&self) -> Result<(), ValidationError> {
@@ -265,7 +291,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
         V: Clone + Send + Sync + 'static,
         H: BuildHasher + Clone + Send + Sync + 'static,
     {
-        InMemoryCache::from_builder(&self)
+        InMemoryCache::from_builder(self)
     }
 }
 
@@ -366,5 +392,12 @@ mod tests {
             .time_to_idle(Duration::from_secs(60))
             .build();
         result.unwrap();
+    }
+
+    #[test]
+    fn build_eviction_policy_stores_value() {
+        let policy = EvictionPolicy::lru();
+        let builder = InMemoryCacheBuilder::<String, i32>::new().eviction_policy(policy.clone());
+        assert_eq!(builder.eviction_policy, policy);
     }
 }

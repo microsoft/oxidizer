@@ -140,7 +140,7 @@ where
     ///
     /// This is called by `InMemoryCacheBuilder::build()` and should not
     /// be called directly by users.
-    pub(crate) fn from_builder(builder: &InMemoryCacheBuilder<K, V, H>) -> Self {
+    pub(crate) fn from_builder(builder: InMemoryCacheBuilder<K, V, H>) -> Self {
         let mut moka_builder = Cache::builder();
 
         if let Some(capacity) = builder.max_capacity {
@@ -164,7 +164,12 @@ where
         }
 
         Self {
-            inner: Arc::from_unaware(moka_builder.expire_after(EntryExpiry).build_with_hasher(builder.hasher.clone())),
+            inner: Arc::from_unaware(
+                moka_builder
+                    .expire_after(EntryExpiry)
+                    .eviction_policy(builder.eviction_policy.into_moka_policy())
+                    .build_with_hasher(builder.hasher),
+            ),
         }
     }
 }
