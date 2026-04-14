@@ -208,7 +208,7 @@ impl ErrorLabel {
         Cow::Owned(value.chars().map(coerce_char).collect())
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and its fully covered by tests
+    #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and it's fully covered by tests
     const fn from_io(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::NotFound => Self::from_static_unchecked("not_found"),
