@@ -54,42 +54,43 @@ json = ["dep:serde_core", "dep:serde_json"]
 test-util = ["tick/test-util"]
 
 [dependencies]
-bytes = { workspace = true }
+bytes.workspace = true
 bytesbuf = { workspace = true, features = ["bytes-compat"] }
 futures = { workspace = true, features = ["std"] }
-http = { workspace = true }
-http-body = { workspace = true }
-http-body-util = { workspace = true }
-layered = { workspace = true }
-ohno = { workspace = true }
-pin-project = { workspace = true }
-recoverable = { workspace = true }
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+layered.workspace = true
+ohno.workspace = true
+pin-project.workspace = true
+recoverable.workspace = true
 serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
-templated_uri = { workspace = true }
+templated_uri.workspace = true
 thread_aware = { workspace = true, features = ["derive"] }
 tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
-alloc_tracker = { workspace = true }
+alloc_tracker.workspace = true
 bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
-criterion = { workspace = true }
-data_privacy = { workspace = true }
+criterion.workspace = true
+data_privacy.workspace = true
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 layered = { workspace = true, features = ["intercept", "dynamic-service"] }
-mutants = { workspace = true }
+mutants.workspace = true
 ohno = { workspace = true, features = ["test-util", "app-err"] }
 serde = { workspace = true, features = ["derive"] }
-serde_core = { workspace = true }
+serde_core.workspace = true
 serde_json = { workspace = true, features = ["std"] }
-static_assertions = { workspace = true }
+static_assertions.workspace = true
 templated_uri = { workspace = true, features = ["uuid"] }
+testing_aids.workspace = true
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
-uuid = { workspace = true }
-insta = { workspace = true }
+uuid.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

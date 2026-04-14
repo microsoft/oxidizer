@@ -212,6 +212,8 @@ fn get_label_from_error(error: &(dyn Error + 'static)) -> Option<HttpErrorLabel>
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
+    use testing_aids::ALL_ERROR_KINDS;
+
     use super::*;
 
     #[test]
@@ -333,49 +335,7 @@ mod tests {
 
     #[test]
     fn error_kind_all_variants() {
-        let all_kinds = [
-            ErrorKind::NotFound,
-            ErrorKind::PermissionDenied,
-            ErrorKind::ConnectionRefused,
-            ErrorKind::ConnectionReset,
-            ErrorKind::HostUnreachable,
-            ErrorKind::NetworkUnreachable,
-            ErrorKind::ConnectionAborted,
-            ErrorKind::NotConnected,
-            ErrorKind::AddrInUse,
-            ErrorKind::AddrNotAvailable,
-            ErrorKind::NetworkDown,
-            ErrorKind::BrokenPipe,
-            ErrorKind::AlreadyExists,
-            ErrorKind::WouldBlock,
-            ErrorKind::NotADirectory,
-            ErrorKind::IsADirectory,
-            ErrorKind::DirectoryNotEmpty,
-            ErrorKind::ReadOnlyFilesystem,
-            ErrorKind::StaleNetworkFileHandle,
-            ErrorKind::InvalidInput,
-            ErrorKind::InvalidData,
-            ErrorKind::TimedOut,
-            ErrorKind::WriteZero,
-            ErrorKind::StorageFull,
-            ErrorKind::NotSeekable,
-            ErrorKind::QuotaExceeded,
-            ErrorKind::FileTooLarge,
-            ErrorKind::ResourceBusy,
-            ErrorKind::ExecutableFileBusy,
-            ErrorKind::Deadlock,
-            ErrorKind::CrossesDevices,
-            ErrorKind::TooManyLinks,
-            ErrorKind::InvalidFilename,
-            ErrorKind::ArgumentListTooLong,
-            ErrorKind::Interrupted,
-            ErrorKind::Unsupported,
-            ErrorKind::UnexpectedEof,
-            ErrorKind::OutOfMemory,
-            ErrorKind::Other,
-        ];
-
-        let kind_map: Vec<_> = all_kinds.iter().map(|v| (*v, HttpErrorLabel::from(*v))).collect();
+        let kind_map: Vec<_> = ALL_ERROR_KINDS.iter().map(|v| (*v, HttpErrorLabel::from(*v))).collect();
 
         insta::assert_debug_snapshot!(kind_map);
     }

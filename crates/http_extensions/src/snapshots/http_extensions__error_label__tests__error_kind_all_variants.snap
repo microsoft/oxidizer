@@ -4,39 +4,21 @@ expression: kind_map
 ---
 [
     (
-        NotFound,
+        WouldBlock,
         HttpErrorLabel(
-            "not_found",
+            "would_block",
         ),
     ),
     (
-        PermissionDenied,
+        TimedOut,
         HttpErrorLabel(
-            "permission_denied",
-        ),
-    ),
-    (
-        ConnectionRefused,
-        HttpErrorLabel(
-            "connection_refused",
+            "timed_out",
         ),
     ),
     (
         ConnectionReset,
         HttpErrorLabel(
             "connection_reset",
-        ),
-    ),
-    (
-        HostUnreachable,
-        HttpErrorLabel(
-            "host_unreachable",
-        ),
-    ),
-    (
-        NetworkUnreachable,
-        HttpErrorLabel(
-            "network_unreachable",
         ),
     ),
     (
@@ -52,6 +34,12 @@ expression: kind_map
         ),
     ),
     (
+        ConnectionRefused,
+        HttpErrorLabel(
+            "connection_refused",
+        ),
+    ),
+    (
         AddrInUse,
         HttpErrorLabel(
             "addr_in_use",
@@ -64,15 +52,57 @@ expression: kind_map
         ),
     ),
     (
+        BrokenPipe,
+        HttpErrorLabel(
+            "broken_pipe",
+        ),
+    ),
+    (
+        Interrupted,
+        HttpErrorLabel(
+            "interrupted",
+        ),
+    ),
+    (
+        StaleNetworkFileHandle,
+        HttpErrorLabel(
+            "stale_network_file_handle",
+        ),
+    ),
+    (
+        ResourceBusy,
+        HttpErrorLabel(
+            "resource_busy",
+        ),
+    ),
+    (
+        HostUnreachable,
+        HttpErrorLabel(
+            "host_unreachable",
+        ),
+    ),
+    (
+        NetworkUnreachable,
+        HttpErrorLabel(
+            "network_unreachable",
+        ),
+    ),
+    (
         NetworkDown,
         HttpErrorLabel(
             "network_down",
         ),
     ),
     (
-        BrokenPipe,
+        NotFound,
         HttpErrorLabel(
-            "broken_pipe",
+            "not_found",
+        ),
+    ),
+    (
+        PermissionDenied,
+        HttpErrorLabel(
+            "permission_denied",
         ),
     ),
     (
@@ -82,9 +112,39 @@ expression: kind_map
         ),
     ),
     (
-        WouldBlock,
+        InvalidData,
         HttpErrorLabel(
-            "would_block",
+            "invalid_data",
+        ),
+    ),
+    (
+        InvalidInput,
+        HttpErrorLabel(
+            "invalid_input",
+        ),
+    ),
+    (
+        UnexpectedEof,
+        HttpErrorLabel(
+            "unexpected_eof",
+        ),
+    ),
+    (
+        WriteZero,
+        HttpErrorLabel(
+            "write_zero",
+        ),
+    ),
+    (
+        Unsupported,
+        HttpErrorLabel(
+            "unsupported",
+        ),
+    ),
+    (
+        OutOfMemory,
+        HttpErrorLabel(
+            "out_of_memory",
         ),
     ),
     (
@@ -112,36 +172,6 @@ expression: kind_map
         ),
     ),
     (
-        StaleNetworkFileHandle,
-        HttpErrorLabel(
-            "stale_network_file_handle",
-        ),
-    ),
-    (
-        InvalidInput,
-        HttpErrorLabel(
-            "invalid_input",
-        ),
-    ),
-    (
-        InvalidData,
-        HttpErrorLabel(
-            "invalid_data",
-        ),
-    ),
-    (
-        TimedOut,
-        HttpErrorLabel(
-            "timed_out",
-        ),
-    ),
-    (
-        WriteZero,
-        HttpErrorLabel(
-            "write_zero",
-        ),
-    ),
-    (
         StorageFull,
         HttpErrorLabel(
             "storage_full",
@@ -163,12 +193,6 @@ expression: kind_map
         FileTooLarge,
         HttpErrorLabel(
             "file_too_large",
-        ),
-    ),
-    (
-        ResourceBusy,
-        HttpErrorLabel(
-            "resource_busy",
         ),
     ),
     (
@@ -205,30 +229,6 @@ expression: kind_map
         ArgumentListTooLong,
         HttpErrorLabel(
             "argument_list_too_long",
-        ),
-    ),
-    (
-        Interrupted,
-        HttpErrorLabel(
-            "interrupted",
-        ),
-    ),
-    (
-        Unsupported,
-        HttpErrorLabel(
-            "unsupported",
-        ),
-    ),
-    (
-        UnexpectedEof,
-        HttpErrorLabel(
-            "unexpected_eof",
-        ),
-    ),
-    (
-        OutOfMemory,
-        HttpErrorLabel(
-            "out_of_memory",
         ),
     ),
     (
