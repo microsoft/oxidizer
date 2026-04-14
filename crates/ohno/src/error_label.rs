@@ -138,7 +138,7 @@ impl ErrorLabel {
     /// assert_eq!(label, "connection_refused");
     /// ```
     #[must_use]
-    pub fn from_error_chain(error: &(dyn Error + 'static), get_label: impl Fn(&(dyn Error + 'static)) -> Option<Self>) -> Self {
+    pub fn from_error_chain(error: &(dyn Error + 'static), mut get_label: impl FnMut(&(dyn Error + 'static)) -> Option<Self>) -> Self {
         // If the error has no source, return its label directly.
         if error.source().is_none() {
             return get_label(error).unwrap_or_default();
@@ -147,7 +147,7 @@ impl ErrorLabel {
         let mut seen = HashSet::new();
 
         let chain = successors(Some(error), |e| (*e).source())
-            .filter_map(&get_label)
+            .filter_map(get_label)
             .filter(|label| seen.insert(label.clone()));
 
         Self::from_parts(chain)
