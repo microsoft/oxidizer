@@ -15,6 +15,24 @@ use crate::HttpError;
 /// Wraps a [`Cow<'static, str>`] so it can hold either a static string literal
 /// or a heap-allocated [`String`].
 ///
+/// # Cardinality requirements
+///
+/// Labels are intended for use as metric tag values and structured log fields.
+/// Callers **must** ensure that every label they supply is:
+///
+/// - **Low-cardinality**: chosen from a small, bounded set of values known at
+///   development time (e.g. `"timeout"`, `"connection_refused"`,
+///   `"invalid_header"`). Dynamically-generated labels that grow without bound
+///   (request IDs, timestamps, user-supplied strings, file paths, …) will cause
+///   high-cardinality metric series and must be avoided.
+/// - **Free of PII and high-entropy data**: labels may be exported to
+///   monitoring systems and log aggregators. Never include personal
+///   information, credentials, or data that could identify individual users.
+///
+/// Prefer `&'static str` literals whenever possible; reach for an owned
+/// [`String`] only when the value is selected at runtime from a known,
+/// bounded set.
+///
 /// # Examples
 ///
 /// ```

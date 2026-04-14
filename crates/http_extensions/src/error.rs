@@ -28,7 +28,8 @@ use crate::HttpErrorLabel;
 /// - Captures backtraces automatically
 /// - Tells you if an error is temporary (transient) or permanent
 /// - Works with `http` crate errors out of the box
-/// - Carries a low-cardinality [`HttpErrorLabel`] for metrics and logging
+/// - Carries an [`HttpErrorLabel`] for metrics and logging (see its docs for
+///   cardinality requirements)
 ///
 /// # Examples
 ///
@@ -128,10 +129,10 @@ impl ThreadAware for HttpError {
 
 impl HttpError {
     /// Wraps any error type into an [`HttpError`] with the given `recovery`
-    /// strategy and a low-cardinality `label` for metrics and logging.
+    /// strategy and a `label` for metrics and logging.
     ///
-    /// The `label` accepts anything that implements `Into<HttpErrorLabel>`,
-    /// such as `&'static str`, `String`, or [`HttpErrorLabel`] itself.
+    /// The `label` accepts anything that implements `Into<HttpErrorLabel>`.
+    /// See [`HttpErrorLabel`] docs for cardinality requirements.
     pub fn other(
         error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
         recovery: RecoveryInfo,
@@ -144,6 +145,7 @@ impl HttpError {
     /// extracting recovery information automatically via [`Recovery::recovery()`].
     ///
     /// The `label` accepts anything that implements `Into<HttpErrorLabel>`.
+    /// See [`HttpErrorLabel`] docs for cardinality requirements.
     pub fn other_with_recovery<E>(error: E, label: impl Into<HttpErrorLabel>) -> Self
     where
         E: std::error::Error + Send + Sync + Recovery + 'static,
