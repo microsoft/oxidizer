@@ -73,7 +73,7 @@ futures-util = { workspace = true, features = ["alloc"] }
 http.workspace = true
 insta = { workspace = true, features = ["json"] }
 jiff = { workspace = true, default-features = true, features = ["serde"] }
-layered = { workspace = true, features = ["tower-service", "dynamic-service"] }
+layered = { workspace = true, features = ["tower-service", "dynamic-service", "intercept"] }
 mutants.workspace = true
 ohno = { workspace = true, features = ["app-err"] }
 opentelemetry = { workspace = true, default-features = false, features = ["metrics"] }

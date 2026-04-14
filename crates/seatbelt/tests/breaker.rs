@@ -243,3 +243,21 @@ async fn clone_service_shares_circuit_state(#[case] use_tower: bool) {
     assert_eq!(result1, Ok("circuit is open".to_string()));
     assert_eq!(result2, Ok("circuit is open".to_string()));
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Breaker::layer("test_breaker", &context)
+            .recovery_with(|_output: &&str, _| RecoveryInfo::never())
+            .rejected_input(|_input: &str, _| "circuit is open"),
+        Execute::new(|input: &str| async move { input }),
+    );
+
+    let service = stack.into_service();
+    let output = service.execute("hello").await;
+
+    assert_eq!(output, "hello");
+}

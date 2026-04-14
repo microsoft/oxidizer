@@ -362,3 +362,21 @@ async fn inner_service_output_preserved(#[case] use_tower: bool) {
     // Unlike injection, latency preserves the inner service output.
     assert_eq!(output, Ok("processed:hello".to_string()));
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Latency::layer("test_latency", &context)
+            .rate(0.0)
+            .latency(Duration::from_millis(10)),
+        Execute::new(|input: &str| async move { input }),
+    );
+
+    let service = stack.into_service();
+    let output = service.execute("hello").await;
+
+    assert_eq!(output, "hello");
+}

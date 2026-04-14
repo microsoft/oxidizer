@@ -434,3 +434,21 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     // Each service ran through retry cycle: 3 attempts each = 6 total
     assert_eq!(call_count.load(Ordering::SeqCst), 6);
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Retry::layer("test_retry", &context)
+            .clone_input()
+            .recovery_with(|_output: &&str, _| RecoveryInfo::never()),
+        Execute::new(|input: &str| async move { input }),
+    );
+
+    let service = stack.into_service();
+    let output = service.execute("hello").await;
+
+    assert_eq!(output, "hello");
+}

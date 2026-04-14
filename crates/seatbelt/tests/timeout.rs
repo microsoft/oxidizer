@@ -189,3 +189,21 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
     assert_eq!(result1, Ok("processed:original".to_string()));
     assert_eq!(result2, Ok("processed:cloned".to_string()));
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Timeout::layer("test_timeout", &context)
+            .timeout_output(|_args| "timed out")
+            .timeout(Duration::from_secs(5)),
+        Execute::new(|input: &str| async move { input }),
+    );
+
+    let service = stack.into_service();
+    let output = service.execute("hello").await;
+
+    assert_eq!(output, "hello");
+}

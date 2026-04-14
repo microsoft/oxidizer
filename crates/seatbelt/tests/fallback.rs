@@ -220,3 +220,21 @@ async fn fallback_output_returns_fixed_value(#[case] use_tower: bool) {
     assert_eq!(output1, Ok("fixed_default".to_string()));
     assert_eq!(output2, Ok("fixed_default".to_string()));
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Fallback::layer("test_fallback", &context)
+            .should_fallback(|output: &&str| output.is_empty())
+            .fallback(|_output, _args| "fallback_value"),
+        Execute::new(|input: &str| async move { input }),
+    );
+
+    let service = stack.into_service();
+    let output = service.execute("hello").await;
+
+    assert_eq!(output, "hello");
+}
