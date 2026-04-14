@@ -1,43 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Low-cardinality label for errors, useful for metrics and logging.
-//!
-//! This module provides [`ErrorLabel`], a low-cardinality string value intended for use as a
-//! metric tag or structured log field. Values should always be chosen from a small, bounded set
-//! known at development time.
-//!
-//! # Why
-//!
-//! When reporting error telemetry, using the full string representation of an error (e.g. its
-//! [`Display`](std::fmt::Display) output) as a metric tag or log field leads to high-cardinality
-//! series. Error messages often contain dynamic data such as file paths, URLs, request IDs, or
-//! stack traces, causing the number of distinct tag values to grow without bound. This overwhelms
-//! monitoring systems, inflates storage costs, and makes dashboards unusable.
-//!
-//! [`ErrorLabel`] solves this by giving errors a telemetry-friendly label drawn from a small,
-//! bounded set of values known at development time (e.g. `"timeout"`, `"connection_refused"`).
-//! This keeps metric cardinality predictable while still providing actionable information about
-//! the error.
-//!
-//! # Core Types
-//!
-//! - [`ErrorLabel`]: A low-cardinality label for an error, backed by [`Cow<'static, str>`](std::borrow::Cow).
-//!
-//! # Examples
-//!
-//! ```rust
-//! use ohno::ErrorLabel;
-//!
-//! // From a static string
-//! let label: ErrorLabel = "timeout".into();
-//! assert_eq!(label, "timeout");
-//!
-//! // Dotted chain from parts
-//! let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
-//! assert_eq!(label, "http.client.timeout");
-//! ```
-
 use std::borrow::Cow;
 use std::collections::hash_set::HashSet;
 use std::error::Error;
@@ -94,15 +57,15 @@ impl ErrorLabel {
     /// assert_eq!(label, "a.b.c");
     /// ```
     #[must_use]
-    pub fn from_parts(parts: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
-        let mut parts = parts.into_iter().filter(|v| !v.as_ref().is_empty());
+    pub fn from_parts(parts: impl IntoIterator<Item = impl Into<Self>>) -> Self {
+        let mut parts = parts.into_iter().map(Into::into).filter(|v: &Self| !v.as_str().is_empty());
         let mut result = match parts.next() {
-            Some(first) => String::from(first.as_ref()),
+            Some(first) => String::from(first.as_str()),
             None => return Self::default(),
         };
         for part in parts {
             result.push('.');
-            result.push_str(part.as_ref());
+            result.push_str(part.as_str());
         }
         Self(Cow::Owned(result))
     }
@@ -351,7 +314,7 @@ mod tests {
 
     #[test]
     fn from_parts_empty() {
-        let label = ErrorLabel::from_parts(std::iter::empty::<&str>());
+        let label = ErrorLabel::from_parts(std::iter::empty::<ErrorLabel>());
         assert_eq!(label, "");
     }
 
@@ -387,6 +350,32 @@ mod tests {
         assert_eq!(label, "");
     }
 
+    #[test]
+    fn from_error_chain_nested_produces_dotted_label() {
+        let inner = LabeledError::leaf("connection_refused");
+        let outer = LabeledError::wrap("timed_out", inner);
+        let label = ErrorLabel::from_error_chain(&outer, labeled_get_label);
+        assert_eq!(label, "timed_out.connection_refused");
+    }
+
+    #[test]
+    fn from_error_chain_deduplicates_labels() {
+        let inner = LabeledError::leaf("timed_out");
+        let outer = LabeledError::wrap("timed_out", inner);
+        let label = ErrorLabel::from_error_chain(&outer, labeled_get_label);
+        assert_eq!(label, "timed_out");
+    }
+
+    #[test]
+    fn from_error_chain_skips_unrecognized_middle() {
+        let innermost = LabeledError::leaf("broken_pipe");
+        // Wrap in a plain string error (unrecognized by labeled_get_label), then in a labeled error.
+        let middle = UnlabeledError::wrap(innermost);
+        let outer = LabeledError::wrap("connection_reset", middle);
+        let label = ErrorLabel::from_error_chain(&outer, labeled_get_label);
+        assert_eq!(label, "connection_reset.broken_pipe");
+    }
+
     #[cfg_attr(miri, ignore)]
     #[test]
     fn error_kind_all_variants() {
@@ -410,5 +399,63 @@ mod tests {
     /// Test helper: extracts labels only from `std::io::Error`.
     fn io_get_label(error: &(dyn Error + 'static)) -> Option<ErrorLabel> {
         error.downcast_ref::<std::io::Error>().map(|err| err.kind().into())
+    }
+
+    fn labeled_get_label(error: &(dyn Error + 'static)) -> Option<ErrorLabel> {
+        error.downcast_ref::<LabeledError>().map(|e| ErrorLabel::from(e.label))
+    }
+
+    #[derive(Debug)]
+    struct LabeledError {
+        label: &'static str,
+        source: Option<Box<dyn Error + 'static>>,
+    }
+
+    impl LabeledError {
+        fn leaf(label: &'static str) -> Self {
+            Self { label, source: None }
+        }
+
+        fn wrap(label: &'static str, source: impl Error + 'static) -> Self {
+            Self {
+                label,
+                source: Some(Box::new(source)),
+            }
+        }
+    }
+
+    impl fmt::Display for LabeledError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.label)
+        }
+    }
+
+    impl Error for LabeledError {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            self.source.as_deref()
+        }
+    }
+
+    #[derive(Debug)]
+    struct UnlabeledError {
+        source: Box<dyn Error + 'static>,
+    }
+
+    impl UnlabeledError {
+        fn wrap(source: impl Error + 'static) -> Self {
+            Self { source: Box::new(source) }
+        }
+    }
+
+    impl fmt::Display for UnlabeledError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "unlabeled")
+        }
+    }
+
+    impl Error for UnlabeledError {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&*self.source)
+        }
     }
 }

@@ -259,8 +259,8 @@ mod backtrace;
 mod core;
 mod enrichable;
 mod enrichment_entry;
-pub mod error_label;
 mod error_ext;
+mod error_label;
 mod source;
 
 #[cfg(any(feature = "test-util", test))]
