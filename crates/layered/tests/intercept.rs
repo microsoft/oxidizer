@@ -22,8 +22,9 @@ async fn str_references() {
         Execute::new(|input: &str| async move { input }),
     );
 
+    let input = "hello".to_string();
     let service = stack.into_service();
-    let output = service.execute("hello").await;
+    let output = service.execute(input.as_str()).await;
 
     assert_eq!(output, "hello");
 }

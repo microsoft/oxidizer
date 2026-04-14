@@ -12,7 +12,8 @@ use layered::{Execute, Service};
 async fn str_references() {
     let service = Execute::new(|input: &str| async move { input });
 
-    let output = service.execute("hello").await;
+    let input = "hello".to_string();
+    let output = service.execute(input.as_str()).await;
 
     assert_eq!(output, "hello");
 }
