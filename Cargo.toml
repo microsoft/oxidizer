@@ -60,6 +60,7 @@ async-once-cell = { version = "0.5", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
+compact_str = { version = "0.9", default-features = false }
 chumsky = { version = "0.12.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
 darling = { version = "0.23.0", default-features = false }

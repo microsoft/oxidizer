@@ -8,6 +8,8 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::iter::successors;
 
+use compact_str::CompactString;
+
 /// Trait for errors that carry an [`ErrorLabel`].
 pub trait Labeled {
     /// Returns the label attached to this error.
@@ -58,7 +60,7 @@ pub trait Labeled {
 /// ASCII letters are lowered to their lower-case equivalents and every other invalid
 /// character is replaced by an underscore.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
-pub struct ErrorLabel(Cow<'static, str>);
+pub struct ErrorLabel(CompactString);
 
 impl ErrorLabel {
     /// Creates a label from a static string literal.
@@ -91,7 +93,7 @@ impl ErrorLabel {
             "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters, '_', or '.'"
         );
 
-        Self(Cow::Borrowed(label))
+        Self(CompactString::const_new(label))
     }
 
     #[must_use]
@@ -101,7 +103,7 @@ impl ErrorLabel {
             "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters, '_', or '.'"
         );
 
-        Self(Cow::Borrowed(label))
+        Self(CompactString::const_new(label))
     }
 
     /// Creates a label by joining the parts with `.` as a separator.
@@ -120,14 +122,14 @@ impl ErrorLabel {
     pub fn from_parts(parts: impl IntoIterator<Item = impl Into<Self>>) -> Self {
         let mut parts = parts.into_iter().map(Into::into).filter(|v: &Self| !v.as_str().is_empty());
         let mut result = match parts.next() {
-            Some(first) => String::from(first.as_str()),
+            Some(first) => first.0,
             None => return Self::default(),
         };
         for part in parts {
             result.push('.');
             result.push_str(part.as_str());
         }
-        Self(Cow::Owned(result))
+        Self(result)
     }
 
     /// Creates a label by walking the error chain and joining recognized labels with `.`.
@@ -194,18 +196,21 @@ impl ErrorLabel {
     /// ```
     #[must_use]
     pub fn into_cow(self) -> Cow<'static, str> {
-        self.0
+        match self.0.as_static_str() {
+            Some(s) => Cow::Borrowed(s),
+            None => Cow::Owned(self.0.into_string()),
+        }
     }
 
     /// Returns the value unchanged if it only contains lower-case ASCII alphanumeric,
-    /// `_`, or `.` characters. Otherwise, returns an owned copy with upper-case ASCII
+    /// `_`, or `.` characters. Otherwise, returns a copy with upper-case ASCII
     /// letters lowered and every other invalid character replaced by `_`.
-    fn coerce(value: Cow<'static, str>) -> Cow<'static, str> {
+    fn coerce(value: CompactString) -> CompactString {
         if is_valid_label(&value) {
-            return value;
+            return CompactString::new(value);
         }
 
-        Cow::Owned(value.chars().map(coerce_char).collect())
+        value.chars().map(coerce_char).collect()
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and it's fully covered by tests
@@ -263,19 +268,19 @@ impl fmt::Display for ErrorLabel {
 
 impl From<&'static str> for ErrorLabel {
     fn from(s: &'static str) -> Self {
-        Self(Self::coerce(Cow::Borrowed(s)))
+        Self(Self::coerce(CompactString::const_new(s)))
     }
 }
 
 impl From<String> for ErrorLabel {
     fn from(s: String) -> Self {
-        Self(Self::coerce(Cow::Owned(s)))
+        Self(Self::coerce(s.into()))
     }
 }
 
 impl From<Cow<'static, str>> for ErrorLabel {
     fn from(s: Cow<'static, str>) -> Self {
-        Self(Self::coerce(s))
+        Self(Self::coerce(s.into()))
     }
 }
 
@@ -287,13 +292,13 @@ impl From<ErrorLabel> for Cow<'static, str> {
 
 impl PartialEq<str> for ErrorLabel {
     fn eq(&self, other: &str) -> bool {
-        self.0 == other
+        self.0.as_str() == other
     }
 }
 
 impl PartialEq<&str> for ErrorLabel {
     fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
+        self.0.as_str() == *other
     }
 }
 
@@ -494,13 +499,19 @@ mod tests {
     }
 
     #[test]
-    fn into_cow_borrowed() {
-        let label = ErrorLabel::from("static_value");
-        let cow = label.clone().into_cow();
-        assert!(matches!(cow, Cow::Borrowed("static_value")));
+    fn into_cow_static() {
+        // Labels created via from_static with strings longer than the inline
+        // threshold keep the static reference and into_cow returns Borrowed.
+        // Short strings may be inlined by CompactString, in which case
+        // into_cow returns Owned. We verify the string value is correct in
+        // both cases.
+        let label = ErrorLabel::from_static("static_value");
+        let cow = label.into_cow();
+        assert_eq!(cow, "static_value");
 
+        let label = ErrorLabel::from_static("static_value");
         let cow = Cow::<'static, str>::from(label);
-        assert!(matches!(cow, Cow::Borrowed("static_value")));
+        assert_eq!(cow, "static_value");
     }
 
     #[test]

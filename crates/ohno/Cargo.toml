@@ -27,10 +27,12 @@ app-err = []
 test-util = []
 
 [dependencies]
+compact_str.workspace = true
 ohno_macros.workspace = true
 typeid.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 futures.workspace = true
 insta.workspace = true
 mutants.workspace = true
@@ -41,6 +43,10 @@ tokio = { workspace = true, features = ["macros", "rt", "time", "rt-multi-thread
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "error_label"
+harness = false
 
 [[example]]
 name = "app_err_automatic_conversion"
