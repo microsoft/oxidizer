@@ -44,7 +44,7 @@ impl HttpErrorLabel {
     /// ```
     #[must_use]
     pub fn from_parts(parts: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
-        let mut parts = parts.into_iter();
+        let mut parts = parts.into_iter().filter(|v| !v.as_ref().is_empty());
         let mut result = match parts.next() {
             Some(first) => String::from(first.as_ref()),
             None => return Self::default(),
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn from_parts_multiple() {
-        let label = HttpErrorLabel::from_parts(["http", "client", "timeout"]);
+        let label = HttpErrorLabel::from_parts(["http", "client", "", "timeout"]);
         assert_eq!(label, "http.client.timeout");
     }
 
@@ -302,7 +302,7 @@ mod tests {
         let http_err = HttpError::other(std::io::Error::other("fail"), recoverable::RecoveryInfo::never(), "my_label");
         let label = HttpErrorLabel::from_error_chain(&http_err);
         // The HttpError itself is recognized ("my_label"), plus the wrapped
-        // io::Error is also recognized ("other_error").
+        // io::Error is also recognized ("other").
         assert_eq!(label, "my_label.other");
     }
 
