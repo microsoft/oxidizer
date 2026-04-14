@@ -22,7 +22,7 @@ pub trait Labeled {
 /// Callers **must** ensure that every label they supply is:
 ///
 /// - **Low-cardinality**: chosen from a small, bounded set of values known at
-///   development time (e.g. `"timeout"`, `"connection_refused"`,
+///   development time (e.g. `"timeout"`, `"conn_refused"`,
 ///   `"invalid_header"`). Dynamically-generated labels that grow without bound
 ///   (request IDs, timestamps, user-supplied strings, file paths, …) will cause
 ///   high-cardinality metric series and must be avoided.
@@ -85,7 +85,7 @@ impl ErrorLabel {
     pub const fn from_static(label: &'static str) -> Self {
         assert!(
             is_valid_label(label),
-            "ErrorLabel: value must contain only ASCII alphanumeric characters, '_', or '.'"
+            "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters, '_', or '.'"
         );
 
         Self(Cow::Borrowed(label))
@@ -95,7 +95,7 @@ impl ErrorLabel {
     const fn from_static_unchecked(label: &'static str) -> Self {
         debug_assert!(
             is_valid_label(label),
-            "ErrorLabel: value must contain only ASCII alphanumeric characters, '_', or '.'"
+            "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters, '_', or '.'"
         );
 
         Self(Cow::Borrowed(label))
@@ -145,7 +145,7 @@ impl ErrorLabel {
     ///     e.downcast_ref::<std::io::Error>()
     ///         .map(|io| ErrorLabel::from(io.kind()))
     /// });
-    /// assert_eq!(label, "connection_refused");
+    /// assert_eq!(label, "conn_refused");
     /// ```
     #[must_use]
     pub fn from_error_chain(error: &(dyn Error + 'static), mut get_label: impl FnMut(&(dyn Error + 'static)) -> Option<Self>) -> Self {
@@ -202,7 +202,7 @@ impl ErrorLabel {
             return value;
         }
 
-        Cow::Owned(value.chars().map(|c| if is_valid_label_char(c as u8) { c } else { '_' }).collect())
+        Cow::Owned(value.chars().map(coerce_char).collect())
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and its fully covered by tests
@@ -317,7 +317,7 @@ impl From<ErrorKind> for ErrorLabel {
     /// assert_eq!(label, "timed_out");
     ///
     /// let label = ErrorLabel::from(ErrorKind::ConnectionRefused);
-    /// assert_eq!(label, "connection_refused");
+    /// assert_eq!(label, "conn_refused");
     /// ```
     fn from(kind: ErrorKind) -> Self {
         Self::from_io(kind)
@@ -325,6 +325,10 @@ impl From<ErrorKind> for ErrorLabel {
 }
 
 const fn is_valid_label_char(b: u8) -> bool {
+    if b.is_ascii_uppercase() {
+        return false;
+    }
+
     b.is_ascii_alphanumeric() || b == b'_' || b == b'.'
 }
 
@@ -339,6 +343,16 @@ const fn is_valid_label(s: &str) -> bool {
     }
 
     true
+}
+
+fn coerce_char(c: char) -> char {
+    match c {
+        '.' => '.',
+        '_' => '_',
+        c if c.is_ascii_uppercase() => c.to_ascii_lowercase(),
+        c if !c.is_ascii_alphanumeric() => '_',
+        c => c,
+    }
 }
 
 #[cfg(test)]
@@ -363,13 +377,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "ErrorLabel: value must contain only ASCII alphanumeric characters")]
+    #[should_panic(expected = "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters")]
     fn from_static_panics_on_space() {
         let _ = ErrorLabel::from_static("has space");
     }
 
     #[test]
-    #[should_panic(expected = "ErrorLabel: value must contain only ASCII alphanumeric characters")]
+    #[should_panic(expected = "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters")]
     fn from_static_panics_on_dash() {
         let _ = ErrorLabel::from_static("has-dash");
     }
