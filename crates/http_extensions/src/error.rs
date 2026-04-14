@@ -13,13 +13,12 @@ use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
+use crate::HttpErrorLabel;
 use crate::HttpRequest;
 use crate::http_utils::SyncHolder;
 
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
-
-use crate::HttpErrorLabel;
 
 /// A unified HTTP error type.
 ///
