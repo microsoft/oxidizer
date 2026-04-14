@@ -17,6 +17,17 @@ use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::HttpRequest;
 use crate::http_utils::SyncHolder;
 
+const LABEL_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("http_error");
+const LABEL_INVALID_URI_PARTS: ErrorLabel = ErrorLabel::from_static("invalid_uri_parts");
+const LABEL_INVALID_URI: ErrorLabel = ErrorLabel::from_static("invalid_uri");
+const LABEL_INVALID_HEADER_VALUE: ErrorLabel = ErrorLabel::from_static("invalid_header_value");
+const LABEL_INVALID_METHOD: ErrorLabel = ErrorLabel::from_static("invalid_method");
+const LABEL_INVALID_STATUS_CODE: ErrorLabel = ErrorLabel::from_static("invalid_status_code");
+const LABEL_MAX_SIZE_REACHED: ErrorLabel = ErrorLabel::from_static("max_size_reached");
+const LABEL_VALIDATION: ErrorLabel = ErrorLabel::from_static("validation");
+const LABEL_UNAVAILABLE: ErrorLabel = ErrorLabel::from_static("unavailable");
+const LABEL_TIMEOUT: ErrorLabel = ErrorLabel::from_static("timeout");
+
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
 
@@ -101,15 +112,15 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// ```
 #[ohno::error]
 #[from(
-    http::Error(label: ErrorLabel::from_static("http_error"), recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: ErrorLabel::from_static("invalid_uri_parts"), recovery: RecoveryInfo::never()),
-    InvalidUri(label: ErrorLabel::from_static("invalid_uri"), recovery: RecoveryInfo::never()),
-    InvalidHeaderValue(label: ErrorLabel::from_static("invalid_header_value"), recovery: RecoveryInfo::never()),
-    InvalidMethod(label: ErrorLabel::from_static("invalid_method"), recovery: RecoveryInfo::never()),
-    InvalidStatusCode(label: ErrorLabel::from_static("invalid_status_code"), recovery: RecoveryInfo::never()),
-    MaxSizeReached(label: ErrorLabel::from_static("max_size_reached"), recovery: RecoveryInfo::never()),
+    http::Error(label: LABEL_HTTP_ERROR, recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: LABEL_INVALID_URI_PARTS, recovery: RecoveryInfo::never()),
+    InvalidUri(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never()),
+    InvalidHeaderValue(label: LABEL_INVALID_HEADER_VALUE, recovery: RecoveryInfo::never()),
+    InvalidMethod(label: LABEL_INVALID_METHOD, recovery: RecoveryInfo::never()),
+    InvalidStatusCode(label: LABEL_INVALID_STATUS_CODE, recovery: RecoveryInfo::never()),
+    MaxSizeReached(label: LABEL_MAX_SIZE_REACHED, recovery: RecoveryInfo::never()),
     std::io::Error(label: ErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: ErrorLabel::from_static("invalid_uri"), recovery: RecoveryInfo::never())
+    templated_uri::ValidationError(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
@@ -157,7 +168,7 @@ impl HttpError {
         Self::other(
             format!("the response was not successful, status code: {}", code.as_u16()),
             recovery,
-            "invalid_status_code",
+            LABEL_INVALID_STATUS_CODE,
         )
     }
 
@@ -167,7 +178,7 @@ impl HttpError {
     /// The error is classified as non-retryable.
     #[must_use]
     pub fn validation(msg: impl Into<Cow<'static, str>>) -> Self {
-        Self::other(msg.into(), RecoveryInfo::never(), "validation")
+        Self::other(msg.into(), RecoveryInfo::never(), LABEL_VALIDATION)
     }
 
     /// Creates an error that indicates a service is currently unavailable.
@@ -197,7 +208,7 @@ impl HttpError {
     /// ```
     #[must_use]
     pub fn unavailable(msg: impl Into<Cow<'static, str>>) -> Self {
-        Self::other(msg.into(), RecoveryInfo::unavailable(), "unavailable")
+        Self::other(msg.into(), RecoveryInfo::unavailable(), LABEL_UNAVAILABLE)
     }
 
     /// Creates a timeout error with the specified duration.
@@ -212,7 +223,7 @@ impl HttpError {
                 duration.as_millis()
             ),
             RecoveryInfo::retry(),
-            "timeout",
+            LABEL_TIMEOUT,
         )
     }
 
@@ -225,7 +236,7 @@ impl HttpError {
         Self::other(
             format!("body data was not fully received, timeout: {}ms", duration.as_millis()),
             RecoveryInfo::retry(),
-            "timeout",
+            LABEL_TIMEOUT,
         )
     }
 
