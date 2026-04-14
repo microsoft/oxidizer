@@ -91,6 +91,16 @@ impl ErrorLabel {
         Self(Cow::Borrowed(label))
     }
 
+    #[must_use]
+    const fn from_static_unchecked(label: &'static str) -> Self {
+        debug_assert!(
+            is_valid_label(label),
+            "ErrorLabel: value must contain only ASCII alphanumeric characters, '_', or '.'"
+        );
+
+        Self(Cow::Borrowed(label))
+    }
+
     /// Creates a label by joining the parts with `.` as a separator.
     ///
     /// # Examples
@@ -198,46 +208,46 @@ impl ErrorLabel {
     #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and its fully covered by tests
     const fn from_io(kind: ErrorKind) -> Self {
         match kind {
-            ErrorKind::NotFound => Self::from_static("not_found"),
-            ErrorKind::PermissionDenied => Self::from_static("permission_denied"),
-            ErrorKind::ConnectionRefused => Self::from_static("connection_refused"),
-            ErrorKind::ConnectionReset => Self::from_static("connection_reset"),
-            ErrorKind::HostUnreachable => Self::from_static("host_unreachable"),
-            ErrorKind::NetworkUnreachable => Self::from_static("network_unreachable"),
-            ErrorKind::ConnectionAborted => Self::from_static("connection_aborted"),
-            ErrorKind::NotConnected => Self::from_static("not_connected"),
-            ErrorKind::AddrInUse => Self::from_static("addr_in_use"),
-            ErrorKind::AddrNotAvailable => Self::from_static("addr_not_available"),
-            ErrorKind::NetworkDown => Self::from_static("network_down"),
-            ErrorKind::BrokenPipe => Self::from_static("broken_pipe"),
-            ErrorKind::AlreadyExists => Self::from_static("already_exists"),
-            ErrorKind::WouldBlock => Self::from_static("would_block"),
-            ErrorKind::NotADirectory => Self::from_static("not_directory"),
-            ErrorKind::IsADirectory => Self::from_static("is_directory"),
-            ErrorKind::DirectoryNotEmpty => Self::from_static("directory_not_empty"),
-            ErrorKind::ReadOnlyFilesystem => Self::from_static("read_only_filesystem"),
-            ErrorKind::StaleNetworkFileHandle => Self::from_static("stale_network_file_handle"),
-            ErrorKind::InvalidInput => Self::from_static("invalid_input"),
-            ErrorKind::InvalidData => Self::from_static("invalid_data"),
-            ErrorKind::TimedOut => Self::from_static("timed_out"),
-            ErrorKind::WriteZero => Self::from_static("write_zero"),
-            ErrorKind::StorageFull => Self::from_static("storage_full"),
-            ErrorKind::NotSeekable => Self::from_static("not_seekable"),
-            ErrorKind::QuotaExceeded => Self::from_static("quota_exceeded"),
-            ErrorKind::FileTooLarge => Self::from_static("file_too_large"),
-            ErrorKind::ResourceBusy => Self::from_static("resource_busy"),
-            ErrorKind::ExecutableFileBusy => Self::from_static("executable_file_busy"),
-            ErrorKind::Deadlock => Self::from_static("deadlock"),
-            ErrorKind::CrossesDevices => Self::from_static("crosses_devices"),
-            ErrorKind::TooManyLinks => Self::from_static("too_many_links"),
-            ErrorKind::InvalidFilename => Self::from_static("invalid_filename"),
-            ErrorKind::ArgumentListTooLong => Self::from_static("argument_list_too_long"),
-            ErrorKind::Interrupted => Self::from_static("interrupted"),
-            ErrorKind::Unsupported => Self::from_static("unsupported"),
-            ErrorKind::UnexpectedEof => Self::from_static("unexpected_eof"),
-            ErrorKind::OutOfMemory => Self::from_static("out_of_memory"),
-            ErrorKind::Other => Self::from_static("other"),
-            _ => Self::from_static("unknown"),
+            ErrorKind::NotFound => Self::from_static_unchecked("not_found"),
+            ErrorKind::PermissionDenied => Self::from_static_unchecked("permission_denied"),
+            ErrorKind::ConnectionRefused => Self::from_static_unchecked("connection_refused"),
+            ErrorKind::ConnectionReset => Self::from_static_unchecked("connection_reset"),
+            ErrorKind::HostUnreachable => Self::from_static_unchecked("host_unreachable"),
+            ErrorKind::NetworkUnreachable => Self::from_static_unchecked("network_unreachable"),
+            ErrorKind::ConnectionAborted => Self::from_static_unchecked("connection_aborted"),
+            ErrorKind::NotConnected => Self::from_static_unchecked("not_connected"),
+            ErrorKind::AddrInUse => Self::from_static_unchecked("addr_in_use"),
+            ErrorKind::AddrNotAvailable => Self::from_static_unchecked("addr_not_available"),
+            ErrorKind::NetworkDown => Self::from_static_unchecked("network_down"),
+            ErrorKind::BrokenPipe => Self::from_static_unchecked("broken_pipe"),
+            ErrorKind::AlreadyExists => Self::from_static_unchecked("already_exists"),
+            ErrorKind::WouldBlock => Self::from_static_unchecked("would_block"),
+            ErrorKind::NotADirectory => Self::from_static_unchecked("not_directory"),
+            ErrorKind::IsADirectory => Self::from_static_unchecked("is_directory"),
+            ErrorKind::DirectoryNotEmpty => Self::from_static_unchecked("directory_not_empty"),
+            ErrorKind::ReadOnlyFilesystem => Self::from_static_unchecked("read_only_filesystem"),
+            ErrorKind::StaleNetworkFileHandle => Self::from_static_unchecked("stale_network_file_handle"),
+            ErrorKind::InvalidInput => Self::from_static_unchecked("invalid_input"),
+            ErrorKind::InvalidData => Self::from_static_unchecked("invalid_data"),
+            ErrorKind::TimedOut => Self::from_static_unchecked("timed_out"),
+            ErrorKind::WriteZero => Self::from_static_unchecked("write_zero"),
+            ErrorKind::StorageFull => Self::from_static_unchecked("storage_full"),
+            ErrorKind::NotSeekable => Self::from_static_unchecked("not_seekable"),
+            ErrorKind::QuotaExceeded => Self::from_static_unchecked("quota_exceeded"),
+            ErrorKind::FileTooLarge => Self::from_static_unchecked("file_too_large"),
+            ErrorKind::ResourceBusy => Self::from_static_unchecked("resource_busy"),
+            ErrorKind::ExecutableFileBusy => Self::from_static_unchecked("executable_file_busy"),
+            ErrorKind::Deadlock => Self::from_static_unchecked("deadlock"),
+            ErrorKind::CrossesDevices => Self::from_static_unchecked("crosses_devices"),
+            ErrorKind::TooManyLinks => Self::from_static_unchecked("too_many_links"),
+            ErrorKind::InvalidFilename => Self::from_static_unchecked("invalid_filename"),
+            ErrorKind::ArgumentListTooLong => Self::from_static_unchecked("argument_list_too_long"),
+            ErrorKind::Interrupted => Self::from_static_unchecked("interrupted"),
+            ErrorKind::Unsupported => Self::from_static_unchecked("unsupported"),
+            ErrorKind::UnexpectedEof => Self::from_static_unchecked("unexpected_eof"),
+            ErrorKind::OutOfMemory => Self::from_static_unchecked("out_of_memory"),
+            ErrorKind::Other => Self::from_static_unchecked("other"),
+            _ => Self::from_static_unchecked("unknown"),
         }
     }
 }
