@@ -42,7 +42,7 @@ fn report(error: &ApiError) {
         None
     });
 
-    println!("metric tag: {}", label);
+    println!("metric tag: {label}");
 }
 
 #[expect(clippy::unwrap_used, reason = "Example code")]
