@@ -195,6 +195,7 @@ impl ErrorLabel {
         Cow::Owned(value.chars().filter(|c| is_valid_label_char(*c as u8)).collect())
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and its fully covered by tests
     const fn from_io(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::NotFound => Self::from_static("not_found"),
@@ -308,7 +309,6 @@ impl From<ErrorKind> for ErrorLabel {
     /// let label = ErrorLabel::from(ErrorKind::ConnectionRefused);
     /// assert_eq!(label, "connection_refused");
     /// ```
-    #[cfg_attr(coverage_nightly, coverage(off))] // it includes unreachable variant and it's fully covered by tests
     fn from(kind: ErrorKind) -> Self {
         Self::from_io(kind)
     }
