@@ -1,6 +1,32 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+//! Low-cardinality label for errors, useful for metrics and logging.
+//!
+//! [`ErrorLabel`] wraps a [`Cow<'static, str>`] to hold either a static string literal
+//! or a heap-allocated [`String`]. It is intended for use as a metric tag value or
+//! structured log field and should always be chosen from a small, bounded set of values.
+//!
+//! # Quick Start
+//!
+//! ```
+//! use error_label::ErrorLabel;
+//!
+//! // From a static string
+//! let label: ErrorLabel = "timeout".into();
+//! assert_eq!(label, "timeout");
+//!
+//! // Dotted chain from parts
+//! let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
+//! assert_eq!(label, "http.client.timeout");
+//! ```
+
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/favicon.ico")]
+
 use std::borrow::Cow;
 use std::collections::hash_set::HashSet;
 use std::error::Error;
@@ -8,9 +34,7 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::iter::successors;
 
-use crate::HttpError;
-
-/// A low-cardinality label for an [`HttpError`](crate::HttpError), useful for metrics and logging.
+/// A low-cardinality label for an error, useful for metrics and logging.
 ///
 /// Wraps a [`Cow<'static, str>`] so it can hold either a static string literal
 /// or a heap-allocated [`String`].
@@ -36,29 +60,29 @@ use crate::HttpError;
 /// # Examples
 ///
 /// ```
-/// # use http_extensions::HttpErrorLabel;
+/// # use error_label::ErrorLabel;
 /// // From a static string
-/// let label: HttpErrorLabel = "timeout".into();
+/// let label: ErrorLabel = "timeout".into();
 /// assert_eq!(label, "timeout");
 ///
 /// // From an owned String
-/// let label: HttpErrorLabel = String::from("custom_label").into();
+/// let label: ErrorLabel = String::from("custom_label").into();
 /// assert_eq!(label, "custom_label");
 /// ```
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
-pub struct HttpErrorLabel(Cow<'static, str>);
+pub struct ErrorLabel(Cow<'static, str>);
 
-impl HttpErrorLabel {
+impl ErrorLabel {
     /// Creates a label by joining the parts with `.` as a separator.
     ///
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::HttpErrorLabel;
-    /// let label = HttpErrorLabel::from_parts(["http", "timeout"]);
+    /// # use error_label::ErrorLabel;
+    /// let label = ErrorLabel::from_parts(["http", "timeout"]);
     /// assert_eq!(label, "http.timeout");
     ///
-    /// let label = HttpErrorLabel::from_parts(["a", "b", "c"]);
+    /// let label = ErrorLabel::from_parts(["a", "b", "c"]);
     /// assert_eq!(label, "a.b.c");
     /// ```
     #[must_use]
@@ -78,44 +102,34 @@ impl HttpErrorLabel {
     /// Creates a label by walking the error chain and joining recognized labels with `.`.
     ///
     /// Traverses the chain of [`source`](Error::source) errors starting from `error`.
-    /// Each error in the chain that is recognized contributes a segment to the
-    /// resulting label:
+    /// For each error, `get_label` is called to extract an optional label. Duplicate
+    /// labels are removed, keeping only the first occurrence.
     ///
-    /// - [`HttpError`](crate::HttpError) — uses its [`label`](crate::HttpError::label).
-    /// - [`std::io::Error`] — uses a label derived from its [`ErrorKind`](std::io::ErrorKind)
-    ///   (e.g. `connection_refused`).
-    ///
-    /// Duplicate labels are removed, keeping only the first occurrence. This
-    /// avoids redundant segments when an outer error derives its label from
-    /// an inner error (e.g. an [`HttpError`](crate::HttpError) converted from
-    /// an [`std::io::Error`] shares the same [`ErrorKind`](std::io::ErrorKind)-based label).
-    ///
-    /// Unrecognized error types are skipped. If no error in the chain is
-    /// recognized, the returned label is empty.
+    /// Unrecognized error types (where `get_label` returns `None`) are skipped. If no
+    /// error in the chain is recognized, the returned label is empty.
     ///
     /// # Examples
     ///
     /// ```
-    /// # use http_extensions::{HttpError, HttpErrorLabel};
-    /// # use recoverable::RecoveryInfo;
-    /// // An HttpError wrapping an io::Error produces a dotted chain
-    /// // of the outer HttpError label and the inner io::Error label.
+    /// # use error_label::ErrorLabel;
     /// let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-    /// let http_err = HttpError::other(io_err, RecoveryInfo::retry(), "connect");
-    /// let label = HttpErrorLabel::from_error_chain(&http_err);
-    /// assert_eq!(label, "connect.connection_refused");
+    /// let label = ErrorLabel::from_error_chain(&io_err, |e| {
+    ///     e.downcast_ref::<std::io::Error>()
+    ///         .map(|io| ErrorLabel::from(io.kind()))
+    /// });
+    /// assert_eq!(label, "connection_refused");
     /// ```
     #[must_use]
-    pub fn from_error_chain(error: &(dyn Error + 'static)) -> Self {
+    pub fn from_error_chain(error: &(dyn Error + 'static), get_label: impl Fn(&(dyn Error + 'static)) -> Option<Self>) -> Self {
         // If the error has no source, return its label directly.
         if error.source().is_none() {
-            return get_label_from_error(error).unwrap_or_default();
+            return get_label(error).unwrap_or_default();
         }
 
         let mut seen = HashSet::new();
 
         let chain = successors(Some(error), |e| (*e).source())
-            .filter_map(get_label_from_error)
+            .filter_map(&get_label)
             .filter(|label| seen.insert(label.clone()));
 
         Self::from_parts(chain)
@@ -134,55 +148,55 @@ impl HttpErrorLabel {
     }
 }
 
-impl fmt::Display for HttpErrorLabel {
+impl fmt::Display for ErrorLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
 }
 
-impl From<&'static str> for HttpErrorLabel {
+impl From<&'static str> for ErrorLabel {
     fn from(s: &'static str) -> Self {
         Self(Cow::Borrowed(s))
     }
 }
 
-impl From<String> for HttpErrorLabel {
+impl From<String> for ErrorLabel {
     fn from(s: String) -> Self {
         Self(Cow::Owned(s))
     }
 }
 
-impl From<Cow<'static, str>> for HttpErrorLabel {
+impl From<Cow<'static, str>> for ErrorLabel {
     fn from(s: Cow<'static, str>) -> Self {
         Self(s)
     }
 }
 
-impl From<HttpErrorLabel> for Cow<'static, str> {
-    fn from(s: HttpErrorLabel) -> Self {
+impl From<ErrorLabel> for Cow<'static, str> {
+    fn from(s: ErrorLabel) -> Self {
         s.0
     }
 }
 
-impl PartialEq<str> for HttpErrorLabel {
+impl PartialEq<str> for ErrorLabel {
     fn eq(&self, other: &str) -> bool {
         self.0 == other
     }
 }
 
-impl PartialEq<&str> for HttpErrorLabel {
+impl PartialEq<&str> for ErrorLabel {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
     }
 }
 
-impl AsRef<str> for HttpErrorLabel {
+impl AsRef<str> for ErrorLabel {
     fn as_ref(&self) -> &str {
         &self.0
     }
 }
 
-impl From<ErrorKind> for HttpErrorLabel {
+impl From<ErrorKind> for ErrorLabel {
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::NotFound => "not_found".into(),
@@ -229,18 +243,6 @@ impl From<ErrorKind> for HttpErrorLabel {
     }
 }
 
-fn get_label_from_error(error: &(dyn Error + 'static)) -> Option<HttpErrorLabel> {
-    if let Some(err) = error.downcast_ref::<std::io::Error>() {
-        return Some(err.kind().into());
-    }
-
-    if let Some(err) = error.downcast_ref::<HttpError>() {
-        return Some(err.label().clone());
-    }
-
-    None
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -251,14 +253,14 @@ mod tests {
 
     #[test]
     fn from_static_str() {
-        let label = HttpErrorLabel::from("static_label");
+        let label = ErrorLabel::from("static_label");
         assert_eq!(label, "static_label");
         assert_eq!(label.as_str(), "static_label");
     }
 
     #[test]
     fn from_string() {
-        let label = HttpErrorLabel::from(String::from("owned_label"));
+        let label = ErrorLabel::from(String::from("owned_label"));
         assert_eq!(label, "owned_label");
         assert_eq!(label.as_str(), "owned_label");
     }
@@ -266,58 +268,58 @@ mod tests {
     #[test]
     fn from_cow() {
         let cow: Cow<'static, str> = Cow::Owned(String::from("cow_label"));
-        let label = HttpErrorLabel::from(cow);
+        let label = ErrorLabel::from(cow);
         assert_eq!(label, "cow_label");
     }
 
     #[test]
     fn display() {
-        let label = HttpErrorLabel::from("display_test");
+        let label = ErrorLabel::from("display_test");
         assert_eq!(format!("{label}"), "display_test");
     }
 
     #[test]
     fn as_ref_str() {
-        let label = HttpErrorLabel::from("as_ref_test");
+        let label = ErrorLabel::from("as_ref_test");
         let s: &str = label.as_ref();
         assert_eq!(s, "as_ref_test");
     }
 
     #[test]
     fn from_parts_multiple() {
-        let label = HttpErrorLabel::from_parts(["http", "client", "", "timeout"]);
+        let label = ErrorLabel::from_parts(["http", "client", "", "timeout"]);
         assert_eq!(label, "http.client.timeout");
     }
 
     #[test]
     fn from_parts_single() {
-        let label = HttpErrorLabel::from_parts(["only"]);
+        let label = ErrorLabel::from_parts(["only"]);
         assert_eq!(label, "only");
     }
 
     #[test]
     fn from_parts_empty() {
-        let label = HttpErrorLabel::from_parts(std::iter::empty::<&str>());
+        let label = ErrorLabel::from_parts(std::iter::empty::<&str>());
         assert_eq!(label, "");
     }
 
     #[test]
     fn from_parts_owned_strings() {
         let parts = vec![String::from("a"), String::from("b")];
-        let label = HttpErrorLabel::from_parts(parts);
+        let label = ErrorLabel::from_parts(parts);
         assert_eq!(label, "a.b");
     }
 
     #[test]
     fn into_cow_borrowed() {
-        let label = HttpErrorLabel::from("static_value");
+        let label = ErrorLabel::from("static_value");
         let cow = label.into_cow();
         assert!(matches!(cow, Cow::Borrowed("static_value")));
     }
 
     #[test]
     fn into_cow_owned() {
-        let label = HttpErrorLabel::from(String::from("owned_value"));
+        let label = ErrorLabel::from(String::from("owned_value"));
         let cow = label.into_cow();
         assert!(matches!(cow, Cow::Owned(_)));
         assert_eq!(cow, "owned_value");
@@ -326,62 +328,28 @@ mod tests {
     #[test]
     fn from_error_chain_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-        let label = HttpErrorLabel::from_error_chain(&io_err);
+        let label = ErrorLabel::from_error_chain(&io_err, io_get_label);
         assert_eq!(label, "connection_refused");
-    }
-
-    #[test]
-    fn from_error_chain_http_error() {
-        let http_err = HttpError::other(std::io::Error::other("fail"), recoverable::RecoveryInfo::never(), "my_label");
-        let label = HttpErrorLabel::from_error_chain(&http_err);
-        // The HttpError itself is recognized ("my_label"), plus the wrapped
-        // io::Error is also recognized ("other").
-        assert_eq!(label, "my_label.other");
-    }
-
-    #[test]
-    fn from_error_chain_http_wrapping_io_deduplicates() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
-        let http_err = HttpError::from(io_err);
-        let label = HttpErrorLabel::from_error_chain(&http_err);
-        // HttpError converted from io::Error gets label "broken_pipe",
-        // and the inner io::Error also contributes "broken_pipe", but
-        // duplicates are removed so only the first occurrence is kept.
-        assert_eq!(label, "broken_pipe");
-    }
-
-    #[test]
-    fn from_error_chain_keeps_distinct_labels() {
-        // An HttpError with a custom label wrapping an io::Error produces
-        // two distinct segments — no deduplication occurs.
-        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "slow");
-        let http_err = HttpError::other(io_err, recoverable::RecoveryInfo::retry(), "request");
-        let label = HttpErrorLabel::from_error_chain(&http_err);
-        assert_eq!(label, "request.timed_out");
     }
 
     #[test]
     fn from_error_chain_unrecognized_error() {
         // A plain string error is not recognized, so the label is empty.
         let err: Box<dyn Error + Send + Sync> = "unknown".into();
-        let label = HttpErrorLabel::from_error_chain(err.as_ref());
+        let label = ErrorLabel::from_error_chain(err.as_ref(), io_get_label);
         assert_eq!(label, "");
-    }
-
-    #[test]
-    fn from_error_chain_single_http_no_source() {
-        let http_err = HttpError::validation("bad input");
-        let label = HttpErrorLabel::from_error_chain(&http_err);
-        // validation wraps a Cow string via HttpError::other, so the inner
-        // source is a plain string — only the HttpError label is recognized.
-        assert_eq!(label, "validation");
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn error_kind_all_variants() {
-        let kind_map: Vec<_> = ALL_ERROR_KINDS.iter().map(|v| (*v, HttpErrorLabel::from(*v))).collect();
+        let kind_map: Vec<_> = ALL_ERROR_KINDS.iter().map(|v| (*v, ErrorLabel::from(*v))).collect();
 
         insta::assert_debug_snapshot!(kind_map);
+    }
+
+    /// Test helper: extracts labels only from `std::io::Error`.
+    fn io_get_label(error: &(dyn Error + 'static)) -> Option<ErrorLabel> {
+        error.downcast_ref::<std::io::Error>().map(|err| err.kind().into())
     }
 }

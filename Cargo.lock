@@ -754,6 +754,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "error_label"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "testing_aids",
+]
+
+[[package]]
 name = "event-listener"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1102,13 +1110,13 @@ dependencies = [
  "bytesbuf",
  "criterion",
  "data_privacy",
+ "error_label",
  "futures",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
  "hyper-util",
- "insta",
  "layered",
  "mutants",
  "ohno 0.3.1",

@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
+use error_label::ErrorLabel;
 use http::StatusCode;
 use http::header::{InvalidHeaderValue, MaxSizeReached};
 use http::method::InvalidMethod;
@@ -13,7 +14,6 @@ use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
-use crate::HttpErrorLabel;
 use crate::HttpRequest;
 use crate::http_utils::SyncHolder;
 
@@ -27,7 +27,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// - Captures backtraces automatically
 /// - Tells you if an error is temporary (transient) or permanent
 /// - Works with `http` crate errors out of the box
-/// - Carries an [`HttpErrorLabel`] for metrics and logging (see its docs for
+/// - Carries an [`ErrorLabel`] for metrics and logging (see its docs for
 ///   cardinality requirements)
 ///
 /// # Examples
@@ -101,18 +101,18 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// ```
 #[ohno::error]
 #[from(
-    http::Error(label: HttpErrorLabel::from("http_error"), recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: HttpErrorLabel::from("invalid_uri_parts"), recovery: RecoveryInfo::never()),
-    InvalidUri(label: HttpErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never()),
-    InvalidHeaderValue(label: HttpErrorLabel::from("invalid_header_value"), recovery: RecoveryInfo::never()),
-    InvalidMethod(label: HttpErrorLabel::from("invalid_method"), recovery: RecoveryInfo::never()),
-    InvalidStatusCode(label: HttpErrorLabel::from("invalid_status_code"), recovery: RecoveryInfo::never()),
-    MaxSizeReached(label: HttpErrorLabel::from("max_size_reached"), recovery: RecoveryInfo::never()),
-    std::io::Error(label: HttpErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: HttpErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never())
+    http::Error(label: ErrorLabel::from("http_error"), recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: ErrorLabel::from("invalid_uri_parts"), recovery: RecoveryInfo::never()),
+    InvalidUri(label: ErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never()),
+    InvalidHeaderValue(label: ErrorLabel::from("invalid_header_value"), recovery: RecoveryInfo::never()),
+    InvalidMethod(label: ErrorLabel::from("invalid_method"), recovery: RecoveryInfo::never()),
+    InvalidStatusCode(label: ErrorLabel::from("invalid_status_code"), recovery: RecoveryInfo::never()),
+    MaxSizeReached(label: ErrorLabel::from("max_size_reached"), recovery: RecoveryInfo::never()),
+    std::io::Error(label: ErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
+    templated_uri::ValidationError(label: ErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
-    label: HttpErrorLabel,
+    label: ErrorLabel,
     recovery: RecoveryInfo,
     // NOTE: Boxed to keep the size of HttpError small and wrapped
     // in SyncHolder to make HttpError Sync even if HttpRequest is not Sync.
@@ -130,22 +130,18 @@ impl HttpError {
     /// Wraps any error type into an [`HttpError`] with the given `recovery`
     /// strategy and a `label` for metrics and logging.
     ///
-    /// The `label` accepts anything that implements `Into<HttpErrorLabel>`.
-    /// See [`HttpErrorLabel`] docs for cardinality requirements.
-    pub fn other(
-        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
-        recovery: RecoveryInfo,
-        label: impl Into<HttpErrorLabel>,
-    ) -> Self {
+    /// The `label` accepts anything that implements `Into<ErrorLabel>`.
+    /// See [`ErrorLabel`] docs for cardinality requirements.
+    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: impl Into<ErrorLabel>) -> Self {
         Self::caused_by(label, recovery, None, error)
     }
 
     /// Wraps an error that implements [`Recovery`] into an [`HttpError`],
     /// extracting recovery information automatically via [`Recovery::recovery()`].
     ///
-    /// The `label` accepts anything that implements `Into<HttpErrorLabel>`.
-    /// See [`HttpErrorLabel`] docs for cardinality requirements.
-    pub fn other_with_recovery<E>(error: E, label: impl Into<HttpErrorLabel>) -> Self
+    /// The `label` accepts anything that implements `Into<ErrorLabel>`.
+    /// See [`ErrorLabel`] docs for cardinality requirements.
+    pub fn other_with_recovery<E>(error: E, label: impl Into<ErrorLabel>) -> Self
     where
         E: std::error::Error + Send + Sync + Recovery + 'static,
     {
@@ -242,11 +238,11 @@ impl HttpError {
         self
     }
 
-    /// Returns the [`HttpErrorLabel`] attached to this error.
+    /// Returns the [`ErrorLabel`] attached to this error.
     ///
     /// Labels are low-cardinality identifiers useful for metrics and logging.
     #[must_use]
-    pub fn label(&self) -> &HttpErrorLabel {
+    pub fn label(&self) -> &ErrorLabel {
         &self.label
     }
 
