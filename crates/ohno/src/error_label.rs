@@ -148,7 +148,7 @@ impl ErrorLabel {
     ///     e.downcast_ref::<std::io::Error>()
     ///         .map(|io| ErrorLabel::from(io.kind()))
     /// });
-    /// assert_eq!(label, "conn_refused");
+    /// assert_eq!(label, "connection_refused");
     /// ```
     #[must_use]
     pub fn from_error_chain(error: &(dyn Error + 'static), mut get_label: impl FnMut(&(dyn Error + 'static)) -> Option<Self>) -> Self {
@@ -320,7 +320,7 @@ impl From<ErrorKind> for ErrorLabel {
     /// assert_eq!(label, "timed_out");
     ///
     /// let label = ErrorLabel::from(ErrorKind::ConnectionRefused);
-    /// assert_eq!(label, "conn_refused");
+    /// assert_eq!(label, "connection_refused");
     /// ```
     fn from(kind: ErrorKind) -> Self {
         Self::from_io(kind)
@@ -508,7 +508,7 @@ mod tests {
     fn from_error_chain_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
         let label = ErrorLabel::from_error_chain(&io_err, io_get_label);
-        assert_eq!(label, "conn_refused");
+        assert_eq!(label, "connection_refused");
     }
 
     #[test]
