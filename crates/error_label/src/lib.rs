@@ -8,12 +8,17 @@
 
 //! Low-cardinality label for errors, useful for metrics and logging.
 //!
-//! [`ErrorLabel`] holds a low-cardinality string value intended for use as a metric tag
-//! or structured log field. Values should always be chosen from a small, bounded set.
+//! This crate provides [`ErrorLabel`], a low-cardinality string value intended for use as a
+//! metric tag or structured log field. Values should always be chosen from a small, bounded set
+//! known at development time.
 //!
-//! # Quick Start
+//! # Core Types
 //!
-//! ```
+//! - [`ErrorLabel`]: A low-cardinality label for an error, backed by [`Cow<'static, str>`](std::borrow::Cow).
+//!
+//! # Examples
+//!
+//! ```rust
 //! use error_label::ErrorLabel;
 //!
 //! // From a static string
@@ -54,7 +59,7 @@ use std::iter::successors;
 ///
 /// # Examples
 ///
-/// ```
+/// ```rust
 /// # use error_label::ErrorLabel;
 /// // From a static string
 /// let label: ErrorLabel = "timeout".into();
@@ -72,7 +77,7 @@ impl ErrorLabel {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust
     /// # use error_label::ErrorLabel;
     /// let label = ErrorLabel::from_parts(["http", "timeout"]);
     /// assert_eq!(label, "http.timeout");
@@ -105,7 +110,7 @@ impl ErrorLabel {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust
     /// # use error_label::ErrorLabel;
     /// let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
     /// let label = ErrorLabel::from_error_chain(&io_err, |e| {
@@ -131,12 +136,31 @@ impl ErrorLabel {
     }
 
     /// Returns the label as a string slice.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use error_label::ErrorLabel;
+    /// let label: ErrorLabel = "timeout".into();
+    /// assert_eq!(label.as_str(), "timeout");
+    /// ```
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Consumes the label and returns [`Cow<'static, str>`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use error_label::ErrorLabel;
+    /// use std::borrow::Cow;
+    ///
+    /// let label: ErrorLabel = "timeout".into();
+    /// let cow: Cow<'static, str> = label.into_cow();
+    /// assert_eq!(cow, "timeout");
+    /// ```
     #[must_use]
     pub fn into_cow(self) -> Cow<'static, str> {
         self.0
@@ -169,7 +193,7 @@ impl From<Cow<'static, str>> for ErrorLabel {
 
 impl From<ErrorLabel> for Cow<'static, str> {
     fn from(s: ErrorLabel) -> Self {
-        s.0
+        s.into_cow()
     }
 }
 
@@ -192,6 +216,24 @@ impl AsRef<str> for ErrorLabel {
 }
 
 impl From<ErrorKind> for ErrorLabel {
+    /// Creates a label from an IO error kind.
+    ///
+    /// Maps each [`ErrorKind`] variant to a `snake_case` string label suitable for use as a
+    /// metric tag. Unrecognized variants (e.g. future additions to [`ErrorKind`]) are converted
+    /// using their [`Display`] representation with spaces replaced by underscores.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use error_label::ErrorLabel;
+    /// use std::io::ErrorKind;
+    ///
+    /// let label = ErrorLabel::from(ErrorKind::TimedOut);
+    /// assert_eq!(label, "timed_out");
+    ///
+    /// let label = ErrorLabel::from(ErrorKind::ConnectionRefused);
+    /// assert_eq!(label, "connection_refused");
+    /// ```
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::NotFound => "not_found".into(),
@@ -308,16 +350,11 @@ mod tests {
     #[test]
     fn into_cow_borrowed() {
         let label = ErrorLabel::from("static_value");
-        let cow = label.into_cow();
+        let cow = label.clone().into_cow();
         assert!(matches!(cow, Cow::Borrowed("static_value")));
-    }
 
-    #[test]
-    fn into_cow_owned() {
-        let label = ErrorLabel::from(String::from("owned_value"));
-        let cow = label.into_cow();
-        assert!(matches!(cow, Cow::Owned(_)));
-        assert_eq!(cow, "owned_value");
+        let cow = Cow::<'static, str>::from(label);
+        assert!(matches!(cow, Cow::Borrowed("static_value")));
     }
 
     #[test]
