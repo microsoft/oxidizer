@@ -15,6 +15,6 @@
 `ubuntu-slim` is a 1-vCPU Linux runner with a minimal image, suitable for jobs that
 are not CPU- or toolchain-intensive. It starts faster and consumes fewer resources.
 
-- [Standart github runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories)
+- [Standard github runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories)
 - [1-vCPU Linux runner announcement](https://github.blog/changelog/2025-10-28-1-vcpu-linux-runner-now-available-in-github-actions-in-public-preview/)
 - [ubuntu-slim image contents](https://github.com/actions/runner-images/blob/main/images/ubuntu-slim/ubuntu-slim-Readme.md)
