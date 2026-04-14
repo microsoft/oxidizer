@@ -4,8 +4,8 @@
 
 | Image | Used For |
 |-------|----------|
-| `ubuntu-slim` | Lightweight jobs that don't run a full build (spell-check, PR title lint, license headers, external type checks, CodeQL, release publishing, nightly gatekeeper) |
-| `ubuntu-latest` | Full builds, tests, static analysis, coverage, mutation testing |
+| `ubuntu-slim` | Lightweight jobs that don't run a full build (spell-check, PR title lint, license headers, external type checks, release publishing, nightly gatekeeper) |
+| `ubuntu-latest` | Full builds, tests, static analysis, coverage, mutation testing, CodeQL |
 | `ubuntu-24.04-arm` | ARM builds, tests, static analysis, coverage |
 | `windows-latest` | Cross-platform builds, tests, static analysis, coverage |
 | `windows-11-arm` | ARM builds, tests, static analysis |
