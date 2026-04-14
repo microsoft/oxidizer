@@ -253,13 +253,46 @@ fn process() -> Result<(), AppError> {
 }
 ```
 
+## Error Labeling
+
+[`ErrorLabel`][__link16] is a low-cardinality string label for errors, intended for use as a metric
+tag or structured log field. Labels must be chosen from a small, bounded set known at
+development time to avoid high-cardinality metric series.
+
+```rust
+use ohno::ErrorLabel;
+
+let label: ErrorLabel = "timeout".into();
+assert_eq!(label, "timeout");
+
+let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
+assert_eq!(label, "http.client.timeout");
+```
+
+Use [`ErrorLabel::from_error_chain`][__link17] to walk an error’s [`source`][__link18]
+chain and build a dotted label from recognized errors:
+
+```rust
+use ohno::ErrorLabel;
+
+let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+let label = ErrorLabel::from_error_chain(&io_err, |e| {
+    e.downcast_ref::<std::io::Error>()
+        .map(|io| ErrorLabel::from(io.kind()))
+});
+assert_eq!(label, "connection_refused");
+```
+
+Types that carry an [`ErrorLabel`][__link19] can implement the [`Labeled`][__link20] trait to expose it
+uniformly via [`Labeled::label`][__link21].
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-eemFTsYv4VGxV8V6jA5F3wGxEo-mnGFa-6G0HcPMFBpRdrYWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyKCPSdlRl5VG2b_E3QJE-3HGxDLtgYiIo0RG04scjDQw51GYWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
@@ -268,7 +301,13 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link13]: https://docs.rs/ohno/0.3.1/ohno/?search=Enrichable
  [__link14]: https://docs.rs/ohno/0.3.1/ohno/?search=AppError
  [__link15]: https://docs.rs/ohno/0.3.1/ohno/?search=AppError
+ [__link16]: https://docs.rs/ohno/0.3.1/ohno/?search=ErrorLabel
+ [__link17]: https://docs.rs/ohno/0.3.1/ohno/?search=ErrorLabel::from_error_chain
+ [__link18]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link19]: https://docs.rs/ohno/0.3.1/ohno/?search=ErrorLabel
  [__link2]: https://docs.rs/ohno/0.3.1/ohno/?search=ErrorExt
+ [__link20]: https://docs.rs/ohno/0.3.1/ohno/?search=Labeled
+ [__link21]: https://docs.rs/ohno/0.3.1/ohno/?search=Labeled::label
  [__link3]: https://docs.rs/ohno/0.3.1/ohno/?search=OhnoCore
  [__link4]: https://docs.rs/ohno/0.3.1/ohno/?search=AppError
  [__link5]: https://docs.rs/ohno/0.3.1/ohno/?search=OhnoCore

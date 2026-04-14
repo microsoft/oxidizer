@@ -4,12 +4,12 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use ohno::ErrorLabel;
 use http::StatusCode;
 use http::header::{InvalidHeaderValue, MaxSizeReached};
 use http::method::InvalidMethod;
 use http::status::InvalidStatusCode;
 use http::uri::{InvalidUri, InvalidUriParts};
+use ohno::ErrorLabel;
 use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
