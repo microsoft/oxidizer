@@ -3,12 +3,13 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/favicon.ico")]
 
 //! Low-cardinality label for errors, useful for metrics and logging.
 //!
-//! [`ErrorLabel`] wraps a [`Cow<'static, str>`] to hold either a static string literal
-//! or a heap-allocated [`String`]. It is intended for use as a metric tag value or
-//! structured log field and should always be chosen from a small, bounded set of values.
+//! [`ErrorLabel`] holds a low-cardinality string value intended for use as a metric tag
+//! or structured log field. Values should always be chosen from a small, bounded set.
 //!
 //! # Quick Start
 //!
@@ -24,9 +25,6 @@
 //! assert_eq!(label, "http.client.timeout");
 //! ```
 
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/favicon.ico")]
-
 use std::borrow::Cow;
 use std::collections::hash_set::HashSet;
 use std::error::Error;
@@ -35,9 +33,6 @@ use std::io::ErrorKind;
 use std::iter::successors;
 
 /// A low-cardinality label for an error, useful for metrics and logging.
-///
-/// Wraps a [`Cow<'static, str>`] so it can hold either a static string literal
-/// or a heap-allocated [`String`].
 ///
 /// # Cardinality requirements
 ///
