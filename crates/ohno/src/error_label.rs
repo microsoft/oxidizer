@@ -375,8 +375,7 @@ mod tests {
 
     #[test]
     fn from_static_with_dots_and_underscores() {
-        const LABEL: ErrorLabel = ErrorLabel::from_static("http.timed_out");
-        assert_eq!(LABEL, "http.timed_out");
+        assert_eq!(ErrorLabel::from_static("http.timed_out"), "http.timed_out");
     }
 
     #[test]
