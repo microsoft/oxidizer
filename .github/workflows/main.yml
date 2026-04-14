@@ -296,7 +296,7 @@ jobs:
           strict: true
 
   external-type-exposure:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       # prep
       - name: Checkout
