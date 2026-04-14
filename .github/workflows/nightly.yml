@@ -11,7 +11,7 @@ on:
 
 jobs:
   nightly-gatekeeper:
-    runs-on: ubuntu-1-vcpu-latest
+    runs-on: ubuntu-slim
     outputs:
       should_skip: ${{ steps.check.outputs.should_skip }}
     steps:

@@ -90,7 +90,7 @@ jobs:
         run: cargo deny --all-features --workspace --color always check all
 
   spell-check:
-    runs-on: ubuntu-1-vcpu-latest
+    runs-on: ubuntu-slim
     steps:
       # prep
       - name: Checkout
@@ -257,7 +257,7 @@ jobs:
           fail_ci_if_error: true
 
   pr-title:
-    runs-on: ubuntu-1-vcpu-latest
+    runs-on: ubuntu-slim
     if: github.event_name == 'pull_request'
     steps:
       - name: Check PR Title
@@ -282,7 +282,7 @@ jobs:
             test
 
   license-headers:
-    runs-on: ubuntu-1-vcpu-latest
+    runs-on: ubuntu-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
