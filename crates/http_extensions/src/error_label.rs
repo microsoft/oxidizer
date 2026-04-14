@@ -377,6 +377,7 @@ mod tests {
         assert_eq!(label, "validation");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn error_kind_all_variants() {
         let kind_map: Vec<_> = ALL_ERROR_KINDS.iter().map(|v| (*v, HttpErrorLabel::from(*v))).collect();
