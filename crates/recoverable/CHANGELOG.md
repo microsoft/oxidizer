@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.2] - 2026-04-12
+
+- ✨ Features
+
+  - implement `From<std::io::error::ErrorKind>` for `RecoveryInfo`
+
 ## [0.1.1] - 2026-03-03
 
 - ✨ Features

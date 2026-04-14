@@ -50,7 +50,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// ## Standard Library Errors
 ///
-/// - [`std::io::Error`] - Auto-classified as temporary or permanent
+/// - [`std::io::Error`] - Auto-classified as retry, unavailable, or never based on error kind
 /// - [`std::convert::Infallible`] - Handled for pattern matching completeness
 ///
 /// ## Works with `http` crate
@@ -106,7 +106,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
     InvalidMethod(label: "invalid_method", recovery: RecoveryInfo::never()),
     InvalidStatusCode(label: "invalid_status_code", recovery: RecoveryInfo::never()),
     MaxSizeReached(label: "max_size_reached", recovery: RecoveryInfo::never()),
-    std::io::Error(label: "io", recovery: crate::resilience::detect_io_recovery(error.kind())),
+    std::io::Error(label: "io", recovery: RecoveryInfo::from(error.kind())),
     templated_uri::ValidationError(label: "invalid_uri", recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {

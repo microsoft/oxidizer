@@ -201,6 +201,7 @@ msvc
 mutex
 Namespace
 NeutralMemoryPool
+NFS
 NewRelic
 newtype
 newtypes
@@ -317,6 +318,7 @@ tuples
 typesafe
 typestate
 UDEPS
+uncategorized
 unconfigured
 Multithreaded
 uncontended

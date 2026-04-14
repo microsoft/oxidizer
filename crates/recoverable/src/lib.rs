@@ -8,26 +8,22 @@
 
 //! Recovery information and classification for resilience patterns.
 //!
-//! # Why
-//!
 //! This crate provides types for classifying conditions based on their **recoverability state**,
 //! enabling consistent recovery behavior across different error types and resilience middleware.
 //!
-//! # Recovery Information
-//!
-//! The recovery information describes whether recovering from an operation might help, not whether
-//! the operation succeeded or failed. Both successful operations and permanent failures
-//! should use [`RecoveryInfo::never`][RecoveryInfo::never] since recovery is not necessary or desirable.
+//! Recovery information describes whether retrying an operation might help, not whether the
+//! operation succeeded or failed. Both successful operations and permanent failures should use
+//! [`RecoveryInfo::never`] since recovery is not necessary or desirable.
 //!
 //! # Core Types
 //!
 //! - [`RecoveryInfo`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
-//! - [`Recovery`]: A trait for types that can determine their recoverability.
+//! - [`Recovery`]: A trait for types that can provide their own recovery information.
 //! - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
 //!
 //! # Examples
 //!
-//! ## Recovery Error
+//! ## Classifying Errors
 //!
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
@@ -54,9 +50,8 @@
 //! let error = DatabaseError::ConnectionTimeout;
 //! assert_eq!(error.recovery().kind(), RecoveryKind::Retry);
 //!
-//! // For successful operations, also use never() since retry is unnecessary
+//! // Successful operations also use never() since retry is unnecessary
 //! let success_result: Result<(), DatabaseError> = Ok(());
-//! // If we had a wrapper type for success, it would also return RecoveryInfo::never()
 //! ```
 //!
 //! ## Retry Delay
@@ -81,6 +76,8 @@
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
+mod io;
+
 // Naming Convention for Get/Set:
 //
 // This type uses an unconventional naming pattern where setters use plain names (e.g., `delay()`)
@@ -88,11 +85,12 @@ use std::time::Duration;
 // conventions because setters are used much more frequently than getters in typical usage patterns.
 // The `get_` prefix on getters helps distinguish them from their corresponding setters.
 
-/// The recovery information associated with an operation or condition.
+/// Recovery information associated with an operation or condition.
 ///
-/// This type describes how an operation can be recovered from, if at all. It provides
-/// various ways to create recovery information for different scenarios, such as unknown conditions,
-/// permanent failures, transient failures, and service unavailability.
+/// Describes how an operation can be recovered from, if at all. Construct instances via the
+/// named constructors [`unknown`](Self::unknown), [`never`](Self::never),
+/// [`retry`](Self::retry), and [`unavailable`](Self::unavailable), and optionally attach a
+/// delay hint with [`delay`](Self::delay).
 ///
 /// # Examples
 ///
@@ -110,13 +108,13 @@ pub struct RecoveryInfo {
 
 /// Kind of recovery that can be attempted.
 ///
-/// To retrieve the recovery kind from a `RecoveryInfo` instance, use the [`RecoveryInfo::kind`] method.
+/// Retrieve the recovery kind from a [`RecoveryInfo`] instance via [`RecoveryInfo::kind`].
 ///
 /// # Handling Unknown Variants
 ///
-/// This enum is marked `#[non_exhaustive]`, which means new variants may be added in future
-/// versions without a major version bump. When matching on `RecoveryKind`, always include a
-/// wildcard arm that treats unrecognized variants the same as [`RecoveryKind::Unknown`]:
+/// This enum is `#[non_exhaustive]`, so new variants may be added in future versions without
+/// a major version bump. When matching on `RecoveryKind`, always include a wildcard arm that
+/// treats unrecognized variants the same as [`RecoveryKind::Unknown`]:
 ///
 /// ```rust
 /// use recoverable::{RecoveryInfo, RecoveryKind};
@@ -126,7 +124,7 @@ pub struct RecoveryInfo {
 ///         RecoveryKind::Retry => true,
 ///         RecoveryKind::Never => false,
 ///         RecoveryKind::Unavailable => false,
-///         // Treat unknown and any future variants conservatively
+///         // Treat unknown (and any future variants) conservatively
 ///         RecoveryKind::Unknown | _ => false,
 ///     }
 /// }
@@ -143,14 +141,14 @@ pub struct RecoveryInfo {
 #[derive(Debug, PartialEq, Clone, Eq, Copy, Hash)]
 #[non_exhaustive]
 pub enum RecoveryKind {
-    /// The condition is unknown.
+    /// The recoverability of the condition is unknown.
     ///
     /// Handling should be determined on a case-by-case basis. For example,
     /// unclassified network errors might warrant retrying. Consider an
-    /// optimistic/pessimistic approach based on your application's requirements.
+    /// optimistic or pessimistic approach based on your application's requirements.
     Unknown,
 
-    /// The condition is temporary and may resolve with recovery.
+    /// The condition is transient and may resolve with recovery.
     ///
     /// Retry the operation with backoff, respecting any [`RecoveryInfo::delay`] hint.
     Retry,
@@ -168,9 +166,9 @@ pub enum RecoveryKind {
 }
 
 impl RecoveryInfo {
-    /// Recovery cannot be determined.
+    /// Creates recovery info for an unknown condition.
     ///
-    /// Use when it's unclear whether recovery would help. Consider treating
+    /// Use when it is unclear whether recovery would help. Consider treating
     /// unknown conditions conservatively based on your application's requirements.
     ///
     /// # Examples
@@ -189,16 +187,16 @@ impl RecoveryInfo {
         }
     }
 
-    /// The condition is permanent and recovery won't help.
+    /// Creates recovery info for a permanent, non-recoverable condition.
     ///
-    /// Use this for both successful operations and permanent failures:
+    /// Use for both successful operations and permanent failures:
     ///
-    /// - **Successful operations**: The operation completed successfully, no recovery needed.
+    /// - **Successful operations**: The operation completed successfully; no recovery needed.
     /// - **Permanent failures**: Malformed requests, authentication failures, resource not found,
     ///   or other errors that require user intervention or code changes to resolve.
     ///
-    /// The recovery information describes **recoverability state**, not success/failure status.
-    /// If recovery doesn't change the outcome, use [`RecoveryInfo::never`] regardless of whether the
+    /// Recovery information describes **recoverability state**, not success/failure status.
+    /// If recovery would not change the outcome, use `never()` regardless of whether the
     /// original operation succeeded or failed.
     ///
     /// # Examples
@@ -223,7 +221,7 @@ impl RecoveryInfo {
         }
     }
 
-    /// The condition is temporary and may resolve quickly with recovery.
+    /// Creates recovery info for a transient, likely recoverable condition.
     ///
     /// Use for transient failures that are expected to resolve relatively quickly,
     /// such as network timeouts, brief resource contention, or rate limiting.
@@ -232,7 +230,7 @@ impl RecoveryInfo {
     ///
     /// For service-wide unavailability that may take much longer to resolve,
     /// use [`RecoveryInfo::unavailable`] instead. For cases where the service provides
-    /// explicit timing guidance, use the [`RecoveryInfo::delay`] method.
+    /// explicit timing guidance, chain the [`delay`](Self::delay) method.
     ///
     /// # Examples
     ///
@@ -251,15 +249,14 @@ impl RecoveryInfo {
         }
     }
 
-    /// Indicates a service is experiencing a widespread unavailability or significant degradation.
+    /// Creates recovery info for service-wide unavailability or significant degradation.
     ///
-    /// Use when the failure is due to a service-wide unavailability that affects many users
-    /// and may take an extended period to resolve (minutes to hours). Unlike
-    /// [`RecoveryInfo::retry`] which suggests quick resolution, unavailability indicates
-    /// uncertainty about recovery timing and suggests that multiple recovery attempts may
-    /// fail before the service recovers.
+    /// Use when the failure is due to a service-wide issue that affects many users and may
+    /// take an extended period to resolve (minutes to hours). Unlike [`RecoveryInfo::retry`],
+    /// which suggests quick resolution, unavailability indicates uncertainty about recovery
+    /// timing and suggests that multiple recovery attempts may fail before the service recovers.
     ///
-    /// To specify a recovery delay hint, use the [`RecoveryInfo::delay`] method:
+    /// To attach a recovery delay hint, chain the [`delay`](Self::delay) method:
     /// ```rust
     /// use std::time::Duration;
     ///
@@ -283,10 +280,10 @@ impl RecoveryInfo {
         }
     }
 
-    /// Adds a delay hint to this recovery.
+    /// Attaches a delay hint to this recovery information.
     ///
-    /// Sets a delay hint for this recovery information to indicate when a recovery attempt
-    /// should be made. The meaning of the delay depends on the recovery kind:
+    /// The delay indicates when a recovery attempt should be made. Its meaning depends on
+    /// the recovery kind:
     ///
     /// - For [`RecoveryInfo::retry`]: High-confidence timing guidance (e.g., from a
     ///   `Retry-After` header) indicating when the recovery attempt is likely to succeed.
@@ -322,10 +319,9 @@ impl RecoveryInfo {
         }
     }
 
-    /// Returns the recovery kind.
+    /// Returns the recovery kind for this instance.
     ///
-    /// Use this method to determine the appropriate recovery strategy
-    /// for the given recovery instance.
+    /// Use this to determine the appropriate recovery strategy.
     ///
     /// # Examples
     ///
@@ -343,13 +339,13 @@ impl RecoveryInfo {
         self.kind
     }
 
-    /// Returns the explicit delay duration for recoverable conditions.
+    /// Returns the delay hint, if one was set via [`delay`](Self::delay).
     ///
-    /// Use this method with [`RecoveryInfo::kind`] to determine both whether a condition is recoverable
-    /// and if an explicit delay is provided. This method returns `Some(duration)` when a delay
-    /// has been specified via [`RecoveryInfo::delay`], and `None` otherwise.
+    /// Use together with [`kind`](Self::kind) to determine both whether a condition is
+    /// recoverable and whether an explicit delay is provided. Returns `Some(duration)` when
+    /// a delay has been set, and `None` otherwise.
     ///
-    /// The meaning of the delay depends on the recovery kind:
+    /// The meaning of the returned delay depends on the recovery kind:
     /// - For [`RecoveryInfo::retry`]: High-confidence timing guidance indicating when recovery will likely succeed.
     /// - For [`RecoveryInfo::unavailable`]: Low-confidence estimate for the earliest time when recovery might succeed.
     ///
@@ -390,14 +386,14 @@ impl RecoveryInfo {
     }
 }
 
-/// Enables types to indicate their recovery information.
+/// Enables types to provide their own recovery information.
 ///
-/// Implement this trait for errors or any type that can provide recovery information
-/// information about its state. This allows consistent handling of recoverable
-/// conditions across various types in resilience middleware.
+/// Implement this trait for errors or any type that can indicate the recoverability of
+/// its state. This allows consistent handling of recoverable conditions across various
+/// types in resilience middleware.
 ///
-/// Typical scenarios for implementing this trait are errors that can be classified
-/// as transient or permanent, depending on the specific error condition.
+/// Typical implementers are error types whose variants can be classified as transient or
+/// permanent, depending on the specific error condition.
 ///
 /// # Examples
 ///
@@ -424,10 +420,10 @@ impl RecoveryInfo {
 /// }
 /// ```
 pub trait Recovery {
-    /// Returns the recovery information for this condition.
+    /// Returns recovery information for this instance.
     ///
-    /// Return appropriate recovery information based on the internal state of the type
-    /// that implements this trait.
+    /// Implementations should return appropriate recovery information based on the
+    /// internal state of the type.
     ///
     /// # Examples
     ///
@@ -472,7 +468,7 @@ impl Display for RecoveryInfo {
 }
 
 impl RecoveryKind {
-    /// Returns a static string representation of this recovery kind.
+    /// Returns a string representation of this recovery kind.
     ///
     /// # Examples
     ///
