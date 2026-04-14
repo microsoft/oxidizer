@@ -259,6 +259,7 @@ mod backtrace;
 mod core;
 mod enrichable;
 mod enrichment_entry;
+pub mod error_label;
 mod error_ext;
 mod source;
 
@@ -266,6 +267,7 @@ mod source;
 pub mod test_util;
 
 pub use core::OhnoCore;
+pub use error_label::ErrorLabel;
 
 #[cfg(feature = "app-err")]
 pub use app::{AppError, IntoAppError};

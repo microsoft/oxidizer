@@ -1,14 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/error_label/favicon.ico")]
-
 //! Low-cardinality label for errors, useful for metrics and logging.
 //!
-//! This crate provides [`ErrorLabel`], a low-cardinality string value intended for use as a
+//! This module provides [`ErrorLabel`], a low-cardinality string value intended for use as a
 //! metric tag or structured log field. Values should always be chosen from a small, bounded set
 //! known at development time.
 //!
@@ -32,7 +27,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use error_label::ErrorLabel;
+//! use ohno::ErrorLabel;
 //!
 //! // From a static string
 //! let label: ErrorLabel = "timeout".into();
@@ -73,7 +68,7 @@ use std::iter::successors;
 /// # Examples
 ///
 /// ```rust
-/// # use error_label::ErrorLabel;
+/// # use ohno::ErrorLabel;
 /// // From a static string
 /// let label: ErrorLabel = "timeout".into();
 /// assert_eq!(label, "timeout");
@@ -91,7 +86,7 @@ impl ErrorLabel {
     /// # Examples
     ///
     /// ```rust
-    /// # use error_label::ErrorLabel;
+    /// # use ohno::ErrorLabel;
     /// let label = ErrorLabel::from_parts(["http", "timeout"]);
     /// assert_eq!(label, "http.timeout");
     ///
@@ -124,7 +119,7 @@ impl ErrorLabel {
     /// # Examples
     ///
     /// ```rust
-    /// # use error_label::ErrorLabel;
+    /// # use ohno::ErrorLabel;
     /// let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
     /// let label = ErrorLabel::from_error_chain(&io_err, |e| {
     ///     e.downcast_ref::<std::io::Error>()
@@ -153,7 +148,7 @@ impl ErrorLabel {
     /// # Examples
     ///
     /// ```rust
-    /// # use error_label::ErrorLabel;
+    /// # use ohno::ErrorLabel;
     /// let label: ErrorLabel = "timeout".into();
     /// assert_eq!(label.as_str(), "timeout");
     /// ```
@@ -167,7 +162,7 @@ impl ErrorLabel {
     /// # Examples
     ///
     /// ```rust
-    /// # use error_label::ErrorLabel;
+    /// # use ohno::ErrorLabel;
     /// use std::borrow::Cow;
     ///
     /// let label: ErrorLabel = "timeout".into();
@@ -238,7 +233,7 @@ impl From<ErrorKind> for ErrorLabel {
     /// # Examples
     ///
     /// ```rust
-    /// # use error_label::ErrorLabel;
+    /// # use ohno::ErrorLabel;
     /// use std::io::ErrorKind;
     ///
     /// let label = ErrorLabel::from(ErrorKind::TimedOut);

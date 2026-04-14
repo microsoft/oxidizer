@@ -17,7 +17,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extens
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "error_label::ErrorLabel",
+    "ohno::error_label::ErrorLabel",
     "futures_core::stream::Stream",
     "bytes::bytes::Bytes",
     "bytesbuf::mem::global::GlobalPool",
@@ -57,7 +57,6 @@ test-util = ["tick/test-util"]
 [dependencies]
 bytes.workspace = true
 bytesbuf = { workspace = true, features = ["bytes-compat"] }
-error_label.workspace = true
 futures = { workspace = true, features = ["std"] }
 http.workspace = true
 http-body.workspace = true

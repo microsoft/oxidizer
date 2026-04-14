@@ -1,5 +1,5 @@
 ---
-source: crates/error_label/src/lib.rs
+source: crates/ohno/src/error_label.rs
 expression: kind_map
 ---
 [

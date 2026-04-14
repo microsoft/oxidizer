@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use error_label::ErrorLabel;
+use ohno::ErrorLabel;
 use http::StatusCode;
 use http::header::{InvalidHeaderValue, MaxSizeReached};
 use http::method::InvalidMethod;
