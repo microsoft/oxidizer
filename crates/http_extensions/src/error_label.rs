@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::borrow::Cow;
+use std::collections::hash_set::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::io::ErrorKind;
@@ -66,6 +67,11 @@ impl HttpErrorLabel {
     /// - [`std::io::Error`] — uses a label derived from its [`ErrorKind`](std::io::ErrorKind)
     ///   (e.g. `connection_refused`).
     ///
+    /// Duplicate labels are removed, keeping only the first occurrence. This
+    /// avoids redundant segments when an outer error derives its label from
+    /// an inner error (e.g. an [`HttpError`](crate::HttpError) converted from
+    /// an [`std::io::Error`] shares the same [`ErrorKind`](std::io::ErrorKind)-based label).
+    ///
     /// Unrecognized error types are skipped. If no error in the chain is
     /// recognized, the returned label is empty.
     ///
@@ -81,9 +87,25 @@ impl HttpErrorLabel {
     /// let label = HttpErrorLabel::from_error_chain(&http_err);
     /// assert_eq!(label, "connect.connection_refused");
     /// ```
+    ///
+    /// Duplicate labels are collapsed to a single occurrence:
+    ///
+    /// ```
+    /// # use http_extensions::{HttpError, HttpErrorLabel};
+    /// // An HttpError converted from an io::Error shares the same label,
+    /// // so the duplicate is removed.
+    /// let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
+    /// let http_err = HttpError::from(io_err);
+    /// let label = HttpErrorLabel::from_error_chain(&http_err);
+    /// assert_eq!(label, "broken_pipe");
+    /// ```
     #[must_use]
     pub fn from_error_chain(error: &(dyn Error + 'static)) -> Self {
-        let chain = successors(Some(error), |e| (*e).source()).filter_map(get_label_from_error);
+        let mut seen = HashSet::new();
+
+        let chain = successors(Some(error), |e| (*e).source())
+            .filter_map(get_label_from_error)
+            .filter(|label| seen.insert(label.clone()));
 
         Self::from_parts(chain)
     }
@@ -307,13 +329,24 @@ mod tests {
     }
 
     #[test]
-    fn from_error_chain_http_wrapping_io() {
+    fn from_error_chain_http_wrapping_io_deduplicates() {
         let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
         let http_err = HttpError::from(io_err);
         let label = HttpErrorLabel::from_error_chain(&http_err);
         // HttpError converted from io::Error gets label "broken_pipe",
-        // and the inner io::Error also contributes "broken_pipe".
-        assert_eq!(label, "broken_pipe.broken_pipe");
+        // and the inner io::Error also contributes "broken_pipe", but
+        // duplicates are removed so only the first occurrence is kept.
+        assert_eq!(label, "broken_pipe");
+    }
+
+    #[test]
+    fn from_error_chain_keeps_distinct_labels() {
+        // An HttpError with a custom label wrapping an io::Error produces
+        // two distinct segments — no deduplication occurs.
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "slow");
+        let http_err = HttpError::other(io_err, recoverable::RecoveryInfo::retry(), "request");
+        let label = HttpErrorLabel::from_error_chain(&http_err);
+        assert_eq!(label, "request.timed_out");
     }
 
     #[test]
