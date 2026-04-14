@@ -46,6 +46,14 @@ pub trait Labeled {
 /// let label: ErrorLabel = String::from("custom_label").into();
 /// assert_eq!(label, "custom_label");
 /// ```
+///
+/// # Character restrictions
+///
+/// Label values may only contain ASCII alphanumeric characters (`a`–`z`, `A`–`Z`,
+/// `0`–`9`), underscores (`_`), and dots (`.`). The [`from_static`](Self::from_static)
+/// constructor panics at compile time (or at runtime if called dynamically) when given
+/// invalid characters. All other constructors silently replace invalid characters with
+/// underscores.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct ErrorLabel(Cow<'static, str>);
 
@@ -54,6 +62,11 @@ impl ErrorLabel {
     ///
     /// This is the preferred way to create a label from a known string at compile time.
     ///
+    /// # Panics
+    ///
+    /// Panics if `label` contains characters other than ASCII alphanumeric, `_`, or `.`.
+    /// When used in a `const` context the panic surfaces as a compile-time error.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -61,9 +74,21 @@ impl ErrorLabel {
     /// const TIMEOUT: ErrorLabel = ErrorLabel::from_static("timeout");
     /// assert_eq!(TIMEOUT, "timeout");
     /// ```
+    ///
+    /// Invalid characters cause a compile-time error:
+    ///
+    /// ```compile_fail
+    /// # use ohno::ErrorLabel;
+    /// const BAD: ErrorLabel = ErrorLabel::from_static("has space");
+    /// ```
     #[must_use]
-    pub const fn from_static(s: &'static str) -> Self {
-        Self(Cow::Borrowed(s))
+    pub const fn from_static(label: &'static str) -> Self {
+        assert!(
+            is_valid_label(label),
+            "ErrorLabel: value must contain only ASCII alphanumeric characters, '_', or '.'"
+        );
+
+        Self(Cow::Borrowed(label))
     }
 
     /// Creates a label by joining the parts with `.` as a separator.
@@ -158,6 +183,62 @@ impl ErrorLabel {
     pub fn into_cow(self) -> Cow<'static, str> {
         self.0
     }
+
+    /// Returns the value unchanged if it only contains ASCII alphanumeric, `_`, or `.`
+    /// characters. Otherwise, returns an owned copy with every invalid character replaced
+    /// by `_`.
+    fn coerce(value: Cow<'static, str>) -> Cow<'static, str> {
+        if is_valid_label(&value) {
+            return value;
+        }
+
+        Cow::Owned(value.chars().filter(|c| is_valid_label_char(*c as u8)).collect())
+    }
+
+    const fn from_io(kind: ErrorKind) -> Self {
+        match kind {
+            ErrorKind::NotFound => Self::from_static("not_found"),
+            ErrorKind::PermissionDenied => Self::from_static("permission_denied"),
+            ErrorKind::ConnectionRefused => Self::from_static("connection_refused"),
+            ErrorKind::ConnectionReset => Self::from_static("connection_reset"),
+            ErrorKind::HostUnreachable => Self::from_static("host_unreachable"),
+            ErrorKind::NetworkUnreachable => Self::from_static("network_unreachable"),
+            ErrorKind::ConnectionAborted => Self::from_static("connection_aborted"),
+            ErrorKind::NotConnected => Self::from_static("not_connected"),
+            ErrorKind::AddrInUse => Self::from_static("addr_in_use"),
+            ErrorKind::AddrNotAvailable => Self::from_static("addr_not_available"),
+            ErrorKind::NetworkDown => Self::from_static("network_down"),
+            ErrorKind::BrokenPipe => Self::from_static("broken_pipe"),
+            ErrorKind::AlreadyExists => Self::from_static("already_exists"),
+            ErrorKind::WouldBlock => Self::from_static("would_block"),
+            ErrorKind::NotADirectory => Self::from_static("not_directory"),
+            ErrorKind::IsADirectory => Self::from_static("is_directory"),
+            ErrorKind::DirectoryNotEmpty => Self::from_static("directory_not_empty"),
+            ErrorKind::ReadOnlyFilesystem => Self::from_static("read_only_filesystem"),
+            ErrorKind::StaleNetworkFileHandle => Self::from_static("stale_network_file_handle"),
+            ErrorKind::InvalidInput => Self::from_static("invalid_input"),
+            ErrorKind::InvalidData => Self::from_static("invalid_data"),
+            ErrorKind::TimedOut => Self::from_static("timed_out"),
+            ErrorKind::WriteZero => Self::from_static("write_zero"),
+            ErrorKind::StorageFull => Self::from_static("storage_full"),
+            ErrorKind::NotSeekable => Self::from_static("not_seekable"),
+            ErrorKind::QuotaExceeded => Self::from_static("quota_exceeded"),
+            ErrorKind::FileTooLarge => Self::from_static("file_too_large"),
+            ErrorKind::ResourceBusy => Self::from_static("resource_busy"),
+            ErrorKind::ExecutableFileBusy => Self::from_static("executable_file_busy"),
+            ErrorKind::Deadlock => Self::from_static("deadlock"),
+            ErrorKind::CrossesDevices => Self::from_static("crosses_devices"),
+            ErrorKind::TooManyLinks => Self::from_static("too_many_links"),
+            ErrorKind::InvalidFilename => Self::from_static("invalid_filename"),
+            ErrorKind::ArgumentListTooLong => Self::from_static("argument_list_too_long"),
+            ErrorKind::Interrupted => Self::from_static("interrupted"),
+            ErrorKind::Unsupported => Self::from_static("unsupported"),
+            ErrorKind::UnexpectedEof => Self::from_static("unexpected_eof"),
+            ErrorKind::OutOfMemory => Self::from_static("out_of_memory"),
+            ErrorKind::Other => Self::from_static("other"),
+            _ => Self::from_static("unknown"),
+        }
+    }
 }
 
 impl fmt::Display for ErrorLabel {
@@ -168,19 +249,19 @@ impl fmt::Display for ErrorLabel {
 
 impl From<&'static str> for ErrorLabel {
     fn from(s: &'static str) -> Self {
-        Self(Cow::Borrowed(s))
+        Self(Self::coerce(Cow::Borrowed(s)))
     }
 }
 
 impl From<String> for ErrorLabel {
     fn from(s: String) -> Self {
-        Self(Cow::Owned(s))
+        Self(Self::coerce(Cow::Owned(s)))
     }
 }
 
 impl From<Cow<'static, str>> for ErrorLabel {
     fn from(s: Cow<'static, str>) -> Self {
-        Self(s)
+        Self(Self::coerce(s))
     }
 }
 
@@ -229,55 +310,25 @@ impl From<ErrorKind> for ErrorLabel {
     /// ```
     #[cfg_attr(coverage_nightly, coverage(off))] // it includes unreachable variant and it's fully covered by tests
     fn from(kind: ErrorKind) -> Self {
-        match kind {
-            ErrorKind::NotFound => "not_found".into(),
-            ErrorKind::PermissionDenied => "permission_denied".into(),
-            ErrorKind::ConnectionRefused => "connection_refused".into(),
-            ErrorKind::ConnectionReset => "connection_reset".into(),
-            ErrorKind::HostUnreachable => "host_unreachable".into(),
-            ErrorKind::NetworkUnreachable => "network_unreachable".into(),
-            ErrorKind::ConnectionAborted => "connection_aborted".into(),
-            ErrorKind::NotConnected => "not_connected".into(),
-            ErrorKind::AddrInUse => "addr_in_use".into(),
-            ErrorKind::AddrNotAvailable => "addr_not_available".into(),
-            ErrorKind::NetworkDown => "network_down".into(),
-            ErrorKind::BrokenPipe => "broken_pipe".into(),
-            ErrorKind::AlreadyExists => "already_exists".into(),
-            ErrorKind::WouldBlock => "would_block".into(),
-            ErrorKind::NotADirectory => "not_directory".into(),
-            ErrorKind::IsADirectory => "is_directory".into(),
-            ErrorKind::DirectoryNotEmpty => "directory_not_empty".into(),
-            ErrorKind::ReadOnlyFilesystem => "read_only_filesystem".into(),
-            ErrorKind::StaleNetworkFileHandle => "stale_network_file_handle".into(),
-            ErrorKind::InvalidInput => "invalid_input".into(),
-            ErrorKind::InvalidData => "invalid_data".into(),
-            ErrorKind::TimedOut => "timed_out".into(),
-            ErrorKind::WriteZero => "write_zero".into(),
-            ErrorKind::StorageFull => "storage_full".into(),
-            ErrorKind::NotSeekable => "not_seekable".into(),
-            ErrorKind::QuotaExceeded => "quota_exceeded".into(),
-            ErrorKind::FileTooLarge => "file_too_large".into(),
-            ErrorKind::ResourceBusy => "resource_busy".into(),
-            ErrorKind::ExecutableFileBusy => "executable_file_busy".into(),
-            ErrorKind::Deadlock => "deadlock".into(),
-            ErrorKind::CrossesDevices => "crosses_devices".into(),
-            ErrorKind::TooManyLinks => "too_many_links".into(),
-            ErrorKind::InvalidFilename => "invalid_filename".into(),
-            ErrorKind::ArgumentListTooLong => "argument_list_too_long".into(),
-            ErrorKind::Interrupted => "interrupted".into(),
-            ErrorKind::Unsupported => "unsupported".into(),
-            ErrorKind::UnexpectedEof => "unexpected_eof".into(),
-            ErrorKind::OutOfMemory => "out_of_memory".into(),
-            ErrorKind::Other => "other".into(),
-            _ => label_from_display(kind),
-        }
+        Self::from_io(kind)
     }
 }
 
-/// Converts a display representation of an error kind into a label by replacing spaces with
-/// underscores.
-fn label_from_display(display: impl fmt::Display) -> ErrorLabel {
-    ErrorLabel(Cow::Owned(display.to_string().replace(' ', "_")))
+const fn is_valid_label_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'.'
+}
+
+const fn is_valid_label(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !is_valid_label_char(bytes[i]) {
+            return false;
+        }
+        i += 1;
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -296,10 +347,40 @@ mod tests {
     }
 
     #[test]
+    fn from_static_with_dots_and_underscores() {
+        const LABEL: ErrorLabel = ErrorLabel::from_static("http.timed_out");
+        assert_eq!(LABEL, "http.timed_out");
+    }
+
+    #[test]
+    #[should_panic(expected = "ErrorLabel: value must contain only ASCII alphanumeric characters")]
+    fn from_static_panics_on_space() {
+        let _ = ErrorLabel::from_static("has space");
+    }
+
+    #[test]
+    #[should_panic(expected = "ErrorLabel: value must contain only ASCII alphanumeric characters")]
+    fn from_static_panics_on_dash() {
+        let _ = ErrorLabel::from_static("has-dash");
+    }
+
+    #[test]
     fn from_static_str() {
         let label = ErrorLabel::from("static_label");
         assert_eq!(label, "static_label");
         assert_eq!(label.as_str(), "static_label");
+    }
+
+    #[test]
+    fn from_static_str_coerces_invalid_chars() {
+        let label = ErrorLabel::from("has space");
+        assert_eq!(label, "hasspace");
+
+        let label = ErrorLabel::from("has-dash");
+        assert_eq!(label, "hasdash");
+
+        let label = ErrorLabel::from("keep.dots_and.underscores");
+        assert_eq!(label, "keep.dots_and.underscores");
     }
 
     #[test]
@@ -310,10 +391,23 @@ mod tests {
     }
 
     #[test]
+    fn from_string_coerces_invalid_chars() {
+        let label = ErrorLabel::from(String::from("hello world!"));
+        assert_eq!(label, "helloworld");
+    }
+
+    #[test]
     fn from_cow() {
         let cow: Cow<'static, str> = Cow::Owned(String::from("cow_label"));
         let label = ErrorLabel::from(cow);
         assert_eq!(label, "cow_label");
+    }
+
+    #[test]
+    fn from_cow_coerces_invalid_chars() {
+        let cow: Cow<'static, str> = Cow::Borrowed("has space");
+        let label = ErrorLabel::from(cow);
+        assert_eq!(label, "hasspace");
     }
 
     #[test]
@@ -411,18 +505,6 @@ mod tests {
         let kind_map: Vec<_> = ALL_ERROR_KINDS.iter().map(|v| (*v, ErrorLabel::from(*v))).collect();
 
         insta::assert_debug_snapshot!(kind_map);
-    }
-
-    #[test]
-    fn label_from_display_replaces_spaces() {
-        let label = label_from_display("some new error kind");
-        assert_eq!(label, "some_new_error_kind");
-    }
-
-    #[test]
-    fn label_from_display_no_spaces() {
-        let label = label_from_display("already_snake_case");
-        assert_eq!(label, "already_snake_case");
     }
 
     /// Test helper: extracts labels only from `std::io::Error`.
