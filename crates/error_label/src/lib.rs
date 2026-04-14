@@ -247,6 +247,7 @@ impl From<ErrorKind> for ErrorLabel {
     /// let label = ErrorLabel::from(ErrorKind::ConnectionRefused);
     /// assert_eq!(label, "connection_refused");
     /// ```
+    #[cfg_attr(coverage_nightly, coverage(off))] // it includes unreachable variant and it's fully covered by tests
     fn from(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::NotFound => "not_found".into(),
@@ -288,9 +289,15 @@ impl From<ErrorKind> for ErrorLabel {
             ErrorKind::UnexpectedEof => "unexpected_eof".into(),
             ErrorKind::OutOfMemory => "out_of_memory".into(),
             ErrorKind::Other => "other".into(),
-            _ => kind.to_string().replace(' ', "_").into(),
+            _ => label_from_display(kind),
         }
     }
+}
+
+/// Converts a display representation of an error kind into a label by replacing spaces with
+/// underscores.
+fn label_from_display(display: impl fmt::Display) -> ErrorLabel {
+    ErrorLabel(Cow::Owned(display.to_string().replace(' ', "_")))
 }
 
 #[cfg(test)]
@@ -391,6 +398,18 @@ mod tests {
         let kind_map: Vec<_> = ALL_ERROR_KINDS.iter().map(|v| (*v, ErrorLabel::from(*v))).collect();
 
         insta::assert_debug_snapshot!(kind_map);
+    }
+
+    #[test]
+    fn label_from_display_replaces_spaces() {
+        let label = label_from_display("some new error kind");
+        assert_eq!(label, "some_new_error_kind");
+    }
+
+    #[test]
+    fn label_from_display_no_spaces() {
+        let label = label_from_display("already_snake_case");
+        assert_eq!(label, "already_snake_case");
     }
 
     /// Test helper: extracts labels only from `std::io::Error`.

@@ -246,6 +246,15 @@ impl HttpError {
         &self.label
     }
 
+    /// Returns the label as a plain string slice.
+    ///
+    /// This is a convenience shorthand for `self.label().as_str()` for cases
+    /// where the full capabilities of [`ErrorLabel`] are not necessary.
+    #[must_use]
+    pub fn label_str(&self) -> &str {
+        self.label.as_str()
+    }
+
     /// Extracts the HTTP request from this error, if any.
     ///
     /// The request can be extracted only once. Further calls return `None`.
@@ -289,6 +298,7 @@ mod tests {
 
         assert_eq!(error.message(), "my-validation");
         assert_eq!(error.label(), "validation");
+        assert_eq!(error.label_str(), "validation");
         assert_eq!(error.recovery(), RecoveryInfo::never());
     }
 
