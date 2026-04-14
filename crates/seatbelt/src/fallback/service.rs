@@ -101,7 +101,7 @@ impl<In, Out> Fallback<In, Out, ()> {
 impl<In, Out, S> Service<In> for Fallback<In, Out, S>
 where
     In: Send,
-    Out: Send + 'static,
+    Out: Send,
     S: Service<In, Out = Out>,
 {
     type Out = Out;
@@ -186,7 +186,7 @@ where
     }
 }
 
-impl<In, Out: Send + 'static> FallbackShared<In, Out> {
+impl<In, Out: Send> FallbackShared<In, Out> {
     async fn handle_fallback(&self, output: Out) -> Out {
         let new_output = self.fallback_action.call(output, FallbackActionArgs {}).await;
 
