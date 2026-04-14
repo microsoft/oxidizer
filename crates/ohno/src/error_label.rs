@@ -50,6 +50,22 @@ pub trait Labeled {
 pub struct ErrorLabel(Cow<'static, str>);
 
 impl ErrorLabel {
+    /// Creates a label from a static string literal.
+    ///
+    /// This is the preferred way to create a label from a known string at compile time.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use ohno::ErrorLabel;
+    /// const TIMEOUT: ErrorLabel = ErrorLabel::from_static("timeout");
+    /// assert_eq!(TIMEOUT, "timeout");
+    /// ```
+    #[must_use]
+    pub const fn from_static(s: &'static str) -> Self {
+        Self(Cow::Borrowed(s))
+    }
+
     /// Creates a label by joining the parts with `.` as a separator.
     ///
     /// # Examples
@@ -271,6 +287,13 @@ mod tests {
     use testing_aids::ALL_ERROR_KINDS;
 
     use super::*;
+
+    #[test]
+    fn from_static_const() {
+        const LABEL: ErrorLabel = ErrorLabel::from_static("const_label");
+        assert_eq!(LABEL, "const_label");
+        assert_eq!(LABEL.as_str(), "const_label");
+    }
 
     #[test]
     fn from_static_str() {
