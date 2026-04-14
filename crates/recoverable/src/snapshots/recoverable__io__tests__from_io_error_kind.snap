@@ -1,0 +1,279 @@
+---
+source: crates/recoverable/src/io.rs
+expression: classifications
+---
+[
+    (
+        WouldBlock,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        TimedOut,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        ConnectionReset,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        ConnectionAborted,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        NotConnected,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        ConnectionRefused,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        AddrInUse,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        AddrNotAvailable,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        BrokenPipe,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        Interrupted,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        StaleNetworkFileHandle,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        ResourceBusy,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        HostUnreachable,
+        RecoveryInfo {
+            kind: Unavailable,
+            delay: None,
+        },
+    ),
+    (
+        NetworkUnreachable,
+        RecoveryInfo {
+            kind: Unavailable,
+            delay: None,
+        },
+    ),
+    (
+        NetworkDown,
+        RecoveryInfo {
+            kind: Unavailable,
+            delay: None,
+        },
+    ),
+    (
+        NotFound,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        PermissionDenied,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        AlreadyExists,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        InvalidData,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        InvalidInput,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        UnexpectedEof,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        WriteZero,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        Unsupported,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        OutOfMemory,
+        RecoveryInfo {
+            kind: Unavailable,
+            delay: None,
+        },
+    ),
+    (
+        NotADirectory,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        IsADirectory,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        DirectoryNotEmpty,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        ReadOnlyFilesystem,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        StorageFull,
+        RecoveryInfo {
+            kind: Unavailable,
+            delay: None,
+        },
+    ),
+    (
+        NotSeekable,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        QuotaExceeded,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        FileTooLarge,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        ExecutableFileBusy,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        Deadlock,
+        RecoveryInfo {
+            kind: Retry,
+            delay: None,
+        },
+    ),
+    (
+        CrossesDevices,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        TooManyLinks,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        InvalidFilename,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        ArgumentListTooLong,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+    (
+        Other,
+        RecoveryInfo {
+            kind: Never,
+            delay: None,
+        },
+    ),
+]

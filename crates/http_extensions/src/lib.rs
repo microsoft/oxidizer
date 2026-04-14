@@ -34,6 +34,7 @@
 //! - [`HttpRequestExt`] - Request cloning with body support
 //! - [`HeaderMapExt`] - Header value extraction and parsing
 //! - [`HeaderValueExt`] - Construction of [`HeaderValue`][http::HeaderValue] from [`Bytes`][bytes::Bytes]
+//! - [`ExtensionsExt`] - Extensions for [`Extensions`][http::Extensions] to extract URL template labels
 //!
 //! # Quick Start
 //!
@@ -208,7 +209,7 @@ mod http_request_builder_ext;
 pub use http_request_builder_ext::HttpRequestBuilderExt;
 
 mod extensions;
-pub use extensions::{HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
+pub use extensions::{ExtensionsExt, HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
 
 mod url_template_label;
 pub use url_template_label::UrlTemplateLabel;
@@ -220,8 +221,6 @@ pub use http_response_builder::HttpResponseBuilder;
 
 mod http_request_builder;
 pub(crate) mod http_utils;
-
-pub(crate) mod resilience;
 
 pub use http_request_builder::HttpRequestBuilder;
 

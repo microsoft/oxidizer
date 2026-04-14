@@ -52,7 +52,7 @@ use crate::HttpErrorLabel;
 ///
 /// ## Standard Library Errors
 ///
-/// - [`std::io::Error`] - Auto-classified as temporary or permanent
+/// - [`std::io::Error`] - Auto-classified as retry, unavailable, or never based on error kind
 /// - [`std::convert::Infallible`] - Handled for pattern matching completeness
 ///
 /// ## Works with `http` crate
@@ -108,7 +108,7 @@ use crate::HttpErrorLabel;
     InvalidMethod(label: HttpErrorLabel::from("invalid_method"), recovery: RecoveryInfo::never()),
     InvalidStatusCode(label: HttpErrorLabel::from("invalid_status_code"), recovery: RecoveryInfo::never()),
     MaxSizeReached(label: HttpErrorLabel::from("max_size_reached"), recovery: RecoveryInfo::never()),
-    std::io::Error(label: HttpErrorLabel::from(error.kind()), recovery: crate::resilience::detect_io_recovery(error.kind())),
+    std::io::Error(label: HttpErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
     templated_uri::ValidationError(label: HttpErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
