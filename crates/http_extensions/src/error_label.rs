@@ -107,6 +107,11 @@ impl HttpErrorLabel {
     /// ```
     #[must_use]
     pub fn from_error_chain(error: &(dyn Error + 'static)) -> Self {
+        // If the error has no source, return its label directly.
+        if error.source().is_none() {
+            return get_label_from_error(error).unwrap_or_default();
+        }
+
         let mut seen = HashSet::new();
 
         let chain = successors(Some(error), |e| (*e).source())
