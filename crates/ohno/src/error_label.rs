@@ -22,7 +22,7 @@ pub trait Labeled {
 /// Callers **must** ensure that every label they supply is:
 ///
 /// - **Low-cardinality**: chosen from a small, bounded set of values known at
-///   development time (e.g. `"timeout"`, `"conn_refused"`,
+///   development time (e.g. `"timeout"`, `"connection_refused"`,
 ///   `"invalid_header"`). Dynamically-generated labels that grow without bound
 ///   (request IDs, timestamps, user-supplied strings, file paths, …) will cause
 ///   high-cardinality metric series and must be avoided.
@@ -49,11 +49,14 @@ pub trait Labeled {
 ///
 /// # Character restrictions
 ///
-/// Label values may only contain ASCII alphanumeric characters (`a`–`z`, `A`–`Z`,
-/// `0`–`9`), underscores (`_`), and dots (`.`). The [`from_static`](Self::from_static)
-/// constructor panics at compile time (or at runtime if called dynamically) when given
-/// invalid characters. All other constructors silently replace invalid characters with
-/// underscores.
+/// Stored label values contain only lower-case ASCII alphanumeric characters (`a`–`z`,
+/// `0`–`9`), underscores (`_`), and dots (`.`).
+///
+/// The [`from_static`](Self::from_static) constructor panics at compile time (or at
+/// runtime if called dynamically) when given any character outside this set, including
+/// upper-case letters. All other constructors silently coerce the input: upper-case
+/// ASCII letters are lowered to their lower-case equivalents and every other invalid
+/// character is replaced by an underscore.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct ErrorLabel(Cow<'static, str>);
 
@@ -194,9 +197,9 @@ impl ErrorLabel {
         self.0
     }
 
-    /// Returns the value unchanged if it only contains ASCII alphanumeric, `_`, or `.`
-    /// characters. Otherwise, returns an owned copy with every invalid character replaced
-    /// by `_`.
+    /// Returns the value unchanged if it only contains lower-case ASCII alphanumeric,
+    /// `_`, or `.` characters. Otherwise, returns an owned copy with upper-case ASCII
+    /// letters lowered and every other invalid character replaced by `_`.
     fn coerce(value: Cow<'static, str>) -> Cow<'static, str> {
         if is_valid_label(&value) {
             return value;
@@ -389,6 +392,12 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters")]
+    fn from_static_panics_on_uppercase() {
+        let _ = ErrorLabel::from_static("HasUpper");
+    }
+
+    #[test]
     fn from_static_str() {
         let label = ErrorLabel::from("static_label");
         assert_eq!(label, "static_label");
@@ -405,6 +414,12 @@ mod tests {
 
         let label = ErrorLabel::from("keep.dots_and.underscores");
         assert_eq!(label, "keep.dots_and.underscores");
+
+        let label = ErrorLabel::from("HasUpper");
+        assert_eq!(label, "hasupper");
+
+        let label = ErrorLabel::from("MixedCase.With_PARTS");
+        assert_eq!(label, "mixedcase.with_parts");
     }
 
     #[test]
@@ -418,6 +433,9 @@ mod tests {
     fn from_string_coerces_invalid_chars() {
         let label = ErrorLabel::from(String::from("hello world!"));
         assert_eq!(label, "hello_world_");
+
+        let label = ErrorLabel::from(String::from("UpperCase"));
+        assert_eq!(label, "uppercase");
     }
 
     #[test]
@@ -432,6 +450,10 @@ mod tests {
         let cow: Cow<'static, str> = Cow::Borrowed("has space");
         let label = ErrorLabel::from(cow);
         assert_eq!(label, "has_space");
+
+        let cow: Cow<'static, str> = Cow::Owned(String::from("CowUPPER"));
+        let label = ErrorLabel::from(cow);
+        assert_eq!(label, "cowupper");
     }
 
     #[test]
@@ -486,7 +508,7 @@ mod tests {
     fn from_error_chain_io_error() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
         let label = ErrorLabel::from_error_chain(&io_err, io_get_label);
-        assert_eq!(label, "connection_refused");
+        assert_eq!(label, "conn_refused");
     }
 
     #[test]
