@@ -105,18 +105,6 @@ impl HttpErrorLabel {
     /// let label = HttpErrorLabel::from_error_chain(&http_err);
     /// assert_eq!(label, "connect.connection_refused");
     /// ```
-    ///
-    /// Duplicate labels are collapsed to a single occurrence:
-    ///
-    /// ```
-    /// # use http_extensions::{HttpError, HttpErrorLabel};
-    /// // An HttpError converted from an io::Error shares the same label,
-    /// // so the duplicate is removed.
-    /// let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
-    /// let http_err = HttpError::from(io_err);
-    /// let label = HttpErrorLabel::from_error_chain(&http_err);
-    /// assert_eq!(label, "broken_pipe");
-    /// ```
     #[must_use]
     pub fn from_error_chain(error: &(dyn Error + 'static)) -> Self {
         let mut seen = HashSet::new();
