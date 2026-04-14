@@ -1119,6 +1119,7 @@ dependencies = [
  "serde_json",
  "static_assertions",
  "templated_uri",
+ "testing_aids",
  "thread_aware",
  "tick",
  "tokio",
