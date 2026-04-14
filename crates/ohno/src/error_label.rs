@@ -27,7 +27,7 @@ pub trait Labeled {
 ///   (request IDs, timestamps, user-supplied strings, file paths, …) will cause
 ///   high-cardinality metric series and must be avoided.
 /// - **Free of PII and high-entropy data**: labels may be exported to
-///   monitoring systems and log aggregators. Never include personal
+///   monitoring systems and log sinks. Never include personal
 ///   information, credentials, or data that could identify individual users.
 ///
 /// Prefer `&'static str` literals whenever possible; reach for an owned
@@ -192,7 +192,7 @@ impl ErrorLabel {
             return value;
         }
 
-        Cow::Owned(value.chars().filter(|c| is_valid_label_char(*c as u8)).collect())
+        Cow::Owned(value.chars().map(|c| if is_valid_label_char(c as u8) { c } else { '_' }).collect())
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and its fully covered by tests
@@ -294,8 +294,8 @@ impl From<ErrorKind> for ErrorLabel {
     /// Creates a label from an IO error kind.
     ///
     /// Maps each [`ErrorKind`] variant to a `snake_case` string label suitable for use as a
-    /// metric tag. Unrecognized variants (e.g. future additions to [`ErrorKind`]) are converted
-    /// using their [`Display`] representation with spaces replaced by underscores.
+    /// metric tag. Unrecognized variants (e.g. future additions to [`ErrorKind`]) are mapped
+    /// to `"unknown"` to keep the label set low-cardinality.
     ///
     /// # Examples
     ///
@@ -374,10 +374,10 @@ mod tests {
     #[test]
     fn from_static_str_coerces_invalid_chars() {
         let label = ErrorLabel::from("has space");
-        assert_eq!(label, "hasspace");
+        assert_eq!(label, "has_space");
 
         let label = ErrorLabel::from("has-dash");
-        assert_eq!(label, "hasdash");
+        assert_eq!(label, "has_dash");
 
         let label = ErrorLabel::from("keep.dots_and.underscores");
         assert_eq!(label, "keep.dots_and.underscores");
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn from_string_coerces_invalid_chars() {
         let label = ErrorLabel::from(String::from("hello world!"));
-        assert_eq!(label, "helloworld");
+        assert_eq!(label, "hello_world_");
     }
 
     #[test]
@@ -407,7 +407,7 @@ mod tests {
     fn from_cow_coerces_invalid_chars() {
         let cow: Cow<'static, str> = Cow::Borrowed("has space");
         let label = ErrorLabel::from(cow);
-        assert_eq!(label, "hasspace");
+        assert_eq!(label, "has_space");
     }
 
     #[test]
