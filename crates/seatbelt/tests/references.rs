@@ -15,7 +15,7 @@
 #![cfg(not(miri))]
 
 //! Integration test verifying that all resilience middleware can be stacked
-//! together with non-static reference input and output types (`&str`).
+//! together with non-`'static` reference input and output types (`&str`).
 
 use std::time::Duration;
 
