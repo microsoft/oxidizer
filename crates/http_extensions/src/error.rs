@@ -101,15 +101,15 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// ```
 #[ohno::error]
 #[from(
-    http::Error(label: ErrorLabel::from("http_error"), recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: ErrorLabel::from("invalid_uri_parts"), recovery: RecoveryInfo::never()),
-    InvalidUri(label: ErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never()),
-    InvalidHeaderValue(label: ErrorLabel::from("invalid_header_value"), recovery: RecoveryInfo::never()),
-    InvalidMethod(label: ErrorLabel::from("invalid_method"), recovery: RecoveryInfo::never()),
-    InvalidStatusCode(label: ErrorLabel::from("invalid_status_code"), recovery: RecoveryInfo::never()),
-    MaxSizeReached(label: ErrorLabel::from("max_size_reached"), recovery: RecoveryInfo::never()),
+    http::Error(label: ErrorLabel::from_static("http_error"), recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: ErrorLabel::from_static("invalid_uri_parts"), recovery: RecoveryInfo::never()),
+    InvalidUri(label: ErrorLabel::from_static("invalid_uri"), recovery: RecoveryInfo::never()),
+    InvalidHeaderValue(label: ErrorLabel::from_static("invalid_header_value"), recovery: RecoveryInfo::never()),
+    InvalidMethod(label: ErrorLabel::from_static("invalid_method"), recovery: RecoveryInfo::never()),
+    InvalidStatusCode(label: ErrorLabel::from_static("invalid_status_code"), recovery: RecoveryInfo::never()),
+    MaxSizeReached(label: ErrorLabel::from_static("max_size_reached"), recovery: RecoveryInfo::never()),
     std::io::Error(label: ErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: ErrorLabel::from("invalid_uri"), recovery: RecoveryInfo::never())
+    templated_uri::ValidationError(label: ErrorLabel::from_static("invalid_uri"), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
