@@ -285,6 +285,7 @@ impl From<ErrorKind> for ErrorLabel {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // causes test timeout
 const fn is_valid_label_char(b: u8) -> bool {
     match b {
         b'_' | b'.' => true,
@@ -293,6 +294,7 @@ const fn is_valid_label_char(b: u8) -> bool {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // causes test timeout
 const fn is_valid_label(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut i = 0;
