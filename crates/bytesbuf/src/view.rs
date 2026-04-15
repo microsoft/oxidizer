@@ -868,7 +868,8 @@ impl Eq for BytesView {}
 impl Hash for BytesView {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash all bytes in logical order, consistent with PartialEq.
-        // We also hash the length to distinguish e.g. [1,2]+[3] from [1]+[2,3].
+        // We also hash the cached length as an additional input, but equality and hashing are
+        // both defined by the logical byte sequence rather than how it is segmented into spans.
         self.len.hash(state);
         for (slice, _) in self.slices() {
             state.write(slice);

@@ -6,7 +6,7 @@ mod codec;
 mod serialize;
 mod tier;
 
-pub use codec::{Codec, Encoder, infallible};
+pub use codec::{Codec, Encoder, infallible, infallible_owned};
 #[cfg(any(feature = "serialize", test))]
 pub(crate) use serialize::{BincodeCodec, BincodeEncoder};
 pub(crate) use tier::TransformAdapter;

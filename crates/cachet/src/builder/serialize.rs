@@ -20,8 +20,7 @@ where
 {
     /// Applies a serialization boundary that converts keys and values to [`BytesView`](bytesbuf::BytesView).
     ///
-    /// Subsequent `.fallback()` tiers must work with `BytesView` keys and values
-    /// (i.e., implement [`DistributedCacheTier`](cachet_tier::DistributedCacheTier)).
+    /// Subsequent `.fallback()` tiers must work with `BytesView` keys and values.
     ///
     /// # Examples
     ///

@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, CacheOp, MockCache, TransformCodec, TransformEncoder, infallible};
+use cachet::{Cache, CacheEntry, CacheOp, MockCache, TransformCodec, TransformEncoder, infallible, infallible_owned};
 use tick::Clock;
 
 /// Builds a cache with L1 (`MockCache<String, String>`) and L2 (`MockCache<i32, i32>`)
@@ -21,7 +21,7 @@ fn build_transform_cache(
         .storage(l1)
         .transform(
             TransformEncoder::new(|k: &String| k.parse::<i32>()),
-            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible_owned(|v: i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(l2))
         .build()
@@ -139,7 +139,7 @@ async fn get_key_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::new(|_k: &String| "bad".parse::<i32>()),
-            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible_owned(|v: i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -160,7 +160,7 @@ async fn get_value_decode_error_propagates() {
             TransformEncoder::new(|k: &String| k.parse::<i32>()),
             TransformCodec::new(
                 |v: &String| v.parse::<i32>(),
-                |_v: &i32| Err::<String, _>("bad".parse::<i32>().unwrap_err()),
+                |_v: i32| Err::<String, _>("bad".parse::<i32>().unwrap_err()),
             ),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::with_data(l2_data.into_iter().collect())))
@@ -179,7 +179,7 @@ async fn insert_key_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::new(|_k: &String| "bad".parse::<i32>()),
-            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible_owned(|v: i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -197,7 +197,7 @@ async fn insert_value_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::new(|k: &String| k.parse::<i32>()),
-            TransformCodec::new(|_v: &String| "bad".parse::<i32>(), infallible(|v: &i32| v.to_string())),
+            TransformCodec::new(|_v: &String| "bad".parse::<i32>(), infallible_owned(|v: i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -218,7 +218,7 @@ async fn invalidate_key_encode_error_propagates() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::new(|_k: &String| "bad".parse::<i32>()),
-            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string())),
+            TransformCodec::new(|v: &String| v.parse::<i32>(), infallible_owned(|v: i32| v.to_string())),
         )
         .fallback(Cache::builder::<i32, i32>(clock).storage(MockCache::new()))
         .build();
@@ -239,7 +239,7 @@ async fn infallible_encoder_through_builder() {
         .storage(MockCache::new())
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v)),
+            TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v)),
         )
         .fallback(Cache::builder::<String, i32>(clock).storage(l2.clone()))
         .build();
@@ -265,7 +265,7 @@ async fn transform_on_fallback_builder() {
         .fallback(Cache::builder::<i32, i32>(clock.clone()).storage(MockCache::new()))
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: &String| v.parse::<i32>()),
+            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
         )
         .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
         .build();
@@ -288,7 +288,7 @@ async fn chained_post_transform_fallback() {
         .ttl(Duration::from_secs(60))
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
-            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: &String| v.parse::<i32>()),
+            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
         )
         .fallback(Cache::builder::<String, String>(clock.clone()).storage(MockCache::new()))
         .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
@@ -311,7 +311,7 @@ fn transform_encoder_debug() {
 
 #[test]
 fn transform_codec_debug() {
-    let codec = TransformCodec::new(|v: &String| v.parse::<i32>(), infallible(|v: &i32| v.to_string()));
+    let codec = TransformCodec::new(|v: &String| v.parse::<i32>(), infallible_owned(|v: i32| v.to_string()));
     let debug = format!("{codec:?}");
     assert!(debug.contains("TransformCodec"));
 }
@@ -322,7 +322,7 @@ fn transform_builder_debug() {
     let clock = Clock::new_frozen();
     let builder = Cache::builder::<i32, i32>(clock).memory().ttl(Duration::from_secs(60)).transform(
         TransformEncoder::infallible(|k: &i32| k.to_string()),
-        TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: &String| v.parse::<i32>()),
+        TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
     );
     let debug = format!("{builder:?}");
     assert!(debug.contains("TransformBuilder"));

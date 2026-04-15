@@ -288,4 +288,4 @@ pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
-pub use transform::{Codec, Encoder, TransformCodec, TransformEncoder, infallible};
+pub use transform::{Codec, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

@@ -6,6 +6,7 @@ use crate::{CacheEntry, CacheTier, Codec, Encoder, Error};
 use std::fmt::Debug;
 
 type EncodeFn<A, B> = Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>;
+type DecodeFn<A, B> = Box<dyn Fn(A) -> Result<B, Error> + Send + Sync>;
 
 /// A boxed-closure encoder for custom one-directional transforms (keys).
 pub struct TransformEncoder<A, B> {
@@ -49,14 +50,14 @@ impl<A, B> Debug for TransformEncoder<A, B> {
 /// A boxed-closure codec for custom bidirectional transforms (values).
 pub struct TransformCodec<A, B> {
     encode_fn: EncodeFn<A, B>,
-    decode_fn: EncodeFn<B, A>,
+    decode_fn: DecodeFn<B, A>,
 }
 
 impl<A, B> TransformCodec<A, B> {
     /// Creates a new `TransformCodec` from a pair of fallible closures.
     pub fn new<EncodeError, DecodeError>(
         encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static,
-        decode_fn: impl Fn(&B) -> Result<A, DecodeError> + Send + Sync + 'static,
+        decode_fn: impl Fn(B) -> Result<A, DecodeError> + Send + Sync + 'static,
     ) -> Self
     where
         EncodeError: std::error::Error + Send + Sync + 'static,
@@ -76,7 +77,7 @@ impl<A, B> Encoder<A, B> for TransformCodec<A, B> {
 }
 
 impl<A, B> Codec<A, B> for TransformCodec<A, B> {
-    fn decode(&self, value: &B) -> Result<A, Error> {
+    fn decode(&self, value: B) -> Result<A, Error> {
         (self.decode_fn)(value)
     }
 }
@@ -133,7 +134,7 @@ where
         let mapped_key = self.key_encoder.encode(key)?;
         let entry_option = self.inner.get(&mapped_key).await?;
         if let Some(entry) = entry_option {
-            entry.try_map_value(|v| self.value_codec.decode(&v)).map(Some)
+            entry.try_map_value(|v| self.value_codec.decode(v)).map(Some)
         } else {
             Ok(None)
         }
@@ -177,17 +178,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transform::codec::infallible_owned;
     use cachet_tier::MockCache;
 
     #[test]
     fn transform_adapter_debug() {
         let codec = TransformCodec::new(
             |v: &String| v.parse::<i32>(),
-            |v: &i32| Ok::<_, std::convert::Infallible>(v.to_string()),
+            |v: i32| Ok::<_, std::convert::Infallible>(v.to_string()),
         );
         // Exercise both directions so closure bodies are covered.
         assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
-        assert_eq!(codec.decode(&42).unwrap(), "42");
+        assert_eq!(codec.decode(42).unwrap(), "42");
 
         let key_encoder = TransformEncoder::new(|k: &String| k.parse::<i32>());
         // Exercise the encoder so the wrapping closure is covered.
@@ -214,7 +216,7 @@ mod tests {
         let adapter = TransformAdapter::from_boxed(
             inner,
             Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
-            Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible(|v: &i32| *v))),
+            Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
         );
         assert_eq!(adapter.len(), Some(2));
     }

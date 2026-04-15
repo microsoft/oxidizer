@@ -144,7 +144,7 @@ where
     V: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.value == *other.value() && self.ttl == other.ttl()
+        self.value() == other.value() && self.ttl == other.ttl()
     }
 }
 

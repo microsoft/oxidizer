@@ -3,25 +3,41 @@
 
 use crate::Error;
 
-/// Wraps an infallible closure so it can be used where a fallible one is expected.
+/// Wraps an infallible closure taking a reference so it can be used where a fallible one is expected.
 ///
-/// This avoids the need to write `Ok::<_, std::convert::Infallible>(...)` in
-/// encoder/codec closures that cannot fail.
+/// Use this for encoder closures that borrow their input.
 ///
 /// # Examples
 ///
 /// ```
-/// use cachet::{infallible, TransformCodec};
+/// use cachet::{infallible, TransformEncoder};
 ///
-/// // Mixed fallibility: encode is fallible, decode is infallible
-/// let codec = TransformCodec::new(
-///     |v: &String| v.parse::<i32>(),
-///     infallible(|v: &i32| v.to_string()),
-/// );
+/// let encoder = TransformEncoder::new(infallible(|v: &i32| v.to_string()));
 /// ```
 pub fn infallible<A, B, F>(f: F) -> impl Fn(&A) -> Result<B, std::convert::Infallible> + Send + Sync + 'static
 where
     F: Fn(&A) -> B + Send + Sync + 'static,
+{
+    move |a| Ok(f(a))
+}
+
+/// Wraps an infallible closure taking an owned value so it can be used where a fallible one is expected.
+///
+/// Use this for decoder closures that consume their input.
+///
+/// # Examples
+///
+/// ```
+/// use cachet::{infallible_owned, TransformCodec, infallible};
+///
+/// let codec = TransformCodec::new(
+///     |v: &String| v.parse::<i32>(),
+///     infallible_owned(|v: i32| v.to_string()),
+/// );
+/// ```
+pub fn infallible_owned<A, B, F>(f: F) -> impl Fn(A) -> Result<B, std::convert::Infallible> + Send + Sync + 'static
+where
+    F: Fn(A) -> B + Send + Sync + 'static,
 {
     move |a| Ok(f(a))
 }
@@ -49,5 +65,5 @@ pub trait Codec<A, B>: Encoder<A, B> {
     /// # Errors
     ///
     /// Returns an error if the decoding fails.
-    fn decode(&self, value: &B) -> Result<A, Error>;
+    fn decode(&self, value: B) -> Result<A, Error>;
 }

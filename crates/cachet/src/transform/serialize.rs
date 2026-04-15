@@ -7,7 +7,7 @@
 //! avoiding heap allocations. The serialized bytes can then flow through
 //! compression, encryption, and network I/O without additional copies.
 
-use bincode::{deserialize, serialize_into};
+use bincode::{deserialize_from, serialize_into};
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
@@ -51,7 +51,9 @@ fn encode<T: Serialize + Send + Sync>(value: &T) -> Result<BytesView, Error> {
 }
 
 impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for BincodeCodec {
-    fn decode(&self, value: &BytesView) -> Result<T, Error> {
-        deserialize(value.first_slice()).map_err(Error::from_source)
+    fn decode(&self, mut value: BytesView) -> Result<T, Error> {
+        // BytesView implements Read, allowing deserialization across all spans
+        // without copying bytes into an intermediate buffer.
+        deserialize_from(&mut value).map_err(Error::from_source)
     }
 }
