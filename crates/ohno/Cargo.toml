@@ -4,7 +4,7 @@
 [package]
 name = "ohno"
 description = "High-quality Rust error handling."
-version = "0.3.1"
+version = "0.3.2"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]
@@ -32,8 +32,10 @@ typeid.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
+insta.workspace = true
 mutants.workspace = true
 regex = { workspace = true, features = [ "unicode-perl"] }
+testing_aids.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time", "rt-multi-thread"] }
 

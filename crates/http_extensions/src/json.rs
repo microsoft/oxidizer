@@ -220,7 +220,7 @@ mod tests {
     use std::borrow::Cow;
 
     use bytes::Bytes;
-    use ohno::ErrorExt;
+    use ohno::{ErrorExt, Labeled};
     use recoverable::{Recovery, RecoveryInfo};
     use serde::Deserialize;
     use serde_json::json;

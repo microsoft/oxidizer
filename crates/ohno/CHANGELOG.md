@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.2] - 2026-04-15
+
+- ✨ Features
+
+  - introduce `ohno::ErrorLabel` ([#366](https://github.com/microsoft/oxidizer/pull/366))
+
 ## [0.3.1] - 2026-02-17
 
 - 🐛 Bug Fixes
@@ -40,4 +46,3 @@
 - ✨ Features
 
   - Introduce the ohno and ohno_macros crates ([#53](https://github.com/microsoft/oxidizer/pull/53))
-
