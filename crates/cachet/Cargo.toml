@@ -63,7 +63,9 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+bincode = { workspace = true }
 bytesbuf = { workspace = true }
+cachet_memory = { workspace = true }
 cachet_tier = { workspace = true, features = ["test-util"] }
 criterion = { workspace = true }
 dynosaur = { workspace = true }
@@ -148,6 +150,10 @@ required-features = ["memory", "service"]
 [[example]]
 name = "type_mapping"
 required-features = ["memory", "test-util"]
+
+[[example]]
+name = "serialization"
+required-features = ["memory", "serialize"]
 
 [lints]
 workspace = true
