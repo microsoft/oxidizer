@@ -384,6 +384,17 @@ mod tests {
     }
 
     #[test]
+    fn partial_eq() {
+        let label = ErrorLabel::from("timeout");
+        // PartialEq<&str>
+        assert!(label == "timeout");
+        assert!(label != "other");
+        // PartialEq<str>
+        assert!(label == *"timeout");
+        assert!(label != *"other");
+    }
+
+    #[test]
     fn into_cow_borrowed() {
         let label = ErrorLabel::from("static_value");
         let cow = label.clone().into_cow();
