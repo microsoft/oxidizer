@@ -156,6 +156,7 @@
 //! | `metrics` | ❌ | Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`). |
 //! | `logs` | ❌ | Enables structured `tracing` log events for every cache activity. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
+//! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic bincode serialization of keys and values to `BytesView`. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
@@ -195,6 +196,34 @@
 //!     .fallback(l2)
 //!     .promotion_policy(FallbackPromotionPolicy::always())
 //!     .build();
+//! # };
+//! ```
+//!
+//! ## Serialization Boundary
+//!
+//! When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
+//! to add a bincode serialization boundary. Keys and values are automatically serialized
+//! to [`BytesView`](bytesbuf::BytesView) before reaching the fallback tier, and
+//! deserialized on the way back.
+//!
+//! ```no_run
+//! use cachet::{Cache, FallbackPromotionPolicy};
+//! use tick::Clock;
+//! # async {
+//!
+//! let clock = Clock::new_tokio();
+//! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+//!
+//! let cache = Cache::builder::<String, String>(clock)
+//!     .memory()
+//!     .serialize()
+//!     .fallback(remote)
+//!     .promotion_policy(FallbackPromotionPolicy::always())
+//!     .build();
+//!
+//! // Keys and values are String on the outside, BytesView in the fallback tier.
+//! cache.insert("key".to_string(), "value".to_string().into()).await?;
+//! # Ok::<(), cachet::Error>(())
 //! # };
 //! ```
 //!

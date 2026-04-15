@@ -22,6 +22,23 @@ where
     ///
     /// Subsequent `.fallback()` tiers must work with `BytesView` keys and values
     /// (i.e., implement [`DistributedCacheTier`](cachet_tier::DistributedCacheTier)).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::{Cache, FallbackPromotionPolicy};
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+    ///
+    /// let cache = Cache::builder::<String, String>(clock)
+    ///     .memory()
+    ///     .serialize()
+    ///     .fallback(remote)
+    ///     .promotion_policy(FallbackPromotionPolicy::always())
+    ///     .build();
+    /// ```
     #[must_use]
     pub fn serialize(self) -> TransformBuilder<K, V, BytesView, BytesView, Self>
     where
@@ -31,8 +48,6 @@ where
         self.transform(BincodeEncoder, BincodeCodec)
     }
 }
-
-// ── .serialize() on FallbackBuilder ──
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
