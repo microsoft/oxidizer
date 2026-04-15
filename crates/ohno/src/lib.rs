@@ -256,7 +256,7 @@
 //! ```rust
 //! use ohno::ErrorLabel;
 //!
-//! let label: ErrorLabel = "timeout".into();
+//! let label: ErrorLabel = ErrorLabel::from_static("timeout");
 //! assert_eq!(label, "timeout");
 //!
 //! let label = ErrorLabel::from_parts(["http", "client", "timeout"]);

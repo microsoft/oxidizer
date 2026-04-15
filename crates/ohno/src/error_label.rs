@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::borrow::Cow;
-use std::collections::hash_set::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::io::ErrorKind;
@@ -30,9 +29,8 @@ pub trait Labeled {
 ///   monitoring systems and log sinks. Never include personal
 ///   information, credentials, or data that could identify individual users.
 ///
-/// Prefer `&'static str` literals whenever possible; reach for an owned
-/// [`String`] only when the value is selected at runtime from a known,
-/// bounded set.
+/// Labels can only be created from `&'static str` values — either via
+/// [`from_static`](Self::from_static) or the [`From<&'static str>`] impl.
 ///
 /// # Examples
 ///
@@ -41,10 +39,6 @@ pub trait Labeled {
 /// // From a static string
 /// let label: ErrorLabel = "timeout".into();
 /// assert_eq!(label, "timeout");
-///
-/// // From an owned String
-/// let label: ErrorLabel = String::from("custom_label").into();
-/// assert_eq!(label, "custom_label");
 /// ```
 ///
 /// # Character restrictions
@@ -52,11 +46,10 @@ pub trait Labeled {
 /// Stored label values contain only lower-case ASCII alphanumeric characters (`a`–`z`,
 /// `0`–`9`), underscores (`_`), and dots (`.`).
 ///
-/// The [`from_static`](Self::from_static) constructor panics at compile time (or at
-/// runtime if called dynamically) when given any character outside this set, including
-/// upper-case letters. All other constructors silently coerce the input: upper-case
-/// ASCII letters are lowered to their lower-case equivalents and every other invalid
-/// character is replaced by an underscore.
+/// The [`from_static`](Self::from_static) constructor validates the input on **debug
+/// builds only** — in a `const` context the check surfaces as a compile-time error,
+/// while in a non-const debug context it panics at runtime. On release builds the
+/// validation is elided for performance.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct ErrorLabel(Cow<'static, str>);
 
@@ -65,10 +58,11 @@ impl ErrorLabel {
     ///
     /// This is the preferred way to create a label from a known string at compile time.
     ///
-    /// # Panics
+    /// # Panics (debug builds only)
     ///
-    /// Panics if `label` contains characters other than ASCII alphanumeric, `_`, or `.`.
-    /// When used in a `const` context the panic surfaces as a compile-time error.
+    /// On debug builds, panics if `label` contains characters other than lower-case ASCII
+    /// alphanumeric, `_`, or `.`. When used in a `const` context the panic surfaces as a
+    /// compile-time error. On release builds the validation is elided.
     ///
     /// # Examples
     ///
@@ -78,24 +72,16 @@ impl ErrorLabel {
     /// assert_eq!(TIMEOUT, "timeout");
     /// ```
     ///
-    /// Invalid characters cause a compile-time error:
+    /// On debug builds, invalid characters cause a panic (compile-time error in
+    /// `const` context):
     ///
-    /// ```compile_fail
+    /// ```ignore
     /// # use ohno::ErrorLabel;
+    /// // Fails to compile on debug builds because of the space character.
     /// const BAD: ErrorLabel = ErrorLabel::from_static("has space");
     /// ```
     #[must_use]
     pub const fn from_static(label: &'static str) -> Self {
-        assert!(
-            is_valid_label(label),
-            "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters, '_', or '.'"
-        );
-
-        Self(Cow::Borrowed(label))
-    }
-
-    #[must_use]
-    const fn from_static_unchecked(label: &'static str) -> Self {
         debug_assert!(
             is_valid_label(label),
             "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters, '_', or '.'"
@@ -157,11 +143,7 @@ impl ErrorLabel {
             return get_label(error).unwrap_or_default();
         }
 
-        let mut seen = HashSet::new();
-
-        let chain = successors(Some(error), |e| (*e).source())
-            .filter_map(get_label)
-            .filter(|label| seen.insert(label.clone()));
+        let chain = successors(Some(error), |e| (*e).source()).filter_map(get_label);
 
         Self::from_parts(chain)
     }
@@ -197,60 +179,49 @@ impl ErrorLabel {
         self.0
     }
 
-    /// Returns the value unchanged if it only contains lower-case ASCII alphanumeric,
-    /// `_`, or `.` characters. Otherwise, returns an owned copy with upper-case ASCII
-    /// letters lowered and every other invalid character replaced by `_`.
-    fn coerce(value: Cow<'static, str>) -> Cow<'static, str> {
-        if is_valid_label(&value) {
-            return value;
-        }
-
-        Cow::Owned(value.chars().map(coerce_char).collect())
-    }
-
     #[cfg_attr(coverage_nightly, coverage(off))] // it includes an unreachable variant and it's fully covered by tests
     const fn from_io(kind: ErrorKind) -> Self {
         match kind {
-            ErrorKind::NotFound => Self::from_static_unchecked("not_found"),
-            ErrorKind::PermissionDenied => Self::from_static_unchecked("permission_denied"),
-            ErrorKind::ConnectionRefused => Self::from_static_unchecked("connection_refused"),
-            ErrorKind::ConnectionReset => Self::from_static_unchecked("connection_reset"),
-            ErrorKind::HostUnreachable => Self::from_static_unchecked("host_unreachable"),
-            ErrorKind::NetworkUnreachable => Self::from_static_unchecked("network_unreachable"),
-            ErrorKind::ConnectionAborted => Self::from_static_unchecked("connection_aborted"),
-            ErrorKind::NotConnected => Self::from_static_unchecked("not_connected"),
-            ErrorKind::AddrInUse => Self::from_static_unchecked("addr_in_use"),
-            ErrorKind::AddrNotAvailable => Self::from_static_unchecked("addr_not_available"),
-            ErrorKind::NetworkDown => Self::from_static_unchecked("network_down"),
-            ErrorKind::BrokenPipe => Self::from_static_unchecked("broken_pipe"),
-            ErrorKind::AlreadyExists => Self::from_static_unchecked("already_exists"),
-            ErrorKind::WouldBlock => Self::from_static_unchecked("would_block"),
-            ErrorKind::NotADirectory => Self::from_static_unchecked("not_directory"),
-            ErrorKind::IsADirectory => Self::from_static_unchecked("is_directory"),
-            ErrorKind::DirectoryNotEmpty => Self::from_static_unchecked("directory_not_empty"),
-            ErrorKind::ReadOnlyFilesystem => Self::from_static_unchecked("read_only_filesystem"),
-            ErrorKind::StaleNetworkFileHandle => Self::from_static_unchecked("stale_network_file_handle"),
-            ErrorKind::InvalidInput => Self::from_static_unchecked("invalid_input"),
-            ErrorKind::InvalidData => Self::from_static_unchecked("invalid_data"),
-            ErrorKind::TimedOut => Self::from_static_unchecked("timed_out"),
-            ErrorKind::WriteZero => Self::from_static_unchecked("write_zero"),
-            ErrorKind::StorageFull => Self::from_static_unchecked("storage_full"),
-            ErrorKind::NotSeekable => Self::from_static_unchecked("not_seekable"),
-            ErrorKind::QuotaExceeded => Self::from_static_unchecked("quota_exceeded"),
-            ErrorKind::FileTooLarge => Self::from_static_unchecked("file_too_large"),
-            ErrorKind::ResourceBusy => Self::from_static_unchecked("resource_busy"),
-            ErrorKind::ExecutableFileBusy => Self::from_static_unchecked("executable_file_busy"),
-            ErrorKind::Deadlock => Self::from_static_unchecked("deadlock"),
-            ErrorKind::CrossesDevices => Self::from_static_unchecked("crosses_devices"),
-            ErrorKind::TooManyLinks => Self::from_static_unchecked("too_many_links"),
-            ErrorKind::InvalidFilename => Self::from_static_unchecked("invalid_filename"),
-            ErrorKind::ArgumentListTooLong => Self::from_static_unchecked("argument_list_too_long"),
-            ErrorKind::Interrupted => Self::from_static_unchecked("interrupted"),
-            ErrorKind::Unsupported => Self::from_static_unchecked("unsupported"),
-            ErrorKind::UnexpectedEof => Self::from_static_unchecked("unexpected_eof"),
-            ErrorKind::OutOfMemory => Self::from_static_unchecked("out_of_memory"),
-            ErrorKind::Other => Self::from_static_unchecked("other"),
-            _ => Self::from_static_unchecked("unknown"),
+            ErrorKind::NotFound => Self::from_static("not_found"),
+            ErrorKind::PermissionDenied => Self::from_static("permission_denied"),
+            ErrorKind::ConnectionRefused => Self::from_static("connection_refused"),
+            ErrorKind::ConnectionReset => Self::from_static("connection_reset"),
+            ErrorKind::HostUnreachable => Self::from_static("host_unreachable"),
+            ErrorKind::NetworkUnreachable => Self::from_static("network_unreachable"),
+            ErrorKind::ConnectionAborted => Self::from_static("connection_aborted"),
+            ErrorKind::NotConnected => Self::from_static("not_connected"),
+            ErrorKind::AddrInUse => Self::from_static("addr_in_use"),
+            ErrorKind::AddrNotAvailable => Self::from_static("addr_not_available"),
+            ErrorKind::NetworkDown => Self::from_static("network_down"),
+            ErrorKind::BrokenPipe => Self::from_static("broken_pipe"),
+            ErrorKind::AlreadyExists => Self::from_static("already_exists"),
+            ErrorKind::WouldBlock => Self::from_static("would_block"),
+            ErrorKind::NotADirectory => Self::from_static("not_directory"),
+            ErrorKind::IsADirectory => Self::from_static("is_directory"),
+            ErrorKind::DirectoryNotEmpty => Self::from_static("directory_not_empty"),
+            ErrorKind::ReadOnlyFilesystem => Self::from_static("read_only_filesystem"),
+            ErrorKind::StaleNetworkFileHandle => Self::from_static("stale_network_file_handle"),
+            ErrorKind::InvalidInput => Self::from_static("invalid_input"),
+            ErrorKind::InvalidData => Self::from_static("invalid_data"),
+            ErrorKind::TimedOut => Self::from_static("timed_out"),
+            ErrorKind::WriteZero => Self::from_static("write_zero"),
+            ErrorKind::StorageFull => Self::from_static("storage_full"),
+            ErrorKind::NotSeekable => Self::from_static("not_seekable"),
+            ErrorKind::QuotaExceeded => Self::from_static("quota_exceeded"),
+            ErrorKind::FileTooLarge => Self::from_static("file_too_large"),
+            ErrorKind::ResourceBusy => Self::from_static("resource_busy"),
+            ErrorKind::ExecutableFileBusy => Self::from_static("executable_file_busy"),
+            ErrorKind::Deadlock => Self::from_static("deadlock"),
+            ErrorKind::CrossesDevices => Self::from_static("crosses_devices"),
+            ErrorKind::TooManyLinks => Self::from_static("too_many_links"),
+            ErrorKind::InvalidFilename => Self::from_static("invalid_filename"),
+            ErrorKind::ArgumentListTooLong => Self::from_static("argument_list_too_long"),
+            ErrorKind::Interrupted => Self::from_static("interrupted"),
+            ErrorKind::Unsupported => Self::from_static("unsupported"),
+            ErrorKind::UnexpectedEof => Self::from_static("unexpected_eof"),
+            ErrorKind::OutOfMemory => Self::from_static("out_of_memory"),
+            ErrorKind::Other => Self::from_static("other"),
+            _ => Self::from_static("unknown"),
         }
     }
 }
@@ -263,19 +234,7 @@ impl fmt::Display for ErrorLabel {
 
 impl From<&'static str> for ErrorLabel {
     fn from(s: &'static str) -> Self {
-        Self(Self::coerce(Cow::Borrowed(s)))
-    }
-}
-
-impl From<String> for ErrorLabel {
-    fn from(s: String) -> Self {
-        Self(Self::coerce(Cow::Owned(s)))
-    }
-}
-
-impl From<Cow<'static, str>> for ErrorLabel {
-    fn from(s: Cow<'static, str>) -> Self {
-        Self(Self::coerce(s))
+        Self::from_static(s)
     }
 }
 
@@ -348,23 +307,11 @@ const fn is_valid_label(s: &str) -> bool {
     true
 }
 
-fn coerce_char(c: char) -> char {
-    match c {
-        '.' => '.',
-        '_' => '_',
-        c if c.is_ascii_uppercase() => c.to_ascii_lowercase(),
-        c if !c.is_ascii_alphanumeric() => '_',
-        c => c,
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-
-    use testing_aids::ALL_ERROR_KINDS;
-
     use super::*;
+    use testing_aids::ALL_ERROR_KINDS;
 
     #[test]
     fn from_static_const() {
@@ -380,18 +327,21 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters")]
+    #[cfg(debug_assertions)]
     fn from_static_panics_on_space() {
         let _ = ErrorLabel::from_static("has space");
     }
 
     #[test]
     #[should_panic(expected = "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters")]
+    #[cfg(debug_assertions)]
     fn from_static_panics_on_dash() {
         let _ = ErrorLabel::from_static("has-dash");
     }
 
     #[test]
     #[should_panic(expected = "ErrorLabel: value must contain only lower-case ASCII alphanumeric characters")]
+    #[cfg(debug_assertions)]
     fn from_static_panics_on_uppercase() {
         let _ = ErrorLabel::from_static("HasUpper");
     }
@@ -401,58 +351,6 @@ mod tests {
         let label = ErrorLabel::from("static_label");
         assert_eq!(label, "static_label");
         assert_eq!(label.as_str(), "static_label");
-    }
-
-    #[test]
-    fn from_static_str_coerces_invalid_chars() {
-        let label = ErrorLabel::from("has space");
-        assert_eq!(label, "has_space");
-
-        let label = ErrorLabel::from("has-dash");
-        assert_eq!(label, "has_dash");
-
-        let label = ErrorLabel::from("keep.dots_and.underscores");
-        assert_eq!(label, "keep.dots_and.underscores");
-
-        let label = ErrorLabel::from("HasUpper");
-        assert_eq!(label, "hasupper");
-
-        let label = ErrorLabel::from("MixedCase.With_PARTS");
-        assert_eq!(label, "mixedcase.with_parts");
-    }
-
-    #[test]
-    fn from_string() {
-        let label = ErrorLabel::from(String::from("owned_label"));
-        assert_eq!(label, "owned_label");
-        assert_eq!(label.as_str(), "owned_label");
-    }
-
-    #[test]
-    fn from_string_coerces_invalid_chars() {
-        let label = ErrorLabel::from(String::from("hello world!"));
-        assert_eq!(label, "hello_world_");
-
-        let label = ErrorLabel::from(String::from("UpperCase"));
-        assert_eq!(label, "uppercase");
-    }
-
-    #[test]
-    fn from_cow() {
-        let cow: Cow<'static, str> = Cow::Owned(String::from("cow_label"));
-        let label = ErrorLabel::from(cow);
-        assert_eq!(label, "cow_label");
-    }
-
-    #[test]
-    fn from_cow_coerces_invalid_chars() {
-        let cow: Cow<'static, str> = Cow::Borrowed("has space");
-        let label = ErrorLabel::from(cow);
-        assert_eq!(label, "has_space");
-
-        let cow: Cow<'static, str> = Cow::Owned(String::from("CowUPPER"));
-        let label = ErrorLabel::from(cow);
-        assert_eq!(label, "cowupper");
     }
 
     #[test]
@@ -487,13 +385,6 @@ mod tests {
     }
 
     #[test]
-    fn from_parts_owned_strings() {
-        let parts = vec![String::from("a"), String::from("b")];
-        let label = ErrorLabel::from_parts(parts);
-        assert_eq!(label, "a.b");
-    }
-
-    #[test]
     fn into_cow_borrowed() {
         let label = ErrorLabel::from("static_value");
         let cow = label.clone().into_cow();
@@ -524,14 +415,6 @@ mod tests {
         let outer = LabeledError::wrap("timed_out", inner);
         let label = ErrorLabel::from_error_chain(&outer, labeled_get_label);
         assert_eq!(label, "timed_out.connection_refused");
-    }
-
-    #[test]
-    fn from_error_chain_deduplicates_labels() {
-        let inner = LabeledError::leaf("timed_out");
-        let outer = LabeledError::wrap("timed_out", inner);
-        let label = ErrorLabel::from_error_chain(&outer, labeled_get_label);
-        assert_eq!(label, "timed_out");
     }
 
     #[test]
