@@ -23,7 +23,7 @@ async fn serialize_encode_decode_returns_correct_output() {
     let expected_key = "greeting".to_string();
     let expected_value = "Hello, world!".to_string();
     cache
-        .insert(expected_key.clone(), expected_value.clone().into())
+        .insert(expected_key.clone(), expected_value.clone())
         .await
         .expect("Insert failed");
 

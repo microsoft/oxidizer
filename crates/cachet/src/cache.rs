@@ -262,11 +262,12 @@ where
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     ///
     /// cache.insert("key".to_string(), CacheEntry::new(42)).await?;
+    /// cache.insert("key".to_string(), 42).await?; // also works
     /// # Ok::<(), cachet::Error>(())
     /// # };
     /// ```
-    pub async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.storage.insert(key, entry).await
+    pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<(), Error> {
+        self.storage.insert(key, entry.into()).await
     }
 
     /// Invalidates (removes) a value from the cache.

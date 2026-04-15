@@ -222,7 +222,7 @@
 //!     .build();
 //!
 //! // Keys and values are String on the outside, BytesView in the fallback tier.
-//! cache.insert("key".to_string(), "value".to_string().into()).await?;
+//! cache.insert("key".to_string(), "value".to_string()).await?;
 //! # Ok::<(), cachet::Error>(())
 //! # };
 //! ```
