@@ -34,7 +34,7 @@ use crate::Error;
 /// let entry = CacheEntry::expires_after("data".to_string(), Duration::from_secs(60));
 /// assert_eq!(entry.ttl(), Some(Duration::from_secs(60)));
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct CacheEntry<V> {
     value: V,
     cached_at: Option<SystemTime>,
@@ -136,6 +136,15 @@ impl<V> CacheEntry<V> {
             cached_at: self.cached_at,
             ttl: self.ttl,
         })
+    }
+}
+
+impl<V> PartialEq for CacheEntry<V>
+where
+    V: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.value == *other.value() && self.ttl == other.ttl()
     }
 }
 
