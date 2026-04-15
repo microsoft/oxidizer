@@ -23,6 +23,7 @@ all-features = true
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "bytesbuf::view::BytesView",
     "cachet_memory::*",
     "cachet_service::*",
     "cachet_tier::*",
@@ -31,6 +32,8 @@ allowed_external_types = [
     # External dependencies
     "opentelemetry::metrics::meter::Meter",
     "opentelemetry::metrics::meter::MeterProvider",
+    "serde_core::de::DeserializeOwned",
+    "serde_core::ser::Serialize",
 ]
 
 [features]
