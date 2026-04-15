@@ -29,7 +29,7 @@ pub trait Labeled {
 ///   monitoring systems and log sinks. Never include personal
 ///   information, credentials, or data that could identify individual users.
 ///
-/// Labels can only be created from `&'static str` values — either via
+/// Labels can only be created from `&'static str` values, either via
 /// [`from_static`](Self::from_static) or the [`From<&'static str>`] impl.
 ///
 /// # Examples
@@ -47,7 +47,7 @@ pub trait Labeled {
 /// `0`–`9`), underscores (`_`), and dots (`.`).
 ///
 /// The [`from_static`](Self::from_static) constructor validates the input on **debug
-/// builds only** — in a `const` context the check surfaces as a compile-time error,
+/// builds only**, in a `const` context the check surfaces as a compile-time error,
 /// while in a non-const debug context it panics at runtime. On release builds the
 /// validation is elided for performance.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
@@ -119,8 +119,7 @@ impl ErrorLabel {
     /// Creates a label by walking the error chain and joining recognized labels with `.`.
     ///
     /// Traverses the chain of [`source`](Error::source) errors starting from `error`.
-    /// For each error, `get_label` is called to extract an optional label. Duplicate
-    /// labels are removed, keeping only the first occurrence.
+    /// For each error, `get_label` is called to extract an optional label.
     ///
     /// Unrecognized error types (where `get_label` returns `None`) are skipped. If no
     /// error in the chain is recognized, the returned label is empty.
@@ -287,11 +286,11 @@ impl From<ErrorKind> for ErrorLabel {
 }
 
 const fn is_valid_label_char(b: u8) -> bool {
-    if b.is_ascii_uppercase() {
-        return false;
+    match b {
+        b'_' | b'.' => true,
+        _ if b.is_ascii_uppercase() => false,
+        _ => b.is_ascii_alphanumeric(),
     }
-
-    b.is_ascii_alphanumeric() || b == b'_' || b == b'.'
 }
 
 const fn is_valid_label(s: &str) -> bool {

@@ -430,11 +430,4 @@ mod tests {
         assert_eq!(relocated.message(), "relocated test");
         assert_eq!(relocated.label(), "validation");
     }
-
-    #[test]
-    fn other_with_owned_label() {
-        let owned_label = String::from("dynamic_label");
-        let error = HttpError::other(std::io::Error::other("some error"), RecoveryInfo::never(), owned_label);
-        assert_eq!(error.label(), "dynamic_label");
-    }
 }
