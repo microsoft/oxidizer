@@ -3,12 +3,12 @@
 
 #![allow(missing_docs, reason = "This is a test module")]
 #![cfg(feature = "intercept")]
-#![cfg(not(miri))]
 
 //! Integration tests for [`Intercept`] middleware.
 
 use layered::{Execute, Intercept, Service, Stack};
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn str_references() {
     let stack = (
@@ -21,9 +21,9 @@ async fn str_references() {
             }),
         Execute::new(|input: &str| async move { input }),
     );
+    let service = stack.into_service();
 
     let input = "hello".to_string();
-    let service = stack.into_service();
     let output = service.execute(input.as_str()).await;
 
     assert_eq!(output, "hello");

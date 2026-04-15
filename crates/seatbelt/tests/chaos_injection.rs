@@ -343,9 +343,9 @@ async fn str_references() {
             .output_with(|_input: &str, _args| "injected"),
         Execute::new(|input: &str| async move { input }),
     );
+    let service = stack.into_service();
 
     let input = "hello".to_string();
-    let service = stack.into_service();
     let output = service.execute(input.as_str()).await;
 
     assert_eq!(output, "hello");

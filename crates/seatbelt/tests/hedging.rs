@@ -699,9 +699,9 @@ async fn str_references() {
             .recovery_with(|_output: &&str, _| RecoveryInfo::never()),
         Execute::new(|input: &str| async move { input }),
     );
+    let service = stack.into_service();
 
     let input = "hello".to_string();
-    let service = stack.into_service();
     let output = service.execute(input.as_str()).await;
 
     assert_eq!(output, "hello");

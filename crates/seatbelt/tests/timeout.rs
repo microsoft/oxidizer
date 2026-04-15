@@ -4,7 +4,6 @@
 #![allow(dead_code, reason = "This is a test module")]
 #![allow(missing_docs, reason = "This is a test module")]
 #![cfg(feature = "timeout")]
-#![cfg(not(miri))]
 
 //! Integration tests for timeout middleware using only public API.
 
@@ -198,12 +197,13 @@ async fn str_references() {
     let stack = (
         Timeout::layer("test_timeout", &context)
             .timeout_output(|_args| "timed out")
+            .enable_if(|input| true)
             .timeout(Duration::from_secs(5)),
         Execute::new(|input: &str| async move { input }),
     );
+    let service = stack.into_service();
 
     let input = "hello".to_string();
-    let service = stack.into_service();
     let output = service.execute(input.as_str()).await;
 
     assert_eq!(output, "hello");

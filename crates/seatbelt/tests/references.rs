@@ -66,9 +66,9 @@ async fn all_middleware_stacked_with_str_references() {
             .latency(Duration::from_millis(10)),
         Execute::new(|input: &str| async move { input }),
     );
+    let service = stack.into_service();
 
     let input = "hello".to_string();
-    let service = stack.into_service();
     let output = service.execute(&input).await;
 
     assert_eq!(output, "hello");
