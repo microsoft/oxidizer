@@ -262,7 +262,7 @@ development time to avoid high-cardinality metric series.
 ```rust
 use ohno::ErrorLabel;
 
-let label: ErrorLabel = "timeout".into();
+let label: ErrorLabel = ErrorLabel::from_static("timeout");
 assert_eq!(label, "timeout");
 
 let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
@@ -292,7 +292,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyKCPSdlRl5VG2b_E3QJE-3HGxDLtgYiIo0RG04scjDQw51GYWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6wnfcY2uiFGG0Xrr3B-7vuMGx9RE6mpuHhQGxPVenE9RhyaYWSCgmRvaG5vZTAuMy4xgmtvaG5vX21hY3Jvc2UwLjMuMA
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
