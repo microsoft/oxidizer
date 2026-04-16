@@ -4,7 +4,7 @@
 //! Recipes and patterns for flowing recovery information.
 //!
 //! A cookbook of practical examples for implementing [`Recovery`] effectively.
-//! All examples use [`ohno`](https://www.docs.rs/ohno) for error definitions.
+//! All examples use [`ohno`](https://docs.rs/ohno) for error definitions.
 //!
 //! # Flow from inner errors
 //!
