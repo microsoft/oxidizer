@@ -36,6 +36,8 @@ allowed_external_types = [
     "templated_uri_macros::UriUnsafeParam",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
+    "ohno::error_label::ErrorLabel",
+    "ohno::error_label::Labeled",
     "serde_core::de::*",
     "serde_core::ser::*",
     "uuid::Uuid",
