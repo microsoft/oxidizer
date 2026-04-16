@@ -328,6 +328,25 @@ fn transform_builder_debug() {
     assert!(debug.contains("TransformBuilder"));
 }
 
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn transform_builder_time_to_refresh() {
+    let l1 = MockCache::<i32, i32>::new();
+    let l2 = MockCache::<String, String>::new();
+
+    let refresh = cachet::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
+    let _cache = Cache::builder(Clock::new_frozen())
+        .storage(l1)
+        .transform(
+            TransformEncoder::infallible(|k: &i32| k.to_string()),
+            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
+        )
+        .fallback(Cache::builder(Clock::new_frozen()).storage(l2))
+        .promotion_policy(cachet::FallbackPromotionPolicy::always())
+        .time_to_refresh(refresh)
+        .build();
+}
+
 // -- CacheEntry::map_value tests --
 
 #[cfg_attr(miri, ignore)]

@@ -46,7 +46,15 @@ impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardCodec {
 }
 
 fn encode<T: Serialize + Send + Sync>(value: &T) -> Result<BytesView, Error> {
-    let mut writer = BytesBuf::new().into_writer(GlobalPool::new());
+    // TODO make Cache thread aware so we can simply store the pool in the encoder
+    // Until then we need this to avoid creating a new pool for every encode call, which would be
+    // very expensive
+    thread_local! {
+        static POOL: GlobalPool = GlobalPool::new();
+    }
+    let pool = POOL.with(GlobalPool::clone);
+
+    let mut writer = BytesBuf::new().into_writer(pool);
     postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
     Ok(writer.into_inner().peek())
 }
