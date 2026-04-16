@@ -7,7 +7,8 @@
 //! avoiding heap allocations. The serialized bytes can then flow through
 //! compression, encryption, and network I/O without additional copies.
 
-use bincode::{deserialize_from, serialize_into};
+use std::borrow::Cow;
+
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
@@ -15,30 +16,30 @@ use crate::{Codec, Encoder, Error};
 
 use serde::{Serialize, de::DeserializeOwned};
 
-/// An encoder that serializes values to [`BytesView`] using bincode (one-directional).
+/// An encoder that serializes values to [`BytesView`] using postcard (one-directional).
 ///
 /// Implements `Encoder<T, BytesView>` for any `T: Serialize + Send + Sync`.
 ///
-/// For bidirectional serialization/deserialization, use [`BincodeCodec`].
+/// For bidirectional serialization/deserialization, use [`PostcardCodec`].
 #[derive(Debug, Clone, Copy)]
-pub struct BincodeEncoder;
+pub struct PostcardEncoder;
 
-/// A bidirectional codec that serializes and deserializes values using bincode.
+/// A bidirectional codec that serializes and deserializes values using postcard.
 ///
 /// Implements `Codec<T, BytesView>` for any `T: Serialize + DeserializeOwned + Send + Sync`.
 ///
 /// Serialization writes directly into pool-backed memory via [`BytesBufWriter`](bytesbuf::BytesBufWriter),
 /// producing a [`BytesView`] with no intermediate heap allocation.
 #[derive(Debug, Clone, Copy)]
-pub struct BincodeCodec;
+pub struct PostcardCodec;
 
-impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for BincodeEncoder {
+impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
     fn encode(&self, value: &T) -> Result<BytesView, Error> {
         encode(value)
     }
 }
 
-impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for BincodeCodec {
+impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardCodec {
     fn encode(&self, value: &T) -> Result<BytesView, Error> {
         encode(value)
     }
@@ -46,14 +47,28 @@ impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for BincodeCodec {
 
 fn encode<T: Serialize + Send + Sync>(value: &T) -> Result<BytesView, Error> {
     let mut writer = BytesBuf::new().into_writer(GlobalPool::new());
-    serialize_into(&mut writer, value).map_err(Error::from_source)?;
+    postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
     Ok(writer.into_inner().peek())
 }
 
-impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for BincodeCodec {
-    fn decode(&self, mut value: BytesView) -> Result<T, Error> {
-        // BytesView implements Read, allowing deserialization across all spans
-        // without copying bytes into an intermediate buffer.
-        deserialize_from(&mut value).map_err(Error::from_source)
+/// Returns a contiguous byte slice from a [`BytesView`]. Zero-copy for single-span
+/// views (the common case), collects into a Vec only for multi-span views.
+fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
+    let first = view.first_slice();
+    if first.len() == view.len() {
+        Cow::Borrowed(first)
+    } else {
+        let mut buf = Vec::with_capacity(view.len());
+        for (slice, _) in view.slices() {
+            buf.extend_from_slice(slice);
+        }
+        Cow::Owned(buf)
+    }
+}
+
+impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for PostcardCodec {
+    fn decode(&self, value: BytesView) -> Result<T, Error> {
+        let bytes = to_contiguous(&value);
+        postcard::from_bytes(&bytes).map_err(Error::from_source)
     }
 }

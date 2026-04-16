@@ -9,7 +9,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder,
-    transform::{BincodeCodec, BincodeEncoder},
+    transform::{PostcardCodec, PostcardEncoder},
 };
 
 impl<K, V, CT> CacheBuilder<K, V, CT>
@@ -44,7 +44,7 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(BincodeEncoder, BincodeCodec)
+        self.transform(PostcardEncoder, PostcardCodec)
     }
 }
 
@@ -62,6 +62,6 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(BincodeEncoder, BincodeCodec)
+        self.transform(PostcardEncoder, PostcardCodec)
     }
 }

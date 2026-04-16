@@ -43,11 +43,10 @@ test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 service = ["dep:cachet_service", "dep:layered"]
-serialize = ["dep:serde", "dep:bincode", "dep:bytesbuf", "cachet_tier/distributed"]
+serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf", "cachet_tier/distributed"]
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
-bincode = { workspace = true, optional = true }
 bytesbuf = { workspace = true, optional = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
@@ -58,6 +57,7 @@ ohno = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
+postcard = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thread_aware = { workspace = true }
 tick = { workspace = true, features = [] }
@@ -66,9 +66,9 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-bincode = { workspace = true }
 bytesbuf = { workspace = true }
 cachet_memory = { workspace = true }
+postcard = { workspace = true }
 cachet_tier = { workspace = true, features = ["test-util"] }
 criterion = { workspace = true }
 dynosaur = { workspace = true }

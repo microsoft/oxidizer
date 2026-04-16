@@ -870,9 +870,15 @@ impl Hash for BytesView {
         // Hash all bytes in logical order, consistent with PartialEq.
         // We also hash the cached length as an additional input, but equality and hashing are
         // both defined by the logical byte sequence rather than how it is segmented into spans.
+        //
+        // We iterate over spans_reversed using an index to avoid cloning the view,
+        // which would increment atomic reference counts for every span.
         self.len.hash(state);
-        for (slice, _) in self.slices() {
-            state.write(slice);
+        let mut span_idx = self.spans_reversed.len();
+        while span_idx > 0 {
+            span_idx -= 1;
+            let span: &[u8] = &self.spans_reversed[span_idx];
+            state.write(span);
         }
     }
 }
