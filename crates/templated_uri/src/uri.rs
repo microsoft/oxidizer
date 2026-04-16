@@ -363,7 +363,7 @@ impl TryFrom<Uri> for TargetPathAndQuery {
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         uri.to_path_and_query()?
             .map(Self::from_path_and_query)
-            .ok_or_else(|| ValidationError::caused_by("URI does not have a path and query component"))
+            .ok_or_else(|| ValidationError::invalid_uri("URI does not have a path and query component"))
     }
 }
 
@@ -377,7 +377,7 @@ impl TryFrom<Uri> for PathAndQuery {
     type Error = ValidationError;
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         uri.to_path_and_query()?
-            .ok_or_else(|| ValidationError::caused_by("URI does not have a path and query component"))
+            .ok_or_else(|| ValidationError::invalid_uri("URI does not have a path and query component"))
     }
 }
 
