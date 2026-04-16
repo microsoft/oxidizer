@@ -14,7 +14,7 @@ const LABEL_URI_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("uri_http_error
 /// This error type is returned when URI parsing or validation fails,
 /// typically due to malformed syntax or invalid URI components. It can wrap
 /// errors from the `http` crate, such as `InvalidUri` and `InvalidUriParts`,
-/// and exposes them via the `source()` method as `http::Error` when available.
+/// and exposes them via the `source()` method.
 #[ohno::error]
 #[from(http::Error(label: LABEL_URI_HTTP_ERROR))]
 #[from(InvalidUri(label: LABEL_URI_INVALID))]
