@@ -12,12 +12,12 @@ bodies, or errors, apply the rules below.
 | Request/response type | `HttpRequest` / `HttpResponse` (aliases for `Request<HttpBody>` / `Response<HttpBody>`) | raw `Request<Vec<u8>>` |
 | Build a request | `HttpRequestBuilder::new(&body_builder)` | manual `http::Request::builder()` |
 | Build a response | `HttpResponseBuilder::new(&body_builder)` | manual `http::Response::builder()` |
-| Create bodies | `HttpBodyBuilder` methods: `.text()`, `.slice()`, `.bytes()`, `.json()`, `.empty()`, `.stream()` | constructing `HttpBody` directly |
+| Create bodies | `HttpBodyBuilder` methods: `.text()`, `.slice()`, `.bytes()`, `.json()` (requires feature `json`), `.empty()`, `.stream()` | manual `Vec<u8>` or raw `StreamBody` plumbing |
 | Consume body as text | `body.into_text().await?` | manual `String::from_utf8(...)` on collected bytes |
 | Consume body as bytes | `body.into_bytes().await?` → `BytesView` | collecting frames manually |
-| Consume body as JSON | `body.into_json_owned::<T>().await?` (owned) or `body.into_json::<T>().await?` (lazy) | manual serde + buffering |
+| Consume body as JSON | `body.into_json_owned::<T>().await?` (owned) or `body.into_json::<T>().await?` (lazy) (requires feature `json`) | manual serde + buffering |
 | Buffer a streaming body | `body.into_buffered().await?` | collecting frames into a `Vec` |
-| Fetch + consume shorthand | `.fetch_text()`, `.fetch_bytes()`, `.fetch_json_owned::<T>()` | separate `.fetch()` + body consumption |
+| Fetch + consume shorthand | `.fetch_text()`, `.fetch_bytes()`, `.fetch_json_owned::<T>()` (requires feature `json`) | separate `.fetch()` + body consumption |
 | URI | `templated_uri::Uri` with `#[templated]` structs | `format!()` string concatenation |
 | Header names | `http::header::CONTENT_TYPE` constants or `HeaderName::from_static(...)` | string literals where a constant exists |
 | Header values | `HeaderValue::from_static(...)` for static; `HeaderValueExt::from_shared(...)` for dynamic | `HeaderValue::from_str(&format!(...))` per request |
@@ -89,45 +89,35 @@ via `HeaderName::from_static("x-custom-header")`.
 - `RequestExt` — `url_template_label()`, `path_and_query()`
 - `ExtensionsExt` — `url_template_label()` on `http::Extensions`
 
-### 7 — Error handling
+### 7 — Use `HttpError` for all HTTP failures
 
-- `HttpError` is the unified error type. It carries `ErrorLabel` (for metrics)
-  and `RecoveryInfo` (retry/never/unavailable).
-- Wrap custom errors: `HttpError::other(err, recovery, label)`.
-- Wrap errors that implement `Recovery`: `HttpError::other_with_recovery(err, label)`.
-- Use `HttpError::validation(msg)` for non-retryable validation failures.
-- Use `HttpError::unavailable(msg)` for circuit-breaker rejections; attach the
-  original request via `.with_request(req)` so it can be retried later with
-  `.take_request()`.
-- Use `HttpError::timeout(duration)` for request-level timeouts (classified as
-  retryable).
-- `HttpError` has `From` impls for `http::Error`, `InvalidUri`,
-  `InvalidUriParts`, `InvalidHeaderValue`, `InvalidMethod`,
-  `InvalidStatusCode`, `MaxSizeReached`, `std::io::Error`,
-  `templated_uri::ValidationError`.
-- `std::io::Error` conversion auto-classifies recovery based on `ErrorKind`
-  (e.g., `BrokenPipe` → retry, `Other` → never).
+- `HttpError` carries `ErrorLabel` (metrics) and `RecoveryInfo`
+  (retry/never/unavailable).
+- Wrap custom errors: `HttpError::other(err, recovery, label)` or
+  `HttpError::other_with_recovery(err, label)` when the error implements
+  `Recovery`.
+- Use `HttpError::validation(msg)` for non-retryable failures,
+  `HttpError::unavailable(msg)` for circuit-breaker rejections (attach the
+  request via `.with_request(req)`), and `HttpError::timeout(duration)` for
+  retryable timeouts.
+- `From` impls auto-convert `http::Error`, `InvalidUri`, `InvalidHeaderValue`,
+  `InvalidMethod`, `MaxSizeReached`, `std::io::Error`,
+  `templated_uri::ValidationError`, and others.
 
-### 8 — Bodies and memory pools
+### 8 — Create bodies through `HttpBodyBuilder`
 
-- Always create bodies through `HttpBodyBuilder`; it uses pooled memory from
-  `bytesbuf` for reduced allocation overhead.
-- Use `.bytes(view)` (zero-copy) over `.slice(data)` (copies) when you already
-  have a `BytesView`.
-- Use `.json(&value)` to serialize directly into pooled memory (requires
-  feature `json`).
+- `HttpBodyBuilder` uses pooled memory from `bytesbuf` for reduced allocation
+  overhead. Use `.bytes(view)` (zero-copy) over `.slice(data)` (copies) when
+  you already have a `BytesView`.
 - For streaming, use `HttpBodyBuilder::stream(stream, &options)` or
   `HttpRequestBuilder::stream(stream)`.
-- Consume bodies via `into_text()`, `into_bytes()`, `into_json_owned::<T>()`,
-  or `into_stream()`. Use `into_buffered()` to eagerly load a streaming body
-  into memory (enables `try_clone()`).
-- Set `HttpBodyOptions::buffer_limit(n)` to cap memory when buffering large
-  bodies.
-- Set `HttpBodyOptions::timeout(dur)` for idle-timeout on streaming bodies.
-- Set builder-level defaults with
-  `HttpBodyBuilder::new(pool, &clock).with_options(options)`.
+- Consume bodies via `into_text()`, `into_bytes()`, `into_json_owned::<T>()`
+  (requires feature `json`), or `into_stream()`. Use `into_buffered()` to
+  eagerly load a streaming body into memory.
+- Cap memory with `HttpBodyOptions::buffer_limit(n)` and set idle-timeout on
+  streaming bodies with `HttpBodyOptions::timeout(dur)`.
 
-### 9 — JSON handling (requires feature `json`)
+### 9 — Serialize JSON through the builder (requires feature `json`)
 
 - `HttpBodyBuilder::json(&value)` serializes to a body, returns
   `Result<HttpBody, JsonError>`.
@@ -139,7 +129,7 @@ via `HeaderName::from_static("x-custom-header")`.
 - Shorthand: `builder.fetch_json_owned::<T>()` fetches + deserializes in one
   call.
 
-### 10 — Timeouts
+### 10 — Set timeouts on the request builder
 
 - `.response_timeout(dur)` on `HttpRequestBuilder` — caps time to receive
   response headers (stored as `timeout::ResponseTimeout` extension).
@@ -149,35 +139,29 @@ via `HeaderName::from_static("x-custom-header")`.
 - Timeout extensions are read by the HTTP client (the `RequestHandler`
   implementation); they are not enforced by the builder itself.
 
-### 11 — Testing
+### 11 — Use `FakeHandler` for unit tests
 
-- Enable `test-util` feature for `FakeHandler`, `new_fake()` constructors.
-- `FakeHandler::from(StatusCode::OK)` — fixed status, works indefinitely.
-- `FakeHandler::from(vec![StatusCode::OK, StatusCode::BAD_REQUEST])` — status
-  code sequence; errors when exhausted.
-- `FakeHandler::from(response)` — single buffered response, reusable
-  indefinitely (body must be buffered).
-- `FakeHandler::from_sync_handler(|req| ...)` — dynamic per-request logic.
-- `FakeHandler::from_async_handler(|req| async { ... })` — async test logic.
-- `FakeHandler::from_http_error(|req| HttpError::...)` — always returns error.
-- `FakeHandler::never_completes()` — for timeout testing.
-- `FakeHandler::default()` — returns 200 OK.
+- Enable `test-util` feature for `FakeHandler` and `new_fake()` constructors.
+- `FakeHandler::from(StatusCode::OK)` — fixed status;
+  `FakeHandler::from(vec![...])` — status sequence;
+  `FakeHandler::from(response)` — reusable buffered response.
+- `FakeHandler::from_sync_handler(|req| ...)` and
+  `from_async_handler(|req| async { ... })` for dynamic test logic.
+- `FakeHandler::never_completes()` for timeout testing;
+  `FakeHandler::default()` returns 200 OK.
 - `HttpRequestBuilderExt::request_builder()` on a handler gives a builder
-  wired for `.fetch()` / `.fetch_text()` / `.fetch_bytes()` /
-  `.fetch_json_owned()`.
+  wired for `.fetch()` / `.fetch_text()` / `.fetch_bytes()`.
 
-### 12 — Middleware
+### 12 — Implement `Service<HttpRequest>` for middleware
 
-Implement `Service<HttpRequest>` with `type Out = Result<HttpResponse>` to
-automatically satisfy the `RequestHandler` trait alias. Use `layered::Stack` to
-compose middleware layers.
+Satisfy the `RequestHandler` trait alias by implementing
+`Service<HttpRequest>` with `type Out = Result<HttpResponse>`. Use
+`layered::Stack` to compose middleware layers.
 
 ```rust
 impl<S: RequestHandler> Service<HttpRequest> for MyMiddleware<S> {
     type Out = Result<HttpResponse>;
-    async fn execute(&self, request: HttpRequest) -> Self::Out {
-        self.inner.execute(request).await
-    }
+    async fn execute(&self, req: HttpRequest) -> Self::Out { self.inner.execute(req).await }
 }
 ```
 
