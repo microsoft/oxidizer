@@ -15,20 +15,9 @@
 //! ```rust
 //! use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 //!
-//! /// A low-level database error with its own recovery classification.
 //! #[ohno::error]
 //! struct DatabaseError {
 //!     recovery: RecoveryInfo,
-//! }
-//!
-//! impl DatabaseError {
-//!     fn connection_timeout() -> Self {
-//!         Self::caused_by(RecoveryInfo::retry(), "connection timed out")
-//!     }
-//!
-//!     fn invalid_query() -> Self {
-//!         Self::caused_by(RecoveryInfo::never(), "invalid query")
-//!     }
 //! }
 //!
 //! impl Recovery for DatabaseError {
@@ -37,8 +26,6 @@
 //!     }
 //! }
 //!
-//! /// A higher-level service error.
-//! ///
 //! /// The `#[from]` attribute flows recovery info from `DatabaseError`
 //! /// automatically — `error.recovery()` is called during conversion.
 //! #[ohno::error]
@@ -54,7 +41,7 @@
 //! }
 //!
 //! fn database_operation() -> Result<(), DatabaseError> {
-//!     Err(DatabaseError::connection_timeout())
+//!     Err(DatabaseError::caused_by(RecoveryInfo::retry(), "connection timed out"))
 //! }
 //!
 //! fn service_operation() -> Result<(), ServiceError> {
@@ -90,23 +77,13 @@
 //!     recovery: RecoveryInfo,
 //! }
 //!
-//! impl ConfigError {
-//!     fn missing_field(name: &str) -> Self {
-//!         Self::caused_by(RecoveryInfo::never(), format!("missing required field: {name}"))
-//!     }
-//!
-//!     fn invalid_format() -> Self {
-//!         Self::caused_by(RecoveryInfo::never(), "invalid configuration format")
-//!     }
-//! }
-//!
 //! impl Recovery for ConfigError {
 //!     fn recovery(&self) -> RecoveryInfo {
 //!         self.recovery.clone()
 //!     }
 //! }
 //!
-//! let err = ConfigError::missing_field("database_url");
+//! let err = ConfigError::caused_by(RecoveryInfo::never(), "missing required field: database_url");
 //! assert_eq!(err.recovery().kind(), RecoveryKind::Never);
 //! ```
 //!
@@ -132,12 +109,6 @@
 //! #[from(io::Error(recovery: RecoveryInfo::from(error.kind())))]
 //! struct StorageError {
 //!     recovery: RecoveryInfo,
-//! }
-//!
-//! impl StorageError {
-//!     fn corrupted() -> Self {
-//!         Self::caused_by(RecoveryInfo::never(), "data corruption detected")
-//!     }
 //! }
 //!
 //! impl Recovery for StorageError {
