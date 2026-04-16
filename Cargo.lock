@@ -2330,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chumsky",
  "darling",
