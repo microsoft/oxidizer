@@ -43,7 +43,7 @@ test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 service = ["dep:cachet_service", "dep:layered"]
-serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf", "cachet_tier/distributed"]
+serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }

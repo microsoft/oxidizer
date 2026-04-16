@@ -65,13 +65,8 @@ mod error;
 mod testing;
 mod tier;
 
-#[cfg(feature = "distributed")]
-mod distributed;
 mod dynamic;
 
-#[cfg(feature = "distributed")]
-#[doc(inline)]
-pub use distributed::DistributedCacheTier;
 #[doc(inline)]
 pub use dynamic::DynamicCache;
 #[doc(inline)]
