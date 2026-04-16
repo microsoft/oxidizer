@@ -1,4 +1,10 @@
 # Changelog
+## [0.1.2] - 2026-04-16
+
+- ✨ Features
+
+  - add support for `ErrorLabel` and bump `ohno` version
+
 ## [0.1.1] - 2026-04-10
 
 - ✨ Features

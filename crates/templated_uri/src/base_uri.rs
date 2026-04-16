@@ -366,7 +366,7 @@ impl BaseUri {
     /// ```
     pub fn from_http_uri(uri: &http::Uri) -> Result<Self, ValidationError> {
         let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority()) else {
-            return Err(ValidationError::caused_by("URI must have both scheme and authority components"));
+            return Err(ValidationError::invalid_uri("URI must have both scheme and authority components"));
         };
 
         // Use only the path component - query and fragment are not part of a base URI.
