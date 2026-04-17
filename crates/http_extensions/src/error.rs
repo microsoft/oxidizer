@@ -14,12 +14,12 @@ use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
+use crate::HttpRequest;
 use crate::error_labels::{
     LABEL_HTTP_ERROR, LABEL_INVALID_HEADER_VALUE, LABEL_INVALID_METHOD, LABEL_INVALID_STATUS_CODE, LABEL_INVALID_URI, LABEL_IO,
     LABEL_MAX_SIZE_REACHED, LABEL_TIMEOUT_BODY, LABEL_TIMEOUT_RESPONSE, LABEL_UNAVAILABLE, LABEL_UNSUCCESSFUL_RESPONSE, LABEL_VALIDATION,
 };
 use crate::http_utils::SyncHolder;
-use crate::{HttpRequest, JsonError};
 
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
@@ -270,7 +270,8 @@ impl HttpError {
             return Some(err.label().clone());
         }
 
-        if let Some(err) = error.downcast_ref::<JsonError>() {
+        #[cfg(any(feature = "json", test))]
+        if let Some(err) = error.downcast_ref::<crate::json::JsonError>() {
             return Some(err.label().clone());
         }
 
@@ -310,7 +311,7 @@ mod tests {
     use thread_aware::affinity::pinned_affinities;
 
     use super::*;
-    use crate::{FakeHandler, HttpRequestBuilder, HttpRequestBuilderExt, HttpResponseBuilder};
+    use crate::{FakeHandler, HttpRequestBuilder, HttpRequestBuilderExt, HttpResponseBuilder, JsonError};
 
     static_assertions::assert_impl_all!(HttpError: std::error::Error, Send, Sync, Display, Debug, ThreadAware);
 
