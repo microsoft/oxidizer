@@ -262,7 +262,7 @@ impl HttpError {
     ///
     /// This method recognizes the following error types:
     /// - [`HttpError`]
-    /// - [`JsonError`]
+    /// - [`JsonError`][crate::json::JsonError]
     /// - [`templated_uri::ValidationError`]
     /// - [`std::io::Error`]
     pub fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
