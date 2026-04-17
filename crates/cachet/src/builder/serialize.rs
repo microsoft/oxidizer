@@ -44,7 +44,7 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(PostcardEncoder, PostcardCodec)
+        self.transform(PostcardEncoder::new(), PostcardCodec::new())
     }
 }
 
@@ -62,6 +62,6 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(PostcardEncoder, PostcardCodec)
+        self.transform(PostcardEncoder::new(), PostcardCodec::new())
     }
 }

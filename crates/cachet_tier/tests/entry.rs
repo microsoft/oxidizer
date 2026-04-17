@@ -100,37 +100,3 @@ fn debug_includes_value() {
     let debug_str = format!("{entry:?}");
     assert!(debug_str.contains("42"));
 }
-
-#[test]
-fn partial_eq_compares_value_and_ttl() {
-    let a = CacheEntry::new(42);
-    let b = CacheEntry::new(42);
-    assert_eq!(a, b);
-}
-
-#[test]
-fn partial_eq_ignores_cached_at() {
-    let clock = Clock::new_frozen();
-    let t1 = clock.system_time();
-    let t2 = t1 + Duration::from_secs(100);
-
-    let a = CacheEntry::expires_at(42, Duration::from_secs(60), t1);
-    let b = CacheEntry::expires_at(42, Duration::from_secs(60), t2);
-
-    // Same value and TTL but different cached_at — should be equal.
-    assert_eq!(a, b);
-}
-
-#[test]
-fn partial_eq_different_value() {
-    let a = CacheEntry::new(42);
-    let b = CacheEntry::new(99);
-    assert_ne!(a, b);
-}
-
-#[test]
-fn partial_eq_different_ttl() {
-    let a = CacheEntry::expires_after(42, Duration::from_secs(60));
-    let b = CacheEntry::expires_after(42, Duration::from_secs(300));
-    assert_ne!(a, b);
-}

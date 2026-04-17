@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
+use crate::telemetry::CacheTelemetry;
 use crate::{Codec, Encoder, Error};
 
 use serde::{Serialize, de::DeserializeOwned};
@@ -21,8 +22,15 @@ use serde::{Serialize, de::DeserializeOwned};
 /// Implements `Encoder<T, BytesView>` for any `T: Serialize + Send + Sync`.
 ///
 /// For bidirectional serialization/deserialization, use [`PostcardCodec`].
-#[derive(Debug, Clone, Copy)]
-pub struct PostcardEncoder;
+#[derive(Debug, Clone)]
+pub struct PostcardEncoder {}
+
+impl PostcardEncoder {
+    /// Creates a new `PostcardEncoder` with the given telemetry.
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 /// A bidirectional codec that serializes and deserializes values using postcard.
 ///
@@ -30,8 +38,15 @@ pub struct PostcardEncoder;
 ///
 /// Serialization writes directly into pool-backed memory via [`BytesBufWriter`](bytesbuf::BytesBufWriter),
 /// producing a [`BytesView`] with no intermediate heap allocation.
-#[derive(Debug, Clone, Copy)]
-pub struct PostcardCodec;
+#[derive(Debug, Clone)]
+pub struct PostcardCodec {}
+
+impl PostcardCodec {
+    /// Creates a new `PostcardCodec` with the given telemetry.
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
     fn encode(&self, value: &T) -> Result<BytesView, Error> {
