@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
