@@ -18,6 +18,9 @@ pub(crate) const LABEL_MAX_SIZE_REACHED: ErrorLabel = ErrorLabel::from_static("m
 pub(crate) const LABEL_TIMEOUT_RESPONSE: ErrorLabel = ErrorLabel::from_static("timeout_response");
 pub(crate) const LABEL_TIMEOUT_BODY: ErrorLabel = ErrorLabel::from_static("timeout_body");
 
+// IO errors
+pub(crate) const LABEL_IO: ErrorLabel = ErrorLabel::from_static("io");
+
 // Availability errors
 pub(crate) const LABEL_UNAVAILABLE: ErrorLabel = ErrorLabel::from_static("unavailable");
 
