@@ -32,6 +32,9 @@ pub(crate) const LABEL_BODY_NOT_BUFFERED: ErrorLabel = ErrorLabel::from_static("
 pub(crate) const LABEL_BODY_SIZE_LIMIT: ErrorLabel = ErrorLabel::from_static("body_size_limit");
 
 // JSON errors
+#[cfg(any(feature = "json", test))]
 pub(crate) const LABEL_JSON: ErrorLabel = ErrorLabel::from_static("json");
+#[cfg(any(feature = "json", test))]
 pub(crate) const LABEL_JSON_SERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_serialization");
+#[cfg(any(feature = "json", test))]
 pub(crate) const LABEL_JSON_DESERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_deserialization");
