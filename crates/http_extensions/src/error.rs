@@ -18,15 +18,17 @@ use crate::HttpRequest;
 use crate::http_utils::SyncHolder;
 
 const LABEL_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("http_error");
-const LABEL_INVALID_URI_PARTS: ErrorLabel = ErrorLabel::from_static("invalid_uri_parts");
 const LABEL_INVALID_URI: ErrorLabel = ErrorLabel::from_static("invalid_uri");
+const LABEL_INVALID_URI_TEMPLATE: ErrorLabel = ErrorLabel::from_static("invalid_uri_template");
 const LABEL_INVALID_HEADER_VALUE: ErrorLabel = ErrorLabel::from_static("invalid_header_value");
 const LABEL_INVALID_METHOD: ErrorLabel = ErrorLabel::from_static("invalid_method");
 const LABEL_INVALID_STATUS_CODE: ErrorLabel = ErrorLabel::from_static("invalid_status_code");
+const LABEL_UNSUCCESSFUL_RESPONSE: ErrorLabel = ErrorLabel::from_static("unsuccessful_response");
 const LABEL_MAX_SIZE_REACHED: ErrorLabel = ErrorLabel::from_static("max_size_reached");
 const LABEL_VALIDATION: ErrorLabel = ErrorLabel::from_static("validation");
 const LABEL_UNAVAILABLE: ErrorLabel = ErrorLabel::from_static("unavailable");
-const LABEL_TIMEOUT: ErrorLabel = ErrorLabel::from_static("timeout");
+const LABEL_TIMEOUT_RESPONSE: ErrorLabel = ErrorLabel::from_static("timeout_response");
+const LABEL_TIMEOUT_BODY: ErrorLabel = ErrorLabel::from_static("timeout_body");
 
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
@@ -113,14 +115,14 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 #[ohno::error]
 #[from(
     http::Error(label: LABEL_HTTP_ERROR, recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: LABEL_INVALID_URI_PARTS, recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never()),
     InvalidUri(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never()),
     InvalidHeaderValue(label: LABEL_INVALID_HEADER_VALUE, recovery: RecoveryInfo::never()),
     InvalidMethod(label: LABEL_INVALID_METHOD, recovery: RecoveryInfo::never()),
     InvalidStatusCode(label: LABEL_INVALID_STATUS_CODE, recovery: RecoveryInfo::never()),
     MaxSizeReached(label: LABEL_MAX_SIZE_REACHED, recovery: RecoveryInfo::never()),
     std::io::Error(label: ErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never())
+    templated_uri::ValidationError(label: LABEL_INVALID_URI_TEMPLATE, recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
@@ -168,7 +170,7 @@ impl HttpError {
         Self::other(
             format!("the response was not successful, status code: {}", code.as_u16()),
             recovery,
-            LABEL_INVALID_STATUS_CODE,
+            LABEL_UNSUCCESSFUL_RESPONSE,
         )
     }
 
@@ -179,6 +181,12 @@ impl HttpError {
     #[must_use]
     pub fn validation(msg: impl Into<Cow<'static, str>>) -> Self {
         Self::other(msg.into(), RecoveryInfo::never(), LABEL_VALIDATION)
+    }
+
+    /// Like [`validation`](Self::validation) but with a custom label for finer-grained telemetry.
+    #[must_use]
+    pub(crate) fn validation_with_label(msg: impl Into<Cow<'static, str>>, label: impl Into<ErrorLabel>) -> Self {
+        Self::other(msg.into(), RecoveryInfo::never(), label)
     }
 
     /// Creates an error that indicates a service is currently unavailable.
@@ -223,7 +231,7 @@ impl HttpError {
                 duration.as_millis()
             ),
             RecoveryInfo::retry(),
-            LABEL_TIMEOUT,
+            LABEL_TIMEOUT_RESPONSE,
         )
     }
 
@@ -236,7 +244,7 @@ impl HttpError {
         Self::other(
             format!("body data was not fully received, timeout: {}ms", duration.as_millis()),
             RecoveryInfo::retry(),
-            LABEL_TIMEOUT,
+            LABEL_TIMEOUT_BODY,
         )
     }
 
@@ -306,7 +314,7 @@ mod tests {
         let error = HttpError::invalid_status_code(StatusCode::NOT_FOUND, RecoveryInfo::unknown());
 
         assert_eq!(error.message(), "the response was not successful, status code: 404");
-        assert_eq!(error.label(), "invalid_status_code");
+        assert_eq!(error.label(), "unsuccessful_response");
         assert_eq!(error.recovery(), RecoveryInfo::unknown());
     }
 
@@ -349,6 +357,14 @@ mod tests {
     }
 
     #[test]
+    fn from_uri_template_validation_error() {
+        let validation_error = templated_uri::ValidationError::from("not a valid uri".parse::<http::Uri>().unwrap_err());
+        let error = HttpError::from(validation_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "invalid_uri_template");
+    }
+
+    #[test]
     fn assert_from() {
         static_assertions::assert_impl_all!(HttpError: From<http::Error>);
         static_assertions::assert_impl_all!(HttpError: From<InvalidUri>);
@@ -376,7 +392,7 @@ mod tests {
             timeout_error.message(),
             "request timed out while receiving the response, timeout: 1500ms"
         );
-        assert_eq!(timeout_error.label(), "timeout");
+        assert_eq!(timeout_error.label(), "timeout_response");
     }
 
     #[test]
@@ -386,7 +402,7 @@ mod tests {
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
         assert_eq!(error.message(), "body data was not fully received, timeout: 2500ms");
-        assert_eq!(error.label(), "timeout");
+        assert_eq!(error.label(), "timeout_body");
     }
 
     #[test]

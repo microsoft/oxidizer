@@ -349,7 +349,7 @@ impl<R> HttpRequestBuilder<'_, R> {
 
         let uri = self
             .uri
-            .ok_or_else(|| HttpError::validation("URI is required when building the request"))??;
+            .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", "missing_uri"))??;
 
         let path_and_query = uri.target_path_and_query().cloned();
         let mut request = self.builder.uri(uri.into_http_uri()?).body(body)?;

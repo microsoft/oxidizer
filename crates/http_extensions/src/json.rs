@@ -11,11 +11,16 @@ use std::marker::PhantomData;
 
 use bytes::{Buf, Bytes};
 use bytesbuf::BytesView;
+use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
 use serde_core::Deserialize;
 use serde_core::de::DeserializeOwned;
 
 use crate::HttpError;
+
+const LABEL_JSON: ErrorLabel = ErrorLabel::from_static("json");
+const LABEL_JSON_SERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_serialization");
+const LABEL_JSON_DESERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_deserialization");
 
 /// Error type for JSON serialization and deserialization operations.
 ///
@@ -25,6 +30,7 @@ use crate::HttpError;
 #[no_constructors]
 #[display("{message}")]
 pub struct JsonError {
+    label: ErrorLabel,
     message: &'static str,
     inner: ohno::OhnoCore,
 }
@@ -33,6 +39,7 @@ impl JsonError {
     #[must_use]
     pub(crate) fn serialization(error: serde_json::Error) -> Self {
         Self {
+            label: LABEL_JSON_SERIALIZATION,
             message: "JSON serialization error",
             inner: ohno::OhnoCore::from(error),
         }
@@ -41,15 +48,22 @@ impl JsonError {
     #[must_use]
     pub(crate) fn deserialization(error: serde_json::Error) -> Self {
         Self {
+            label: LABEL_JSON_DESERIALIZATION,
             message: "JSON deserialization error",
             inner: ohno::OhnoCore::from(error),
         }
     }
 }
 
+impl Labeled for JsonError {
+    fn label(&self) -> &ErrorLabel {
+        &self.label
+    }
+}
+
 impl From<JsonError> for HttpError {
     fn from(value: JsonError) -> Self {
-        Self::other(value, RecoveryInfo::never(), "json")
+        Self::other(value, RecoveryInfo::never(), LABEL_JSON)
     }
 }
 
@@ -337,6 +351,7 @@ mod tests {
     fn json_error_deserialization() {
         let error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("json de error")));
         assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "json_deserialization");
         assert_eq!(error.message(), "JSON deserialization error\ncaused by: json de error");
     }
 
@@ -344,11 +359,12 @@ mod tests {
     fn json_error_serialization() {
         let error = JsonError::serialization(serde_json::Error::io(std::io::Error::other("json se error")));
         assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "json_serialization");
         assert_eq!(error.message(), "JSON serialization error\ncaused by: json se error");
     }
 
     #[test]
-    fn http_error_from_json_error() {
+    fn http_error_from_json_deserialization() {
         use ohno::assert_error_message;
 
         let json_error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("json de error")));
@@ -356,5 +372,16 @@ mod tests {
         assert_eq!(http_error.recovery(), RecoveryInfo::never());
         assert_eq!(http_error.label(), "json");
         assert_error_message!(http_error, "JSON deserialization error\ncaused by: json de error");
+    }
+
+    #[test]
+    fn http_error_from_json_serialization() {
+        use ohno::assert_error_message;
+
+        let json_error = JsonError::serialization(serde_json::Error::io(std::io::Error::other("json se error")));
+        let http_error: crate::HttpError = json_error.into();
+        assert_eq!(http_error.recovery(), RecoveryInfo::never());
+        assert_eq!(http_error.label(), "json");
+        assert_error_message!(http_error, "JSON serialization error\ncaused by: json se error");
     }
 }

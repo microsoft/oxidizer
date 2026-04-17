@@ -219,7 +219,7 @@ impl HttpBody {
         self.into_bytes()
             .await?
             .read_to_string(&mut text)
-            .map_err(|e| HttpError::validation(format!("body contains invalid UTF-8: {e}")))?;
+            .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), "invalid_utf8"))?;
 
         Ok(text)
     }
@@ -266,7 +266,10 @@ impl HttpBody {
 
         match self.kind {
             Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
-            Kind::Bytes(None) => Err(HttpError::validation("body cannot be buffered because it is already consumed")),
+            Kind::Bytes(None) => Err(HttpError::validation_with_label(
+                "body cannot be buffered because it is already consumed",
+                "body_consumed",
+            )),
             Kind::Empty => Ok(builder.empty()),
             Kind::Body(b, options) => {
                 let limit = options.buffer_limit;
@@ -480,8 +483,9 @@ impl TryFrom<HttpBody> for BytesView {
         match value.kind {
             Kind::Bytes(Some(bytes)) => Ok(bytes),
             Kind::Empty => Ok(Self::default()),
-            _ => Err(HttpError::validation(
+            _ => Err(HttpError::validation_with_label(
                 "body cannot be converted to byte sequence because it is not buffered",
+                "body_not_buffered",
             )),
         }
     }
@@ -561,10 +565,13 @@ async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Se
 fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Result<usize> {
     let total = current_size
         .checked_add(additional)
-        .ok_or_else(|| HttpError::validation(format!("body size exceeds the limit of {limit} bytes")))?;
+        .ok_or_else(|| HttpError::validation_with_label(format!("body size exceeds the limit of {limit} bytes"), "body_size_limit"))?;
 
     if total > limit {
-        return Err(HttpError::validation(format!("body size exceeds the limit of {limit} bytes")));
+        return Err(HttpError::validation_with_label(
+            format!("body size exceeds the limit of {limit} bytes"),
+            "body_size_limit",
+        ));
     }
 
     Ok(total)
