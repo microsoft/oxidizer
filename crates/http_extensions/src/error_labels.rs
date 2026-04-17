@@ -7,16 +7,16 @@ use ohno::ErrorLabel;
 
 // HTTP protocol errors
 pub(crate) const LABEL_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("http_error");
-pub(crate) const LABEL_INVALID_URI: ErrorLabel = ErrorLabel::from_static("invalid_uri");
-pub(crate) const LABEL_INVALID_HEADER_VALUE: ErrorLabel = ErrorLabel::from_static("invalid_header_value");
-pub(crate) const LABEL_INVALID_METHOD: ErrorLabel = ErrorLabel::from_static("invalid_method");
-pub(crate) const LABEL_INVALID_STATUS_CODE: ErrorLabel = ErrorLabel::from_static("invalid_status_code");
-pub(crate) const LABEL_UNSUCCESSFUL_RESPONSE: ErrorLabel = ErrorLabel::from_static("unsuccessful_response");
-pub(crate) const LABEL_MAX_SIZE_REACHED: ErrorLabel = ErrorLabel::from_static("max_size_reached");
+pub(crate) const LABEL_URI_INVALID: ErrorLabel = ErrorLabel::from_static("uri_invalid");
+pub(crate) const LABEL_HEADER_VALUE_INVALID: ErrorLabel = ErrorLabel::from_static("header_value_invalid");
+pub(crate) const LABEL_METHOD_INVALID: ErrorLabel = ErrorLabel::from_static("method_invalid");
+pub(crate) const LABEL_STATUS_CODE_INVALID: ErrorLabel = ErrorLabel::from_static("status_code_invalid");
+pub(crate) const LABEL_RESPONSE_UNSUCCESSFUL: ErrorLabel = ErrorLabel::from_static("response_unsuccessful");
+pub(crate) const LABEL_BODY_SIZE_LIMIT_REACHED: ErrorLabel = ErrorLabel::from_static("body_size_limit_reached");
 
 // Timeout errors
-pub(crate) const LABEL_TIMEOUT_RESPONSE: ErrorLabel = ErrorLabel::from_static("timeout_response");
-pub(crate) const LABEL_TIMEOUT_BODY: ErrorLabel = ErrorLabel::from_static("timeout_body");
+pub(crate) const LABEL_RESPONSE_TIMEOUT: ErrorLabel = ErrorLabel::from_static("response_timeout");
+pub(crate) const LABEL_BODY_TIMEOUT: ErrorLabel = ErrorLabel::from_static("body_timeout");
 
 // IO errors
 pub(crate) const LABEL_IO: ErrorLabel = ErrorLabel::from_static("io");
@@ -26,8 +26,8 @@ pub(crate) const LABEL_UNAVAILABLE: ErrorLabel = ErrorLabel::from_static("unavai
 
 // Validation errors
 pub(crate) const LABEL_VALIDATION: ErrorLabel = ErrorLabel::from_static("validation");
-pub(crate) const LABEL_MISSING_URI: ErrorLabel = ErrorLabel::from_static("missing_uri");
-pub(crate) const LABEL_INVALID_UTF8: ErrorLabel = ErrorLabel::from_static("invalid_utf8");
+pub(crate) const LABEL_URI_MISSING: ErrorLabel = ErrorLabel::from_static("uri_missing");
+pub(crate) const LABEL_BODY_UTF8_INVALID: ErrorLabel = ErrorLabel::from_static("body_utf8_invalid");
 
 // Body errors
 pub(crate) const LABEL_BODY_CONSUMED: ErrorLabel = ErrorLabel::from_static("body_consumed");

@@ -16,8 +16,8 @@ use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
 use crate::HttpRequest;
 use crate::error_labels::{
-    LABEL_HTTP_ERROR, LABEL_INVALID_HEADER_VALUE, LABEL_INVALID_METHOD, LABEL_INVALID_STATUS_CODE, LABEL_INVALID_URI, LABEL_IO,
-    LABEL_MAX_SIZE_REACHED, LABEL_TIMEOUT_BODY, LABEL_TIMEOUT_RESPONSE, LABEL_UNAVAILABLE, LABEL_UNSUCCESSFUL_RESPONSE, LABEL_VALIDATION,
+    LABEL_BODY_SIZE_LIMIT_REACHED, LABEL_BODY_TIMEOUT, LABEL_HEADER_VALUE_INVALID, LABEL_HTTP_ERROR, LABEL_IO, LABEL_METHOD_INVALID,
+    LABEL_RESPONSE_TIMEOUT, LABEL_RESPONSE_UNSUCCESSFUL, LABEL_STATUS_CODE_INVALID, LABEL_UNAVAILABLE, LABEL_URI_INVALID, LABEL_VALIDATION,
 };
 use crate::http_utils::SyncHolder;
 
@@ -106,14 +106,14 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 #[ohno::error]
 #[from(
     http::Error(label: LABEL_HTTP_ERROR, recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never()),
-    InvalidUri(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never()),
-    InvalidHeaderValue(label: LABEL_INVALID_HEADER_VALUE, recovery: RecoveryInfo::never()),
-    InvalidMethod(label: LABEL_INVALID_METHOD, recovery: RecoveryInfo::never()),
-    InvalidStatusCode(label: LABEL_INVALID_STATUS_CODE, recovery: RecoveryInfo::never()),
-    MaxSizeReached(label: LABEL_MAX_SIZE_REACHED, recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: LABEL_URI_INVALID, recovery: RecoveryInfo::never()),
+    InvalidUri(label: LABEL_URI_INVALID, recovery: RecoveryInfo::never()),
+    InvalidHeaderValue(label: LABEL_HEADER_VALUE_INVALID, recovery: RecoveryInfo::never()),
+    InvalidMethod(label: LABEL_METHOD_INVALID, recovery: RecoveryInfo::never()),
+    InvalidStatusCode(label: LABEL_STATUS_CODE_INVALID, recovery: RecoveryInfo::never()),
+    MaxSizeReached(label: LABEL_BODY_SIZE_LIMIT_REACHED, recovery: RecoveryInfo::never()),
     std::io::Error(label: LABEL_IO, recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never())
+    templated_uri::ValidationError(label: error.label().clone(), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
@@ -161,7 +161,7 @@ impl HttpError {
         Self::other(
             format!("the response was not successful, status code: {}", code.as_u16()),
             recovery,
-            LABEL_UNSUCCESSFUL_RESPONSE,
+            LABEL_RESPONSE_UNSUCCESSFUL,
         )
     }
 
@@ -222,7 +222,7 @@ impl HttpError {
                 duration.as_millis()
             ),
             RecoveryInfo::retry(),
-            LABEL_TIMEOUT_RESPONSE,
+            LABEL_RESPONSE_TIMEOUT,
         )
     }
 
@@ -235,7 +235,7 @@ impl HttpError {
         Self::other(
             format!("body data was not fully received, timeout: {}ms", duration.as_millis()),
             RecoveryInfo::retry(),
-            LABEL_TIMEOUT_BODY,
+            LABEL_BODY_TIMEOUT,
         )
     }
 
@@ -263,7 +263,6 @@ impl HttpError {
     /// This method recognizes the following error types:
     /// - [`HttpError`]
     /// - [`JsonError`][crate::json::JsonError]
-    /// - [`templated_uri::ValidationError`]
     /// - [`std::io::Error`]
     pub fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
         if let Some(err) = error.downcast_ref::<Self>() {
@@ -272,10 +271,6 @@ impl HttpError {
 
         #[cfg(any(feature = "json", test))]
         if let Some(err) = error.downcast_ref::<crate::json::JsonError>() {
-            return Some(err.label().clone());
-        }
-
-        if let Some(err) = error.downcast_ref::<templated_uri::ValidationError>() {
             return Some(err.label().clone());
         }
 
@@ -335,7 +330,7 @@ mod tests {
         let error = HttpError::invalid_status_code(StatusCode::NOT_FOUND, RecoveryInfo::unknown());
 
         assert_eq!(error.message(), "the response was not successful, status code: 404");
-        assert_eq!(error.label(), "unsuccessful_response");
+        assert_eq!(error.label(), "response_unsuccessful");
         assert_eq!(error.recovery(), RecoveryInfo::unknown());
     }
 
@@ -354,7 +349,7 @@ mod tests {
         let invalid_method = http::Method::from_bytes(b"INVALID METHOD").unwrap_err();
         let error = HttpError::from(invalid_method);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_method");
+        assert_eq!(error.label(), "method_invalid");
     }
 
     #[test]
@@ -374,7 +369,7 @@ mod tests {
         let uri_error = "invalid uri with spaces".parse::<http::Uri>().unwrap_err();
         let error = HttpError::from(uri_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_uri");
+        assert_eq!(error.label(), "uri_invalid");
     }
 
     #[test]
@@ -382,7 +377,7 @@ mod tests {
         let validation_error = templated_uri::ValidationError::from("not a valid uri".parse::<http::Uri>().unwrap_err());
         let error = HttpError::from(validation_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_uri");
+        assert_eq!(error.label(), "uri_invalid");
     }
 
     #[test]
@@ -390,7 +385,7 @@ mod tests {
         let header_error = http::header::HeaderValue::from_bytes(&[0x00]).unwrap_err();
         let error = HttpError::from(header_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_header_value");
+        assert_eq!(error.label(), "header_value_invalid");
     }
 
     #[test]
@@ -398,7 +393,7 @@ mod tests {
         let status_error = StatusCode::from_u16(9999).unwrap_err();
         let error = HttpError::from(status_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_status_code");
+        assert_eq!(error.label(), "status_code_invalid");
     }
 
     #[test]
@@ -437,7 +432,7 @@ mod tests {
             timeout_error.message(),
             "request timed out while receiving the response, timeout: 1500ms"
         );
-        assert_eq!(timeout_error.label(), "timeout_response");
+        assert_eq!(timeout_error.label(), "response_timeout");
     }
 
     #[test]
@@ -447,7 +442,7 @@ mod tests {
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
         assert_eq!(error.message(), "body data was not fully received, timeout: 2500ms");
-        assert_eq!(error.label(), "timeout_body");
+        assert_eq!(error.label(), "body_timeout");
     }
 
     #[test]
@@ -501,11 +496,6 @@ mod tests {
         // JsonError variant
         let json_err = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("bad json")));
         assert_eq!(HttpError::resolve_error_label(&json_err).unwrap(), "json_deserialization");
-
-        // templated_uri::ValidationError variant
-        let uri_err = "not a valid uri".parse::<http::Uri>().unwrap_err();
-        let validation_err = templated_uri::ValidationError::from(uri_err);
-        assert_eq!(HttpError::resolve_error_label(&validation_err).unwrap(), "uri_invalid");
 
         // std::io::Error variant
         let io_err = std::io::Error::from(std::io::ErrorKind::ConnectionReset);

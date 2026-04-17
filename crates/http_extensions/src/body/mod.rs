@@ -30,7 +30,7 @@ use pin_project::pin_project;
 use thread_aware::ThreadAware;
 
 use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
-use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BODY_SIZE_LIMIT, LABEL_INVALID_UTF8};
+use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BODY_SIZE_LIMIT, LABEL_BODY_UTF8_INVALID};
 use crate::{HttpError, Result};
 
 mod builder;
@@ -220,7 +220,7 @@ impl HttpBody {
         self.into_bytes()
             .await?
             .read_to_string(&mut text)
-            .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), LABEL_INVALID_UTF8))?;
+            .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), LABEL_BODY_UTF8_INVALID))?;
 
         Ok(text)
     }
@@ -781,7 +781,7 @@ mod tests {
         let body = builder.slice(&invalid_utf8);
 
         let error = block_on(body.into_text()).unwrap_err();
-        assert_eq!(error.label(), "invalid_utf8");
+        assert_eq!(error.label(), "body_utf8_invalid");
         assert!(error.to_string().contains("body contains invalid UTF-8"));
     }
 
