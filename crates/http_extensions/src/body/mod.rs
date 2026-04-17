@@ -30,6 +30,7 @@ use pin_project::pin_project;
 use thread_aware::ThreadAware;
 
 use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
+use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BODY_SIZE_LIMIT, LABEL_INVALID_UTF8};
 use crate::{HttpError, Result};
 
 mod builder;
@@ -219,7 +220,7 @@ impl HttpBody {
         self.into_bytes()
             .await?
             .read_to_string(&mut text)
-            .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), "invalid_utf8"))?;
+            .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), LABEL_INVALID_UTF8))?;
 
         Ok(text)
     }
@@ -268,7 +269,7 @@ impl HttpBody {
             Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
             Kind::Bytes(None) => Err(HttpError::validation_with_label(
                 "body cannot be buffered because it is already consumed",
-                "body_consumed",
+                LABEL_BODY_CONSUMED,
             )),
             Kind::Empty => Ok(builder.empty()),
             Kind::Body(b, options) => {
@@ -485,7 +486,7 @@ impl TryFrom<HttpBody> for BytesView {
             Kind::Empty => Ok(Self::default()),
             _ => Err(HttpError::validation_with_label(
                 "body cannot be converted to byte sequence because it is not buffered",
-                "body_not_buffered",
+                LABEL_BODY_NOT_BUFFERED,
             )),
         }
     }
@@ -565,12 +566,12 @@ async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Se
 fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Result<usize> {
     let total = current_size
         .checked_add(additional)
-        .ok_or_else(|| HttpError::validation_with_label(format!("body size exceeds the limit of {limit} bytes"), "body_size_limit"))?;
+        .ok_or_else(|| HttpError::validation_with_label(format!("body size exceeds the limit of {limit} bytes"), LABEL_BODY_SIZE_LIMIT))?;
 
     if total > limit {
         return Err(HttpError::validation_with_label(
             format!("body size exceeds the limit of {limit} bytes"),
-            "body_size_limit",
+            LABEL_BODY_SIZE_LIMIT,
         ));
     }
 
@@ -587,7 +588,7 @@ mod tests {
     use bytesbuf::mem::GlobalPool;
     use futures::executor::block_on;
     use http_body_util::StreamBody;
-    use ohno::ErrorExt;
+    use ohno::{ErrorExt, Labeled};
     use serde::{Deserialize, Serialize};
     use static_assertions::assert_impl_all;
 
@@ -703,6 +704,7 @@ mod tests {
 
         // Now the body is consumed; into_buffered should fail.
         let err = block_on(body.into_buffered()).unwrap_err();
+        assert_eq!(err.label(), "body_consumed");
         assert!(
             err.to_string().contains("body cannot be buffered because it is already consumed"),
             "expected consumed body error, got: {err}"
@@ -742,6 +744,7 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.err().unwrap();
+        assert_eq!(err.label(), "body_size_limit");
         assert!(err.to_string().contains("body size exceeds the limit"));
     }
 
@@ -778,6 +781,7 @@ mod tests {
         let body = builder.slice(&invalid_utf8);
 
         let error = block_on(body.into_text()).unwrap_err();
+        assert_eq!(error.label(), "invalid_utf8");
         assert!(error.to_string().contains("body contains invalid UTF-8"));
     }
 
@@ -880,6 +884,7 @@ mod tests {
         let result = check_size_limit(usize::MAX, 1, usize::MAX);
 
         let err = result.unwrap_err();
+        assert_eq!(err.label(), "body_size_limit");
         assert!(
             err.to_string().contains("body size exceeds the limit"),
             "expected body size error, got: {err}"
@@ -1026,7 +1031,8 @@ mod tests {
     fn external_body_into_bytes_view_fails() {
         let builder = HttpBodyBuilder::new_fake();
         let body = create_stream_body(&builder, b"not buffered", &HttpBodyOptions::default());
-        BytesView::try_from(body).unwrap_err();
+        let err = BytesView::try_from(body).unwrap_err();
+        assert_eq!(err.label(), "body_not_buffered");
     }
 
     #[test]
@@ -1054,6 +1060,7 @@ mod tests {
         let body = create_stream_body(&builder, b"this exceeds the limit", &HttpBodyOptions::default());
 
         let err = block_on(body.into_buffered()).unwrap_err();
+        assert_eq!(err.label(), "body_size_limit");
         assert!(err.to_string().contains("body size exceeds the limit"));
     }
 

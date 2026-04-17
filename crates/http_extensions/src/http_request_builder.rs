@@ -12,6 +12,7 @@ use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
 use templated_uri::Uri;
 
+use crate::error_labels::LABEL_MISSING_URI;
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
 use crate::timeout::{BodyTimeout, ResponseTimeout};
 use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
@@ -349,7 +350,7 @@ impl<R> HttpRequestBuilder<'_, R> {
 
         let uri = self
             .uri
-            .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", "missing_uri"))??;
+            .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_MISSING_URI))??;
 
         let path_and_query = uri.target_path_and_query().cloned();
         let mut request = self.builder.uri(uri.into_http_uri()?).body(body)?;
@@ -687,7 +688,7 @@ mod tests {
     use futures::executor::block_on;
     use http::StatusCode;
     use http::header::CONTENT_LENGTH;
-    use ohno::ErrorExt;
+    use ohno::{ErrorExt, Labeled};
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -1491,6 +1492,7 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
+        assert_eq!(err.label(), "missing_uri");
         assert!(
             err.message().contains("URI is required"),
             "expected 'URI is required' but got: {}",

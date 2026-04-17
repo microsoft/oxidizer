@@ -15,20 +15,11 @@ use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
 use crate::HttpRequest;
+use crate::error_labels::{
+    LABEL_HTTP_ERROR, LABEL_INVALID_HEADER_VALUE, LABEL_INVALID_METHOD, LABEL_INVALID_STATUS_CODE, LABEL_INVALID_URI,
+    LABEL_MAX_SIZE_REACHED, LABEL_TIMEOUT_BODY, LABEL_TIMEOUT_RESPONSE, LABEL_UNAVAILABLE, LABEL_UNSUCCESSFUL_RESPONSE, LABEL_VALIDATION,
+};
 use crate::http_utils::SyncHolder;
-
-const LABEL_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("http_error");
-const LABEL_INVALID_URI: ErrorLabel = ErrorLabel::from_static("invalid_uri");
-const LABEL_INVALID_URI_TEMPLATE: ErrorLabel = ErrorLabel::from_static("invalid_uri_template");
-const LABEL_INVALID_HEADER_VALUE: ErrorLabel = ErrorLabel::from_static("invalid_header_value");
-const LABEL_INVALID_METHOD: ErrorLabel = ErrorLabel::from_static("invalid_method");
-const LABEL_INVALID_STATUS_CODE: ErrorLabel = ErrorLabel::from_static("invalid_status_code");
-const LABEL_UNSUCCESSFUL_RESPONSE: ErrorLabel = ErrorLabel::from_static("unsuccessful_response");
-const LABEL_MAX_SIZE_REACHED: ErrorLabel = ErrorLabel::from_static("max_size_reached");
-const LABEL_VALIDATION: ErrorLabel = ErrorLabel::from_static("validation");
-const LABEL_UNAVAILABLE: ErrorLabel = ErrorLabel::from_static("unavailable");
-const LABEL_TIMEOUT_RESPONSE: ErrorLabel = ErrorLabel::from_static("timeout_response");
-const LABEL_TIMEOUT_BODY: ErrorLabel = ErrorLabel::from_static("timeout_body");
 
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
@@ -122,7 +113,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
     InvalidStatusCode(label: LABEL_INVALID_STATUS_CODE, recovery: RecoveryInfo::never()),
     MaxSizeReached(label: LABEL_MAX_SIZE_REACHED, recovery: RecoveryInfo::never()),
     std::io::Error(label: ErrorLabel::from(error.kind()), recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: LABEL_INVALID_URI_TEMPLATE, recovery: RecoveryInfo::never())
+    templated_uri::ValidationError(label: LABEL_INVALID_URI, recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
@@ -361,7 +352,31 @@ mod tests {
         let validation_error = templated_uri::ValidationError::from("not a valid uri".parse::<http::Uri>().unwrap_err());
         let error = HttpError::from(validation_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_uri_template");
+        assert_eq!(error.label(), "invalid_uri");
+    }
+
+    #[test]
+    fn from_invalid_header_value() {
+        let header_error = http::header::HeaderValue::from_bytes(&[0x00]).unwrap_err();
+        let error = HttpError::from(header_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "invalid_header_value");
+    }
+
+    #[test]
+    fn from_invalid_status_code() {
+        let status_error = StatusCode::from_u16(9999).unwrap_err();
+        let error = HttpError::from(status_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "invalid_status_code");
+    }
+
+    #[test]
+    fn from_http_error() {
+        let http_error = http::Request::builder().header("invalid\nheader", "value").body(()).unwrap_err();
+        let error = HttpError::from(http_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "http_error");
     }
 
     #[test]

@@ -188,6 +188,8 @@ pub type HttpResponse = Response<HttpBody>;
 mod error;
 pub use error::{HttpError, Result};
 
+mod error_labels;
+
 mod body;
 pub use body::{HttpBody, HttpBodyBuilder, HttpBodyOptions};
 

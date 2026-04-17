@@ -17,10 +17,7 @@ use serde_core::Deserialize;
 use serde_core::de::DeserializeOwned;
 
 use crate::HttpError;
-
-const LABEL_JSON: ErrorLabel = ErrorLabel::from_static("json");
-const LABEL_JSON_SERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_serialization");
-const LABEL_JSON_DESERIALIZATION: ErrorLabel = ErrorLabel::from_static("json_deserialization");
+use crate::error_labels::{LABEL_JSON, LABEL_JSON_DESERIALIZATION, LABEL_JSON_SERIALIZATION};
 
 /// Error type for JSON serialization and deserialization operations.
 ///
