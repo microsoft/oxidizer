@@ -266,7 +266,7 @@ impl HttpError {
     /// - [`templated_uri::ValidationError`]
     /// - [`std::io::Error`]
     pub fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
-        if let Some(err) = error.downcast_ref::<HttpError>() {
+        if let Some(err) = error.downcast_ref::<Self>() {
             return Some(err.label().clone());
         }
 
@@ -517,14 +517,14 @@ mod tests {
 
     #[test]
     fn error_chain() {
+        #[derive(Debug, Deserialize)]
+        struct Person;
+
         let handler = FakeHandler::from_sync_handler(|_| HttpResponseBuilder::new_fake().text("invalid json").build());
 
         let err = block_on(handler.request_builder().uri("https://dummy.com").fetch_json_owned::<Person>()).unwrap_err();
 
         let label = ErrorLabel::from_error_chain(&err, HttpError::resolve_error_label);
         assert_eq!(label, "json.json_deserialization");
-
-        #[derive(Debug, Deserialize)]
-        struct Person {}
     }
 }
