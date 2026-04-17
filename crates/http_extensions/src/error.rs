@@ -264,12 +264,12 @@ impl HttpError {
     /// - [`HttpError`]
     /// - [`JsonError`][crate::json::JsonError]
     /// - [`std::io::Error`]
-    pub fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
+    #[cfg(test)]
+    pub(crate) fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
         if let Some(err) = error.downcast_ref::<Self>() {
             return Some(err.label().clone());
         }
 
-        #[cfg(any(feature = "json", test))]
         if let Some(err) = error.downcast_ref::<crate::json::JsonError>() {
             return Some(err.label().clone());
         }
