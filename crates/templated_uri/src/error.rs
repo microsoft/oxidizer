@@ -30,8 +30,8 @@ impl ValidationError {
 }
 
 impl Labeled for ValidationError {
-    fn label(&self) -> &ErrorLabel {
-        &self.label
+    fn label(&self) -> ErrorLabel {
+        self.label.clone()
     }
 }
 

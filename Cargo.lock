@@ -228,7 +228,7 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "duct",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "serde",
  "serde_json",
 ]
@@ -292,21 +292,21 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bytesbuf",
  "futures",
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "testing_aids",
  "trait-variant",
 ]
 
 [[package]]
 name = "cachet"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -317,7 +317,7 @@ dependencies = [
  "dynosaur",
  "futures",
  "layered",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -344,7 +344,7 @@ dependencies = [
  "futures",
  "moka",
  "mutants",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "thread_aware",
  "tick",
  "tokio",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -361,10 +361,10 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dynosaur",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "parking_lot",
  "recoverable",
  "tick",
@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -1110,7 +1110,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "pin-project",
  "recoverable",
  "serde",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "futures",
  "insta",
@@ -1925,7 +1925,7 @@ name = "recoverable"
 version = "0.1.2"
 dependencies = [
  "insta",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "static_assertions",
  "testing_aids",
 ]
@@ -2080,7 +2080,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -2304,12 +2304,12 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "data_privacy",
  "http",
  "mutants",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "pct-str",
  "serde",
  "serde_json",
@@ -2336,7 +2336,7 @@ dependencies = [
  "darling",
  "insta",
  "mutants",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -2442,7 +2442,7 @@ dependencies = [
  "insta",
  "jiff",
  "mutants",
- "ohno 0.3.2",
+ "ohno 0.4.0",
  "pin-project-lite",
  "serde",
  "serde_core",
