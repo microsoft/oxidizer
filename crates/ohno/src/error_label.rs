@@ -10,7 +10,7 @@ use std::iter::successors;
 /// Trait for errors that carry an [`ErrorLabel`].
 pub trait Labeled {
     /// Returns the label attached to this error.
-    fn label(&self) -> &ErrorLabel;
+    fn label(&self) -> ErrorLabel;
 }
 
 /// A low-cardinality label for an error, useful for metrics and logging.

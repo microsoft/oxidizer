@@ -25,24 +25,24 @@ homepage = "https://github.com/microsoft/oxidizer"
 # local dependencies
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.3.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.2" }
-bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.1.0" }
-cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.1.0" }
-cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.1.0" }
-cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.1.0" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.5.0" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.2.0" }
+cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.2.0" }
+cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.0" }
+cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.11.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.3.1" }
+http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.4.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.3.2" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.4.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.2" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.4.4" }
-templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.1.2" }
+templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.2.0" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.1" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.1" }
 testing_aids = { path = "crates/testing_aids", default-features = false }

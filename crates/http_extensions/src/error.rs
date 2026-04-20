@@ -113,7 +113,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
     InvalidStatusCode(label: LABEL_STATUS_CODE_INVALID, recovery: RecoveryInfo::never()),
     MaxSizeReached(label: LABEL_BODY_SIZE_LIMIT_REACHED, recovery: RecoveryInfo::never()),
     std::io::Error(label: LABEL_IO, recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: error.label().clone(), recovery: RecoveryInfo::never())
+    templated_uri::ValidationError(label: error.label(), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
@@ -267,11 +267,11 @@ impl HttpError {
     #[cfg(test)]
     pub(crate) fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
         if let Some(err) = error.downcast_ref::<Self>() {
-            return Some(err.label().clone());
+            return Some(err.label());
         }
 
         if let Some(err) = error.downcast_ref::<crate::json::JsonError>() {
-            return Some(err.label().clone());
+            return Some(err.label());
         }
 
         if let Some(err) = error.downcast_ref::<std::io::Error>() {
@@ -289,8 +289,8 @@ impl Recovery for HttpError {
 }
 
 impl Labeled for HttpError {
-    fn label(&self) -> &ErrorLabel {
-        &self.label
+    fn label(&self) -> ErrorLabel {
+        self.label.clone()
     }
 }
 

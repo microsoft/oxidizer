@@ -17,8 +17,8 @@ impl ApiError {
 }
 
 impl Labeled for ApiError {
-    fn label(&self) -> &ErrorLabel {
-        &self.label
+    fn label(&self) -> ErrorLabel {
+        self.label.clone()
     }
 }
 
@@ -36,7 +36,7 @@ fn report(error: &ApiError) {
         }
 
         if let Some(e) = e.downcast_ref::<ApiError>() {
-            return Some(e.label().clone());
+            return Some(e.label());
         }
 
         None

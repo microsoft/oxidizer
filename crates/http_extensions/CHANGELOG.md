@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-04-20
+
+- ⚠️ Breaking
+
+  - `Labeled::label()` now returns `ErrorLabel` by value instead of `&ErrorLabel` (via `ohno` 0.4.0)
+
 ## [0.3.1] - 2026-04-20
 
 - ✨ Features

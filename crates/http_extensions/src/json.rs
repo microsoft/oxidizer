@@ -53,8 +53,8 @@ impl JsonError {
 }
 
 impl Labeled for JsonError {
-    fn label(&self) -> &ErrorLabel {
-        &self.label
+    fn label(&self) -> ErrorLabel {
+        self.label.clone()
     }
 }
 

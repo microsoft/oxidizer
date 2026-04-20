@@ -168,19 +168,19 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyftk28CR_jhG9_WxkUHtfBdG9giB010pVAzGwCsTyFCPqO3YWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
- [__link0]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=uri::Uri
- [__link1]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyftk28CR_jhG9_WxkUHtfBdG9giB010pVAzGwCsTyFCPqO3YWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMi4w
+ [__link0]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=uri::Uri
+ [__link1]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/
- [__link11]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=uri::Uri
+ [__link11]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=uri::Uri
  [__link12]: https://docs.rs/http/1.4.0/http/?search=Uri
  [__link13]: https://docs.rs/hyper/latest/hyper/
  [__link14]: https://docs.rs/reqwest/latest/reqwest/
- [__link2]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BasePath
- [__link3]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=TemplatedPathAndQuery
- [__link4]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafe
- [__link5]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafeString
- [__link6]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafe
- [__link7]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafeString
+ [__link2]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=BasePath
+ [__link3]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=TemplatedPathAndQuery
+ [__link4]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=UriSafe
+ [__link5]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=UriSafeString
+ [__link6]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=UriSafe
+ [__link7]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=UriSafeString
  [__link8]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link9]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriParam
+ [__link9]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=UriParam
