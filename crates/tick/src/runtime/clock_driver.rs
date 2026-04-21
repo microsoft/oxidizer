@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn advance_timers_ok() {
-        let timers = SynchronizedTimers::new();
+        let timers = SynchronizedTimers::new_isolated();
         let when = Instant::now();
         timers.with_timers::<_, ()>(|timers| {
             timers.register(when, Waker::noop().clone());

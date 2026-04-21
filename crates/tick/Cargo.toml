@@ -35,7 +35,10 @@ test-util = []
 # Serialization support for serde
 serde = ["dep:serde_core"]
 # Integration with tokio runtime
-tokio = ["dep:tokio"]
+tokio = ["dep:tokio", "rt-shared"]
+# Enables primitives for runtimes that drive the clock from a single shared driver task,
+# such as multi-threaded async runtimes (e.g. Tokio). Enables `InactiveClock::new_shared`.
+rt-shared = []
 # Exposes APIs for formatting of SystemTime
 fmt = ["dep:jiff"]
 

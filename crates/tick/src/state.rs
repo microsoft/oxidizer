@@ -28,7 +28,16 @@ impl ThreadAware for ClockState {
 
 impl ClockState {
     pub fn new_system() -> Self {
-        Self::System(SynchronizedTimers::new())
+        Self::System(SynchronizedTimers::new_isolated())
+    }
+
+    /// Creates a `System` clock state backed by a single shared timer set. Used by clocks driven
+    /// by a single global driver task (e.g. the Tokio-driven clock created by
+    /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocated`] is a no-op for
+    /// this variant.
+    #[cfg(any(feature = "rt-shared", test))]
+    pub fn new_system_shared() -> Self {
+        Self::System(SynchronizedTimers::new_shared())
     }
 }
 
@@ -59,44 +68,56 @@ impl ClockState {
     }
 }
 
+// The mutex here is not accessed on a hot path. Timers are accessed only when:
+//
+// 1. A new timer is registered.
+// 2. A timer is unregistered.
+// 3. Timers are evaluated. Timer evaluation is very fast when there are no timers to fire. If
+//    there are timers to fire, the time to evaluate them is proportional to the number of timers
+//    that are ready to fire, and taking the lock is not the bottleneck.
 #[derive(Debug, Clone)]
-pub(crate) struct SynchronizedTimers {
-    // The mutex here is not accessed on a hot path. Timers are accessed only when:
-    //
-    // 1. A new timer is registered.
-    // 2. A timer is unregistered.
-    // 3. Timers are evaluated. Timer evaluation is very fast when there are no timers to fire. If
-    //    there are timers to fire, the time to evaluate them is proportional to the number of timers
-    //    that are ready to fire, and taking the lock is not the bottleneck.
-    //
-    // We have performed a [benchmark](https://o365exchange.visualstudio.com/O365%20Core/_git/ox-sdk?path=/crates/tick/benches/clock_bench.rs)
-    // that compares the performance of this code by replacing the `Mutex`
-    // with `RefCell`. The `RefCell` variant is around 7% faster. In practice, in real applications,
-    // the difference is negligible. The real performance improvement comes from isolating the `Clock` to each thread.
-    // This reduces lock contention and provides linear scalability.
-    timers: thread_aware::Arc<Mutex<Timers>, PerCore>,
+pub(crate) enum SynchronizedTimers {
+    /// A single shared timer set. [`ThreadAware::relocated`] is a no-op, so all clones observe
+    /// the same timers regardless of thread affinity. Used by clocks driven by a single global
+    /// driver task (e.g. the Tokio-driven clock created by [`Clock::new_tokio`][crate::Clock::new_tokio]).
+    #[cfg(any(feature = "rt-shared", test))]
+    Shared(std::sync::Arc<Mutex<Timers>>),
+
+    /// Per-core isolated timer storage. [`ThreadAware::relocated`] creates a fresh timer set on
+    /// the destination core, enabling thread-per-core runtimes to operate on independent timers
+    /// with no cross-thread lock contention.
+    Isolated(thread_aware::Arc<Mutex<Timers>, PerCore>),
 }
 
 impl ThreadAware for SynchronizedTimers {
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        Self {
-            timers: self.timers.relocated(source, destination),
+        match self {
+            #[cfg(any(feature = "rt-shared", test))]
+            Self::Shared(_) => self,
+            Self::Isolated(timers) => Self::Isolated(timers.relocated(source, destination)),
         }
     }
 }
 
 impl SynchronizedTimers {
-    pub fn new() -> Self {
-        Self {
-            timers: thread_aware::Arc::new(|| Mutex::new(Timers::default())),
-        }
+    pub fn new_isolated() -> Self {
+        Self::Isolated(thread_aware::Arc::new(|| Mutex::new(Timers::default())))
+    }
+
+    #[cfg(any(feature = "rt-shared", test))]
+    pub fn new_shared() -> Self {
+        Self::Shared(std::sync::Arc::new(Mutex::new(Timers::default())))
     }
 
     pub(super) fn with_timers<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Timers) -> R,
     {
-        let mut timers = self.timers.lock().expect("timers lock poisoned");
+        let mut timers = match self {
+            #[cfg(any(feature = "rt-shared", test))]
+            Self::Shared(timers) => timers.lock().expect("timers lock poisoned"),
+            Self::Isolated(timers) => timers.lock().expect("timers lock poisoned"),
+        };
         f(&mut timers)
     }
 
@@ -107,7 +128,11 @@ impl SynchronizedTimers {
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
-        thread_aware::Arc::strong_count(&self.timers) == 1
+        match self {
+            #[cfg(any(feature = "rt-shared", test))]
+            Self::Shared(timers) => std::sync::Arc::strong_count(timers) == 1,
+            Self::Isolated(timers) => thread_aware::Arc::strong_count(timers) == 1,
+        }
     }
 }
 
