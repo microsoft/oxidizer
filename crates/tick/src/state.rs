@@ -79,6 +79,7 @@ pub(crate) enum SynchronizedTimers {
     /// A single shared timer set. [`ThreadAware::relocated`] is a no-op, so all clones observe
     /// the same timers regardless of thread affinity. Used by clocks driven by a single global
     /// driver task (e.g. the Tokio-driven clock created by [`Clock::new_tokio`][crate::Clock::new_tokio]).
+    #[cfg(any(feature = "tokio", test))]
     Global(std::sync::Arc<Mutex<Timers>>),
 
     /// Per-core isolated timer storage. [`ThreadAware::relocated`] creates a fresh timer set on
@@ -90,6 +91,7 @@ pub(crate) enum SynchronizedTimers {
 impl ThreadAware for SynchronizedTimers {
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         match self {
+            #[cfg(any(feature = "tokio", test))]
             Self::Global(_) => self,
             Self::Isolated(timers) => Self::Isolated(timers.relocated(source, destination)),
         }
@@ -111,6 +113,7 @@ impl SynchronizedTimers {
         F: FnOnce(&mut Timers) -> R,
     {
         let mut timers = match self {
+            #[cfg(any(feature = "tokio", test))]
             Self::Global(timers) => timers.lock().expect("timers lock poisoned"),
             Self::Isolated(timers) => timers.lock().expect("timers lock poisoned"),
         };
@@ -125,6 +128,7 @@ impl SynchronizedTimers {
     #[cfg_attr(test, mutants::skip)] // causes test timeout
     pub fn is_unique(&self) -> bool {
         match self {
+            #[cfg(any(feature = "tokio", test))]
             Self::Global(timers) => std::sync::Arc::strong_count(timers) == 1,
             Self::Isolated(timers) => thread_aware::Arc::strong_count(timers) == 1,
         }
