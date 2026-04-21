@@ -34,10 +34,10 @@ pub struct Shared;
 /// This type represents a clock in an inactive state that cannot perform any time-related
 /// operations until activated. It is parameterized by a mode marker (`S`):
 ///
-/// - [`Isolated`] (default) — per-core timer storage. The inactive clock can be cloned and
+/// - [`Isolated`] (default): per-core timer storage. The inactive clock can be cloned and
 ///   relocated across threads, with each thread getting an independent timer set on
 ///   activation.
-/// - [`Shared`] — a single shared timer set advanced by a single driver. Use
+/// - [`Shared`]: a single shared timer set advanced by a single driver. Use
 ///   [`InactiveClock::new_shared`] to construct one. Does not implement [`Clone`] or
 ///   [`ThreadAware`].
 ///
@@ -99,7 +99,7 @@ impl ThreadAware for InactiveClock<Isolated> {
     }
 }
 
-#[cfg(any(feature = "tokio", test))]
+#[cfg(any(feature = "rt-shared", test))]
 impl InactiveClock<Shared> {
     /// Creates an [`InactiveClock`] backed by a single shared timer set.
     ///

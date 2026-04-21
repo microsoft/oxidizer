@@ -223,6 +223,7 @@ OpenSource
 openssl-devel
 OpenTelemetry
 parameterless
+parameterized
 parser
 passthrough
 performant
