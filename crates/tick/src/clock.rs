@@ -229,13 +229,10 @@ impl Clock {
         const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
 
         // The Tokio clock is driven by a single background task that advances a shared timer
-        // set. Per-core relocation would create independent timer storage on the destination
-        // thread that this driver never advances, so we construct the clock state with
-        // relocation disabled. Unlike [`InactiveClock::activate`], this does not go through the
-        // thread-per-core activation path.
-        let state = ClockState::new_system_global();
-        let clock = Self::new(state.clone());
-        let mut driver = crate::runtime::ClockDriver::new(state);
+        // set. We use the `Shared` inactive-clock variant which intentionally does not support
+        // cloning or per-core relocation, since both would create configurations the single
+        // background driver could not advance correctly.
+        let (clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate();
 
         let join_handle = tokio::spawn(async move {
             loop {

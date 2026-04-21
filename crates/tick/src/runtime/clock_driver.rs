@@ -21,7 +21,7 @@ pub struct ClockDriver {
 }
 
 impl ClockDriver {
-    pub(crate) const fn new(state: ClockState) -> Self {
+    pub(super) const fn new(state: ClockState) -> Self {
         Self { state }
     }
 

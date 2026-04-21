@@ -31,12 +31,13 @@ impl ClockState {
         Self::System(SynchronizedTimers::new_isolated())
     }
 
-    /// Creates a `System` clock state backed by a globally shared (non-isolated) timer set.
-    /// Used by Tokio-driven clocks where a single background task drives the timers, so
-    /// [`ThreadAware::relocated`] must be a no-op.
+    /// Creates a `System` clock state backed by a single shared timer set. Used by clocks driven
+    /// by a single global driver task (e.g. the Tokio-driven clock created by
+    /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocated`] is a no-op for
+    /// this variant.
     #[cfg(any(feature = "tokio", test))]
-    pub fn new_system_global() -> Self {
-        Self::System(SynchronizedTimers::new_global())
+    pub fn new_system_shared() -> Self {
+        Self::System(SynchronizedTimers::new_shared())
     }
 }
 
@@ -80,7 +81,7 @@ pub(crate) enum SynchronizedTimers {
     /// the same timers regardless of thread affinity. Used by clocks driven by a single global
     /// driver task (e.g. the Tokio-driven clock created by [`Clock::new_tokio`][crate::Clock::new_tokio]).
     #[cfg(any(feature = "tokio", test))]
-    Global(std::sync::Arc<Mutex<Timers>>),
+    Shared(std::sync::Arc<Mutex<Timers>>),
 
     /// Per-core isolated timer storage. [`ThreadAware::relocated`] creates a fresh timer set on
     /// the destination core, enabling thread-per-core runtimes to operate on independent timers
@@ -92,7 +93,7 @@ impl ThreadAware for SynchronizedTimers {
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         match self {
             #[cfg(any(feature = "tokio", test))]
-            Self::Global(_) => self,
+            Self::Shared(_) => self,
             Self::Isolated(timers) => Self::Isolated(timers.relocated(source, destination)),
         }
     }
@@ -104,8 +105,8 @@ impl SynchronizedTimers {
     }
 
     #[cfg(any(feature = "tokio", test))]
-    pub fn new_global() -> Self {
-        Self::Global(std::sync::Arc::new(Mutex::new(Timers::default())))
+    pub fn new_shared() -> Self {
+        Self::Shared(std::sync::Arc::new(Mutex::new(Timers::default())))
     }
 
     pub(super) fn with_timers<F, R>(&self, f: F) -> R
@@ -114,7 +115,7 @@ impl SynchronizedTimers {
     {
         let mut timers = match self {
             #[cfg(any(feature = "tokio", test))]
-            Self::Global(timers) => timers.lock().expect("timers lock poisoned"),
+            Self::Shared(timers) => timers.lock().expect("timers lock poisoned"),
             Self::Isolated(timers) => timers.lock().expect("timers lock poisoned"),
         };
         f(&mut timers)
@@ -129,7 +130,7 @@ impl SynchronizedTimers {
     pub fn is_unique(&self) -> bool {
         match self {
             #[cfg(any(feature = "tokio", test))]
-            Self::Global(timers) => std::sync::Arc::strong_count(timers) == 1,
+            Self::Shared(timers) => std::sync::Arc::strong_count(timers) == 1,
             Self::Isolated(timers) => thread_aware::Arc::strong_count(timers) == 1,
         }
     }
