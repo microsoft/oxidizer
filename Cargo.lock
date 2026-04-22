@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.2.1"
+version = "0.3.2"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -2068,7 +2068,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "data_privacy",
  "http",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -2330,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chumsky",
  "darling",
@@ -2432,7 +2432,7 @@ dependencies = [
 
 [[package]]
 name = "tick"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "chrono-tz",

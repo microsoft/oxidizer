@@ -22,7 +22,7 @@ pub trait Labeled {
 ///
 /// - **Low-cardinality**: chosen from a small, bounded set of values known at
 ///   development time (e.g. `"timeout"`, `"connection_refused"`,
-///   `"invalid_header"`). Dynamically-generated labels that grow without bound
+///   `"header_invalid"`). Dynamically-generated labels that grow without bound
 ///   (request IDs, timestamps, user-supplied strings, file paths, …) will cause
 ///   high-cardinality metric series and must be avoided.
 /// - **Free of PII and high-entropy data**: labels may be exported to
@@ -50,6 +50,19 @@ pub trait Labeled {
 /// builds only**, in a `const` context the check surfaces as a compile-time error,
 /// while in a non-const debug context it panics at runtime. On release builds the
 /// validation is elided for performance.
+///
+/// # Naming conventions
+///
+/// Labels should follow **subject-first** naming: put the noun (subject) first,
+/// then the state or condition. For example, prefer `"uri_invalid"` over
+/// `"invalid_uri"`, and `"uri_missing"` over `"missing_uri"`. This keeps
+/// related labels grouped together when sorted alphabetically.
+///
+/// Individual label values **should not** contain dots (`.`). Dots are reserved as
+/// separators for multi-part labels produced by [`from_parts`](Self::from_parts)
+/// and [`from_error_chain`](Self::from_error_chain). Using dots inside a single
+/// label segment will interfere with the hierarchical structure of composite
+/// labels.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct ErrorLabel(Cow<'static, str>);
 

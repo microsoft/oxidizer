@@ -95,6 +95,12 @@ use crate::timers::TimerKey;
 ///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
 ///   across threads.
 ///
+/// - **Tokio clocks** (created via [`Clock::new_tokio()`]): Relocation is a no-op. The Tokio clock
+///   is driven by a single background task that advances a shared set of timers, so all clones
+///   share the same timer storage regardless of which thread they are on. Per-core relocation
+///   would create independent timer storage on the destination thread that the background driver
+///   does not advance, so relocation is intentionally suppressed.
+///
 /// For thread-per-core setups, the typical pattern is to clone an
 /// [`InactiveClock`][crate::runtime::InactiveClock], relocate each clone to its target thread,
 /// and then activate it. See the [`runtime`][crate::runtime] module for details.
@@ -222,7 +228,11 @@ impl Clock {
         /// background task that drives timer advancement in Tokio.
         const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
 
-        let (clock, mut driver) = crate::runtime::InactiveClock::default().activate();
+        // The Tokio clock is driven by a single background task that advances a shared timer
+        // set. We use the `Shared` inactive-clock variant which intentionally does not support
+        // cloning or per-core relocation, since both would create configurations the single
+        // background driver could not advance correctly.
+        let (clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate();
 
         let join_handle = tokio::spawn(async move {
             loop {
@@ -571,6 +581,16 @@ mod tests {
     #[tokio::test]
     async fn tokio_ensure_timers_advancing() {
         let clock = Clock::new_tokio();
+        clock.delay(Duration::from_millis(15)).await;
+    }
+
+    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
+    #[tokio::test]
+    async fn tokio_ensure_timers_advancing_after_relocate() {
+        // Relocation must be a no-op for Tokio clocks: the background driver task drives a
+        // shared timer set, so a relocated clone must still observe timers being advanced.
+        let affinities = pinned_affinities(&[2]);
+        let clock = Clock::new_tokio().relocated(affinities[0].into(), affinities[1]);
         clock.delay(Duration::from_millis(15)).await;
     }
 
