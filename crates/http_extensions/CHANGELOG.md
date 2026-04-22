@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- ✨ Features
+
+  - add `routing` module with `Routing`, `RoutingContext`, and `BaseUriConflict` for resolving the target `BaseUri` of outgoing requests
+
 ## [0.3.2] - 2026-04-22
 
 - 🔧 Maintenance

@@ -1,4 +1,11 @@
 # Changelog
+
+## Unreleased
+
+- ✨ Features
+
+  - add `Uri::target_base_uri` getter to access the optional `BaseUri`
+
 ## [0.1.2] - 2026-04-16
 
 - ✨ Features

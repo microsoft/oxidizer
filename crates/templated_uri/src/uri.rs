@@ -146,6 +146,11 @@ impl Uri {
     pub fn into_http_uri(self) -> Result<http::Uri, ValidationError> {
         self.try_into()
     }
+
+    /// Returns the [`BaseUri`] and path and query of the URI as a tuple.
+    pub fn into_parts(self) -> (Option<BaseUri>, Option<TargetPathAndQuery>) {
+        (self.base_uri, self.path_and_query)
+    }
 }
 
 impl RedactedDisplay for Uri {
