@@ -165,10 +165,10 @@
 //! }
 //! ```
 //!
-//! The [`From<ErrorKind>`](RecoveryInfo#impl-From<ErrorKind>-for-RecoveryInfo)
-//! conversion provides opinionated defaults for common IO error kinds.
-//! See its documentation for the full classification table.
-//! If the defaults don't match your use case, implement your own mapping.
+//! The `From<ErrorKind> for RecoveryInfo` conversion provides opinionated
+//! defaults for common IO error kinds. See its documentation for the full
+//! classification table. If the defaults don't match your use case,
+//! implement your own mapping.
 
 #[expect(unused_imports, reason = "simplifies the docs")]
 use crate::*;
