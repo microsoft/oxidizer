@@ -93,7 +93,7 @@
 //! is potentially recoverable. In these cases, use heuristics to derive
 //! recovery information. A common pattern is detecting [`std::io::Error`] as
 //! the root cause and converting its [`ErrorKind`](std::io::ErrorKind) into
-//! [`RecoveryInfo`] via the built-in [`From<ErrorKind>`](RecoveryInfo#impl-From<ErrorKind>-for-RecoveryInfo)
+//! [`RecoveryInfo`] via the built-in [`RecoveryInfo::from`]
 //! conversion.
 //!
 //! The `#[from]` attribute lets you apply the heuristic at conversion time:
