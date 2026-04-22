@@ -106,7 +106,7 @@
 //! /// `std::io::Error` does not implement `Recovery`, so we derive
 //! /// recoverability from its `ErrorKind` using the built-in conversion.
 //! #[ohno::error]
-//! #[from(io::Error(recovery: RecoveryInfo::from(error.kind())))]
+//! #[from(io::Error(recovery: error.kind().into()))]
 //! struct StorageError {
 //!     recovery: RecoveryInfo,
 //! }
@@ -157,15 +157,11 @@
 //! /// Walk the error chain looking for a `std::io::Error` and derive
 //! /// recovery info from its `ErrorKind`.
 //! fn io_recovery_from_chain(err: &(dyn Error + 'static)) -> RecoveryInfo {
-//!     let mut current: Option<&(dyn Error + 'static)> = Some(err);
-//!     while let Some(e) = current {
-//!         if let Some(io_err) = e.downcast_ref::<io::Error>() {
-//!             return RecoveryInfo::from(io_err.kind());
-//!         }
-//!         current = e.source();
-//!     }
-//!     // No IO error found — assume non-recoverable.
-//!     RecoveryInfo::never()
+//!     std::iter::successors(Some(err), |e| (*e).source())
+//!         .find_map(|e| e.downcast_ref::<io::Error>())
+//!         .map(|io_err| RecoveryInfo::from(io_err.kind()))
+//!         // No IO error found — assume non-recoverable.
+//!         .unwrap_or_else(RecoveryInfo::never)
 //! }
 //! ```
 //!
