@@ -26,7 +26,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.3.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.1.0" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.1.1" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.1.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.1.0" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.1.0" }
@@ -36,12 +36,12 @@ data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-f
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.3.1" }
+http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.3.2" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.2" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.4.4" }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.4.5" }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.1.2" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.1" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.1" }
@@ -49,7 +49,7 @@ testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
-tick = { path = "crates/tick", default-features = false, version = "0.2.1" }
+tick = { path = "crates/tick", default-features = false, version = "0.2.2" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
 # external dependencies
