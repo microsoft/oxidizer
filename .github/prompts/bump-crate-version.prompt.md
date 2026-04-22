@@ -11,14 +11,22 @@ in-workspace dependents, respecting SemVer.
 
 ## SemVer Rules
 
-Cargo SemVer for `0.x.y` versions treats `x` as the major component and `y` as the
-minor component. Apply the following mapping consistently:
+Cargo's resolver treats `0.x.y` versions specially: the `x` component is the
+compatibility boundary (a bump of `x` is a breaking change), and `y` is the
+non-breaking component. There is no separate "minor" slot in `0.x.y` — both
+`minor` and `patch` bumps of a `0.x.y` crate map to bumping `y`. Apply the
+following mapping consistently:
 
-| Bump kind | `0.x.y` becomes | `x.y.z` (x ≥ 1) becomes |
-| --------- | --------------- | ----------------------- |
-| major     | `0.(x+1).0`     | `(x+1).0.0`             |
-| minor     | `0.x.(y+1)`     | `x.(y+1).0`             |
-| patch     | `0.x.(y+1)`     | `x.y.(z+1)`             |
+| Bump kind | `0.x.y` becomes      | `x.y.z` (x ≥ 1) becomes |
+| --------- | -------------------- | ----------------------- |
+| major     | `0.(x+1).0`          | `(x+1).0.0`             |
+| minor     | `0.x.(y+1)` (= patch) | `x.(y+1).0`             |
+| patch     | `0.x.(y+1)`          | `x.y.(z+1)`             |
+
+For `0.x.y` crates, prefer using `patch` for any non-breaking change. The
+`minor` row is provided so the cascade rules below behave uniformly when a
+dependent is `0.x.y` but its target is `x.y.z` (or vice versa); it produces
+the same result as `patch` for `0.x.y` crates.
 
 Cascade rule for in-workspace dependents:
 
