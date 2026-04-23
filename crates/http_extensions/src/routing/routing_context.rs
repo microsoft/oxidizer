@@ -78,3 +78,39 @@ impl<'a> RoutingContext<'a> {
         self.request
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::HttpRequestBuilder;
+
+    #[test]
+    fn defaults() {
+        let ctx = RoutingContext::new();
+        assert_eq!(ctx.attempt(), 0);
+        assert!(!ctx.is_last_attempt());
+        assert!(ctx.previous_recovery().is_none());
+        assert!(ctx.request().is_none());
+        // Exercise Debug + Clone for coverage.
+        let _ = format!("{:?}", ctx.clone());
+    }
+
+    #[test]
+    fn with_setters() {
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/")
+            .build()
+            .expect("valid request");
+        let recovery = RecoveryInfo::retry();
+
+        let ctx = RoutingContext::new()
+            .with_request(&request)
+            .with_attempt(2, true)
+            .with_previous_recovery(recovery);
+
+        assert_eq!(ctx.attempt(), 2);
+        assert!(ctx.is_last_attempt());
+        assert!(ctx.previous_recovery().is_some());
+        assert!(ctx.request().is_some());
+    }
+}

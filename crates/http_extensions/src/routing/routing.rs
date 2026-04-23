@@ -423,4 +423,15 @@ mod tests {
 
         assert_eq!(request.uri(), &original_uri);
     }
+
+    #[test]
+    fn resolver_debug_format() {
+        assert_eq!(format!("{:?}", Resolver::Empty), "Empty");
+
+        let fixed = Resolver::Fixed(BaseUri::from_uri_static("https://api.example.com"));
+        assert!(format!("{fixed:?}").starts_with("Fixed("));
+
+        let custom = Resolver::Custom(Arc::new(|_| None));
+        assert_eq!(format!("{custom:?}"), "Custom");
+    }
 }

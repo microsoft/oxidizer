@@ -371,6 +371,9 @@ mod tests {
         let builder = HttpBodyBuilder::new(memory, &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
+
+        // access the clock
+        let _clock: &Clock = builder.as_ref();
     }
 
     #[test]
