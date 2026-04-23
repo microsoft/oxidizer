@@ -11,7 +11,85 @@ on:
     branches: [main]
 
 jobs:
+  # Computes the impacted-crate scope for the rest of the pipeline.
+  # On pull_request: snapshots origin/<base_ref> and the PR head, then emits
+  # `-p NAME ...` cargo args for each tier (modified / affected / required).
+  # On push: emits `--workspace` for all tiers (full backstop build).
+  # If a PR touches no crates (e.g. doc-only), `skip=true` and source-related
+  # jobs are short-circuited.
+  #
+  # Note: snapshots are taken on the PR head SHA, not on the merge commit that
+  # downstream jobs build. This matches cargo-delta's PR-optimization model;
+  # the push-to-main backstop catches anything skewed by the merge.
+  delta:
+    runs-on: ubuntu-latest
+    outputs:
+      modified: ${{ steps.compute.outputs.modified }}
+      affected: ${{ steps.compute.outputs.affected }}
+      required: ${{ steps.compute.outputs.required }}
+      skip: ${{ steps.compute.outputs.skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Setup
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/setup
+        with:
+          rust-toolchain: RUST_LATEST
+          cargo-tools: CARGO_DELTA_VERSION
+      - name: Compute Impact
+        id: compute
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            # push to main (or any non-PR trigger) → backstop: full workspace.
+            {
+              echo "modified=--workspace"
+              echo "affected=--workspace"
+              echo "required=--workspace"
+              echo "skip=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          head_sha=$(git rev-parse HEAD)
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git checkout "origin/$BASE_REF"
+          cargo delta snapshot > baseline.json
+          git checkout "$head_sha"
+          cargo delta snapshot > current.json
+
+          MODIFIED=$(cargo delta impact --baseline baseline.json --current current.json -f cargo-args --modified)
+          AFFECTED=$(cargo delta impact --baseline baseline.json --current current.json -f cargo-args --affected)
+          REQUIRED=$(cargo delta impact --baseline baseline.json --current current.json -f cargo-args --required)
+
+          echo "Modified: ${MODIFIED:-<none>}"
+          echo "Affected: ${AFFECTED:-<none>}"
+          echo "Required: ${REQUIRED:-<none>}"
+
+          # `required` is the superset of `affected` ⊇ `modified`; if it's empty,
+          # nothing is impacted and source-scoped jobs can be skipped entirely.
+          if [[ -z "$REQUIRED" ]]; then
+            skip=true
+          else
+            skip=false
+          fi
+
+          {
+            echo "modified=$MODIFIED"
+            echo "affected=$AFFECTED"
+            echo "required=$REQUIRED"
+            echo "skip=$skip"
+          } >> "$GITHUB_OUTPUT"
+
   testing:
+    needs: [delta]
+    if: needs.delta.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -30,22 +108,24 @@ jobs:
 
       # execute
       - name: Build
-        run: cargo hack build --each-feature --workspace --verbose --locked --color always
+        run: cargo hack build --each-feature ${{ needs.delta.outputs.affected }} --verbose --locked --color always
       - name: Tests
         if: success() || failure()
-        run: cargo nextest run --verbose --workspace --all-features
+        run: cargo nextest run --verbose ${{ needs.delta.outputs.affected }} --all-features
       - name: Docs
         if: success() || failure()
         env:
           RUSTDOCFLAGS: "--cfg docsrs -D warnings"
-        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace --all-features
+        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose ${{ needs.delta.outputs.required }} --all-features
       - name: Doc Tests
         if: success() || failure()
-        run: cargo test --doc --verbose --workspace --all-features
+        run: cargo test --doc --verbose ${{ needs.delta.outputs.affected }} --all-features
       - name: Examples
         run: just examples
 
   static-analysis:
+    needs: [delta]
+    if: needs.delta.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -65,10 +145,10 @@ jobs:
 
       # execute
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy ${{ needs.delta.outputs.modified }} --all-targets --all-features -- -D warnings
       - name: Source Format
         if: success() || failure()
-        run: cargo fmt -- --check
+        run: cargo fmt ${{ needs.delta.outputs.modified }} -- --check
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
@@ -107,7 +187,8 @@ jobs:
         run: just spellcheck
 
   semver:
-    if: github.event_name == 'pull_request'
+    needs: [delta]
+    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -130,7 +211,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          cargo semver-checks --all-features --workspace --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
+          cargo semver-checks --all-features ${{ needs.delta.outputs.affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
 
       # report
       - name: Prepare Semver Comment
@@ -162,8 +243,8 @@ jobs:
 
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
-    if: github.event_name == 'pull_request'
-    needs: [testing, static-analysis]
+    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    needs: [delta, testing, static-analysis]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -194,10 +275,10 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
       - name: Careful
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace --color always --target ${{ matrix.target }}
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features ${{ needs.delta.outputs.affected }} --color always --target ${{ matrix.target }}
       - name: Miri
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features ${{ needs.delta.outputs.affected }} --lib --tests
 
   mutation-testing:
     if: github.event_name == 'pull_request'
