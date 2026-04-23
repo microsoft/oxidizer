@@ -20,8 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         item: UriSafeString::from_static("name"),
     };
     let target = Uri::default()
-        .base_uri(BaseUri::from_uri_static("https://example.com"))
-        .path_and_query(user_path);
+        .with_base(BaseUri::from_static("https://example.com"))
+        .with_path(user_path);
 
     let uri: http::Uri = target.try_into()?;
 

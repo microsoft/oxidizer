@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use http::uri::PathAndQuery;
 
-use crate::ValidationError;
+use crate::UriError;
 
 /// The base of a Uri, like `/foo`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,13 +20,13 @@ impl BasePath {
         self.inner.as_str()
     }
 
-    fn validate_path_format(&self) -> Result<(), ValidationError> {
+    fn validate_path_format(&self) -> Result<(), UriError> {
         let path_str = self.inner.as_str();
         if self.inner.query().is_some() {
-            return Err(ValidationError::invalid_uri("the path must not contain a query string"));
+            return Err(UriError::invalid_uri("the path must not contain a query string"));
         }
         if !(path_str.starts_with('/') && path_str.ends_with('/')) {
-            return Err(ValidationError::invalid_uri("the path must start and end with a slash"));
+            return Err(UriError::invalid_uri("the path must start and end with a slash"));
         }
 
         Ok(())
@@ -34,13 +34,13 @@ impl BasePath {
 
     /// Creates a new `Path` from a `PathAndQuery`, validating its format.
     /// The path must start and end with a slash (`/`) and must not contain a query string.
-    fn new(p: PathAndQuery) -> Result<Self, ValidationError> {
+    fn new(p: PathAndQuery) -> Result<Self, UriError> {
         let path = Self { inner: p };
         path.validate_path_format()?;
         Ok(path)
     }
 
-    pub(crate) fn join(&self, other: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<PathAndQuery, ValidationError> {
+    pub(crate) fn join(&self, other: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<PathAndQuery, UriError> {
         let other: PathAndQuery = other.try_into().map_err(Into::into)?;
         let path_str = other.as_str().trim_start_matches('/');
         if path_str.is_empty() {
@@ -60,7 +60,7 @@ impl Default for BasePath {
 }
 
 impl FromStr for BasePath {
-    type Err = ValidationError;
+    type Err = UriError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let p: PathAndQuery = s.try_into()?;
@@ -69,7 +69,7 @@ impl FromStr for BasePath {
 }
 
 impl TryFrom<&str> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::from_str(value)
@@ -77,7 +77,7 @@ impl TryFrom<&str> for BasePath {
 }
 
 impl TryFrom<String> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let p = PathAndQuery::try_from(value)?;
@@ -86,7 +86,7 @@ impl TryFrom<String> for BasePath {
 }
 
 impl TryFrom<PathAndQuery> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
     fn try_from(paq: PathAndQuery) -> Result<Self, Self::Error> {
         Self::new(paq)
@@ -94,7 +94,7 @@ impl TryFrom<PathAndQuery> for BasePath {
 }
 
 impl TryFrom<&PathAndQuery> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
     fn try_from(paq: &PathAndQuery) -> Result<Self, Self::Error> {
         paq.clone().try_into()

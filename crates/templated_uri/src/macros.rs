@@ -48,10 +48,10 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:
-/// - `TemplatedPathAndQuery`: Methods for URI template expansion and formatting
+/// - `UriTemplate`: Methods for URI template expansion and formatting
 /// - `Debug`: Custom debug representation showing the template
 /// - `RedactedDisplay`: Data privacy-aware display with selective field redaction
-/// - `From<T> for TargetPathAndQuery`: Conversion to target path and query
+/// - `From<T> for UriPath`: Conversion to a URI path
 ///
 /// # Struct Usage
 ///
@@ -91,7 +91,7 @@ pub use templated_uri_macros::UriUnsafeParam;
 ///
 /// # Enum Usage
 ///
-/// For enums, each variant must contain exactly one field that implements `TemplatedPathAndQuery`.
+/// For enums, each variant must contain exactly one field that implements `UriTemplate`.
 /// The macro generates delegating implementations that forward to the inner type.
 ///
 /// ```ignore

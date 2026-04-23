@@ -4,12 +4,12 @@
 use crate::UrlTemplateLabel;
 use crate::extensions::ExtensionsExt;
 use http::Request;
-use templated_uri::uri::TargetPathAndQuery;
+use templated_uri::UriPath;
 
 /// Extensions for HTTP requests.
 pub trait RequestExt: sealed::Sealed {
     /// Returns the path and query associated with this request, if any.
-    fn path_and_query(&self) -> Option<&TargetPathAndQuery>;
+    fn path_and_query(&self) -> Option<&UriPath>;
 
     /// Returns the URL template label for this request, if available.
     ///
@@ -23,7 +23,7 @@ pub trait RequestExt: sealed::Sealed {
 }
 
 impl<B> RequestExt for Request<B> {
-    fn path_and_query(&self) -> Option<&TargetPathAndQuery> {
+    fn path_and_query(&self) -> Option<&UriPath> {
         self.extensions().get()
     }
 
@@ -54,7 +54,7 @@ mod tests {
         let mut request = crate::Request::builder().uri(uri.clone()).body(()).unwrap();
         request
             .extensions_mut()
-            .insert(TargetPathAndQuery::from_path_and_query(uri.path_and_query().cloned().unwrap()));
+            .insert(UriPath::from_http_path(uri.path_and_query().cloned().unwrap()));
 
         assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/path");
     }
@@ -87,12 +87,12 @@ mod tests {
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
 
-        // Attach a TargetPathAndQuery but no UrlTemplateLabel.
+        // Attach a UriPath but no UrlTemplateLabel.
         // For a plain PathAndQuery, label() returns None so the fallback
         // to template() is exercised.
         request
             .extensions_mut()
-            .insert(TargetPathAndQuery::from_path_and_query(uri.path_and_query().cloned().unwrap()));
+            .insert(UriPath::from_http_path(uri.path_and_query().cloned().unwrap()));
 
         let result = request.url_template_label();
         assert_eq!(result.as_ref().map(UrlTemplateLabel::as_str), Some("/api/users"));

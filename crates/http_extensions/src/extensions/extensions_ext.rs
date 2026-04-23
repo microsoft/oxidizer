@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use http::Extensions;
-use templated_uri::uri::TargetPathAndQuery;
+use templated_uri::UriPath;
 
 use crate::UrlTemplateLabel;
 
@@ -12,8 +12,8 @@ pub trait ExtensionsExt: sealed::Sealed {
     ///
     /// This method checks for a template label in the following order:
     /// 1. From an explicit [`UrlTemplateLabel`] extension
-    /// 2. From a [`TargetPathAndQuery`] label (if set via `#[templated(label = "...")]`)
-    /// 3. From a [`TargetPathAndQuery`] template string
+    /// 2. From a [`UriPath`] label (if set via `#[templated(label = "...")]`)
+    /// 3. From a [`UriPath`] template string
     ///
     /// Returns `None` if no template information is available.
     fn url_template_label(&self) -> Option<UrlTemplateLabel>;
@@ -24,7 +24,7 @@ impl ExtensionsExt for Extensions {
         if let Some(label) = self.get::<UrlTemplateLabel>() {
             return Some(label.clone());
         }
-        if let Some(path) = self.get::<TargetPathAndQuery>() {
+        if let Some(path) = self.get::<UriPath>() {
             return Some(UrlTemplateLabel::new(path.label().unwrap_or_else(|| path.template())));
         }
 
@@ -55,9 +55,9 @@ mod tests {
     }
 
     #[test]
-    fn returns_template_as_fallback_from_target_path_and_query() {
+    fn returns_template_as_fallback_from_uri_path() {
         let mut extensions = Extensions::new();
-        extensions.insert(TargetPathAndQuery::from_path_and_query("/path".parse().unwrap()));
+        extensions.insert(UriPath::from_http_path("/path".parse().unwrap()));
 
         assert_eq!(
             extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
@@ -66,7 +66,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_label_from_templated_target_path_and_query() {
+    fn returns_label_from_templated_uri_path() {
         use templated_uri::{UriSafeString, templated};
 
         #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
@@ -76,7 +76,7 @@ mod tests {
         }
 
         let mut extensions = Extensions::new();
-        extensions.insert(TargetPathAndQuery::from_templated(UserPosts {
+        extensions.insert(UriPath::from_template(UserPosts {
             user_id: UriSafeString::from_static("123"),
         }));
 
@@ -90,7 +90,7 @@ mod tests {
     fn explicit_label_takes_precedence_over_target_path() {
         let mut extensions = Extensions::new();
         extensions.insert(UrlTemplateLabel::new("/explicit"));
-        extensions.insert(TargetPathAndQuery::from_path_and_query("/path".parse().unwrap()));
+        extensions.insert(UriPath::from_http_path("/path".parse().unwrap()));
 
         assert_eq!(
             extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),

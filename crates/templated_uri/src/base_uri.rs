@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use http::uri::PathAndQuery;
 
-use crate::ValidationError;
+use crate::UriError;
 use crate::uri::{Authority, Parts, Scheme};
 
 mod base_path;
@@ -46,7 +46,7 @@ pub use origin::Origin;
 /// let users_path = PathAndQuery::from_static("/api/v1/users");
 ///
 /// // Create base_uri once
-/// let base_uri = BaseUri::from_uri_static("https://api.example.com");
+/// let base_uri = BaseUri::from_static("https://api.example.com");
 ///
 /// // Combine with a path to create a complete URI
 /// let uri = base_uri.build_http_uri(api_path)?;
@@ -63,18 +63,18 @@ pub use origin::Origin;
 /// Creating `base_uri` with various constructors:
 ///
 /// ```
-/// # use templated_uri::{BasePath, BaseUri, uri::Scheme, };
-/// // From scheme and authority
-/// let base_uri1 = BaseUri::new(Scheme::HTTPS, "example.com")?;
+/// # use templated_uri::{BasePath, BaseUri, Origin, uri::Scheme};
+/// // From an Origin (scheme + authority)
+/// let base_uri1: BaseUri = Origin::from_parts(Scheme::HTTPS, "example.com")?.into();
 /// assert_eq!(base_uri1.to_string(), "https://example.com/");
 ///
-/// // From scheme, host, and port
-/// let base_uri2 =
-///     BaseUri::from_parts(Scheme::HTTP, "api.example.com", 8080, BasePath::default())?;
+/// // From an Origin and a path
+/// let origin = Origin::from_parts(Scheme::HTTP, "api.example.com:8080")?;
+/// let base_uri2 = BaseUri::from_parts(origin, BasePath::default());
 /// assert_eq!(base_uri2.to_string(), "http://api.example.com:8080/");
 ///
 /// // From a URI string with path prefix
-/// let base_uri3 = BaseUri::from_uri_str("https://auth.example.com/path/prefix/")?;
+/// let base_uri3: BaseUri = "https://auth.example.com/path/prefix/".parse()?;
 /// assert_eq!(
 ///     base_uri3.to_string(),
 ///     "https://auth.example.com/path/prefix/"
@@ -86,8 +86,8 @@ pub use origin::Origin;
 /// Converting an `base_uri` to a complete URI:
 ///
 /// ```
-/// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
-/// let base_uri = BaseUri::new(Scheme::HTTPS, "api.example.com")?;
+/// # use templated_uri::{BaseUri, Origin, uri::{Scheme, PathAndQuery}};
+/// let base_uri: BaseUri = Origin::from_parts(Scheme::HTTPS, "api.example.com")?.into();
 ///
 /// // Combine with a path to create a complete URI
 /// let uri = base_uri.build_http_uri("/users/123?active=true")?;
@@ -112,79 +112,15 @@ pub struct BaseUri {
 }
 
 impl BaseUri {
-    /// Creates a new [`BaseUri`] with the specified scheme and authority.
-    ///
-    /// This is a fallible constructor that attempts to convert the inputs to the
-    /// required types. You can provide pre-constructed `Scheme` and `Authority` objects
-    /// to avoid unnecessary conversions.
-    ///
-    /// # Arguments
-    ///
-    /// * `scheme`: The URI scheme (must be either HTTP or HTTPS).
-    /// * `authority`: The authority component (hostname and optional port).
-    ///
-    /// # Errors
-    ///
-    /// Returns a validation error if:
-    ///
-    /// - The scheme is not HTTP or HTTPS.
-    /// - The scheme or authority conversion fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use templated_uri::{BaseUri, uri::{Scheme, Authority}};
-    /// // Default HTTPS port (443)
-    /// let base_uri = BaseUri::new(Scheme::HTTPS, "example.com")?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/");
-    ///
-    /// // Default HTTPS port (443)
-    /// let base_uri = BaseUri::new(Scheme::HTTPS, "www.example.com")?;
-    /// assert_eq!(base_uri.to_string(), "https://www.example.com/");
-    ///
-    /// // Default HTTP port (80)
-    /// let base_uri = BaseUri::new(Scheme::HTTP, "example.com")?;
-    /// assert_eq!(base_uri.to_string(), "http://example.com/");
-    ///
-    /// // Custom port
-    /// let base_uri = BaseUri::new(Scheme::HTTPS, "example.com:1234")?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
-    ///
-    /// // Invalid or unsupported scheme
-    /// let error = BaseUri::new("invalid", "example.com:1234").unwrap_err();
-    /// assert!(
-    ///     error
-    ///         .to_string()
-    ///         .starts_with("unsupported scheme: invalid, only HTTP and HTTPS schemes are supported")
-    /// );
-    ///
-    /// // Invalid authority
-    /// let error = BaseUri::new(Scheme::HTTPS, "exa/mple.com").unwrap_err();
-    /// assert!(error.to_string().starts_with("invalid uri character"));
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn new(
-        scheme: impl TryInto<Scheme, Error: Into<http::Error>>,
-        authority: impl TryInto<Authority, Error: Into<http::Error>>,
-    ) -> Result<Self, ValidationError> {
-        let origin = Origin::new(scheme, authority)?;
-
-        Ok(Self {
-            origin,
-            path: BasePath::default(),
-        })
-    }
-
-    /// Sets the path component of this [`BaseUri`].
     ///
     /// The path must start and end with a slash (`/`).
     ///
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
-    /// let base_uri =
-    ///     BaseUri::new(Scheme::HTTPS, "example.com")?.with_path(BasePath::try_from("/api/v1/")?)?;
+    /// # use templated_uri::{BaseUri, Origin, uri::Scheme, BasePath};
+    /// let base_uri = BaseUri::from(Origin::from_parts(Scheme::HTTPS, "example.com")?)
+    ///     .with_path(BasePath::try_from("/api/v1/")?)?;
     ///
     /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -192,44 +128,32 @@ impl BaseUri {
     ///
     /// # Errors
     ///
-    /// Returns a [`ValidationError`] if the path cannot be converted to a valid [`BasePath`].
-    pub fn with_path<P>(mut self, path: P) -> Result<Self, ValidationError>
+    /// Returns a [`UriError`] if the path cannot be converted to a valid [`BasePath`].
+    pub fn with_path<P>(mut self, path: P) -> Result<Self, UriError>
     where
         P: TryInto<BasePath>,
-        ValidationError: From<<P as TryInto<BasePath>>::Error>,
+        UriError: From<<P as TryInto<BasePath>>::Error>,
     {
         self.path = path.try_into()?;
         Ok(self)
     }
 
-    /// Creates a [`BaseUri`] from a host, port, scheme and path.
+    /// Creates a [`BaseUri`] from an [`Origin`] and a [`BasePath`].
     ///
-    /// This is a convenience method that constructs the `base_uri` from individual components.
-    ///
-    /// # Arguments
-    ///
-    /// - `scheme`: The URI scheme (must be either HTTP or HTTPS).
-    /// - `host`: The hostname.
-    /// - `port`: The port number.
-    /// - `path`: The path component. Must start and end with a slash (`/`)
-    ///
-    /// # Errors
-    ///
-    /// Returns a validation error if:
-    ///
-    /// - The scheme is not HTTP or HTTPS.
-    /// - The provided host is invalid.
+    /// This constructor is infallible — both inputs are already validated.
     ///
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
-    /// let base_uri = BaseUri::from_parts(Scheme::HTTPS, "example.com", 1234, BasePath::default())?;
+    /// # use templated_uri::{BaseUri, BasePath, Origin, uri::Scheme};
+    /// let origin = Origin::from_parts(Scheme::HTTPS, "example.com:1234")?;
+    /// let base_uri = BaseUri::from_parts(origin, BasePath::default());
     /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn from_parts(scheme: Scheme, host: impl AsRef<str>, port: u16, path: BasePath) -> Result<Self, ValidationError> {
-        Self::new(scheme, format!("{}:{}", host.as_ref(), port))?.with_path(path)
+    #[must_use]
+    pub fn from_parts(origin: Origin, path: BasePath) -> Self {
+        Self { origin, path }
     }
 
     /// Creates an [`BaseUri`] from a static URI string.
@@ -255,65 +179,12 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com:443");
+    /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
     /// ```
     #[must_use]
-    pub fn from_uri_static(uri: &'static str) -> Self {
-        Self::from_http_uri(&http::Uri::from_static(uri)).expect("static str is not a valid base_uri URI")
-    }
-
-    /// Creates a [`BaseUri`] from a URI string.
-    ///
-    /// This method parses a string as a URI and extracts the scheme, authority and optional
-    /// path prefix to create a [`BaseUri`]. The URI must contain both a scheme and authority,
-    /// and the scheme must be either HTTP or HTTPS.
-    ///
-    /// Any query string or fragment in the URI is silently discarded - only the scheme,
-    /// authority and path prefix are preserved.
-    ///
-    /// # Arguments
-    ///
-    /// - `uri`: A string representing a valid URI with HTTP or HTTPS scheme and authority.
-    ///
-    /// # Errors
-    ///
-    /// Returns a validation error if:
-    ///
-    /// - The URI string cannot be parsed as a valid URI.
-    /// - The URI does not contain both a scheme and an authority component.
-    /// - The scheme is not HTTP or HTTPS.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use templated_uri::BaseUri;
-    /// let base_uri = BaseUri::from_uri_str("https://example.com:443")?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    ///
-    /// Using a URI string with a path prefix:
-    ///
-    /// ```
-    /// # use templated_uri::BaseUri;
-    /// let base_uri = BaseUri::from_uri_str("https://example.com/path/prefix/")?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/path/prefix/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    ///
-    /// Query strings are discarded:
-    ///
-    /// ```
-    /// # use templated_uri::BaseUri;
-    /// let base_uri = BaseUri::from_uri_str("https://example.com/path/?query=1")?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn from_uri_str(uri: &str) -> Result<Self, ValidationError> {
-        uri.parse::<http::Uri>()
-            .map_err(Into::into)
-            .and_then(|uri| Self::from_http_uri(&uri))
+    pub fn from_static(uri: &'static str) -> Self {
+        Self::from_http(&http::Uri::from_static(uri)).expect("static str is not a valid base_uri URI")
     }
 
     /// Creates a [`BaseUri`] from an existing `http::Uri`.
@@ -337,7 +208,7 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::BaseUri;
     /// let uri = "https://example.com".parse::<http::Uri>()?;
-    /// let base_uri = BaseUri::from_http_uri(&uri)?;
+    /// let base_uri = BaseUri::from_http(&uri)?;
     /// // Note the added trailing slash, this is a behavior of http::Uri parsing which initializes a `/`
     /// // path if none is present in input string, we can't do anything about it.
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
@@ -349,7 +220,7 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::BaseUri;
     /// let uri = "https://example.com/path/".parse::<http::Uri>()?;
-    /// let base_uri = BaseUri::from_http_uri(&uri)?;
+    /// let base_uri = BaseUri::from_http(&uri)?;
     /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
     /// assert_eq!(base_uri.path().as_str(), "/path/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -360,13 +231,13 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::BaseUri;
     /// let uri = "https://example.com/path/?query=1".parse::<http::Uri>()?;
-    /// let base_uri = BaseUri::from_http_uri(&uri)?;
+    /// let base_uri = BaseUri::from_http(&uri)?;
     /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn from_http_uri(uri: &http::Uri) -> Result<Self, ValidationError> {
+    pub fn from_http(uri: &http::Uri) -> Result<Self, UriError> {
         let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority()) else {
-            return Err(ValidationError::invalid_uri("URI must have both scheme and authority components"));
+            return Err(UriError::invalid_uri("URI must have both scheme and authority components"));
         };
 
         // Use only the path component - query and fragment are not part of a base URI.
@@ -384,7 +255,7 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.scheme().as_str(), "https");
     /// ```
     pub const fn scheme(&self) -> &Scheme {
@@ -399,13 +270,13 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.authority().as_str(), "example.com");
     /// ```
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com:1234");
+    /// let base_uri = BaseUri::from_static("https://example.com:1234");
     /// assert_eq!(base_uri.authority().as_str(), "example.com:1234");
     /// ```
     pub const fn authority(&self) -> &Authority {
@@ -418,7 +289,7 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com:443");
+    /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// assert_eq!(base_uri.host(), "example.com");
     /// ```
     pub fn host(&self) -> &str {
@@ -436,9 +307,9 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, Origin, uri::{Scheme, Authority}};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com:443");
+    /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// let new_base_uri = base_uri.with_origin(
-    ///     Origin::new(
+    ///     Origin::from_parts(
     ///         Scheme::HTTPS,
     ///         Authority::from_static("new-example.com:8080"),
     ///     )
@@ -464,15 +335,15 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
     /// // Explicit port
-    /// let base_uri = BaseUri::from_uri_static("https://example.com:8443");
+    /// let base_uri = BaseUri::from_static("https://example.com:8443");
     /// assert_eq!(base_uri.port(), 8443);
     ///
     /// // Default HTTPS port
-    /// let base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.port(), 443);
     ///
     /// // Default HTTP port
-    /// let base_uri = BaseUri::from_uri_static("http://example.com");
+    /// let base_uri = BaseUri::from_static("http://example.com");
     /// assert_eq!(base_uri.port(), 80);
     /// ```
     pub fn port(&self) -> u16 {
@@ -484,7 +355,7 @@ impl BaseUri {
     /// # Examples
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let mut base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let mut base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.port(), 443);
     ///
     /// let base_uri = base_uri.with_port(8443);
@@ -506,14 +377,14 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com/some/path/");
+    /// let base_uri = BaseUri::from_static("https://example.com/some/path/");
     ///
     /// assert_eq!(base_uri.path().as_str(), "/some/path/");
     /// ```
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let base_uri = BaseUri::from_static("https://example.com");
     ///
     /// assert_eq!(base_uri.path().as_str(), "/");
     /// ```
@@ -529,10 +400,10 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::Scheme};
-    /// let secure = BaseUri::from_uri_static("https://example.com");
+    /// let secure = BaseUri::from_static("https://example.com");
     /// assert!(secure.is_https());
     ///
-    /// let insecure = BaseUri::from_uri_static("http://example.com");
+    /// let insecure = BaseUri::from_static("http://example.com");
     /// assert!(!insecure.is_https());
     /// ```
     pub fn is_https(&self) -> bool {
@@ -557,7 +428,7 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let base_uri = BaseUri::from_static("https://example.com");
     /// let uri = base_uri.build_http_uri("/api/resource?param=value")?;
     ///
     /// assert_eq!(
@@ -570,7 +441,7 @@ impl BaseUri {
     /// Using a path prefix as a part of the [`BaseUri`]:
     /// ```
     /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com/api/");
+    /// let base_uri = BaseUri::from_static("https://example.com/api/");
     /// let uri = base_uri.build_http_uri("resource?param=value")?;
     ///
     /// assert_eq!(
@@ -584,7 +455,7 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
-    /// let base_uri = BaseUri::from_uri_static("https://example.com");
+    /// let base_uri = BaseUri::from_static("https://example.com");
     ///
     /// // Pre-create and cache path and query to avoid parsing and extra allocations.
     /// let path = PathAndQuery::from_static("/api/resource?param=value");
@@ -596,7 +467,7 @@ impl BaseUri {
     /// );
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn build_http_uri(&self, path: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<http::Uri, ValidationError> {
+    pub fn build_http_uri(&self, path: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<http::Uri, UriError> {
         let full_path = self.path.join(path)?;
 
         let mut parts = Parts::default();
@@ -609,7 +480,7 @@ impl BaseUri {
 }
 
 impl TryFrom<http::Uri> for BaseUri {
-    type Error = ValidationError;
+    type Error = UriError;
 
     /// Tries to convert a URI into an `base_uri`.
     ///
@@ -620,7 +491,23 @@ impl TryFrom<http::Uri> for BaseUri {
     /// - The URI does not have both scheme and authority components.
     /// - The scheme is not HTTP or HTTPS.
     fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
-        Self::from_http_uri(&uri)
+        Self::from_http(&uri)
+    }
+}
+
+impl TryFrom<&http::Uri> for BaseUri {
+    type Error = UriError;
+
+    fn try_from(uri: &http::Uri) -> Result<Self, Self::Error> {
+        Self::from_http(uri)
+    }
+}
+
+impl TryFrom<&str> for BaseUri {
+    type Error = UriError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
     }
 }
 
@@ -637,10 +524,10 @@ impl From<Origin> for BaseUri {
 }
 
 impl FromStr for BaseUri {
-    type Err = ValidationError;
+    type Err = UriError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_uri_str(s)
+        http::Uri::from_str(s)?.try_into()
     }
 }
 
@@ -671,11 +558,17 @@ impl Display for BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
-    /// let base_uri = BaseUri::from_parts(Scheme::HTTPS, "example.com", 443, BasePath::default())?;
+    /// # use templated_uri::{BaseUri, BasePath, Origin, uri::Scheme};
+    /// let base_uri = BaseUri::from_parts(
+    ///     Origin::from_parts(Scheme::HTTPS, "example.com:443")?,
+    ///     BasePath::default(),
+    /// );
     /// assert_eq!(format!("{}", base_uri), "https://example.com/");
     ///
-    /// let custom_port = BaseUri::from_parts(Scheme::HTTPS, "example.com", 8443, BasePath::default())?;
+    /// let custom_port = BaseUri::from_parts(
+    ///     Origin::from_parts(Scheme::HTTPS, "example.com:8443")?,
+    ///     BasePath::default(),
+    /// );
     /// assert_eq!(format!("{}", custom_port), "https://example.com:8443/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
@@ -709,57 +602,51 @@ impl<'de> serde::Deserialize<'de> for BaseUri {
 mod tests {
     use super::*;
 
-    mod new {
+    mod from_parts {
         use super::*;
 
         #[test]
         fn valid_base_uri() {
-            let base_uri = BaseUri::new(Scheme::HTTPS, "example.com").unwrap();
+            let origin = Origin::from_parts(Scheme::HTTPS, "example.com").unwrap();
+            let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
         }
 
         #[test]
         fn with_custom_port() {
-            let base_uri = BaseUri::new(Scheme::HTTP, "example.com:8080").unwrap();
+            let origin = Origin::from_parts(Scheme::HTTP, "example.com:8080").unwrap();
+            let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTP);
             assert_eq!(base_uri.authority().as_str(), "example.com:8080");
         }
 
         #[test]
         fn with_string_scheme() {
-            let base_uri = BaseUri::new("https", "example.com").unwrap();
+            let origin = Origin::from_parts("https", "example.com").unwrap();
+            let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
         }
 
         #[test]
         fn invalid_scheme() {
-            let err = BaseUri::new("ftp", "example.com").unwrap_err();
+            let err = Origin::from_parts("ftp", "example.com").unwrap_err();
             assert!(err.to_string().contains("unsupported scheme: ftp"));
         }
 
         #[test]
         fn invalid_authority() {
-            let err = BaseUri::new(Scheme::HTTPS, "exam/ple.com:123").unwrap_err();
+            let err = Origin::from_parts(Scheme::HTTPS, "exam/ple.com:123").unwrap_err();
             assert!(err.to_string().contains("invalid uri"));
         }
-    }
-
-    mod from_parts {
-        use super::*;
 
         #[test]
-        fn valid_parts() {
-            let base_uri = BaseUri::from_parts(Scheme::HTTPS, "example.com", 443, BasePath::from_str("/example/").unwrap()).unwrap();
+        fn with_path() {
+            let origin = Origin::from_parts(Scheme::HTTPS, "example.com:443").unwrap();
+            let base_uri = BaseUri::from_parts(origin, BasePath::from_str("/example/").unwrap());
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com:443");
             assert_eq!(base_uri.to_string(), "https://example.com/example/");
-        }
-
-        #[test]
-        fn invalid_host() {
-            let err = BaseUri::from_parts(Scheme::HTTPS, "exa/mple.com", 443, BasePath::from_str("/example/").unwrap()).unwrap_err();
-            assert!(err.to_string().contains("invalid uri"));
         }
     }
 
@@ -768,14 +655,14 @@ mod tests {
 
         #[test]
         fn valid_uri() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
         }
 
         #[test]
         fn with_path() {
-            let base_uri = BaseUri::from_uri_static("https://example.com/path/to/resource/");
+            let base_uri = BaseUri::from_static("https://example.com/path/to/resource/");
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
             assert_eq!(base_uri.to_string(), "https://example.com/path/to/resource/");
@@ -784,7 +671,7 @@ mod tests {
         #[should_panic(expected = "static str is not a valid base_uri URI")]
         #[test]
         fn invalid_uri() {
-            let _base_uri = BaseUri::from_uri_static("not-a-valid-uri");
+            let _base_uri = BaseUri::from_static("not-a-valid-uri");
         }
     }
 
@@ -795,27 +682,27 @@ mod tests {
 
         #[test]
         fn valid_uri() {
-            let base_uri = BaseUri::from_uri_str("https://example.com/").unwrap();
+            let base_uri = BaseUri::from_str("https://example.com/").unwrap();
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
         }
 
         #[test]
         fn with_path() {
-            let base_uri = BaseUri::from_uri_str("https://example.com/path/").unwrap();
+            let base_uri = BaseUri::from_str("https://example.com/path/").unwrap();
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
         }
 
         #[test]
         fn strips_query_from_path() {
-            let base_uri = BaseUri::from_uri_str("https://example.com/path/?query=1&other=2").unwrap();
+            let base_uri = BaseUri::from_str("https://example.com/path/?query=1&other=2").unwrap();
             assert_eq!(base_uri.to_string(), "https://example.com/path/");
         }
 
         #[test]
         fn invalid_uri() {
-            let err = BaseUri::from_uri_str("not-a-valid-uri").unwrap_err();
+            let err = BaseUri::from_str("not-a-valid-uri").unwrap_err();
             assert_eq!(err.message(), "URI must have both scheme and authority components");
         }
     }
@@ -826,7 +713,7 @@ mod tests {
         #[test]
         fn valid_uri() {
             let uri = http::Uri::from_static("https://example.com");
-            let base_uri = BaseUri::from_http_uri(&uri).unwrap();
+            let base_uri = BaseUri::from_http(&uri).unwrap();
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
         }
@@ -834,7 +721,7 @@ mod tests {
         #[test]
         fn with_path() {
             let uri = http::Uri::from_static("https://example.com/path/");
-            let base_uri = BaseUri::from_http_uri(&uri).unwrap();
+            let base_uri = BaseUri::from_http(&uri).unwrap();
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
             assert_eq!(base_uri.path().as_str(), "/path/");
@@ -843,14 +730,14 @@ mod tests {
         #[test]
         fn strips_query_from_path() {
             let uri = http::Uri::from_static("https://example.com/path/?query=1");
-            let base_uri = BaseUri::from_http_uri(&uri).unwrap();
+            let base_uri = BaseUri::from_http(&uri).unwrap();
             assert_eq!(base_uri.to_string(), "https://example.com/path/");
         }
 
         #[test]
         fn missing_components() {
             let uri = http::Uri::from_static("/just-a-path");
-            let err = BaseUri::from_http_uri(&uri).unwrap_err();
+            let err = BaseUri::from_http(&uri).unwrap_err();
             assert!(err.to_string().contains("URI must have both scheme and authority"));
         }
     }
@@ -860,37 +747,37 @@ mod tests {
 
         #[test]
         fn scheme() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             assert_eq!(base_uri.scheme().as_str(), "https");
         }
 
         #[test]
         fn authority() {
-            let base_uri = BaseUri::from_uri_static("https://example.com:8443");
+            let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.authority().as_str(), "example.com:8443");
         }
 
         #[test]
         fn host() {
-            let base_uri = BaseUri::from_uri_static("https://example.com:8443");
+            let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.host(), "example.com");
         }
 
         #[test]
         fn port_explicit() {
-            let base_uri = BaseUri::from_uri_static("https://example.com:8443");
+            let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.port(), 8443);
         }
 
         #[test]
         fn port_default_https() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             assert_eq!(base_uri.port(), 443);
         }
 
         #[test]
         fn port_default_http() {
-            let base_uri = BaseUri::from_uri_static("http://example.com");
+            let base_uri = BaseUri::from_static("http://example.com");
             assert_eq!(base_uri.port(), 80);
         }
     }
@@ -900,13 +787,13 @@ mod tests {
 
         #[test]
         fn secure() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             assert!(base_uri.is_https());
         }
 
         #[test]
         fn insecure() {
-            let base_uri = BaseUri::from_uri_static("http://example.com");
+            let base_uri = BaseUri::from_static("http://example.com");
             assert!(!base_uri.is_https());
         }
     }
@@ -916,28 +803,28 @@ mod tests {
 
         #[test]
         fn with_path_string() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             let uri = base_uri.build_http_uri("/api/resource").unwrap();
             assert_eq!(uri.to_string(), "https://example.com/api/resource");
         }
 
         #[test]
         fn with_empty_uri() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             let uri = base_uri.build_http_uri("/").unwrap();
             assert_eq!(uri.to_string(), "https://example.com/");
         }
 
         #[test]
         fn with_path_and_query_string() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             let uri = base_uri.build_http_uri("/api/resource?param=value").unwrap();
             assert_eq!(uri.to_string(), "https://example.com/api/resource?param=value");
         }
 
         #[test]
         fn with_path_and_query_object() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             let path_and_query = PathAndQuery::from_static("/api/resource?param=value");
             let uri = base_uri.build_http_uri(path_and_query).unwrap();
             assert_eq!(uri.to_string(), "https://example.com/api/resource?param=value");
@@ -945,7 +832,7 @@ mod tests {
 
         #[test]
         fn invalid_path() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             let invalid_path = "some path/?invalid\\character";
             let err = base_uri.build_http_uri(invalid_path).unwrap_err();
             assert!(err.to_string().contains("invalid uri character"));
@@ -965,14 +852,14 @@ mod tests {
 
         #[test]
         fn base_uri_to_uri() {
-            let base_uri = BaseUri::from_uri_static("https://example.com");
+            let base_uri = BaseUri::from_static("https://example.com");
             let uri: http::Uri = base_uri.into();
             assert_eq!(uri.to_string(), "https://example.com/");
         }
 
         #[test]
         fn origin_to_base_uri() {
-            let origin = Origin::new(Scheme::HTTPS, "example.com:8443").unwrap();
+            let origin = Origin::from_parts(Scheme::HTTPS, "example.com:8443").unwrap();
             let base_uri: BaseUri = origin.into();
 
             assert_eq!(base_uri.to_string(), "https://example.com:8443/");
@@ -997,19 +884,19 @@ mod tests {
 
         #[test]
         fn http_default_port() {
-            let base_uri = BaseUri::from_uri_static("http://example.com:80");
+            let base_uri = BaseUri::from_static("http://example.com:80");
             assert_eq!(base_uri.to_string(), "http://example.com/");
         }
 
         #[test]
         fn https_default_port() {
-            let base_uri = BaseUri::from_uri_static("https://example.com:443");
+            let base_uri = BaseUri::from_static("https://example.com:443");
             assert_eq!(base_uri.to_string(), "https://example.com/");
         }
 
         #[test]
         fn custom_port() {
-            let base_uri = BaseUri::from_uri_static("https://example.com:8443");
+            let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.to_string(), "https://example.com:8443/");
         }
     }
@@ -1019,8 +906,8 @@ mod tests {
 
         #[test]
         fn replaces_origin() {
-            let base_uri = BaseUri::from_uri_static("https://example.com/api/");
-            let new_origin = Origin::new(Scheme::HTTPS, "new-example.com:8080").unwrap();
+            let base_uri = BaseUri::from_static("https://example.com/api/");
+            let new_origin = Origin::from_parts(Scheme::HTTPS, "new-example.com:8080").unwrap();
 
             let new_base_uri = base_uri.with_origin(new_origin.clone());
 
@@ -1038,7 +925,7 @@ mod tests {
 
         #[test]
         fn changes_port() {
-            let base_uri = BaseUri::from_uri_static("https://example.com/api/");
+            let base_uri = BaseUri::from_static("https://example.com/api/");
 
             let new_base_uri = base_uri.with_port(8443);
 
@@ -1054,7 +941,7 @@ mod tests {
 
         #[test]
         fn base_uri_roundtrip() {
-            let original = BaseUri::from_uri_static("https://example.com:8443/api/");
+            let original = BaseUri::from_static("https://example.com:8443/api/");
             let json = serde_json::to_string(&original).unwrap();
             assert_eq!(json, r#""https://example.com:8443/api/""#);
             let deserialized: BaseUri = serde_json::from_str(&json).unwrap();

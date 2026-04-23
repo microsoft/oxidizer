@@ -19,17 +19,17 @@ const LABEL_URI_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("uri_http_error
 #[from(http::Error(label: LABEL_URI_HTTP_ERROR))]
 #[from(InvalidUri(label: LABEL_URI_INVALID))]
 #[from(InvalidUriParts(label: LABEL_URI_INVALID))]
-pub struct ValidationError {
+pub struct UriError {
     label: ErrorLabel,
 }
 
-impl ValidationError {
+impl UriError {
     pub(crate) fn invalid_uri(message: impl Into<Cow<'static, str>>) -> Self {
         Self::caused_by(LABEL_URI_INVALID, message.into())
     }
 }
 
-impl Labeled for ValidationError {
+impl Labeled for UriError {
     fn label(&self) -> &ErrorLabel {
         &self.label
     }
@@ -41,18 +41,18 @@ mod tests {
 
     use ohno::{ErrorLabel, Labeled};
 
-    use super::ValidationError;
+    use super::UriError;
 
     #[test]
     fn test_error_display() {
-        let error = ValidationError::caused_by(ErrorLabel::from_static("test"), "Test validation error");
+        let error = UriError::caused_by(ErrorLabel::from_static("test"), "Test validation error");
         let display = error.to_string();
         assert!(display.starts_with("Test validation error"), "Unexpected message: {display}");
     }
 
     #[test]
     fn test_source() {
-        let error = ValidationError::caused_by(ErrorLabel::from_static("test"), "Test validation error");
+        let error = UriError::caused_by(ErrorLabel::from_static("test"), "Test validation error");
         assert!(error.source().is_none());
     }
 
@@ -60,7 +60,7 @@ mod tests {
     fn test_from_invalid_uri() {
         // Create an invalid URI error
         let invalid_uri = "http://[::1:invalid".parse::<http::Uri>().unwrap_err();
-        let validation_error = ValidationError::from(invalid_uri);
+        let validation_error = UriError::from(invalid_uri);
 
         // Verify the error can be displayed
         let display = validation_error.to_string();
@@ -78,7 +78,7 @@ mod tests {
         assert!(invalid_uri_result.is_err());
 
         let http_error: http::Error = invalid_uri_result.unwrap_err().into();
-        let validation_error = ValidationError::from(http_error);
+        let validation_error = UriError::from(http_error);
 
         // Verify error properties
         let display = validation_error.to_string();
@@ -101,7 +101,7 @@ mod tests {
         assert!(uri_result.is_err());
 
         let invalid_uri_parts = uri_result.unwrap_err();
-        let validation_error = ValidationError::from(invalid_uri_parts);
+        let validation_error = UriError::from(invalid_uri_parts);
 
         let display = validation_error.to_string();
         assert!(!display.is_empty(), "Error should have a non-empty display");

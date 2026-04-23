@@ -2,13 +2,11 @@
 // Licensed under the MIT License.
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use data_privacy::RedactedDisplay;
 use http::uri::PathAndQuery;
 
-use crate::uri::TargetPathAndQuery;
-use crate::{Uri, ValidationError};
+use crate::{Uri, UriError, UriPath};
 
 /// Allows for the creation of URIs based on templates.
 ///
@@ -28,7 +26,7 @@ use crate::{Uri, ValidationError};
 /// # Example
 ///
 /// ```
-/// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
+/// use templated_uri::{UriTemplate, UriSafeString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
@@ -56,7 +54,7 @@ use crate::{Uri, ValidationError};
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
+/// use templated_uri::{UriTemplate, UriSafeString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
@@ -82,7 +80,7 @@ use crate::{Uri, ValidationError};
 ///     "/acme/user/********/"
 /// )
 /// ```
-pub trait TemplatedPathAndQuery: RedactedDisplay + Debug + Sync + Send
+pub trait UriTemplate: RedactedDisplay + Debug + Sync + Send
 where
     Self: 'static,
 {
@@ -93,8 +91,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns a [`ValidationError`] if the path and query string is invalid.
-    fn to_path_and_query(&self) -> Result<PathAndQuery, ValidationError>;
+    /// Returns a [`UriError`] if the path and query string is invalid.
+    fn to_http_path(&self) -> Result<PathAndQuery, UriError>;
 
     /// Returns the original RFC 6570 template string.
     fn rfc_6570_template(&self) -> &'static str;
@@ -113,11 +111,11 @@ where
     where
         Self: Sized,
     {
-        Uri::with_base_and_path(None, Some(TargetPathAndQuery::TemplatedPathAndQuery(Arc::new(self))))
+        UriPath::from_template(self).into_uri()
     }
 }
 
-impl<T: TemplatedPathAndQuery> From<T> for Uri {
+impl<T: UriTemplate> From<T> for Uri {
     fn from(value: T) -> Self {
         value.into_uri()
     }

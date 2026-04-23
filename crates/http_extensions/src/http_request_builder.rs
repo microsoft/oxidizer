@@ -352,8 +352,8 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
-        let path_and_query = uri.target_path_and_query().cloned();
-        let mut request = self.builder.uri(uri.into_http_uri()?).body(body)?;
+        let path_and_query = uri.to_path();
+        let mut request = self.builder.uri(http::Uri::try_from(uri)?).body(body)?;
         if let Some(path_and_query) = path_and_query {
             request.extensions_mut().insert(path_and_query);
         }

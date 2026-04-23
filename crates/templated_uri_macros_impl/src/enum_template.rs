@@ -39,7 +39,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         .collect();
 
     quote! {
-        impl ::templated_uri::TemplatedPathAndQuery for #ident {
+        impl ::templated_uri::UriTemplate for #ident {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 match self {
                     #(#variant_matches => template_variant.rfc_6570_template()),*
@@ -64,9 +64,9 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::uri::PathAndQuery, ::templated_uri::ValidationError> {
+            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::uri::PathAndQuery, ::templated_uri::UriError> {
                 match self {
-                    #(#variant_matches => template_variant.to_path_and_query()),*
+                    #(#variant_matches => template_variant.to_http_path()),*
                 }
             }
         }
@@ -96,9 +96,9 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
             }
         )*
 
-        impl From<#ident> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<#ident> for ::templated_uri::UriPath {
             fn from(value: #ident) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(::std::sync::Arc::new(value))
+                ::templated_uri::UriPath::from_template(value)
             }
         }
     }

@@ -9,9 +9,7 @@ use std::fmt::Display;
 use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-#[cfg(feature = "uuid")]
-use templated_uri::uri::DATA_CLASS_UNKNOWN_URI;
-use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriParam, UriSafeString, UriUnsafeParam, templated};
+use templated_uri::{BaseUri, Uri, UriParam, UriSafeString, UriTemplate, UriUnsafeParam, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
 #[taxonomy(test_taxonomy)]
@@ -72,8 +70,8 @@ fn uri_with_template() {
     };
 
     let target = Uri::default()
-        .base_uri(BaseUri::from_uri_static("https://example.com"))
-        .path_and_query(test);
+        .with_base(BaseUri::from_static("https://example.com"))
+        .with_path(test);
     assert_eq!(
         target.to_string().declassify_ref(),
         "https://example.com/value1/value2/value3?q1=query1&q2=42"
@@ -98,13 +96,13 @@ fn user_info_uri() {
 
     assert_eq!(
         Uri::from(test.clone())
-            .base_uri(BaseUri::from_uri_static("https://example.com"))
+            .with_base(BaseUri::from_static("https://example.com"))
             .to_string()
             .declassify_ref(),
         "https://example.com/users/123e4567-e89b-12d3-a456-426614174000/info/details"
     );
 
-    let target = test.into_uri().base_uri(BaseUri::from_uri_static("https://example.com"));
+    let target = test.into_uri().with_base(BaseUri::from_static("https://example.com"));
 
     assert_eq!(
         target.to_string().declassify_ref(),
@@ -112,12 +110,9 @@ fn user_info_uri() {
     );
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(TemplatedPathAndQuery(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(UriPath(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
-    assert_eq!(
-        target.target_path_and_query().unwrap().template(),
-        "/users/{user_id}/{path_fragment}"
-    );
+    assert_eq!(target.to_path().unwrap().template(), "/users/{user_id}/{path_fragment}");
     assert_eq!(
         target.to_redacted_string(&RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build(),),
         "https://example.com/users/************************************/************",
@@ -140,17 +135,14 @@ struct ClassifiedUserInfo {
 fn test_uri_taxonomy() {
     use uuid::Uuid;
     let user_info = ClassifiedUserInfo {
-        user_id: Sensitive::new(
-            Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap(),
-            DATA_CLASS_UNKNOWN_URI,
-        ),
+        user_id: Sensitive::new(Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap(), Uri::DATA_CLASS),
     };
 
-    let target = user_info.into_uri().base_uri(BaseUri::from_uri_static("https://example.com"));
+    let target = user_info.into_uri().with_base(BaseUri::from_static("https://example.com"));
 
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(TemplatedPathAndQuery(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(UriPath(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
     );
 
     assert_eq!(
@@ -348,8 +340,8 @@ fn test_label_none_when_not_specified() {
 }
 
 #[test]
-fn test_target_path_and_query_label() {
-    use templated_uri::uri::TargetPathAndQuery;
+fn test_uri_path_label() {
+    use templated_uri::UriPath;
 
     // Test with label
     let complex_path = ComplexReportPath {
@@ -359,26 +351,26 @@ fn test_target_path_and_query_label() {
         year: 2024,
         month: 12,
     };
-    let target_paq: TargetPathAndQuery = complex_path.into();
+    let target_paq: UriPath = complex_path.into();
     assert_eq!(target_paq.label().as_deref(), Some("user_monthly_report"));
 
     // Test without label
     let simple_path = SimplePath {
         id: UriSafeString::from_static("test"),
     };
-    let target_paq: TargetPathAndQuery = simple_path.into();
+    let target_paq: UriPath = simple_path.into();
     assert_eq!(target_paq.label().as_deref(), None);
 
     // Test with non-templated path
-    let static_paq = TargetPathAndQuery::from_static("/static/path");
+    let static_paq = UriPath::from_static("/static/path");
     assert_eq!(static_paq.label().as_deref(), None);
 }
 
 #[test]
-fn test_target_path_and_query_from_templated() {
+fn test_uri_path_from_template() {
     use std::borrow::Cow;
 
-    use templated_uri::uri::TargetPathAndQuery;
+    use templated_uri::UriPath;
 
     #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
     #[derive(Clone)]
@@ -390,7 +382,7 @@ fn test_target_path_and_query_from_templated() {
         user_id: UriSafeString::from_static("123"),
     };
 
-    let target_paq = TargetPathAndQuery::from_templated(user_posts);
+    let target_paq = UriPath::from_template(user_posts);
 
     // Verify template
     assert_eq!(target_paq.template(), "/api/{user_id}/posts");
@@ -401,8 +393,8 @@ fn test_target_path_and_query_from_templated() {
     // Verify to_uri_string
     assert_eq!(target_paq.to_uri_string(), "/api/123/posts");
 
-    // Verify to_path_and_query
-    let path_and_query = target_paq.to_path_and_query().unwrap();
+    // Verify to_http_path
+    let path_and_query = target_paq.to_http_path().unwrap();
     assert_eq!(path_and_query.to_string(), "/api/123/posts");
 
     // Verify redacted string (unredacted because of unredacted attribute)

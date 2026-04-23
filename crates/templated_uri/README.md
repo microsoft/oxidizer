@@ -26,7 +26,7 @@ The crate centers around several key abstractions:
 
 * [`Uri`][__link0] - Flexible URI type with endpoint and path/query components
 * [`BaseUri`][__link1] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`][__link2])
-* [`TemplatedPathAndQuery`][__link3] - RFC 6570 Level 3 compliant URI templating
+* [`UriTemplate`][__link3] - RFC 6570 Level 3 compliant URI templating
 * [`UriSafe`][__link4] and [`UriSafeString`][__link5] - Generic newtype wrapper proving a value is safe for URI components
   by not containing any reserved characters
 
@@ -35,17 +35,17 @@ The crate centers around several key abstractions:
 ### Simple URI Construction
 
 ```rust
-use templated_uri::uri::{PathAndQuery, TargetPathAndQuery};
-use templated_uri::{BaseUri, Uri};
+use templated_uri::uri::PathAndQuery;
+use templated_uri::{BaseUri, Uri, UriPath};
 
 // Create an endpoint (scheme + authority only)
-let base_uri = BaseUri::from_uri_static("https://api.example.com");
+let base_uri = BaseUri::from_static("https://api.example.com");
 
 // Create a path (can be static for zero-allocation)
-let path: TargetPathAndQuery = TargetPathAndQuery::from_static("/api/v1/users");
+let path: UriPath = UriPath::from_static("/api/v1/users");
 
 // Combine into complete URI
-let uri = Uri::default().base_uri(base_uri).path_and_query(path);
+let uri = Uri::default().with_base(base_uri).with_path(path);
 assert_eq!(
     uri.to_string().declassify_ref(),
     "https://api.example.com/api/v1/users"
@@ -57,7 +57,7 @@ assert_eq!(
 For dynamic URIs with variable components, use the templating system:
 
 ```rust
-use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
+use templated_uri::{BaseUri, UriTemplate, Uri, UriSafeString, templated};
 
 #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 #[derive(Clone)]
@@ -72,8 +72,8 @@ let path = UserPostPath {
 };
 
 let uri = Uri::default()
-    .base_uri(BaseUri::from_uri_static("https://api.example.com"))
-    .path_and_query(path);
+    .with_base(BaseUri::from_static("https://api.example.com"))
+    .with_path(path);
 ```
 
 ## URI Safety Guarantees
@@ -168,7 +168,7 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyftk28CR_jhG9_WxkUHtfBdG9giB010pVAzGwCsTyFCPqO3YWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzEJ40csGbEgGw5z1ciAy9fHG1du2pMpiLEyG_VqpRf3UapOYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
  [__link0]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/
@@ -177,7 +177,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link13]: https://docs.rs/hyper/latest/hyper/
  [__link14]: https://docs.rs/reqwest/latest/reqwest/
  [__link2]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BasePath
- [__link3]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=TemplatedPathAndQuery
+ [__link3]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriTemplate
  [__link4]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafe
  [__link5]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafeString
  [__link6]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafe

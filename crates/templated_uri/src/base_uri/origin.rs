@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use http::uri::{Authority, Scheme};
 
-use crate::ValidationError;
+use crate::UriError;
 
 /// Represents the origin of a URI, consisting of the scheme and authority components.
 ///
@@ -34,15 +34,15 @@ impl Origin {
     ///
     /// - The scheme is not HTTP or HTTPS.
     /// - The scheme or authority conversion fails.
-    pub fn new(
+    pub fn from_parts(
         scheme: impl TryInto<Scheme, Error: Into<http::Error>>,
         authority: impl TryInto<Authority, Error: Into<http::Error>>,
-    ) -> Result<Self, ValidationError> {
+    ) -> Result<Self, UriError> {
         let scheme: Scheme = scheme.try_into().map_err(Into::into)?;
 
         // Validate that the scheme is either HTTP or HTTPS
         if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
-            return Err(ValidationError::invalid_uri(format!(
+            return Err(UriError::invalid_uri(format!(
                 "unsupported scheme: {scheme}, only HTTP and HTTPS schemes are supported",
             )));
         }
@@ -96,7 +96,7 @@ impl Origin {
     ///
     /// ```
     /// # use templated_uri::Origin;
-    /// let origin = Origin::new("https", "example.com").unwrap();
+    /// let origin = Origin::from_parts("https", "example.com").unwrap();
     /// let origin_with_port = origin.with_port(8443);
     /// assert_eq!(origin_with_port.port(), 8443);
     /// assert_eq!(format!("{}", origin_with_port), "https://example.com:8443");
@@ -122,21 +122,18 @@ impl Origin {
 }
 
 impl std::str::FromStr for Origin {
-    type Err = ValidationError;
+    type Err = UriError;
 
     /// Parses an `Origin` from a string in the form `scheme://authority`.
     ///
     /// # Errors
     ///
-    /// Returns a [`ValidationError`] if the string is not a valid origin
+    /// Returns a [`UriError`] if the string is not a valid origin
     /// (missing scheme, unsupported scheme, or invalid authority).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let uri: http::Uri = s.parse().map_err(ValidationError::from)?;
-        let scheme = uri.scheme().ok_or_else(|| ValidationError::invalid_uri("missing scheme"))?.clone();
-        let authority = uri
-            .authority()
-            .ok_or_else(|| ValidationError::invalid_uri("missing authority"))?
-            .clone();
+        let uri: http::Uri = s.parse().map_err(UriError::from)?;
+        let scheme = uri.scheme().ok_or_else(|| UriError::invalid_uri("missing scheme"))?.clone();
+        let authority = uri.authority().ok_or_else(|| UriError::invalid_uri("missing authority"))?.clone();
         Self::new(scheme, authority)
     }
 }
@@ -166,10 +163,10 @@ impl Display for Origin {
     ///
     /// ```
     /// # use templated_uri::{Origin, uri::Scheme};
-    /// let origin = Origin::new(Scheme::HTTPS, "example.com:443").unwrap();
+    /// let origin = Origin::from_parts(Scheme::HTTPS, "example.com:443").unwrap();
     /// assert_eq!(format!("{}", origin), "https://example.com");
     ///
-    /// let custom_port = Origin::new(Scheme::HTTPS, "example.com:8443").unwrap();
+    /// let custom_port = Origin::from_parts(Scheme::HTTPS, "example.com:8443").unwrap();
     /// assert_eq!(format!("{}", custom_port), "https://example.com:8443");
     /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -190,61 +187,61 @@ mod tests {
 
     #[test]
     fn test_port() {
-        let origin_implicit_http = Origin::new("http", "example.com").unwrap();
+        let origin_implicit_http = Origin::from_parts("http", "example.com").unwrap();
         assert_eq!(origin_implicit_http.port(), 80);
 
-        let origin_implicit_https = Origin::new("https", "example.com").unwrap();
+        let origin_implicit_https = Origin::from_parts("https", "example.com").unwrap();
         assert_eq!(origin_implicit_https.port(), 443);
 
-        let origin_explicit = Origin::new("http", "example.com:8080").unwrap();
+        let origin_explicit = Origin::from_parts("http", "example.com:8080").unwrap();
         assert_eq!(origin_explicit.port(), 8080);
 
-        let origin_explicit = Origin::new("https", "example.com:8443").unwrap();
+        let origin_explicit = Origin::from_parts("https", "example.com:8443").unwrap();
         assert_eq!(origin_explicit.port(), 8443);
     }
 
     #[test]
     fn test_origin_display() {
         // Default ports omitted
-        let origin_http = Origin::new("http", "example.com").unwrap();
+        let origin_http = Origin::from_parts("http", "example.com").unwrap();
         assert_eq!(format!("{origin_http}"), "http://example.com");
 
-        let origin_https = Origin::new("https", "example.com:443").unwrap();
+        let origin_https = Origin::from_parts("https", "example.com:443").unwrap();
         assert_eq!(format!("{origin_https}"), "https://example.com");
 
         // Custom ports included
-        let origin_custom = Origin::new("https", "example.com:8443").unwrap();
+        let origin_custom = Origin::from_parts("https", "example.com:8443").unwrap();
         assert_eq!(format!("{origin_custom}"), "https://example.com:8443");
 
         // IPv6 with custom port
-        let origin_ipv6 = Origin::new("https", "[::1]:8443").unwrap();
+        let origin_ipv6 = Origin::from_parts("https", "[::1]:8443").unwrap();
         assert_eq!(format!("{origin_ipv6}"), "https://[::1]:8443");
     }
 
     #[test]
     fn test_scheme_accessor() {
-        let origin_http = Origin::new("http", "example.com").unwrap();
+        let origin_http = Origin::from_parts("http", "example.com").unwrap();
         assert_eq!(origin_http.scheme().as_str(), "http");
 
-        let origin_https = Origin::new("https", "example.com:8443").unwrap();
+        let origin_https = Origin::from_parts("https", "example.com:8443").unwrap();
         assert_eq!(origin_https.scheme().as_str(), "https");
     }
 
     #[test]
     fn test_authority_accessor() {
-        let origin = Origin::new("https", "example.com:8443").unwrap();
+        let origin = Origin::from_parts("https", "example.com:8443").unwrap();
         assert_eq!(origin.authority().as_str(), "example.com:8443");
 
-        let origin_no_port = Origin::new("http", "example.com").unwrap();
+        let origin_no_port = Origin::from_parts("http", "example.com").unwrap();
         assert_eq!(origin_no_port.authority().as_str(), "example.com");
 
-        let origin_ipv6 = Origin::new("https", "[::1]:8080").unwrap();
+        let origin_ipv6 = Origin::from_parts("https", "[::1]:8080").unwrap();
         assert_eq!(origin_ipv6.authority().as_str(), "[::1]:8080");
     }
 
     #[test]
     fn test_into_parts() {
-        let origin = Origin::new("https", "example.com:8443").unwrap();
+        let origin = Origin::from_parts("https", "example.com:8443").unwrap();
         let (scheme, authority) = origin.into_parts();
 
         assert_eq!(scheme.as_str(), "https");
@@ -253,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_with_port() {
-        let origin = Origin::new("https", "example.com").unwrap();
+        let origin = Origin::from_parts("https", "example.com").unwrap();
         let with_port = origin.with_port(8443);
         assert_eq!(with_port.port(), 8443);
         assert_eq!(format!("{with_port}"), "https://example.com:8443");
@@ -292,7 +289,7 @@ mod tests {
 
         #[test]
         fn origin_roundtrip() {
-            let original = Origin::new(Scheme::HTTPS, "example.com:8443").unwrap();
+            let original = Origin::from_parts(Scheme::HTTPS, "example.com:8443").unwrap();
             let json = serde_json::to_string(&original).unwrap();
             assert_eq!(json, r#""https://example.com:8443""#);
             let deserialized: Origin = serde_json::from_str(&json).unwrap();

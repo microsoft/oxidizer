@@ -237,7 +237,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
+        impl ::templated_uri::UriTemplate for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -254,11 +254,11 @@ mod tests {
                 let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_path_and_query(
+            fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
                 Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
@@ -292,11 +292,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::UriPath {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::UriPath::from_template(value)
             }
         }
         "#);
@@ -325,7 +323,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
+        impl ::templated_uri::UriTemplate for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -342,11 +340,11 @@ mod tests {
                 let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_path_and_query(
+            fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
                 Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
@@ -376,11 +374,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::UriPath {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::UriPath::from_template(value)
             }
         }
         "#);
@@ -407,7 +403,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
+        impl ::templated_uri::UriTemplate for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -424,11 +420,11 @@ mod tests {
                 let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_path_and_query(
+            fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
                 Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
@@ -458,11 +454,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::UriPath {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::UriPath::from_template(value)
             }
         }
         "#);
@@ -489,7 +483,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
+        impl ::templated_uri::UriTemplate for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -506,11 +500,11 @@ mod tests {
                 let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_path_and_query(
+            fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
                 Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
@@ -540,11 +534,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::UriPath {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::UriPath::from_template(value)
             }
         }
         "#);
@@ -569,7 +561,7 @@ mod tests {
             page: String,
             limit: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for QueryTest {
+        impl ::templated_uri::UriTemplate for QueryTest {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 "/api/{resource}{?page,limit}"
             }
@@ -585,11 +577,11 @@ mod tests {
                 let limit = ::templated_uri::UriParam::as_uri_safe(&self.limit);
                 ::std::format!("/api/{resource}?page={page}&limit={limit}")
             }
-            fn to_path_and_query(
+            fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
                 Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
@@ -619,11 +611,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<QueryTest> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<QueryTest> for ::templated_uri::UriPath {
             fn from(value: QueryTest) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::UriPath::from_template(value)
             }
         }
         "#);
@@ -781,7 +771,7 @@ mod tests {
             FirstTemplate(First),
             SecondTemplate(Second),
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
+        impl ::templated_uri::UriTemplate for Test {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.rfc_6570_template(),
@@ -808,17 +798,15 @@ mod tests {
                     Test::SecondTemplate(template_variant) => template_variant.to_uri_string(),
                 }
             }
-            fn to_path_and_query(
+            fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::UriError,
             > {
                 match self {
-                    Test::FirstTemplate(template_variant) => template_variant.to_path_and_query(),
-                    Test::SecondTemplate(template_variant) => {
-                        template_variant.to_path_and_query()
-                    }
+                    Test::FirstTemplate(template_variant) => template_variant.to_http_path(),
+                    Test::SecondTemplate(template_variant) => template_variant.to_http_path(),
                 }
             }
         }
@@ -857,11 +845,9 @@ mod tests {
                 Self::SecondTemplate(template_variant)
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::UriPath {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::UriPath::from_template(value)
             }
         }
         "#);

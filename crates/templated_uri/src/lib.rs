@@ -19,7 +19,7 @@
 //!
 //! - [`Uri`] - Flexible URI type with endpoint and path/query components
 //! - [`BaseUri`] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`])
-//! - [`TemplatedPathAndQuery`] - RFC 6570 Level 3 compliant URI templating
+//! - [`UriTemplate`] - RFC 6570 Level 3 compliant URI templating
 //! - [`UriSafe`] and [`UriSafeString`] - Generic newtype wrapper proving a value is safe for URI components
 //!   by not containing any reserved characters
 //!
@@ -27,17 +27,17 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use templated_uri::uri::{PathAndQuery, TargetPathAndQuery};
-//! use templated_uri::{BaseUri, Uri};
+//! use templated_uri::uri::PathAndQuery;
+//! use templated_uri::{BaseUri, Uri, UriPath};
 //!
 //! // Create an endpoint (scheme + authority only)
-//! let base_uri = BaseUri::from_uri_static("https://api.example.com");
+//! let base_uri = BaseUri::from_static("https://api.example.com");
 //!
 //! // Create a path (can be static for zero-allocation)
-//! let path: TargetPathAndQuery = TargetPathAndQuery::from_static("/api/v1/users");
+//! let path: UriPath = UriPath::from_static("/api/v1/users");
 //!
 //! // Combine into complete URI
-//! let uri = Uri::default().base_uri(base_uri).path_and_query(path);
+//! let uri = Uri::default().with_base(base_uri).with_path(path);
 //! assert_eq!(
 //!     uri.to_string().declassify_ref(),
 //!     "https://api.example.com/api/v1/users"
@@ -49,7 +49,7 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
+//! use templated_uri::{BaseUri, UriTemplate, Uri, UriSafeString, templated};
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
@@ -64,8 +64,8 @@
 //! };
 //!
 //! let uri = Uri::default()
-//!     .base_uri(BaseUri::from_uri_static("https://api.example.com"))
-//!     .path_and_query(path);
+//!     .with_base(BaseUri::from_static("https://api.example.com"))
+//!     .with_path(path);
 //! ```
 //!
 //! # URI Safety Guarantees
@@ -163,10 +163,10 @@ mod uri_param;
 mod uri_safe;
 
 pub use base_uri::{BasePath, BaseUri, Origin};
-pub use error::ValidationError;
+pub use error::UriError;
 pub use macros::{UriParam, UriUnsafeParam, templated};
-pub use templated::TemplatedPathAndQuery;
+pub use templated::UriTemplate;
 #[doc(inline)]
-pub use uri::{DATA_CLASS_UNKNOWN_URI, Uri};
+pub use uri::{Uri, UriPath};
 pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};
