@@ -207,7 +207,7 @@ impl BaseUri {
         port: u16,
         path: impl TryInto<BasePath, Error: Into<UriError>>,
     ) -> Result<Self, UriError> {
-        let origin = Origin::from_parts(scheme, format!("{}:{}", host.as_ref(), port))?;
+        let origin = Origin::try_from_parts(scheme, format!("{}:{}", host.as_ref(), port))?;
         let path = path.try_into().map_err(Into::into)?;
         Ok(Self::from_parts(origin, path))
     }
@@ -304,7 +304,7 @@ impl BaseUri {
     /// # use templated_uri::{BaseUri, Origin, http::{Scheme, Authority}};
     /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// let new_base_uri = base_uri.with_origin(
-    ///     Origin::from_parts(
+    ///     Origin::try_from_parts(
     ///         Scheme::HTTPS,
     ///         Authority::from_static("new-example.com:8080"),
     ///     )
@@ -533,7 +533,7 @@ impl TryFrom<&http::Uri> for BaseUri {
             p => BasePath::try_from(p)?,
         };
 
-        Ok(Self::from_parts(Origin::from_parts(scheme.clone(), authority.clone())?, path))
+        Ok(Self::from_parts(Origin::try_from_parts(scheme.clone(), authority.clone())?, path))
     }
 }
 
@@ -634,7 +634,7 @@ mod tests {
 
         #[test]
         fn valid_base_uri() {
-            let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
+            let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
             let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
@@ -642,7 +642,7 @@ mod tests {
 
         #[test]
         fn with_custom_port() {
-            let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080")).unwrap();
+            let origin = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com:8080")).unwrap();
             let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTP);
             assert_eq!(base_uri.authority().as_str(), "example.com:8080");
@@ -650,13 +650,13 @@ mod tests {
 
         #[test]
         fn invalid_scheme() {
-            let err = Origin::from_parts(Scheme::try_from("ftp").unwrap(), Authority::from_static("example.com")).unwrap_err();
+            let err = Origin::try_from_parts(Scheme::try_from("ftp").unwrap(), Authority::from_static("example.com")).unwrap_err();
             assert!(err.to_string().contains("unsupported scheme: ftp"));
         }
 
         #[test]
         fn with_path() {
-            let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443")).unwrap();
+            let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:443")).unwrap();
             let base_uri = BaseUri::from_parts(origin, BasePath::from_static("/example/"));
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com:443");

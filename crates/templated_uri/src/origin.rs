@@ -56,7 +56,7 @@ impl Origin {
     ///
     /// - The scheme is not HTTP or HTTPS.
     /// - The scheme or authority conversion fails.
-    pub fn from_parts(
+    pub fn try_from_parts(
         scheme: impl TryInto<Scheme, Error: Into<http::Error>>,
         authority: impl TryInto<Authority, Error: Into<http::Error>>,
     ) -> Result<Self, UriError> {
@@ -132,7 +132,7 @@ impl Origin {
     #[expect(clippy::missing_panics_doc, reason = "impossible panic")]
     pub fn with_port(self, port: u16) -> Self {
         let host = self.authority.host();
-        Self::from_parts(self.scheme, format!("{host}:{port}")).expect("Scheme and host are already valid and port is a valid u16")
+        Self::try_from_parts(self.scheme, format!("{host}:{port}")).expect("Scheme and host are already valid and port is a valid u16")
     }
 
     /// Checks if this origin uses the HTTPS scheme.
@@ -157,7 +157,7 @@ impl std::str::FromStr for Origin {
         let uri: http::Uri = s.parse().map_err(UriError::from)?;
         let scheme = uri.scheme().ok_or_else(|| UriError::invalid_uri("missing scheme"))?.clone();
         let authority = uri.authority().ok_or_else(|| UriError::invalid_uri("missing authority"))?.clone();
-        Self::from_parts(scheme, authority)
+        Self::try_from_parts(scheme, authority)
     }
 }
 
@@ -210,61 +210,61 @@ mod tests {
 
     #[test]
     fn test_port() {
-        let origin_implicit_http = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
+        let origin_implicit_http = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
         assert_eq!(origin_implicit_http.port(), 80);
 
-        let origin_implicit_https = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
+        let origin_implicit_https = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
         assert_eq!(origin_implicit_https.port(), 443);
 
-        let origin_explicit = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080")).unwrap();
+        let origin_explicit = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com:8080")).unwrap();
         assert_eq!(origin_explicit.port(), 8080);
 
-        let origin_explicit = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
+        let origin_explicit = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
         assert_eq!(origin_explicit.port(), 8443);
     }
 
     #[test]
     fn test_origin_display() {
         // Default ports omitted
-        let origin_http = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
+        let origin_http = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
         assert_eq!(format!("{origin_http}"), "http://example.com");
 
-        let origin_https = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443")).unwrap();
+        let origin_https = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:443")).unwrap();
         assert_eq!(format!("{origin_https}"), "https://example.com");
 
         // Custom ports included
-        let origin_custom = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
+        let origin_custom = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
         assert_eq!(format!("{origin_custom}"), "https://example.com:8443");
 
         // IPv6 with custom port
-        let origin_ipv6 = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8443")).unwrap();
+        let origin_ipv6 = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8443")).unwrap();
         assert_eq!(format!("{origin_ipv6}"), "https://[::1]:8443");
     }
 
     #[test]
     fn test_scheme_accessor() {
-        let origin_http = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
+        let origin_http = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
         assert_eq!(origin_http.scheme().as_str(), "http");
 
-        let origin_https = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
+        let origin_https = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
         assert_eq!(origin_https.scheme().as_str(), "https");
     }
 
     #[test]
     fn test_authority_accessor() {
-        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
+        let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
         assert_eq!(origin.authority().as_str(), "example.com:8443");
 
-        let origin_no_port = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
+        let origin_no_port = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
         assert_eq!(origin_no_port.authority().as_str(), "example.com");
 
-        let origin_ipv6 = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8080")).unwrap();
+        let origin_ipv6 = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8080")).unwrap();
         assert_eq!(origin_ipv6.authority().as_str(), "[::1]:8080");
     }
 
     #[test]
     fn test_into_parts() {
-        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
+        let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
         let (scheme, authority) = origin.into_parts();
 
         assert_eq!(scheme.as_str(), "https");
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_with_port() {
-        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
+        let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
         let with_port = origin.with_port(8443);
         assert_eq!(with_port.port(), 8443);
         assert_eq!(format!("{with_port}"), "https://example.com:8443");
@@ -325,7 +325,7 @@ mod tests {
 
         #[test]
         fn origin_roundtrip() {
-            let original = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
+            let original = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443")).unwrap();
             let json = serde_json::to_string(&original).unwrap();
             assert_eq!(json, r#""https://example.com:8443""#);
             let deserialized: Origin = serde_json::from_str(&json).unwrap();

@@ -199,7 +199,7 @@ impl TryFrom<http::Uri> for Uri {
             return Ok(Self { base_uri: None, path });
         };
 
-        let base_uri = BaseUri::from_parts(Origin::from_parts(scheme, authority)?, BasePath::default());
+        let base_uri = BaseUri::from_parts(Origin::try_from_parts(scheme, authority)?, BasePath::default());
         Ok(Self {
             base_uri: Some(base_uri),
             path,
