@@ -4,7 +4,7 @@
 
 - ✨ Features
 
-  - add `Uri::target_base_uri` getter to access the optional `BaseUri`
+- add `Uri::into_parts`
 
 ## [0.1.2] - 2026-04-16
 

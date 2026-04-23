@@ -147,7 +147,8 @@ impl Uri {
         self.try_into()
     }
 
-    /// Returns the [`BaseUri`] and path and query of the URI as a tuple.
+    /// Consumes the URI and returns its components: the optional [`BaseUri`]
+    /// and the optional [`TargetPathAndQuery`].
     pub fn into_parts(self) -> (Option<BaseUri>, Option<TargetPathAndQuery>) {
         (self.base_uri, self.path_and_query)
     }

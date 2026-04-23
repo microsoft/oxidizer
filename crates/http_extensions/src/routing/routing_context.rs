@@ -13,7 +13,7 @@ use crate::HttpRequest;
 ///
 /// [`Routing::custom`]: super::Routing::custom
 /// [`BaseUri`]: templated_uri::BaseUri
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RoutingContext<'a> {
     attempt: u32,
@@ -22,8 +22,23 @@ pub struct RoutingContext<'a> {
     request: Option<&'a HttpRequest>,
 }
 
+impl Default for RoutingContext<'_> {
+    fn default() -> Self {
+        Self {
+            attempt: 0,
+            is_last_attempt: true,
+            previous_recovery: None,
+            request: None,
+        }
+    }
+}
+
 impl<'a> RoutingContext<'a> {
     /// Creates a new [`RoutingContext`] for the first (and only) attempt.
+    ///
+    /// The returned context reports attempt index `0` and `is_last_attempt = true`.
+    /// Use [`RoutingContext::with_attempt`] to override these values when the
+    /// request is part of a multi-attempt flow.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -88,7 +103,7 @@ mod tests {
     fn defaults() {
         let ctx = RoutingContext::new();
         assert_eq!(ctx.attempt(), 0);
-        assert!(!ctx.is_last_attempt());
+        assert!(ctx.is_last_attempt());
         assert!(ctx.previous_recovery().is_none());
         assert!(ctx.request().is_none());
         // Exercise Debug + Clone for coverage.
