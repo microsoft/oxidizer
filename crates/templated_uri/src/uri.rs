@@ -18,11 +18,11 @@ use crate::{BasePath, BaseUri, Origin, UriPath};
 /// This struct encapsulates the [`BaseUri`] (scheme, authority and path prefix) and the path and query components of the URI.
 ///
 /// The `Uri` struct is designed to be flexible and can be constructed with or without a [`BaseUri`].
-/// It can also wrap a templated path produced by a [`UriTemplate`] implementation, allowing for
+/// It can also wrap a templated path produced by a [`UriTemplate`](crate::UriTemplate) implementation, allowing for
 /// dynamic URI generation.
 ///
 /// ```
-/// use templated_uri::uri::PathAndQuery;
+/// use templated_uri::http::PathAndQuery;
 /// use templated_uri::{BaseUri, Uri};
 /// let base_uri = BaseUri::from_static("http://example.com");
 /// let path = PathAndQuery::from_static("/path?query=1");
@@ -91,7 +91,7 @@ impl Uri {
     ///
     /// ```
     /// use templated_uri::{BaseUri, Uri, UriPath};
-    /// use templated_uri::uri::PathAndQuery;
+    /// use templated_uri::http::PathAndQuery;
     ///
     /// let base = BaseUri::from_static("http://example.com");
     /// let path = UriPath::from(PathAndQuery::from_static("/path?query=1"));

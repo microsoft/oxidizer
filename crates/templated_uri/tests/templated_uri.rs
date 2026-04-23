@@ -9,7 +9,7 @@ use std::fmt::Display;
 use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::uri::PathAndQuery;
+use templated_uri::http::PathAndQuery;
 use templated_uri::{BaseUri, Uri, UriParam, UriSafeString, UriTemplate, UriUnsafeParam, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy

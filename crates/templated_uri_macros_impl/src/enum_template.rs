@@ -64,7 +64,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::uri::PathAndQuery, ::templated_uri::UriError> {
+            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::http::PathAndQuery, ::templated_uri::UriError> {
                 match self {
                     #(#variant_matches => template_variant.to_http_path()),*
                 }

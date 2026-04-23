@@ -4,9 +4,8 @@
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
 
-use http::uri::PathAndQuery;
+use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 
-use crate::http::{Authority, Parts, Scheme};
 use crate::{BasePath, Origin, UriError};
 
 /// An HTTP or HTTPS [`BaseUri`] representing a target location with an optional path prefix.
@@ -33,7 +32,7 @@ use crate::{BasePath, Origin, UriError};
 /// - Consider making common paths constants in your application code.
 ///
 /// ```rust
-/// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
+/// # use templated_uri::{BaseUri, http::{Scheme, PathAndQuery}};
 ///
 /// // Pre-create PathAndQuery objects (can be static or stored in a cache)
 /// let api_path = PathAndQuery::from_static("/api/v1/resources");
@@ -199,7 +198,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
+    /// # use templated_uri::{BaseUri, http::Scheme, BasePath};
     /// let base_uri =
     ///     BaseUri::from_host_and_port(Scheme::HTTPS, "example.com", 1234, BasePath::default())?;
     /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
@@ -232,7 +231,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
     /// ```
@@ -247,7 +246,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.scheme().as_str(), "https");
     /// ```
@@ -262,13 +261,13 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.authority().as_str(), "example.com");
     /// ```
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com:1234");
     /// assert_eq!(base_uri.authority().as_str(), "example.com:1234");
     /// ```
@@ -281,7 +280,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// assert_eq!(base_uri.host(), "example.com");
     /// ```
@@ -299,7 +298,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, Origin, uri::{Scheme, Authority}};
+    /// # use templated_uri::{BaseUri, Origin, http::{Scheme, Authority}};
     /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// let new_base_uri = base_uri.with_origin(
     ///     Origin::from_parts(
@@ -326,7 +325,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// // Explicit port
     /// let base_uri = BaseUri::from_static("https://example.com:8443");
     /// assert_eq!(base_uri.port(), 8443);
@@ -347,7 +346,7 @@ impl BaseUri {
     ///
     /// # Examples
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let mut base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.port(), 443);
     ///
@@ -369,14 +368,14 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com/some/path/");
     ///
     /// assert_eq!(base_uri.path().as_str(), "/some/path/");
     /// ```
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let base_uri = BaseUri::from_static("https://example.com");
     ///
     /// assert_eq!(base_uri.path().as_str(), "/");
@@ -392,7 +391,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::Scheme};
+    /// # use templated_uri::{BaseUri, http::Scheme};
     /// let secure = BaseUri::from_static("https://example.com");
     /// assert!(secure.is_https());
     ///
@@ -420,7 +419,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
+    /// # use templated_uri::{BaseUri, http::{Scheme, PathAndQuery}};
     /// let base_uri = BaseUri::from_static("https://example.com");
     /// let uri = base_uri.build_http_uri("/api/resource?param=value")?;
     ///
@@ -433,7 +432,7 @@ impl BaseUri {
     ///
     /// Using a path prefix as a part of the [`BaseUri`]:
     /// ```
-    /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
+    /// # use templated_uri::{BaseUri, http::{Scheme, PathAndQuery}};
     /// let base_uri = BaseUri::from_static("https://example.com/api/");
     /// let uri = base_uri.build_http_uri("resource?param=value")?;
     ///
@@ -447,7 +446,7 @@ impl BaseUri {
     /// Using a pre-existing `PathAndQuery`:
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, uri::{Scheme, PathAndQuery}};
+    /// # use templated_uri::{BaseUri, http::{Scheme, PathAndQuery}};
     /// let base_uri = BaseUri::from_static("https://example.com");
     ///
     /// // Pre-create and cache path and query to avoid parsing and extra allocations.

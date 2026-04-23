@@ -27,7 +27,7 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use templated_uri::uri::PathAndQuery;
+//! use templated_uri::http::PathAndQuery;
 //! use templated_uri::{BaseUri, Uri, UriPath};
 //!
 //! // Create the base (scheme + authority, optionally a path prefix)
@@ -151,7 +151,7 @@
 //!
 //! This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting
 //! and building upon the standard [`http`](https://docs.rs/http/latest/http/) crate types. The resulting [`Uri`] can be converted
-//! to an [`http::Uri`] for use with HTTP clients
+//! to an [`http::Uri`](::http::Uri) for use with HTTP clients
 //! and servers based on [`hyper`](https://docs.rs/hyper/latest/hyper/) like [`reqwest`](https://docs.rs/reqwest/latest/reqwest/).
 
 mod base_path;
@@ -177,7 +177,7 @@ pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_path::UriPath;
 pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};
 
-/// Re-exports [`http::uri`] types for convenience.
+/// Re-exports of [`http::uri`](::http::uri) types used in this crate's public API.
 pub mod http {
     pub use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 }

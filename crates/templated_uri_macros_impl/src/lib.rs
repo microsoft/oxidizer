@@ -257,11 +257,11 @@ mod tests {
             fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::http::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(::templated_uri::http::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -343,11 +343,11 @@ mod tests {
             fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::http::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(::templated_uri::http::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -423,11 +423,11 @@ mod tests {
             fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::http::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(::templated_uri::http::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -503,11 +503,11 @@ mod tests {
             fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::http::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(::templated_uri::http::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -580,11 +580,11 @@ mod tests {
             fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::http::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(::templated_uri::http::PathAndQuery::try_from(uri_string)?)
             }
         }
         impl ::std::fmt::Debug for QueryTest {
@@ -801,7 +801,7 @@ mod tests {
             fn to_http_path(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
+                ::templated_uri::http::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 match self {
