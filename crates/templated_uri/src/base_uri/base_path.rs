@@ -186,7 +186,7 @@ mod test {
 
     #[test]
     fn path_join() {
-        let base_path = BasePath::try_from(PathAndQuery::from_static("/base/path/")).unwrap();
+        let base_path = BasePath::from_static("/base/path/");
         let joined = base_path.join("/additional/resource?param=value").unwrap();
         assert_eq!(
             joined.as_str(),

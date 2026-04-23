@@ -5,6 +5,8 @@
 - ✨ Features
 
   - Add `Uri::from_parts(base, path)` constructor.
+  - Add `From<BaseUri> for Uri` (symmetric with the existing `From<UriPath> for Uri`).
+  - Add fallible `BaseUri::try_with_path(impl TryInto<BasePath>)` setter for callers that need to convert from a fallible source (e.g. `&str`).
   - Add `Uri::from_static(&'static str)` for parsing URIs from compile-time-known strings (panics on invalid input).
   - Add `Origin::from_static(&'static str)` for parsing origins from compile-time-known strings (panics on invalid input).
   - Add `BasePath::from_static(&'static str)` for parsing base paths from compile-time-known strings (panics on invalid input).
@@ -29,9 +31,13 @@
   - Rename `UriPath::from_templated` to `UriPath::from_template`.
   - Rename `Origin::new(scheme, authority)` to `Origin::from_parts(scheme, authority)`.
   - Remove `BaseUri::new(scheme, authority)` — use `Origin::from_parts(scheme, authority)?.into()` (via `From<Origin> for BaseUri`).
-  - Replace `BaseUri::from_parts(scheme, host, port, path)` with infallible `BaseUri::from_parts(origin: impl Into<Origin>, path: impl Into<BasePath>) -> Self`.
+  - Replace `BaseUri::from_parts(scheme, host, port, path)` with infallible `BaseUri::from_parts(origin: Origin, path: BasePath) -> Self`.
+  - `Uri::with_path` and `Uri::with_base` now take `UriPath` and `BaseUri` directly (previously `impl Into<...>`); callers must call `.into()` themselves where applicable. Same for `BaseUri::with_path` (now takes `BasePath` and is infallible). This eliminates redundant monomorphization at call sites.
+  - `Origin::from_parts` now takes `Scheme, Authority` directly (previously `impl TryInto<...>` leaking `http::Error`); construct components via their respective constructors before calling.
+  - Remove `UriSafeString::encode_owned` — `UriSafeString::encode` now takes `impl Into<String>` and covers both borrowed and owned inputs.
   - Add fallible `BaseUri::from_host_and_port(scheme, host, port, path)` convenience constructor (covers the previous 4-arg `from_parts` use case).
   - Remove `UriPath::into_uri()` in favor of `From<UriPath> for Uri` (use `Uri::from(path)` or `path.into()`).
+  - `BaseUri::with_path` is now infallible and takes `impl Into<BasePath>` (mirrors `Uri::with_path` / `Uri::with_base`); the previous fallible behavior moved to `BaseUri::try_with_path`.
 
 ## [0.1.2] - 2026-04-16
 

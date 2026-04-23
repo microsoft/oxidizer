@@ -386,6 +386,15 @@ impl From<UriPath> for Uri {
     }
 }
 
+impl From<BaseUri> for Uri {
+    fn from(value: BaseUri) -> Self {
+        Self {
+            base_uri: Some(value),
+            path: None,
+        }
+    }
+}
+
 impl TryFrom<Uri> for PathAndQuery {
     type Error = UriError;
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
@@ -397,6 +406,14 @@ impl TryFrom<Uri> for PathAndQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_uri_from_base_uri() {
+        let base = BaseUri::from_static("https://example.com/api/");
+        let uri: Uri = base.clone().into();
+        assert_eq!(uri.to_string().declassify_ref(), "https://example.com/api/");
+        assert!(uri.to_path().is_none());
+    }
 
     #[test]
     fn test_uri_try_from_str() {

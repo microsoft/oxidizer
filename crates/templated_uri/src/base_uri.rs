@@ -63,13 +63,13 @@ pub use origin::Origin;
 /// Creating `base_uri` with various constructors:
 ///
 /// ```
-/// # use templated_uri::{BasePath, BaseUri, Origin, uri::Scheme};
+/// # use templated_uri::{BasePath, BaseUri, Origin};
 /// // From an Origin (scheme + authority)
-/// let base_uri1: BaseUri = Origin::from_parts(Scheme::HTTPS, "example.com")?.into();
+/// let base_uri1: BaseUri = Origin::from_static("https://example.com").into();
 /// assert_eq!(base_uri1.to_string(), "https://example.com/");
 ///
 /// // From an Origin and a path
-/// let origin = Origin::from_parts(Scheme::HTTP, "api.example.com:8080")?;
+/// let origin = Origin::from_static("http://api.example.com:8080");
 /// let base_uri2 = BaseUri::from_parts(origin, BasePath::default());
 /// assert_eq!(base_uri2.to_string(), "http://api.example.com:8080/");
 ///
@@ -86,8 +86,8 @@ pub use origin::Origin;
 /// Converting an `base_uri` to a complete URI:
 ///
 /// ```
-/// # use templated_uri::{BaseUri, Origin, uri::{Scheme, PathAndQuery}};
-/// let base_uri: BaseUri = Origin::from_parts(Scheme::HTTPS, "api.example.com")?.into();
+/// # use templated_uri::BaseUri;
+/// let base_uri = BaseUri::from_static("https://api.example.com");
 ///
 /// // Combine with a path to create a complete URI
 /// let uri = base_uri.build_http_uri("/users/123?active=true")?;
@@ -112,15 +112,40 @@ pub struct BaseUri {
 }
 
 impl BaseUri {
+    /// Sets the path component of this `BaseUri` and returns the updated value.
     ///
     /// The path must start and end with a slash (`/`).
     ///
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, Origin, uri::Scheme, BasePath};
-    /// let base_uri = BaseUri::from(Origin::from_parts(Scheme::HTTPS, "example.com")?)
-    ///     .with_path(BasePath::try_from("/api/v1/")?)?;
+    /// # use templated_uri::{BaseUri, BasePath};
+    /// let base_uri = BaseUri::from_static("https://example.com")
+    ///     .with_path(BasePath::from_static("/api/v1/"));
+    ///
+    /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
+    /// ```
+    #[must_use]
+    pub fn with_path<P>(mut self, path: P) -> Self
+    where
+        P: Into<BasePath>,
+    {
+        self.path = path.into();
+        self
+    }
+
+    /// Sets the path of this `BaseUri` from a value that may fail to convert
+    /// into a [`BasePath`] (for example a `&str`), and returns the updated value.
+    ///
+    /// For inputs that already implement `Into<BasePath>` (such as a [`BasePath`]
+    /// itself), prefer the infallible [`BaseUri::with_path`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::BaseUri;
+    /// let base_uri = BaseUri::from_static("https://example.com")
+    ///     .try_with_path("/api/v1/")?;
     ///
     /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -129,7 +154,7 @@ impl BaseUri {
     /// # Errors
     ///
     /// Returns a [`UriError`] if the path cannot be converted to a valid [`BasePath`].
-    pub fn with_path<P>(mut self, path: P) -> Result<Self, UriError>
+    pub fn try_with_path<P>(mut self, path: P) -> Result<Self, UriError>
     where
         P: TryInto<BasePath>,
         UriError: From<<P as TryInto<BasePath>>::Error>,
@@ -145,11 +170,10 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, BasePath, Origin, uri::Scheme};
-    /// let origin = Origin::from_parts(Scheme::HTTPS, "example.com:1234")?;
+    /// # use templated_uri::{BaseUri, BasePath, Origin};
+    /// let origin = Origin::from_static("https://example.com:1234");
     /// let base_uri = BaseUri::from_parts(origin, BasePath::default());
     /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn from_parts(origin: impl Into<Origin>, path: impl Into<BasePath>) -> Self {
         Self {
@@ -572,19 +596,12 @@ impl Display for BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, BasePath, Origin, uri::Scheme};
-    /// let base_uri = BaseUri::from_parts(
-    ///     Origin::from_parts(Scheme::HTTPS, "example.com:443")?,
-    ///     BasePath::default(),
-    /// );
+    /// # use templated_uri::BaseUri;
+    /// let base_uri = BaseUri::from_static("https://example.com:443");
     /// assert_eq!(format!("{}", base_uri), "https://example.com/");
     ///
-    /// let custom_port = BaseUri::from_parts(
-    ///     Origin::from_parts(Scheme::HTTPS, "example.com:8443")?,
-    ///     BasePath::default(),
-    /// );
+    /// let custom_port = BaseUri::from_static("https://example.com:8443");
     /// assert_eq!(format!("{}", custom_port), "https://example.com:8443/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}://", self.scheme())?;
@@ -621,7 +638,7 @@ mod tests {
 
         #[test]
         fn valid_base_uri() {
-            let origin = Origin::from_parts(Scheme::HTTPS, "example.com").unwrap();
+            let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
             let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
@@ -629,35 +646,22 @@ mod tests {
 
         #[test]
         fn with_custom_port() {
-            let origin = Origin::from_parts(Scheme::HTTP, "example.com:8080").unwrap();
+            let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080")).unwrap();
             let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTP);
             assert_eq!(base_uri.authority().as_str(), "example.com:8080");
         }
 
         #[test]
-        fn with_string_scheme() {
-            let origin = Origin::from_parts("https", "example.com").unwrap();
-            let base_uri = BaseUri::from_parts(origin, BasePath::default());
-            assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
-        }
-
-        #[test]
         fn invalid_scheme() {
-            let err = Origin::from_parts("ftp", "example.com").unwrap_err();
+            let err = Origin::from_parts(Scheme::try_from("ftp").unwrap(), Authority::from_static("example.com")).unwrap_err();
             assert!(err.to_string().contains("unsupported scheme: ftp"));
         }
 
         #[test]
-        fn invalid_authority() {
-            let err = Origin::from_parts(Scheme::HTTPS, "exam/ple.com:123").unwrap_err();
-            assert!(err.to_string().contains("invalid uri"));
-        }
-
-        #[test]
         fn with_path() {
-            let origin = Origin::from_parts(Scheme::HTTPS, "example.com:443").unwrap();
-            let base_uri = BaseUri::from_parts(origin, BasePath::from_str("/example/").unwrap());
+            let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443")).unwrap();
+            let base_uri = BaseUri::from_parts(origin, BasePath::from_static("/example/"));
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com:443");
             assert_eq!(base_uri.to_string(), "https://example.com/example/");
@@ -873,7 +877,7 @@ mod tests {
 
         #[test]
         fn origin_to_base_uri() {
-            let origin = Origin::from_parts(Scheme::HTTPS, "example.com:8443").unwrap();
+            let origin = Origin::from_static("https://example.com:8443");
             let base_uri: BaseUri = origin.into();
 
             assert_eq!(base_uri.to_string(), "https://example.com:8443/");
@@ -921,7 +925,7 @@ mod tests {
         #[test]
         fn replaces_origin() {
             let base_uri = BaseUri::from_static("https://example.com/api/");
-            let new_origin = Origin::from_parts(Scheme::HTTPS, "new-example.com:8080").unwrap();
+            let new_origin = Origin::from_static("https://new-example.com:8080");
 
             let new_base_uri = base_uri.with_origin(new_origin.clone());
 
