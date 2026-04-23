@@ -7,8 +7,8 @@ use recoverable::RecoveryKind;
 use templated_uri::{BaseUri, Uri};
 
 use super::RoutingContext;
-use crate::HttpError;
-use crate::error_labels::LABEL_ROUTING_BASE_URI_CONFLICT;
+use crate::error_labels::LABEL_URI_CONFLICT;
+use crate::{HttpError, HttpRequest};
 
 /// Strategy used by [`Routing::create_uri`] when both the target [`Uri`] and the
 /// routing produce a [`BaseUri`].
@@ -120,6 +120,23 @@ impl Routing {
         self
     }
 
+    /// Returns `true` when this [`Routing`] may resolve to more than one
+    /// [`BaseUri`] across attempts.
+    ///
+    /// Resilience layers can use this to decide whether retrying a request that
+    /// previously failed with an unavailable endpoint is worthwhile: if
+    /// alternatives exist, a subsequent attempt may be routed to a different
+    /// endpoint and succeed.
+    ///
+    /// Returns `true` for [`Routing::fallback`] and [`Routing::custom`] (which
+    /// may dynamically select among multiple endpoints), and `false` for
+    /// [`Routing::base_uri`] and [`Routing::default`] (which always resolve to
+    /// the same [`BaseUri`], or none at all).
+    #[must_use]
+    pub fn has_alternatives(&self) -> bool {
+        matches!(self.resolver.as_ref(), Resolver::Custom(_))
+    }
+
     /// Builds the final [`Uri`] for an outgoing request, combining the target [`Uri`] with
     /// the [`BaseUri`] produced by this routing according to the configured
     /// [`BaseUriConflict`] policy.
@@ -128,6 +145,10 @@ impl Routing {
     ///
     /// Returns [`HttpError::validation`] when the target [`Uri`] already has a [`BaseUri`],
     /// the routing also produces one, and the policy is [`BaseUriConflict::Fail`].
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "while not consuming the context, we might do it at some point"
+    )]
     pub fn create_uri(&self, ctx: RoutingContext, uri: Uri) -> Result<Uri, HttpError> {
         let routed = self.resolve(&ctx);
         let (existing, path) = uri.into_parts();
@@ -149,12 +170,35 @@ impl Routing {
             BaseUriConflict::Fail => {
                 return Err(HttpError::validation_with_label(
                     "target URI already has a base URI; routing produced a conflicting base URI",
-                    LABEL_ROUTING_BASE_URI_CONFLICT,
+                    LABEL_URI_CONFLICT,
                 ));
             }
         };
 
         Ok(Uri::with_base_and_path(Some(chosen), path))
+    }
+
+    /// Updates the [`HttpRequest`]'s URI in place by routing the current URI through
+    /// [`Routing::create_uri`].
+    ///
+    /// The request's existing [`http::Uri`] is converted to a [`Uri`], passed through
+    /// [`Routing::create_uri`] together with `ctx`, and the result is written back to the
+    /// request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HttpError::validation`] when:
+    ///
+    /// - the request's existing URI cannot be converted to a [`Uri`],
+    /// - [`Routing::create_uri`] fails (e.g., a [`BaseUriConflict::Fail`] conflict), or
+    /// - the resolved [`Uri`] cannot be converted back to an [`http::Uri`].
+    pub fn update_request_uri(&self, ctx: RoutingContext, request: &mut HttpRequest) -> Result<(), HttpError> {
+        // Clone the URI rather than taking it: if any step below fails we leave the
+        // request's URI untouched.
+        let uri: Uri = request.uri().clone().try_into()?;
+        let resolved = self.create_uri(ctx.with_request(request), uri)?;
+        *request.uri_mut() = resolved.into_http_uri()?;
+        Ok(())
     }
 
     /// Resolves the [`BaseUri`] for the current request, if any.
@@ -257,7 +301,7 @@ mod tests {
         let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
 
         let err = routing.create_uri(RoutingContext::new(), target_with_base()).unwrap_err();
-        assert_eq!(err.label(), "routing_base_uri_conflict");
+        assert_eq!(err.label(), "uri_conflict");
     }
 
     #[test]
@@ -303,5 +347,80 @@ mod tests {
     #[test]
     fn assert_routing_size() {
         static_assertions::assert_eq_size!(Routing, [u8; 16]);
+    }
+
+    #[test]
+    fn default_has_no_alternatives() {
+        assert!(!Routing::default().has_alternatives());
+    }
+
+    #[test]
+    fn base_uri_has_no_alternatives() {
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com"));
+        assert!(!routing.has_alternatives());
+    }
+
+    #[test]
+    fn fallback_has_alternatives() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        assert!(routing.has_alternatives());
+    }
+
+    #[test]
+    fn custom_has_alternatives() {
+        let routing = Routing::custom(|_| None);
+        assert!(routing.has_alternatives());
+    }
+
+    #[test]
+    fn update_request_uri_attaches_base_uri() {
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com"));
+        let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
+
+        routing.update_request_uri(RoutingContext::new(), &mut request).unwrap();
+
+        assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
+    }
+
+    #[test]
+    fn update_request_uri_keeps_existing_base_uri_by_default() {
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com"));
+        let mut request = crate::HttpRequestBuilder::new_fake()
+            .get("https://existing.example.com/items")
+            .build()
+            .unwrap();
+
+        routing.update_request_uri(RoutingContext::new(), &mut request).unwrap();
+
+        assert_eq!(request.uri().to_string(), "https://existing.example.com/items");
+    }
+
+    #[test]
+    fn update_request_uri_returns_error_on_conflict_when_policy_is_fail() {
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
+        let mut request = crate::HttpRequestBuilder::new_fake()
+            .get("https://existing.example.com/items")
+            .build()
+            .unwrap();
+
+        let err = routing.update_request_uri(RoutingContext::new(), &mut request).unwrap_err();
+        assert_eq!(err.label(), "uri_conflict");
+    }
+
+    #[test]
+    fn update_request_uri_preserves_original_uri_on_failure() {
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
+        let mut request = crate::HttpRequestBuilder::new_fake()
+            .get("https://existing.example.com/items")
+            .build()
+            .unwrap();
+
+        let original_uri = request.uri().clone();
+        let _ = routing.update_request_uri(RoutingContext::new(), &mut request).unwrap_err();
+
+        assert_eq!(request.uri(), &original_uri);
     }
 }

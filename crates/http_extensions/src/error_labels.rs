@@ -30,7 +30,7 @@ pub(crate) const LABEL_URI_MISSING: ErrorLabel = ErrorLabel::from_static("uri_mi
 pub(crate) const LABEL_BODY_UTF8_INVALID: ErrorLabel = ErrorLabel::from_static("body_utf8_invalid");
 
 // Routing errors
-pub(crate) const LABEL_ROUTING_BASE_URI_CONFLICT: ErrorLabel = ErrorLabel::from_static("routing_base_uri_conflict");
+pub(crate) const LABEL_URI_CONFLICT: ErrorLabel = ErrorLabel::from_static("uri_conflict");
 
 // Body errors
 pub(crate) const LABEL_BODY_CONSUMED: ErrorLabel = ErrorLabel::from_static("body_consumed");
