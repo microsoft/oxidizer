@@ -8,7 +8,7 @@ use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 
 use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactionEngine, Sensitive};
-pub use http::uri::{Authority, Parts, PathAndQuery, Scheme};
+use http::uri::{Parts, PathAndQuery};
 
 use crate::error::UriError;
 use crate::{BasePath, BaseUri, Origin, UriPath};

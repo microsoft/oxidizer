@@ -160,7 +160,7 @@ mod error;
 mod macros;
 mod origin;
 mod templated;
-pub mod uri;
+mod uri;
 mod uri_param;
 mod uri_path;
 mod uri_safe;
@@ -176,3 +176,8 @@ pub use uri::Uri;
 pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_path::UriPath;
 pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};
+
+/// Re-exports [`http::uri`] types for convenience.
+pub mod http {
+    pub use http::uri::{Authority, Parts, PathAndQuery, Scheme};
+}

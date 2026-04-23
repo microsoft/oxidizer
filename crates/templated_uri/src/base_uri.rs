@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use http::uri::PathAndQuery;
 
-use crate::uri::{Authority, Parts, Scheme};
+use crate::http::{Authority, Parts, Scheme};
 use crate::{BasePath, Origin, UriError};
 
 /// An HTTP or HTTPS [`BaseUri`] representing a target location with an optional path prefix.
