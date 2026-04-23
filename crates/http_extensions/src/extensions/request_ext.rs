@@ -81,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn uri_template_label_falls_back_to_path_and_query_template() {
+    fn uri_template_label_falls_back_to_path_template() {
         let uri = Uri::from_static("https://example.com/api/users");
         let mut request = http::Request::get("https://example.com/api/users")
             .body(HttpBodyBuilder::new_fake().empty())

@@ -395,8 +395,8 @@ fn test_uri_path_from_template() {
     assert_eq!(target_paq.to_uri_string(), "/api/123/posts");
 
     // Verify to_http_path
-    let path_and_query = PathAndQuery::try_from(&target_paq).unwrap();
-    assert_eq!(path_and_query.to_string(), "/api/123/posts");
+    let path = PathAndQuery::try_from(&target_paq).unwrap();
+    assert_eq!(path.to_string(), "/api/123/posts");
 
     // Verify redacted string (unredacted because of unredacted attribute)
     let redaction_engine = RedactionEngine::builder().build();

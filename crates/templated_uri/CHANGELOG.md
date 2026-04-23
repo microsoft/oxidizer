@@ -5,6 +5,7 @@
 - ✨ Features
 
   - Add `Uri::from_parts(base, path)` constructor.
+  - Add `Uri::from_static(&'static str)` for parsing URIs from compile-time-known strings (panics on invalid input).
   - Add `Origin::from_static(&'static str)` for parsing origins from compile-time-known strings (panics on invalid input).
   - Add `BasePath::from_static(&'static str)` for parsing base paths from compile-time-known strings (panics on invalid input).
 

@@ -825,17 +825,17 @@ mod tests {
         }
 
         #[test]
-        fn with_path_and_query_string() {
+        fn with_path_query_string() {
             let base_uri = BaseUri::from_static("https://example.com");
             let uri = base_uri.build_http_uri("/api/resource?param=value").unwrap();
             assert_eq!(uri.to_string(), "https://example.com/api/resource?param=value");
         }
 
         #[test]
-        fn with_path_and_query_object() {
+        fn with_path_object() {
             let base_uri = BaseUri::from_static("https://example.com");
-            let path_and_query = PathAndQuery::from_static("/api/resource?param=value");
-            let uri = base_uri.build_http_uri(path_and_query).unwrap();
+            let path = PathAndQuery::from_static("/api/resource?param=value");
+            let uri = base_uri.build_http_uri(path).unwrap();
             assert_eq!(uri.to_string(), "https://example.com/api/resource?param=value");
         }
 
