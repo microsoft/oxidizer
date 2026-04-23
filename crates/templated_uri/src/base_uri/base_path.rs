@@ -62,12 +62,7 @@ impl BasePath {
         Ok(path)
     }
 
-    pub(crate) fn join(&self, other: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<PathAndQuery, UriError> {
-        let other = other.try_into().map_err(|e| UriError::from(e.into()))?;
-        self.join_path_and_query(other)
-    }
-
-    pub(crate) fn join_path_and_query(&self, other: PathAndQuery) -> Result<PathAndQuery, UriError> {
+    pub(crate) fn join_path_and_query(&self, other: &PathAndQuery) -> Result<PathAndQuery, UriError> {
         let path_str = other.as_str().trim_start_matches('/');
         if path_str.is_empty() {
             return Ok(self.inner.clone());
@@ -187,14 +182,18 @@ mod test {
     #[test]
     fn path_join() {
         let base_path = BasePath::from_static("/base/path/");
-        let joined = base_path.join("/additional/resource?param=value").unwrap();
+        let joined = base_path
+            .join_path_and_query(&"/additional/resource?param=value".parse().unwrap())
+            .unwrap();
         assert_eq!(
             joined.as_str(),
             "/base/path/additional/resource?param=value",
             "Path join with slash prefixed uri string should result in correct concatenation"
         );
 
-        let joined = base_path.join("additional/resource?param=value").unwrap();
+        let joined = base_path
+            .join_path_and_query(&"additional/resource?param=value".parse().unwrap())
+            .unwrap();
         assert_eq!(
             joined.as_str(),
             "/base/path/additional/resource?param=value",

@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn test_uri_from_base_uri() {
         let base = BaseUri::from_static("https://example.com/api/");
-        let uri: Uri = base.clone().into();
+        let uri: Uri = base.into();
         assert_eq!(uri.to_string().declassify_ref(), "https://example.com/api/");
         assert!(uri.to_path().is_none());
     }
