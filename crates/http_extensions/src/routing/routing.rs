@@ -64,7 +64,7 @@ pub enum BaseUriConflict {
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct Routing {
-    resolver: Resolver,
+    resolver: Arc<Resolver>,
     conflict_policy: BaseUriConflict,
 }
 
@@ -73,7 +73,7 @@ impl Routing {
     #[must_use]
     pub fn base_uri(base_uri: BaseUri) -> Self {
         Self {
-            resolver: Resolver::Fixed(base_uri),
+            resolver: Arc::new(Resolver::Fixed(base_uri)),
             conflict_policy: BaseUriConflict::default(),
         }
     }
@@ -107,7 +107,7 @@ impl Routing {
         F: Fn(&RoutingContext) -> Option<BaseUri> + Send + Sync + 'static,
     {
         Self {
-            resolver: Resolver::Custom(Arc::new(resolver)),
+            resolver: Arc::new(Resolver::Custom(Arc::new(resolver))),
             conflict_policy: BaseUriConflict::default(),
         }
     }
@@ -159,7 +159,7 @@ impl Routing {
 
     /// Resolves the [`BaseUri`] for the current request, if any.
     fn resolve(&self, ctx: &RoutingContext) -> Option<BaseUri> {
-        match &self.resolver {
+        match self.resolver.as_ref() {
             Resolver::Empty => None,
             Resolver::Fixed(base_uri) => Some(base_uri.clone()),
             Resolver::Custom(f) => f(ctx),
@@ -171,7 +171,7 @@ impl Routing {
 
 type RoutingFn = dyn Fn(&RoutingContext) -> Option<BaseUri> + Send + Sync + 'static;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 enum Resolver {
     #[default]
     Empty,
@@ -298,5 +298,10 @@ mod tests {
         let ctx = RoutingContext::new().with_previous_recovery(recoverable::RecoveryInfo::unavailable());
         let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
+    }
+
+    #[test]
+    fn assert_routing_size() {
+        static_assertions::assert_eq_size!(Routing, [u8; 16]);
     }
 }
