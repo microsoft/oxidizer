@@ -1,49 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Routing primitives for resolving the [`BaseUri`] of an outgoing request.
-//!
-//! A [`Routing`] decides which [`BaseUri`] should be attached to a target [`Uri`]
-//! before it is sent. This is useful when a library or middleware needs to centralize
-//! the resolution of the destination of HTTP requests while still allowing callers to
-//! express the rest of the request (path, query, ...) independently.
-//!
-//! # Construction
-//!
-//! - [`Routing::default`] - returns no [`BaseUri`] (the target [`Uri`] is used as-is).
-//! - [`Routing::new_base_uri`] - always returns the same [`BaseUri`].
-//! - [`Routing::new_custom`] - delegates the decision to a user supplied closure that
-//!   receives a [`RoutingContext`].
-//!
-//! # Conflict resolution
-//!
-//! When the target [`Uri`] passed to [`Routing::create_uri`] already carries a
-//! [`BaseUri`] and the routing also produces one, [`Routing`] uses the configured
-//! [`BaseUriConflict`] policy to decide what to do. The policy can be set with
-//! [`Routing::conflict_policy`] and defaults to [`BaseUriConflict::KeepExisting`].
-
 use std::sync::Arc;
 
+use recoverable::RecoveryKind;
 use templated_uri::{BaseUri, Uri};
 
+use super::RoutingContext;
 use crate::HttpError;
 use crate::error_labels::LABEL_ROUTING_BASE_URI_CONFLICT;
-
-/// Context passed to the closure of [`Routing::new_custom`] when resolving a [`BaseUri`].
-///
-/// This type is intentionally opaque so that fields can be added in the future without
-/// breaking the closure signature. It currently exposes no information.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct RoutingContext;
-
-impl RoutingContext {
-    /// Creates a new, empty [`RoutingContext`].
-    #[must_use]
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 /// Strategy used by [`Routing::create_uri`] when both the target [`Uri`] and the
 /// routing produce a [`BaseUri`].
@@ -62,7 +27,7 @@ pub enum BaseUriConflict {
 
 /// Resolves the [`BaseUri`] to use for an outgoing request.
 ///
-/// See the [module documentation](self) for an overview.
+/// See the [module documentation](super) for an overview.
 ///
 /// # Examples
 ///
@@ -72,7 +37,7 @@ pub enum BaseUriConflict {
 /// use http_extensions::routing::{Routing, RoutingContext};
 /// use templated_uri::{BaseUri, Uri};
 ///
-/// let routing = Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com"));
+/// let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com"));
 /// let target: Uri = "/v1/items".parse().unwrap();
 ///
 /// let resolved = routing.create_uri(RoutingContext::new(), target).unwrap();
@@ -88,7 +53,7 @@ pub enum BaseUriConflict {
 /// use http_extensions::routing::{Routing, RoutingContext};
 /// use templated_uri::{BaseUri, Uri};
 ///
-/// let routing = Routing::new_custom(|_ctx| Some(BaseUri::from_uri_static("https://api.example.com")));
+/// let routing = Routing::custom(|_ctx| Some(BaseUri::from_uri_static("https://api.example.com")));
 /// let target: Uri = "/v1/items".parse().unwrap();
 ///
 /// let resolved = routing.create_uri(RoutingContext::new(), target).unwrap();
@@ -106,11 +71,30 @@ pub struct Routing {
 impl Routing {
     /// Creates a [`Routing`] that always returns the given [`BaseUri`].
     #[must_use]
-    pub fn new_base_uri(base_uri: BaseUri) -> Self {
+    pub fn base_uri(base_uri: BaseUri) -> Self {
         Self {
             resolver: Resolver::Fixed(base_uri),
             conflict_policy: BaseUriConflict::default(),
         }
+    }
+
+    /// Creates a [`Routing`] that selects between a primary and a fallback [`BaseUri`]
+    /// based on the previous attempt's [`RecoveryInfo`].
+    ///
+    /// The primary [`BaseUri`] is used unless the previous attempt's
+    /// [`RecoveryInfo`] reports [`RecoveryKind::Unavailable`], in which case the
+    /// fallback [`BaseUri`] is used. This is intended for scenarios where the
+    /// primary endpoint becomes unavailable (e.g., a circuit breaker is open) but
+    /// requests can still be served by a fallback endpoint.
+    ///
+    /// [`RecoveryInfo`]: recoverable::RecoveryInfo
+    /// [`RecoveryKind::Unavailable`]: recoverable::RecoveryKind::Unavailable
+    #[must_use]
+    pub fn fallback(primary: BaseUri, fallback: BaseUri) -> Self {
+        Self::custom(move |ctx| {
+            let use_fallback = ctx.previous_recovery().is_some_and(|info| info.kind() == RecoveryKind::Unavailable);
+            Some(if use_fallback { fallback.clone() } else { primary.clone() })
+        })
     }
 
     /// Creates a [`Routing`] that delegates resolution to the given closure.
@@ -118,7 +102,7 @@ impl Routing {
     /// The closure receives a [`RoutingContext`] and returns `Some(BaseUri)` to attach a
     /// [`BaseUri`] to the target, or `None` to leave the target's [`BaseUri`] as-is.
     #[must_use]
-    pub fn new_custom<F>(resolver: F) -> Self
+    pub fn custom<F>(resolver: F) -> Self
     where
         F: Fn(&RoutingContext) -> Option<BaseUri> + Send + Sync + 'static,
     {
@@ -172,6 +156,15 @@ impl Routing {
 
         Ok(Uri::with_base_and_path(Some(chosen), path))
     }
+
+    /// Resolves the [`BaseUri`] for the current request, if any.
+    fn resolve(&self, ctx: &RoutingContext) -> Option<BaseUri> {
+        match &self.resolver {
+            Resolver::Empty => None,
+            Resolver::Fixed(base_uri) => Some(base_uri.clone()),
+            Resolver::Custom(f) => f(ctx),
+        }
+    }
 }
 
 // --- Private items below ---
@@ -192,17 +185,6 @@ impl std::fmt::Debug for Resolver {
             Self::Empty => f.write_str("Empty"),
             Self::Fixed(base_uri) => f.debug_tuple("Fixed").field(base_uri).finish(),
             Self::Custom(_) => f.write_str("Custom"),
-        }
-    }
-}
-
-impl Routing {
-    /// Resolves the [`BaseUri`] for the current request, if any.
-    fn resolve(&self, ctx: &RoutingContext) -> Option<BaseUri> {
-        match &self.resolver {
-            Resolver::Empty => None,
-            Resolver::Fixed(base_uri) => Some(base_uri.clone()),
-            Resolver::Custom(f) => f(ctx),
         }
     }
 }
@@ -234,29 +216,29 @@ mod tests {
     }
 
     #[test]
-    fn new_base_uri_attaches_when_target_has_none() {
-        let routing = Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com"));
+    fn base_uri_attaches_when_target_has_none() {
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com"));
         let resolved = routing.create_uri(RoutingContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
     #[test]
     fn custom_resolver_returning_none_passes_through() {
-        let routing = Routing::new_custom(|_| None);
+        let routing = Routing::custom(|_| None);
         let resolved = routing.create_uri(RoutingContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://existing.example.com/items");
     }
 
     #[test]
     fn custom_resolver_returning_some_is_used() {
-        let routing = Routing::new_custom(|_| Some(BaseUri::from_uri_static("https://api.example.com")));
+        let routing = Routing::custom(|_| Some(BaseUri::from_uri_static("https://api.example.com")));
         let resolved = routing.create_uri(RoutingContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
     #[test]
     fn keep_existing_is_default_on_conflict() {
-        let routing = Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com"));
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com"));
 
         let resolved = routing.create_uri(RoutingContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://existing.example.com/items");
@@ -264,7 +246,7 @@ mod tests {
 
     #[test]
     fn override_replaces_existing_base_uri() {
-        let routing = Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Override);
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Override);
 
         let resolved = routing.create_uri(RoutingContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/items");
@@ -272,7 +254,7 @@ mod tests {
 
     #[test]
     fn fail_returns_error_on_conflict() {
-        let routing = Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
 
         let err = routing.create_uri(RoutingContext::new(), target_with_base()).unwrap_err();
         assert_eq!(err.label(), "routing_base_uri_conflict");
@@ -280,16 +262,41 @@ mod tests {
 
     #[test]
     fn fail_does_not_trigger_without_conflict() {
-        let routing = Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
+        let routing = Routing::base_uri(BaseUri::from_uri_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
 
         let resolved = routing.create_uri(RoutingContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
     #[test]
-    fn debug_does_not_panic() {
-        let _ = format!("{:?}", Routing::default());
-        let _ = format!("{:?}", Routing::new_base_uri(BaseUri::from_uri_static("https://api.example.com")));
-        let _ = format!("{:?}", Routing::new_custom(|_| None));
+    fn fallback_uses_primary_without_previous_recovery() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        let resolved = routing.create_uri(RoutingContext::new(), target_without_base()).unwrap();
+        assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_uses_primary_when_previous_recovery_is_not_unavailable() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        let ctx = RoutingContext::new().with_previous_recovery(recoverable::RecoveryInfo::retry());
+        let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
+        assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_uses_fallback_when_previous_recovery_is_unavailable() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        let ctx = RoutingContext::new().with_previous_recovery(recoverable::RecoveryInfo::unavailable());
+        let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
+        assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
     }
 }
