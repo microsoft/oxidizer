@@ -197,12 +197,18 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::{BaseUri, http::Scheme, BasePath};
     /// let base_uri =
-    ///     BaseUri::from_host_and_port(Scheme::HTTPS, "example.com", 1234, BasePath::default())?;
+    ///     BaseUri::try_from_raw_parts(Scheme::HTTPS, "example.com", 1234, BasePath::default())?;
     /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    pub fn from_host_and_port(scheme: Scheme, host: impl AsRef<str>, port: u16, path: BasePath) -> Result<Self, UriError> {
+    pub fn try_from_raw_parts(
+        scheme: impl TryInto<Scheme, Error: Into<http::Error>>,
+        host: impl AsRef<str>,
+        port: u16,
+        path: impl TryInto<BasePath, Error: Into<UriError>>,
+    ) -> Result<Self, UriError> {
         let origin = Origin::from_parts(scheme, format!("{}:{}", host.as_ref(), port))?;
+        let path = path.try_into().map_err(Into::into)?;
         Ok(Self::from_parts(origin, path))
     }
 
@@ -656,6 +662,14 @@ mod tests {
             assert_eq!(base_uri.authority().as_str(), "example.com:443");
             assert_eq!(base_uri.to_string(), "https://example.com/example/");
         }
+    }
+
+    #[test]
+    fn try_from_raw_parts_builds_uri_with_try_into_args() {
+        // Exercises both `TryInto<Scheme>` (via `&str`) and `TryInto<BasePath>` (via `&str`).
+        let base_uri = BaseUri::try_from_raw_parts("https", "example.com", 1234, "/api/v1/").unwrap();
+        assert_eq!(base_uri.to_string(), "https://example.com:1234/api/v1/");
+        assert!(BaseUri::try_from_raw_parts("ftp", "example.com", 21, BasePath::default()).is_err());
     }
 
     mod from_uri_static {

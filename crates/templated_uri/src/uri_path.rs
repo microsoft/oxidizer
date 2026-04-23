@@ -166,4 +166,18 @@ mod tests {
         let target_paq: UriPath = uri.try_into().unwrap();
         assert_eq!(target_paq.to_uri_string(), "/test/path?query=value");
     }
+
+    #[test]
+    fn try_from_owned_uri_path_to_path_and_query() {
+        let path = PathAndQuery::from_static("/owned/path?query=value");
+        let target_path: UriPath = path.clone().into();
+
+        // Owned conversion.
+        let converted: PathAndQuery = PathAndQuery::try_from(target_path.clone()).unwrap();
+        assert_eq!(converted, path);
+
+        // Ensure owned and borrowed conversions agree.
+        let converted_ref: PathAndQuery = PathAndQuery::try_from(&target_path).unwrap();
+        assert_eq!(converted, converted_ref);
+    }
 }
