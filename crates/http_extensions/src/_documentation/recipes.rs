@@ -248,6 +248,6 @@
 #[expect(unused_imports, reason = "simplifies the docs")]
 use crate::*;
 #[expect(unused_imports, reason = "simplifies the docs")]
-use http::*;
+use ::http::*;
 #[expect(unused_imports, reason = "simplifies the docs")]
 use templated_uri::*;
