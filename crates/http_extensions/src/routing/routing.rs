@@ -155,7 +155,7 @@ impl Routing {
 
         if existing.is_none() && path.is_none() && self.conflict_policy == BaseUriConflict::Fail {
             return Err(HttpError::validation_with_label(
-                "the uri must have a base uri or a path to be routed; if relative path is used, ensure it is prefixed with a slash",
+                "the target uri cannot be empty; provide a base uri or a path such as `/...`",
                 LABEL_URI_MISSING,
             ));
         }
