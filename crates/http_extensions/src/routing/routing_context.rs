@@ -128,4 +128,11 @@ mod tests {
         assert!(ctx.previous_recovery().is_some());
         assert!(ctx.request().is_some());
     }
+
+    #[test]
+    fn with_attempt_can_set_is_last_attempt_to_false() {
+        let ctx = RoutingContext::new().with_attempt(1, false);
+        assert_eq!(ctx.attempt(), 1);
+        assert!(!ctx.is_last_attempt());
+    }
 }
