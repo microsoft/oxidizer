@@ -6,11 +6,11 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/templated_uri/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/templated_uri/favicon.ico")]
 
-//! Standards-compliant URI handling with templating, safety validation, and data classification.
+//! Standards-compliant URI handling with templating, validation, and data classification.
 //!
 //! This crate provides comprehensive URI manipulation capabilities designed for HTTP clients
 //! and servers that need type-safe, efficient, and data classification-aware URI handling. It builds
-//! on top of the standard `http` crate while adding additional safety guarantees, templating
+//! on top of the standard `http` crate while adding additional validation guarantees, templating
 //! capabilities, and data classification features.
 //!
 //! # Core Types
@@ -20,7 +20,7 @@
 //! - [`Uri`] - Flexible URI type composed of an optional [`BaseUri`] and an optional path/query
 //! - [`BaseUri`] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`])
 //! - [`UriTemplate`] - RFC 6570 Level 3 compliant URI templating
-//! - [`UriSafe`] and [`UriSafeString`] - Generic newtype wrapper proving a value is safe for URI components
+//! - [`UriValid`] and [`UriValidString`] - Generic newtype wrapper proving a value is valid for URI components
 //!   by not containing any reserved characters
 //!
 //! # Basic Usage
@@ -49,18 +49,18 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, UriTemplate, Uri, UriSafeString, templated};
+//! use templated_uri::{BaseUri, UriTemplate, Uri, UriValidString, templated};
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
 //! struct UserPostPath {
 //!     user_id: u32,
-//!     post_id: UriSafeString,
+//!     post_id: UriValidString,
 //! }
 //!
 //! let path = UserPostPath {
 //!     user_id: 42,
-//!     post_id: UriSafeString::encode("my-post"),
+//!     post_id: UriValidString::encode("my-post"),
 //! };
 //!
 //! let uri = Uri::default()
@@ -68,29 +68,29 @@
 //!     .with_path(path);
 //! ```
 //!
-//! # URI Safety Guarantees
+//! # URI Validation Guarantees
 //!
-//! The [`UriSafe<T>`](UriSafe) newtype wraps values that are guaranteed
-//! to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
+//! The [`UriValid<T>`](UriValid) newtype wraps values that are guaranteed
+//! to contain only valid URI characters. This prevents common URI injection vulnerabilities:
 //!
 //! ```rust
-//! use templated_uri::UriSafeString;
+//! use templated_uri::UriValidString;
 //!
-//! // This will succeed - encodes unsafe characters into a URI-safe format
-//! let unsafe_string = UriSafeString::encode("hello world?foo=bar");
-//! assert_eq!(unsafe_string.as_str(), "hello%20world%3Ffoo%3Dbar");
+//! // This will succeed - percent-encodes any invalid characters
+//! let encoded = UriValidString::encode("hello world?foo=bar");
+//! assert_eq!(encoded.as_str(), "hello%20world%3Ffoo%3Dbar");
 //!
-//! // This will succeed - contains only safe characters
-//! let safe = UriSafeString::try_new("hello-world_123").unwrap();
-//! assert_eq!(safe.as_str(), "hello-world_123");
+//! // This will succeed - contains only valid characters
+//! let valid = UriValidString::try_new("hello-world_123").unwrap();
+//! assert_eq!(valid.as_str(), "hello-world_123");
 //!
 //! // try_new() fails on URI-reserved characters
-//! let unsafe_string = UriSafeString::try_new("hello world?foo=bar");
-//! assert!(unsafe_string.is_err());
+//! let invalid = UriValidString::try_new("hello world?foo=bar");
+//! assert!(invalid.is_err());
 //! ```
 //!
-//! Built-in safe types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
-//! IP addresses, and validated [`UriSafeString`] instances.
+//! Built-in valid types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
+//! IP addresses, and validated [`UriValidString`] instances.
 //!
 //! # Telemetry Labels
 //!
@@ -98,7 +98,7 @@
 //! for telemetry. When present, the label takes precedence over the template string.
 //!
 //! ```rust
-//! use templated_uri::{UriSafeString, templated};
+//! use templated_uri::{UriValidString, templated};
 //!
 //! #[templated(
 //!     template = "/{org}/users/{user_id}/reports/{report_type}",
@@ -106,9 +106,9 @@
 //!     unredacted
 //! )]
 //! struct ReportPath {
-//!     org: UriSafeString,
-//!     user_id: UriSafeString,
-//!     report_type: UriSafeString,
+//!     org: UriValidString,
+//!     user_id: UriValidString,
+//!     report_type: UriValidString,
 //! }
 //! ```
 //!
@@ -119,14 +119,14 @@
 //!
 //! ```rust
 //! use data_privacy::Sensitive;
-//! use templated_uri::{UriSafeString, templated};
+//! use templated_uri::{UriValidString, templated};
 //!
 //! #[templated(template = "/{org_id}/user/{user_id}/")]
 //! #[derive(Clone)]
 //! struct UserPath {
 //!     #[unredacted]
-//!     org_id: UriSafeString,
-//!     user_id: Sensitive<UriSafeString>,
+//!     org_id: UriValidString,
+//!     user_id: Sensitive<UriValidString>,
 //! }
 //! ```
 //!
@@ -163,7 +163,7 @@ mod templated;
 mod uri;
 mod uri_param;
 mod uri_path;
-mod uri_safe;
+mod uri_valid;
 
 pub use base_path::BasePath;
 pub use base_uri::BaseUri;
@@ -175,6 +175,6 @@ pub use templated::UriTemplate;
 pub use uri::Uri;
 pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_path::UriPath;
-pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};
+pub use uri_valid::{UriValid, UriValidString, UriValidationError};
 
 pub use http::uri::{Authority, PathAndQuery, Scheme};

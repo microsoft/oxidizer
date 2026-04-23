@@ -41,8 +41,8 @@ pub(crate) fn uri_param_impl(input: DeriveInput) -> TokenStream {
     // Generate the implementation
     quote! {
         impl ::templated_uri::UriParam for #ident {
-            fn as_uri_safe(&self) -> ::templated_uri::UriSafe<impl ::std::fmt::Display> {
-                self.0.as_uri_safe()
+            fn as_uri_valid(&self) -> ::templated_uri::UriValid<impl ::std::fmt::Display> {
+                self.0.as_uri_valid()
             }
         }
     }

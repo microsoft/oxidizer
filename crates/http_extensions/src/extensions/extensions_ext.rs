@@ -67,17 +67,17 @@ mod tests {
 
     #[test]
     fn returns_label_from_templated_uri_path() {
-        use templated_uri::{UriSafeString, templated};
+        use templated_uri::{UriValidString, templated};
 
         #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
         #[derive(Clone)]
         struct UserPosts {
-            user_id: UriSafeString,
+            user_id: UriValidString,
         }
 
         let mut extensions = Extensions::new();
         extensions.insert(UriPath::from_template(UserPosts {
-            user_id: UriSafeString::from_static("123"),
+            user_id: UriValidString::from_static("123"),
         }));
 
         assert_eq!(

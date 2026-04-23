@@ -3,7 +3,7 @@
 
 [package]
 name = "templated_uri"
-description = "Standards-compliant URI handling with templating, safety validation, and data classification"
+description = "Standards-compliant URI handling with templating, validation, and data classification"
 version = "0.1.2"
 readme = "README.md"
 keywords = ["oxidizer", "url", "parsing", "templates", "uri"]

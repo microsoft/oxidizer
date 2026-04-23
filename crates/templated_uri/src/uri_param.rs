@@ -9,12 +9,12 @@ use data_privacy::Sensitive;
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
-use crate::{UriSafe, UriSafeString};
+use crate::{UriValid, UriValidString};
 
 /// Marks types usable from templates, e.g., `/get/{foo}`.
 pub trait UriParam {
-    /// Returns this value wrapped in [`UriSafe`], proving it is safe for URI use.
-    fn as_uri_safe(&self) -> UriSafe<impl Display>;
+    /// Returns this value wrapped in [`UriValid`], proving it is valid for URI use.
+    fn as_uri_valid(&self) -> UriValid<impl Display>;
 }
 
 /// Marks types with possibly dodgy content usable from templates, e.g., `/get/{+foo}`.
@@ -36,8 +36,8 @@ macro_rules! impl_uri_unsafe_param {
 macro_rules! impl_uri_param {
     ($t:ty) => {
         impl UriParam for $t {
-            fn as_uri_safe(&self) -> UriSafe<impl Display> {
-                UriSafe::from(*self)
+            fn as_uri_valid(&self) -> UriValid<impl Display> {
+                UriValid::from(*self)
             }
         }
     };
@@ -45,13 +45,13 @@ macro_rules! impl_uri_param {
 
 impl_uri_unsafe_param!(String);
 
-impl UriParam for UriSafeString {
-    fn as_uri_safe(&self) -> UriSafe<impl Display> {
+impl UriParam for UriValidString {
+    fn as_uri_valid(&self) -> UriValid<impl Display> {
         self.clone()
     }
 }
 
-impl UriUnsafeParam for UriSafeString {
+impl UriUnsafeParam for UriValidString {
     fn as_display(&self) -> impl Display {
         self.as_str()
     }
@@ -86,8 +86,8 @@ impl<T> UriParam for Sensitive<T>
 where
     T: UriParam,
 {
-    fn as_uri_safe(&self) -> UriSafe<impl Display> {
-        self.declassify_ref().as_uri_safe()
+    fn as_uri_valid(&self) -> UriValid<impl Display> {
+        self.declassify_ref().as_uri_valid()
     }
 }
 
@@ -107,36 +107,36 @@ mod tests {
     #[test]
     fn test_uri_param_unsigned_integer() {
         let value: u32 = 42;
-        let uri_safe = value.as_uri_safe();
+        let uri_safe = value.as_uri_valid();
         assert_eq!(format!("{uri_safe}"), "42");
     }
 
     #[test]
     fn uri_param_all_numeric_types() {
-        assert_eq!(format!("{}", 1u8.as_uri_safe()), "1");
-        assert_eq!(format!("{}", 2u16.as_uri_safe()), "2");
-        assert_eq!(format!("{}", 3u64.as_uri_safe()), "3");
-        assert_eq!(format!("{}", 4u128.as_uri_safe()), "4");
-        assert_eq!(format!("{}", 5usize.as_uri_safe()), "5");
-        assert_eq!(format!("{}", NonZeroU8::new(1).unwrap().as_uri_safe()), "1");
-        assert_eq!(format!("{}", NonZeroU16::new(2).unwrap().as_uri_safe()), "2");
-        assert_eq!(format!("{}", NonZeroU32::new(3).unwrap().as_uri_safe()), "3");
-        assert_eq!(format!("{}", NonZeroU64::new(4).unwrap().as_uri_safe()), "4");
-        assert_eq!(format!("{}", NonZeroU128::new(5).unwrap().as_uri_safe()), "5");
-        assert_eq!(format!("{}", NonZeroUsize::new(6).unwrap().as_uri_safe()), "6");
+        assert_eq!(format!("{}", 1u8.as_uri_valid()), "1");
+        assert_eq!(format!("{}", 2u16.as_uri_valid()), "2");
+        assert_eq!(format!("{}", 3u64.as_uri_valid()), "3");
+        assert_eq!(format!("{}", 4u128.as_uri_valid()), "4");
+        assert_eq!(format!("{}", 5usize.as_uri_valid()), "5");
+        assert_eq!(format!("{}", NonZeroU8::new(1).unwrap().as_uri_valid()), "1");
+        assert_eq!(format!("{}", NonZeroU16::new(2).unwrap().as_uri_valid()), "2");
+        assert_eq!(format!("{}", NonZeroU32::new(3).unwrap().as_uri_valid()), "3");
+        assert_eq!(format!("{}", NonZeroU64::new(4).unwrap().as_uri_valid()), "4");
+        assert_eq!(format!("{}", NonZeroU128::new(5).unwrap().as_uri_valid()), "5");
+        assert_eq!(format!("{}", NonZeroUsize::new(6).unwrap().as_uri_valid()), "6");
         let ip: IpAddr = "127.0.0.1".parse().unwrap();
-        assert_eq!(format!("{}", ip.as_uri_safe()), "127.0.0.1");
+        assert_eq!(format!("{}", ip.as_uri_valid()), "127.0.0.1");
     }
 
     #[test]
-    fn uri_param_uri_safe_string() {
-        let s = UriSafeString::encode("hello");
-        assert_eq!(format!("{}", s.as_uri_safe()), "hello");
+    fn uri_param_uri_valid_string() {
+        let s = UriValidString::encode("hello");
+        assert_eq!(format!("{}", s.as_uri_valid()), "hello");
     }
 
     #[test]
-    fn uri_unsafe_param_uri_safe_string() {
-        let s = UriSafeString::encode("hello world");
+    fn uri_unsafe_param_uri_valid_string() {
+        let s = UriValidString::encode("hello world");
         assert_eq!(format!("{}", s.as_display()), "hello%20world");
     }
 
@@ -156,7 +156,7 @@ mod tests {
         let data_class = DataClass::new("test", "safe");
         let sensitive_num = Sensitive::new(100u32, data_class);
 
-        let uri_safe = sensitive_num.as_uri_safe();
+        let uri_safe = sensitive_num.as_uri_valid();
         assert_eq!(format!("{uri_safe}"), "100");
     }
 }

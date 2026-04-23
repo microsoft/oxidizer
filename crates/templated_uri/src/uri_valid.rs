@@ -12,34 +12,34 @@ use pct_str::{PctString, UriReserved};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
-/// A wrapper that proves the inner value is safe for use in URI templates.
+/// A wrapper that proves the inner value is valid for use in URI templates.
 ///
-/// Safety is enforced via constructors - only types whose [`Display`] output
-/// contains no RFC 6570 reserved characters can be wrapped. For inherently-safe
+/// Validity is enforced via constructors - only types whose [`Display`] output
+/// contains no RFC 6570 reserved characters can be wrapped. For inherently-valid
 /// types (integers, [`IpAddr`]) an infallible [`From`] impl is provided.
 /// With the `uuid` feature (enabled by default), `Uuid` is also supported.
-/// For strings, use the encoding/validating constructors on [`UriSafe<Cow<'static, str>>`]
-/// (aliased as [`UriSafeString`]).
+/// For strings, use the encoding/validating constructors on [`UriValid<Cow<'static, str>>`]
+/// (aliased as [`UriValidString`]).
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct UriSafe<T>(T);
+pub struct UriValid<T>(T);
 
-impl<T: Display> Display for UriSafe<T> {
+impl<T: Display> Display for UriValid<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl<T: Debug> Debug for UriSafe<T> {
+impl<T: Debug> Debug for UriValid<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-macro_rules! impl_uri_safe_from {
+macro_rules! impl_uri_valid_from {
     ($($t:ty),*) => {
         $(
-            impl From<$t> for UriSafe<$t> {
+            impl From<$t> for UriValid<$t> {
                 fn from(value: $t) -> Self {
                     Self(value)
                 }
@@ -48,7 +48,7 @@ macro_rules! impl_uri_safe_from {
     };
 }
 
-impl_uri_safe_from!(
+impl_uri_valid_from!(
     usize,
     u8,
     u16,
@@ -65,52 +65,52 @@ impl_uri_safe_from!(
 );
 
 #[cfg(feature = "uuid")]
-impl_uri_safe_from!(Uuid);
+impl_uri_valid_from!(Uuid);
 
-/// A URI-safe string whose content is guaranteed to contain only characters
+/// A URI-valid string whose content is guaranteed to contain only characters
 /// valid in URI templates as defined by RFC 6570.
 ///
-/// This is a type alias for `UriSafe<Cow<'static, str>>`. Use its constructors
+/// This is a type alias for `UriValid<Cow<'static, str>>`. Use its constructors
 /// (`encode`, `try_new`, `from_static`) to create instances.
-pub type UriSafeString = UriSafe<Cow<'static, str>>;
+pub type UriValidString = UriValid<Cow<'static, str>>;
 
-/// Error returned when a string contains characters that are not safe for URI templates.
+/// Error returned when a string contains characters that are not valid for URI templates.
 #[derive(Debug)]
-pub struct UriSafeError {
+pub struct UriValidationError {
     /// The invalid character that was found.
     pub invalid_char: char,
     /// The position in the string where the invalid character was found.
     pub position: usize,
 }
 
-impl fmt::Display for UriSafeError {
+impl fmt::Display for UriValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid character '{}' at position {} for URI safe string",
+            "invalid character '{}' at position {} for URI valid string",
             self.invalid_char, self.position
         )
     }
 }
 
-impl Error for UriSafeError {}
+impl Error for UriValidationError {}
 
-impl UriSafeString {
-    /// Creates a `UriSafeString` by percent-encoding any reserved or unsafe characters.
+impl UriValidString {
+    /// Creates a `UriValidString` by percent-encoding any reserved or invalid characters.
     ///
     /// This is the preferred constructor - it always succeeds by encoding any characters
-    /// that are not safe for URI templates as defined in RFC 6570.
+    /// that are not valid for URI templates as defined in RFC 6570.
     ///
     /// # Examples
     ///
     /// ```
-    /// use templated_uri::UriSafeString;
+    /// use templated_uri::UriValidString;
     ///
-    /// let safe = UriSafeString::encode("hello_world");
-    /// assert_eq!(safe.as_str(), "hello_world");
+    /// let valid = UriValidString::encode("hello_world");
+    /// assert_eq!(valid.as_str(), "hello_world");
     ///
-    /// let escaped_safe = UriSafeString::encode("{hello}");
-    /// assert_eq!(escaped_safe.as_str(), "%7Bhello%7D");
+    /// let escaped = UriValidString::encode("{hello}");
+    /// assert_eq!(escaped.as_str(), "%7Bhello%7D");
     /// ```
     pub fn encode(s: impl AsRef<str>) -> Self {
         Self::encode_str(s.as_ref())
@@ -137,34 +137,34 @@ impl UriSafeString {
         }
     }
 
-    /// Creates a `UriSafeString` from an already-encoded string, validating that it
-    /// contains only characters that are safe for URI templates as defined in RFC 6570.
+    /// Creates a `UriValidString` from an already-encoded string, validating that it
+    /// contains only characters that are valid for URI templates as defined in RFC 6570.
     ///
-    /// Unlike [`UriSafeString::encode`], this constructor does **not** encode anything -
-    /// it rejects the input if any reserved or unsafe character is found.
+    /// Unlike [`UriValidString::encode`], this constructor does **not** encode anything -
+    /// it rejects the input if any reserved or invalid character is found.
     /// Use this when you already have a percent-encoded string and want to enforce
     /// the invariant at the call site.
     ///
     /// # Examples
     ///
     /// ```
-    /// use templated_uri::UriSafeString;
+    /// use templated_uri::UriValidString;
     ///
-    /// let safe = UriSafeString::try_new("hello_world");
-    /// assert!(safe.is_ok());
+    /// let valid = UriValidString::try_new("hello_world");
+    /// assert!(valid.is_ok());
     ///
-    /// let unsafe_str = UriSafeString::try_new("{hello}");
-    /// assert!(unsafe_str.is_err());
+    /// let invalid = UriValidString::try_new("{hello}");
+    /// assert!(invalid.is_err());
     /// ```
     ///
     /// # Errors
     ///
-    /// Returns a [`UriSafeError`] if the string contains reserved URI characters.
-    pub fn try_new(raw: impl Into<String>) -> Result<Self, UriSafeError> {
+    /// Returns a [`UriValidationError`] if the string contains reserved URI characters.
+    pub fn try_new(raw: impl Into<String>) -> Result<Self, UriValidationError> {
         Self::try_new_inner(raw.into())
     }
 
-    fn try_new_inner(raw: String) -> Result<Self, UriSafeError> {
+    fn try_new_inner(raw: String) -> Result<Self, UriValidationError> {
         let mut characters = raw.chars().enumerate();
 
         while let Some((i, c)) = characters.next() {
@@ -172,7 +172,7 @@ impl UriSafeString {
                 // Check URL encoded string - must have exactly 2 hex digits after %
                 for _ in 0..2 {
                     if !characters.next().is_some_and(|(_, c)| c.is_ascii_hexdigit()) {
-                        return Err(UriSafeError {
+                        return Err(UriValidationError {
                             invalid_char: '%',
                             position: i,
                         });
@@ -186,7 +186,7 @@ impl UriSafeString {
                 continue;
             }
 
-            return Err(UriSafeError {
+            return Err(UriValidationError {
                 invalid_char: c,
                 position: i,
             });
@@ -201,27 +201,27 @@ impl UriSafeString {
         self.0.borrow()
     }
 
-    /// Creates a `UriSafeString` from a string literal.
+    /// Creates a `UriValidString` from a string literal.
     ///
     /// This is a `const fn`, so when used in a `const` context the validation runs at
     /// compile time. When called at runtime, invalid input panics instead.
     ///
-    /// Unlike [`UriSafeString::encode`], the input must already be percent-encoded -
+    /// Unlike [`UriValidString::encode`], the input must already be percent-encoded -
     /// reserved characters are rejected rather than encoded.
     ///
     /// # Examples
     ///
     /// ```
-    /// use templated_uri::UriSafeString;
+    /// use templated_uri::UriValidString;
     ///
     /// // Validated at compile time when used in a const context.
-    /// const SAFE: UriSafeString = UriSafeString::from_static("hello_world");
+    /// const VALID: UriValidString = UriValidString::from_static("hello_world");
     ///
     /// // Also usable at runtime; panics on invalid input.
-    /// let safe = UriSafeString::from_static("hello_world");
+    /// let valid = UriValidString::from_static("hello_world");
     ///
     /// // The following would fail to compile (const) or panic at runtime:
-    /// // const BAD: UriSafeString = UriSafeString::from_static("{hello}");
+    /// // const BAD: UriValidString = UriValidString::from_static("{hello}");
     /// ```
     ///
     /// # Panics
@@ -230,7 +230,7 @@ impl UriSafeString {
     #[inline]
     #[must_use]
     pub const fn from_static(s: &'static str) -> Self {
-        // Use the same validation logic as in uri_safe! macro
+        // Use the same validation logic as in uri_valid! macro
         let bytes = s.as_bytes();
         let mut i = 0;
         let mut url_encoded_char: Option<u8> = None;
@@ -266,19 +266,19 @@ impl UriSafeString {
     }
 }
 
-impl From<String> for UriSafeString {
-    /// Converts a String to a `UriSafeString`, automatically percent-encoding
+impl From<String> for UriValidString {
+    /// Converts a String to a `UriValidString`, automatically percent-encoding
     /// any RFC 6570 reserved characters.
     ///
     /// # Examples
     ///
     /// ```
-    /// use templated_uri::UriSafeString;
+    /// use templated_uri::UriValidString;
     ///
-    /// let safe = UriSafeString::from("hello_world".to_string());
-    /// assert_eq!(safe.as_str(), "hello_world");
+    /// let valid = UriValidString::from("hello_world".to_string());
+    /// assert_eq!(valid.as_str(), "hello_world");
     ///
-    /// let encoded = UriSafeString::from("{hello}".to_string());
+    /// let encoded = UriValidString::from("{hello}".to_string());
     /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
     fn from(s: String) -> Self {
@@ -286,19 +286,19 @@ impl From<String> for UriSafeString {
     }
 }
 
-impl<'a> From<&'a str> for UriSafeString {
-    /// Converts a `&str` to a `UriSafeString`, automatically percent-encoding
+impl<'a> From<&'a str> for UriValidString {
+    /// Converts a `&str` to a `UriValidString`, automatically percent-encoding
     /// any RFC 6570 reserved characters.
     ///
     /// # Examples
     ///
     /// ```
-    /// use templated_uri::UriSafeString;
+    /// use templated_uri::UriValidString;
     ///
-    /// let safe = UriSafeString::from("hello_world");
-    /// assert_eq!(safe.as_str(), "hello_world");
+    /// let valid = UriValidString::from("hello_world");
+    /// assert_eq!(valid.as_str(), "hello_world");
     ///
-    /// let encoded = UriSafeString::from("{hello}");
+    /// let encoded = UriValidString::from("{hello}");
     /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
     fn from(s: &'a str) -> Self {
@@ -306,14 +306,14 @@ impl<'a> From<&'a str> for UriSafeString {
     }
 }
 
-impl AsRef<str> for UriSafeString {
+impl AsRef<str> for UriValidString {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for UriSafeString {
+impl<'de> serde::Deserialize<'de> for UriValidString {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Self::try_new(s).map_err(serde::de::Error::custom)
@@ -332,7 +332,7 @@ mod tests {
                 #[test]
                 #[should_panic(expected = "any reserved characters need to be URL encoded")]
                 fn $index() {
-                    let _ = UriSafeString::from_static(concat!("hello", $char, "world"));
+                    let _ = UriValidString::from_static(concat!("hello", $char, "world"));
                 }
             )*
         };
@@ -340,52 +340,52 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_safe_string_creation() {
-        let safe = UriSafeString::encode("hello_world");
+    fn test_uri_valid_string_creation() {
+        let safe = UriValidString::encode("hello_world");
         assert_eq!(safe.as_ref(), "hello_world");
 
         for reserved in RESERVED_CHARACTERS.chars() {
-            let encoded_str = UriSafeString::encode(format!("hello_{reserved}_world"));
+            let encoded_str = UriValidString::encode(format!("hello_{reserved}_world"));
             assert_eq!(encoded_str.to_string(), format!("hello_%{:02X}_world", reserved as u8));
         }
     }
 
     #[test]
     fn debug_delegates_to_inner() {
-        let safe = UriSafeString::encode("hello");
+        let safe = UriValidString::encode("hello");
         assert_eq!(format!("{safe:?}"), format!("{:?}", "hello"));
 
-        let safe_num = UriSafe::from(42u32);
+        let safe_num = UriValid::from(42u32);
         assert_eq!(format!("{safe_num:?}"), "42");
     }
 
     #[test]
-    fn test_uri_safe_string_from_static() {
-        const SAFE: UriSafeString = UriSafeString::from_static("hello_world");
+    fn test_uri_valid_string_from_static() {
+        const SAFE: UriValidString = UriValidString::from_static("hello_world");
         assert_eq!(SAFE.as_str(), "hello_world");
     }
 
     #[test]
     fn test_from_string_valid() {
-        let result = UriSafeString::from("valid_string_123".to_string());
+        let result = UriValidString::from("valid_string_123".to_string());
         assert_eq!(result.as_str(), "valid_string_123");
     }
 
     #[test]
     fn encode_owned_no_encoding_reuses_string() {
-        let safe = UriSafeString::encode_owned("hello_world".to_string());
+        let safe = UriValidString::encode_owned("hello_world".to_string());
         assert_eq!(safe.as_str(), "hello_world");
     }
 
     #[test]
     fn encode_owned_encodes_reserved() {
-        let safe = UriSafeString::encode_owned("hello{world}".to_string());
+        let safe = UriValidString::encode_owned("hello{world}".to_string());
         assert_eq!(safe.as_str(), "hello%7Bworld%7D");
     }
 
     #[test]
     fn test_raw_string_valid() {
-        let result = UriSafeString::try_new("valid_string_123".to_string());
+        let result = UriValidString::try_new("valid_string_123".to_string());
         assert_eq!(result.unwrap().as_str(), "valid_string_123");
     }
 
@@ -393,14 +393,14 @@ mod tests {
     fn try_new_accepts_valid_percent_encoded_sequence() {
         // A valid %XX sequence must be accepted - catches mutation that deletes `!`
         // in the is_some_and check, which would incorrectly reject valid encodings.
-        let result = UriSafeString::try_new("hello%3Dworld");
+        let result = UriValidString::try_new("hello%3Dworld");
         assert!(result.is_ok(), "valid percent-encoded sequence should be accepted");
         assert_eq!(result.unwrap().as_str(), "hello%3Dworld");
     }
 
     #[test]
     fn test_try_new_invalid_percent_encoding() {
-        let result = UriSafeString::try_new("hello%3world".to_string());
+        let result = UriValidString::try_new("hello%3world".to_string());
         assert!(result.is_err(), "string with invalid percent encoding should be rejected");
         let err = result.unwrap_err();
         assert_eq!(err.invalid_char, '%', "error should indicate the '%' character as invalid");
@@ -408,8 +408,8 @@ mod tests {
     }
 
     #[test]
-    fn uri_safe_error_display_contains_char_and_position() {
-        let err = UriSafeError {
+    fn uri_validation_error_display_contains_char_and_position() {
+        let err = UriValidationError {
             invalid_char: '{',
             position: 5,
         };
@@ -420,26 +420,26 @@ mod tests {
 
     #[test]
     fn test_from_string_reserved() {
-        let result = UriSafeString::from("reserved{string}".to_string());
+        let result = UriValidString::from("reserved{string}".to_string());
         assert_eq!(result.as_str(), "reserved%7Bstring%7D");
     }
 
     #[test]
     fn test_raw_string_reserved() {
-        let result = UriSafeString::try_new("invalid{string}".to_string());
+        let result = UriValidString::try_new("invalid{string}".to_string());
         assert!(result.is_err());
         result.unwrap_err();
     }
 
     #[test]
     fn test_from_str_valid() {
-        let result = UriSafeString::from("valid_str_456");
+        let result = UriValidString::from("valid_str_456");
         assert_eq!(result.as_str(), "valid_str_456");
     }
 
     #[test]
     fn test_from_str_reserved() {
-        let result = UriSafeString::from("reserved{string}");
+        let result = UriValidString::from("reserved{string}");
         assert_eq!(result.as_str(), "reserved%7Bstring%7D");
     }
 
@@ -473,20 +473,20 @@ mod tests {
 
     #[test]
     fn from_static_urlencoded() {
-        let result = UriSafeString::from_static("hello%3Dworld");
+        let result = UriValidString::from_static("hello%3Dworld");
         assert_eq!(result.as_str(), "hello%3Dworld");
     }
 
     #[test]
     #[should_panic(expected = "string contains unfinished URL encoded character")]
     fn from_static_urlencoded_short() {
-        let _ = UriSafeString::from_static("hello%3");
+        let _ = UriValidString::from_static("hello%3");
     }
 
     #[test]
     #[should_panic(expected = "string contains invalid URL encoding character")]
     fn from_static_urlencoded_bad_char() {
-        let _ = UriSafeString::from_static("hello%3-world");
+        let _ = UriValidString::from_static("hello%3-world");
     }
 
     #[cfg(feature = "serde")]
@@ -494,17 +494,17 @@ mod tests {
         use super::*;
 
         #[test]
-        fn uri_safe_string_roundtrip() {
-            let original = UriSafeString::encode("hello world");
+        fn uri_valid_string_roundtrip() {
+            let original = UriValidString::encode("hello world");
             let json = serde_json::to_string(&original).unwrap();
             assert_eq!(json, r#""hello%20world""#);
-            let deserialized: UriSafeString = serde_json::from_str(&json).unwrap();
+            let deserialized: UriValidString = serde_json::from_str(&json).unwrap();
             assert_eq!(original, deserialized);
         }
 
         #[test]
-        fn uri_safe_string_deserialize_rejects_reserved() {
-            serde_json::from_str::<UriSafeString>(r#""hello{world}""#).unwrap_err();
+        fn uri_valid_string_deserialize_rejects_reserved() {
+            serde_json::from_str::<UriValidString>(r#""hello{world}""#).unwrap_err();
         }
     }
 }

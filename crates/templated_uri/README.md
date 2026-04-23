@@ -13,11 +13,11 @@
 
 </div>
 
-Standards-compliant URI handling with templating, safety validation, and data classification.
+Standards-compliant URI handling with templating, validation, and data classification.
 
 This crate provides comprehensive URI manipulation capabilities designed for HTTP clients
 and servers that need type-safe, efficient, and data classification-aware URI handling. It builds
-on top of the standard `http` crate while adding additional safety guarantees, templating
+on top of the standard `http` crate while adding additional validation guarantees, templating
 capabilities, and data classification features.
 
 ## Core Types
@@ -27,7 +27,7 @@ The crate centers around several key abstractions:
 * [`Uri`][__link0] - Flexible URI type composed of an optional [`BaseUri`][__link1] and an optional path/query
 * [`BaseUri`][__link2] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`][__link3])
 * [`UriTemplate`][__link4] - RFC 6570 Level 3 compliant URI templating
-* [`UriSafe`][__link5] and [`UriSafeString`][__link6] - Generic newtype wrapper proving a value is safe for URI components
+* [`UriValid`][__link5] and [`UriValidString`][__link6] - Generic newtype wrapper proving a value is valid for URI components
   by not containing any reserved characters
 
 ## Basic Usage
@@ -57,18 +57,18 @@ assert_eq!(
 For dynamic URIs with variable components, use the templating system:
 
 ```rust
-use templated_uri::{BaseUri, UriTemplate, Uri, UriSafeString, templated};
+use templated_uri::{BaseUri, UriTemplate, Uri, UriValidString, templated};
 
 #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 #[derive(Clone)]
 struct UserPostPath {
     user_id: u32,
-    post_id: UriSafeString,
+    post_id: UriValidString,
 }
 
 let path = UserPostPath {
     user_id: 42,
-    post_id: UriSafeString::encode("my-post"),
+    post_id: UriValidString::encode("my-post"),
 };
 
 let uri = Uri::default()
@@ -76,29 +76,29 @@ let uri = Uri::default()
     .with_path(path);
 ```
 
-## URI Safety Guarantees
+## URI Validation Guarantees
 
-The [`UriSafe<T>`][__link7] newtype wraps values that are guaranteed
-to contain only URI-safe characters. This prevents common URI injection vulnerabilities:
+The [`UriValid<T>`][__link7] newtype wraps values that are guaranteed
+to contain only valid URI characters. This prevents common URI injection vulnerabilities:
 
 ```rust
-use templated_uri::UriSafeString;
+use templated_uri::UriValidString;
 
-// This will succeed - encodes unsafe characters into a URI-safe format
-let unsafe_string = UriSafeString::encode("hello world?foo=bar");
-assert_eq!(unsafe_string.as_str(), "hello%20world%3Ffoo%3Dbar");
+// This will succeed - percent-encodes any invalid characters
+let encoded = UriValidString::encode("hello world?foo=bar");
+assert_eq!(encoded.as_str(), "hello%20world%3Ffoo%3Dbar");
 
-// This will succeed - contains only safe characters
-let safe = UriSafeString::try_new("hello-world_123").unwrap();
-assert_eq!(safe.as_str(), "hello-world_123");
+// This will succeed - contains only valid characters
+let valid = UriValidString::try_new("hello-world_123").unwrap();
+assert_eq!(valid.as_str(), "hello-world_123");
 
 // try_new() fails on URI-reserved characters
-let unsafe_string = UriSafeString::try_new("hello world?foo=bar");
-assert!(unsafe_string.is_err());
+let invalid = UriValidString::try_new("hello world?foo=bar");
+assert!(invalid.is_err());
 ```
 
-Built-in safe types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
-IP addresses, and validated [`UriSafeString`][__link8] instances.
+Built-in valid types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
+IP addresses, and validated [`UriValidString`][__link8] instances.
 
 ## Telemetry Labels
 
@@ -106,7 +106,7 @@ For complex templates, use the `label` attribute to provide a concise identifier
 for telemetry. When present, the label takes precedence over the template string.
 
 ```rust
-use templated_uri::{UriSafeString, templated};
+use templated_uri::{UriValidString, templated};
 
 #[templated(
     template = "/{org}/users/{user_id}/reports/{report_type}",
@@ -114,9 +114,9 @@ use templated_uri::{UriSafeString, templated};
     unredacted
 )]
 struct ReportPath {
-    org: UriSafeString,
-    user_id: UriSafeString,
-    report_type: UriSafeString,
+    org: UriValidString,
+    user_id: UriValidString,
+    report_type: UriValidString,
 }
 ```
 
@@ -127,14 +127,14 @@ in URIs. This is particularly important for compliance and data security:
 
 ```rust
 use data_privacy::Sensitive;
-use templated_uri::{UriSafeString, templated};
+use templated_uri::{UriValidString, templated};
 
 #[templated(template = "/{org_id}/user/{user_id}/")]
 #[derive(Clone)]
 struct UserPath {
     #[unredacted]
-    org_id: UriSafeString,
-    user_id: Sensitive<UriSafeString>,
+    org_id: UriValidString,
+    user_id: Sensitive<UriValidString>,
 }
 ```
 
@@ -168,7 +168,7 @@ and servers based on [`hyper`][__link14] like [`reqwest`][__link15].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7FUu_igE1pWG5fPlQ3xAPVPG6ZXMF-FLgBGG5Gco0FEXzNBYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_5rjCirVioAG920Fb8WPEjQGzzKJ_YcmfpwG3U95oQLYHDfYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
  [__link0]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Uri
  [__link1]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriParam
@@ -180,8 +180,8 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link2]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
  [__link3]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BasePath
  [__link4]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriTemplate
- [__link5]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafe
- [__link6]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafeString
- [__link7]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafe
- [__link8]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriSafeString
+ [__link5]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriValid
+ [__link6]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriValidString
+ [__link7]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriValid
+ [__link8]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=UriValidString
  [__link9]: https://datatracker.ietf.org/doc/html/rfc6570

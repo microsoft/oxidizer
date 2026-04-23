@@ -13,7 +13,7 @@ use crate::{Uri, UriError, UriPath};
 /// This trait is not meant to be implemented directly; use the `#[templated]` attribute macro instead.
 ///
 /// Templates are based on [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) Level 3,
-/// with additional constraints for safe HTTP URI construction:
+/// with additional constraints for valid HTTP URI construction:
 ///
 /// - Variable names must be valid Rust identifiers (ASCII letters, digits, underscores)
 /// - Templates must start with a leading `/`
@@ -26,18 +26,18 @@ use crate::{Uri, UriError, UriPath};
 /// # Example
 ///
 /// ```
-/// use templated_uri::{UriTemplate, UriSafeString, templated};
+/// use templated_uri::{UriTemplate, UriValidString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
 /// struct UserPath {
-///     org_id: UriSafeString,
-///     user_id: UriSafeString,
+///     org_id: UriValidString,
+///     user_id: UriValidString,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: UriSafeString::from_static("acme"),
-///     user_id: UriSafeString::from_static("john_doe"),
+///     org_id: UriValidString::from_static("acme"),
+///     user_id: UriValidString::from_static("john_doe"),
 /// };
 ///
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
@@ -54,19 +54,19 @@ use crate::{Uri, UriError, UriPath};
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use templated_uri::{UriTemplate, UriSafeString, templated};
+/// use templated_uri::{UriTemplate, UriValidString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
 /// struct UserPath {
 ///     #[unredacted]
-///     org_id: UriSafeString,
-///     user_id: Sensitive<UriSafeString>,
+///     org_id: UriValidString,
+///     user_id: Sensitive<UriValidString>,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: UriSafeString::from_static("acme"),
-///     user_id: Sensitive::new(UriSafeString::from_static("john_doe"), Pii),
+///     org_id: UriValidString::from_static("acme"),
+///     user_id: Sensitive::new(UriValidString::from_static("john_doe"), Pii),
 /// };
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
 ///

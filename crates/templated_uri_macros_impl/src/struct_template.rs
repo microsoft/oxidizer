@@ -121,7 +121,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         crate::bail!(ident, "Excess values in struct: {excess_values:?}")
     }
 
-    // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `UriSafe`).
+    // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `UriValid`).
     let unrestricted_params: HashSet<String> = template_params
         .iter()
         .filter(|p| p.is_unrestricted)
@@ -137,9 +137,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             let is_restricted = is_restricted(ident);
             let ty_span = f.ty.span();
 
-            // Restricted fields use .as_uri_safe(), unrestricted use .as_display()
+            // Restricted fields use .as_uri_valid(), unrestricted use .as_display()
             if is_restricted {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::UriParam::as_uri_safe(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::UriParam::as_uri_valid(&self.#ident); }
             } else {
                 quote_spanned! { ty_span => let #ident = ::templated_uri::UriUnsafeParam::as_display(&self.#ident); }
             }

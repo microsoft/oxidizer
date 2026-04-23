@@ -342,8 +342,8 @@ Uri
 UriParam
 URI
 URIs
-UriSafe
-UriSafeString
+UriValid
+UriValidString
 UriUnsafeParam
 URL
 URLs

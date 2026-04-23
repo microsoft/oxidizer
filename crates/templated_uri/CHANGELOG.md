@@ -5,6 +5,8 @@
 - ⚠️ Breaking
 
   - Broad API revisit with many breaking changes across `Uri`, `BaseUri`, `UriPath`, `Origin`, and related types. Notable renames include `TargetPathAndQuery` → `UriPath`, `TemplatedPathAndQuery` → `UriTemplate`, `ValidationError` → `UriError`, and `Uri::base_uri(...)` / `Uri::path_and_query(...)` setters → `Uri::with_base(...)` / `Uri::with_path(...)`. Several constructors and conversion helpers were removed in favor of standard `From`/`TryFrom` impls and `from_static` / `from_parts` constructors. Review call sites against the updated API surface.
+  - Removed the `http` re-export module. The `Authority`, `PathAndQuery`, and `Scheme` types from `http::uri` are now re-exported directly at the crate root (e.g. `templated_uri::Scheme` instead of `templated_uri::http::Scheme`). `Parts` is no longer re-exported.
+  - Renamed `UriSafe<T>` → `UriValid<T>`, `UriSafeString` → `UriValidString`, `UriSafeError` → `UriValidationError`, and `UriParam::as_uri_safe()` → `UriParam::as_uri_valid()`. The "valid" wording better reflects that the wrapper proves the value uses RFC 6570 unreserved characters, not that the URI itself is safe to visit.
 
 ## [0.1.2] - 2026-04-16
 
