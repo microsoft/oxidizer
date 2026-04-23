@@ -1389,15 +1389,15 @@ mod tests {
 
     #[test]
     fn extension_attaches_to_request() {
-        use crate::UrlTemplateLabel;
+        use crate::UriTemplateLabel;
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api/users/123")
-            .extension(UrlTemplateLabel::new("/api/users/{id}"))
+            .extension(UriTemplateLabel::new("/api/users/{id}"))
             .build()
             .unwrap();
 
-        let label = request.extensions().get::<UrlTemplateLabel>().expect("extension should be present");
+        let label = request.extensions().get::<UriTemplateLabel>().expect("extension should be present");
         assert_eq!(label.as_str(), "/api/users/{id}");
     }
 

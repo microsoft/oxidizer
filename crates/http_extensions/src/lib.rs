@@ -210,8 +210,8 @@ pub use http_request_builder_ext::HttpRequestBuilderExt;
 mod extensions;
 pub use extensions::{ExtensionsExt, HeaderMapExt, HeaderValueExt, HttpRequestExt, RequestExt, ResponseExt, StatusExt};
 
-mod url_template_label;
-pub use url_template_label::UrlTemplateLabel;
+mod uri_template_label;
+pub use uri_template_label::UriTemplateLabel;
 
 pub mod timeout;
 

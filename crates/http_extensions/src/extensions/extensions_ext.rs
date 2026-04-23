@@ -4,28 +4,28 @@
 use http::Extensions;
 use templated_uri::UriPath;
 
-use crate::UrlTemplateLabel;
+use crate::UriTemplateLabel;
 
 /// Extensions for [`http::Extensions`].
 pub trait ExtensionsExt: sealed::Sealed {
     /// Returns the URL template label from extensions, if available.
     ///
     /// This method checks for a template label in the following order:
-    /// 1. From an explicit [`UrlTemplateLabel`] extension
+    /// 1. From an explicit [`UriTemplateLabel`] extension
     /// 2. From a [`UriPath`] label (if set via `#[templated(label = "...")]`)
     /// 3. From a [`UriPath`] template string
     ///
     /// Returns `None` if no template information is available.
-    fn url_template_label(&self) -> Option<UrlTemplateLabel>;
+    fn uri_template_label(&self) -> Option<UriTemplateLabel>;
 }
 
 impl ExtensionsExt for Extensions {
-    fn url_template_label(&self) -> Option<UrlTemplateLabel> {
-        if let Some(label) = self.get::<UrlTemplateLabel>() {
+    fn uri_template_label(&self) -> Option<UriTemplateLabel> {
+        if let Some(label) = self.get::<UriTemplateLabel>() {
             return Some(label.clone());
         }
         if let Some(path) = self.get::<UriPath>() {
-            return Some(UrlTemplateLabel::new(path.label().unwrap_or_else(|| path.template())));
+            return Some(UriTemplateLabel::new(path.label().unwrap_or_else(|| path.template())));
         }
 
         None
@@ -44,12 +44,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn returns_explicit_url_template_label() {
+    fn returns_explicit_uri_template_label() {
         let mut extensions = Extensions::new();
-        extensions.insert(UrlTemplateLabel::new("/api/users/{id}"));
+        extensions.insert(UriTemplateLabel::new("/api/users/{id}"));
 
         assert_eq!(
-            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
+            extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
             Some("/api/users/{id}")
         );
     }
@@ -60,7 +60,7 @@ mod tests {
         extensions.insert(UriPath::from_static("/path"));
 
         assert_eq!(
-            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
+            extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
             Some("/path")
         );
     }
@@ -81,7 +81,7 @@ mod tests {
         }));
 
         assert_eq!(
-            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
+            extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
             Some("user_posts")
         );
     }
@@ -89,11 +89,11 @@ mod tests {
     #[test]
     fn explicit_label_takes_precedence_over_target_path() {
         let mut extensions = Extensions::new();
-        extensions.insert(UrlTemplateLabel::new("/explicit"));
+        extensions.insert(UriTemplateLabel::new("/explicit"));
         extensions.insert(UriPath::from_static("/path"));
 
         assert_eq!(
-            extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
+            extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
             Some("/explicit")
         );
     }
@@ -101,6 +101,6 @@ mod tests {
     #[test]
     fn returns_none_without_any_template_info() {
         let extensions = Extensions::new();
-        assert!(extensions.url_template_label().is_none());
+        assert!(extensions.uri_template_label().is_none());
     }
 }
