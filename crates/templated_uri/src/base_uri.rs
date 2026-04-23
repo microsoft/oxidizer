@@ -669,7 +669,7 @@ mod tests {
         // Exercises both `TryInto<Scheme>` (via `&str`) and `TryInto<BasePath>` (via `&str`).
         let base_uri = BaseUri::try_from_raw_parts("https", "example.com", 1234, "/api/v1/").unwrap();
         assert_eq!(base_uri.to_string(), "https://example.com:1234/api/v1/");
-        assert!(BaseUri::try_from_raw_parts("ftp", "example.com", 21, BasePath::default()).is_err());
+        BaseUri::try_from_raw_parts("ftp", "example.com", 21, BasePath::default()).unwrap_err();
     }
 
     mod from_uri_static {

@@ -101,37 +101,36 @@ impl UriValidString {
     /// This is the preferred constructor - it always succeeds by encoding any characters
     /// that are not valid for URI templates as defined in RFC 6570.
     ///
+    /// Accepts both borrowed (`&str`) and owned (`String`) inputs via `Into<Cow<'_, str>>`.
+    /// When an owned `String` is provided and no encoding is needed, the original
+    /// allocation is reused.
+    ///
     /// # Examples
     ///
     /// ```
     /// use templated_uri::UriValidString;
     ///
+    /// // Borrowed input.
     /// let valid = UriValidString::encode("hello_world");
     /// assert_eq!(valid.as_str(), "hello_world");
     ///
     /// let escaped = UriValidString::encode("{hello}");
     /// assert_eq!(escaped.as_str(), "%7Bhello%7D");
+    ///
+    /// // Owned input; the String is reused directly when already valid.
+    /// let valid = UriValidString::encode(String::from("hello_world"));
+    /// assert_eq!(valid.as_str(), "hello_world");
     /// ```
-    pub fn encode(s: impl AsRef<str>) -> Self {
-        Self::encode_str(s.as_ref())
-    }
-
-    fn encode_str(s: &str) -> Self {
+    pub fn encode<'a>(s: impl Into<Cow<'a, str>>) -> Self {
+        let s = s.into();
         let encoded = PctString::encode(s.chars(), UriReserved::Any);
         if encoded.as_str().len() == s.len() {
-            Self(Cow::Owned(s.to_owned()))
-        } else {
-            Self(Cow::Owned(encoded.into_string()))
-        }
-    }
-
-    /// Like [`encode`](Self::encode), but takes an owned `String` to avoid
-    /// re-allocating when no encoding is needed.
-    #[must_use]
-    pub fn encode_owned(s: String) -> Self {
-        let encoded = PctString::encode(s.chars(), UriReserved::Any);
-        if encoded.as_str().len() == s.len() {
-            Self(Cow::Owned(s))
+            // No characters required encoding; avoid allocating a new `String` when
+            // the caller already owns one.
+            match s {
+                Cow::Owned(owned) => Self(Cow::Owned(owned)),
+                Cow::Borrowed(borrowed) => Self(Cow::Owned(borrowed.to_owned())),
+            }
         } else {
             Self(Cow::Owned(encoded.into_string()))
         }
@@ -157,14 +156,17 @@ impl UriValidString {
     /// assert!(invalid.is_err());
     /// ```
     ///
+    /// Accepts both borrowed (`&'static str`) and owned (`String`) inputs via
+    /// `Into<Cow<'static, str>>`. A `&'static str` is stored without allocation.
+    ///
     /// # Errors
     ///
     /// Returns a [`UriValidationError`] if the string contains reserved URI characters.
-    pub fn try_new(raw: impl Into<String>) -> Result<Self, UriValidationError> {
+    pub fn try_new(raw: impl Into<Cow<'static, str>>) -> Result<Self, UriValidationError> {
         Self::try_new_inner(raw.into())
     }
 
-    fn try_new_inner(raw: String) -> Result<Self, UriValidationError> {
+    fn try_new_inner(raw: Cow<'static, str>) -> Result<Self, UriValidationError> {
         let mut characters = raw.chars().enumerate();
 
         while let Some((i, c)) = characters.next() {
@@ -192,7 +194,7 @@ impl UriValidString {
             });
         }
 
-        Ok(Self(Cow::Owned(raw)))
+        Ok(Self(raw))
     }
 
     /// Returns a reference to the underlying string.
@@ -282,7 +284,7 @@ impl From<String> for UriValidString {
     /// assert_eq!(encoded.as_str(), "%7Bhello%7D");
     /// ```
     fn from(s: String) -> Self {
-        Self::encode_owned(s)
+        Self::encode(s)
     }
 }
 
@@ -373,14 +375,19 @@ mod tests {
 
     #[test]
     fn encode_owned_no_encoding_reuses_string() {
-        let safe = UriValidString::encode_owned("hello_world".to_string());
-        assert_eq!(safe.as_str(), "hello_world");
+        // When given an owned `String` that requires no encoding, the original
+        // allocation must be reused rather than copied.
+        let input = "hello_world".to_string();
+        let ptr_before = input.as_ptr();
+        let valid = UriValidString::encode(input);
+        assert_eq!(valid.as_str(), "hello_world");
+        assert_eq!(valid.as_str().as_ptr(), ptr_before);
     }
 
     #[test]
     fn encode_owned_encodes_reserved() {
-        let safe = UriValidString::encode_owned("hello{world}".to_string());
-        assert_eq!(safe.as_str(), "hello%7Bworld%7D");
+        let valid = UriValidString::encode("hello{world}".to_string());
+        assert_eq!(valid.as_str(), "hello%7Bworld%7D");
     }
 
     #[test]
@@ -396,6 +403,23 @@ mod tests {
         let result = UriValidString::try_new("hello%3Dworld");
         assert!(result.is_ok(), "valid percent-encoded sequence should be accepted");
         assert_eq!(result.unwrap().as_str(), "hello%3Dworld");
+    }
+
+    #[test]
+    fn try_new_preserves_static_borrow() {
+        // A `&'static str` input must be stored without copying.
+        const INPUT: &str = "hello_world";
+        let result = UriValidString::try_new(INPUT).unwrap();
+        assert_eq!(result.as_str().as_ptr(), INPUT.as_ptr());
+    }
+
+    #[test]
+    fn try_new_preserves_owned_string() {
+        // An owned `String` input must be reused without copying.
+        let input = "hello_world".to_string();
+        let ptr_before = input.as_ptr();
+        let result = UriValidString::try_new(input).unwrap();
+        assert_eq!(result.as_str().as_ptr(), ptr_before);
     }
 
     #[test]
