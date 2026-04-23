@@ -17,7 +17,7 @@
 //!
 //! The crate centers around several key abstractions:
 //!
-//! - [`Uri`] - Flexible URI type with endpoint and path/query components
+//! - [`Uri`] - Flexible URI type composed of an optional [`BaseUri`] and an optional path/query
 //! - [`BaseUri`] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`])
 //! - [`UriTemplate`] - RFC 6570 Level 3 compliant URI templating
 //! - [`UriSafe`] and [`UriSafeString`] - Generic newtype wrapper proving a value is safe for URI components
@@ -30,7 +30,7 @@
 //! use templated_uri::uri::PathAndQuery;
 //! use templated_uri::{BaseUri, Uri, UriPath};
 //!
-//! // Create an endpoint (scheme + authority only)
+//! // Create the base (scheme + authority, optionally a path prefix)
 //! let base_uri = BaseUri::from_static("https://api.example.com");
 //!
 //! // Create a path (can be static for zero-allocation)

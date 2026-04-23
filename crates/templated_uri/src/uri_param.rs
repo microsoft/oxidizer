@@ -16,7 +16,7 @@ pub trait UriParam {
     /// Returns this value wrapped in [`UriSafe`], proving it is safe for URI use.
     fn as_uri_safe(&self) -> UriSafe<impl Display>;
 }
-//
+
 /// Marks types with possibly dodgy content usable from templates, e.g., `/get/{+foo}`.
 pub trait UriUnsafeParam {
     /// Returns a displayable representation of this value.

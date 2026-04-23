@@ -21,7 +21,8 @@ use crate::{BasePath, BaseUri, Origin, UriTemplate};
 /// This struct encapsulates the [`BaseUri`] (scheme, authority and path prefix) and the path and query components of the URI.
 ///
 /// The `Uri` struct is designed to be flexible and can be constructed with or without a [`BaseUri`].
-/// It can also handle templated paths and queries, allowing for dynamic URI generation based on templates.
+/// It can also wrap a templated path produced by a [`UriTemplate`] implementation, allowing for
+/// dynamic URI generation.
 ///
 /// ```
 /// use templated_uri::uri::PathAndQuery;
@@ -144,7 +145,11 @@ impl Uri {
         self.path.clone()
     }
 
-    /// Converts the URI to a string representation.
+    /// Returns the URI as a [`Sensitive`] string, classified under [`Uri::DATA_CLASS`].
+    ///
+    /// This shadows [`ToString::to_string`] to ensure callers receive a classified value
+    /// rather than a plain `String`. Use [`Sensitive::declassify_ref`] (or the
+    /// [`RedactedDisplay`] impl) when you need access to the underlying text.
     pub fn to_string(&self) -> Sensitive<String> {
         let mut path = self.base_uri.as_ref().map(ToString::to_string).unwrap_or_default();
 

@@ -201,21 +201,27 @@ impl UriSafeString {
         self.0.borrow()
     }
 
-    /// Creates a `UriSafeString` from a string literal, verifying at compile time
-    /// that the string does not contain any reserved characters.
+    /// Creates a `UriSafeString` from a string literal.
     ///
-    /// Unlike [`UriSafeString::encode`], string needs to be percent-encoded beforehand
+    /// This is a `const fn`, so when used in a `const` context the validation runs at
+    /// compile time. When called at runtime, invalid input panics instead.
+    ///
+    /// Unlike [`UriSafeString::encode`], the input must already be percent-encoded -
+    /// reserved characters are rejected rather than encoded.
     ///
     /// # Examples
     ///
     /// ```
     /// use templated_uri::UriSafeString;
     ///
-    /// // This will compile successfully
+    /// // Validated at compile time when used in a const context.
+    /// const SAFE: UriSafeString = UriSafeString::from_static("hello_world");
+    ///
+    /// // Also usable at runtime; panics on invalid input.
     /// let safe = UriSafeString::from_static("hello_world");
     ///
-    /// // This would fail to compile:
-    /// // let unsafe_str = UriSafeString::from_static("{hello}");
+    /// // The following would fail to compile (const) or panic at runtime:
+    /// // const BAD: UriSafeString = UriSafeString::from_static("{hello}");
     /// ```
     ///
     /// # Panics
