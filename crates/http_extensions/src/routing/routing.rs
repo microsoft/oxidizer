@@ -7,7 +7,7 @@ use recoverable::RecoveryKind;
 use templated_uri::{BaseUri, Uri};
 
 use super::RoutingContext;
-use crate::error_labels::LABEL_URI_CONFLICT;
+use crate::error_labels::{LABEL_URI_CONFLICT, LABEL_URI_MISSING};
 use crate::{HttpError, HttpRequest};
 
 /// Strategy used by [`Routing::create_uri`] when both the target [`Uri`] and the
@@ -152,6 +152,13 @@ impl Routing {
     pub fn create_uri(&self, ctx: RoutingContext, uri: Uri) -> Result<Uri, HttpError> {
         let routed = self.resolve(&ctx);
         let (existing, path) = uri.into_parts();
+
+        if existing.is_none() && path.is_none() && self.conflict_policy == BaseUriConflict::Fail {
+            return Err(HttpError::validation_with_label(
+                "the uri must have a base uri or a path to be routed; if relative path is used, ensure it is prefixed with a slash",
+                LABEL_URI_MISSING,
+            ));
+        }
 
         // if new base uri is not available, return existing uri
         let Some(routed) = routed else {
@@ -302,6 +309,14 @@ mod tests {
 
         let err = routing.create_uri(RoutingContext::new(), target_with_base()).unwrap_err();
         assert_eq!(err.label(), "uri_conflict");
+    }
+
+    #[test]
+    fn fail_returns_error_when_target_has_no_base_and_no_path() {
+        let routing = Routing::default().conflict_policy(BaseUriConflict::Fail);
+
+        let err = routing.create_uri(RoutingContext::new(), Uri::default()).unwrap_err();
+        assert_eq!(err.label(), "uri_missing");
     }
 
     #[test]
