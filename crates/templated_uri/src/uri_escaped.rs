@@ -74,22 +74,13 @@ impl_uri_escaped_from!(Uuid);
 /// (`escape`, `try_new`, `from_static`) to create instances.
 pub type UriEscapedString = UriEscaped<Cow<'static, str>>;
 
-/// Error returned when a string contains characters that are not properly escaped for URI templates.
-#[derive(Debug)]
-pub struct UriEscapeError {
-    /// The unescaped character that was found.
-    pub invalid_char: char,
-    /// The position in the string where the unescaped character was found.
-    pub position: usize,
-}
+/// Error returned when a string is not a valid URI-escaped string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UriEscapeError(&'static str);
 
 impl fmt::Display for UriEscapeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "unescaped character '{}' at position {} in URI-escaped string",
-            self.invalid_char, self.position
-        )
+        f.write_str(self.0)
     }
 }
 
@@ -167,34 +158,10 @@ impl UriEscapedString {
     }
 
     fn try_new_inner(raw: Cow<'static, str>) -> Result<Self, UriEscapeError> {
-        let mut characters = raw.chars().enumerate();
-
-        while let Some((i, c)) = characters.next() {
-            if c == '%' {
-                // Check URL encoded string - must have exactly 2 hex digits after %
-                for _ in 0..2 {
-                    if !characters.next().is_some_and(|(_, c)| c.is_ascii_hexdigit()) {
-                        return Err(UriEscapeError {
-                            invalid_char: '%',
-                            position: i,
-                        });
-                    }
-                }
-                // Valid percent-encoded sequence, continue to next character
-                continue;
-            }
-
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '~' | '.') {
-                continue;
-            }
-
-            return Err(UriEscapeError {
-                invalid_char: c,
-                position: i,
-            });
+        match validate_escaped(raw.as_bytes()) {
+            None => Ok(Self(raw)),
+            Some(message) => Err(UriEscapeError(message)),
         }
-
-        Ok(Self(raw))
     }
 
     /// Returns a reference to the underlying string.
@@ -232,40 +199,38 @@ impl UriEscapedString {
     #[inline]
     #[must_use]
     pub const fn from_static(s: &'static str) -> Self {
-        // Validation logic mirrors `try_new_inner` but operates on bytes for `const fn` use.
-        let bytes = s.as_bytes();
-        let mut i = 0;
-        let mut url_encoded_char: Option<u8> = None;
-
-        while i < bytes.len() {
-            let b = bytes[i];
-            i += 1;
-            // We are dealing with URL encoded string
-            if let Some(pct_num) = url_encoded_char {
-                assert!(b.is_ascii_hexdigit(), "string contains invalid URL encoding character");
-
-                // If we are at the second character already, disable URL encoded check and continue
-                if pct_num == 1 {
-                    url_encoded_char = None;
-                    continue;
-                }
-                url_encoded_char = Some(pct_num + 1);
-            }
-
-            if b == b'%' {
-                // URL encoded start
-                url_encoded_char = Some(0);
-                continue;
-            }
-
-            assert!(
-                b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'~' | b'.'),
-                "any reserved characters need to be URL encoded"
-            );
+        match validate_escaped(s.as_bytes()) {
+            None => Self(Cow::Borrowed(s)),
+            Some(message) => panic!("{}", message),
         }
-        assert!(url_encoded_char.is_none(), "string contains unfinished URL encoded character");
-        Self(Cow::Borrowed(s))
     }
+}
+
+/// Validates that `bytes` contains only RFC 6570 unreserved characters and well-formed
+/// `%XX` percent-escape sequences. Returns `None` on success or a static description of
+/// the first fault found. Shared by [`UriEscapedString::try_new`] (runtime) and
+/// [`UriEscapedString::from_static`] (compile-time).
+const fn validate_escaped(bytes: &[u8]) -> Option<&'static str> {
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%' {
+            if i + 2 >= bytes.len() {
+                return Some("string contains unfinished URL encoded character");
+            }
+            if !bytes[i + 1].is_ascii_hexdigit() || !bytes[i + 2].is_ascii_hexdigit() {
+                return Some("string contains invalid URL encoding character");
+            }
+            i += 3;
+            continue;
+        }
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'~' | b'.') {
+            i += 1;
+            continue;
+        }
+        return Some("any reserved characters need to be URL encoded");
+    }
+    None
 }
 
 impl From<String> for UriEscapedString {
@@ -425,21 +390,14 @@ mod tests {
     #[test]
     fn test_try_new_invalid_percent_encoding() {
         let result = UriEscapedString::try_new("hello%3world".to_string());
-        assert!(result.is_err(), "string with invalid percent encoding should be rejected");
         let err = result.unwrap_err();
-        assert_eq!(err.invalid_char, '%', "error should indicate the '%' character as invalid");
-        assert_eq!(err.position, 5, "error should indicate the position of the invalid '%' character");
+        assert_eq!(err.to_string(), "string contains invalid URL encoding character");
     }
 
     #[test]
-    fn uri_escape_error_display_contains_char_and_position() {
-        let err = UriEscapeError {
-            invalid_char: '{',
-            position: 5,
-        };
-        let msg = err.to_string();
-        assert!(msg.contains('{'), "error message should contain the invalid character");
-        assert!(msg.contains('5'), "error message should contain the position");
+    fn uri_escape_error_display_matches_message() {
+        let err = UriEscapedString::try_new("hello{world}".to_string()).unwrap_err();
+        assert_eq!(err.to_string(), "any reserved characters need to be URL encoded");
     }
 
     #[test]

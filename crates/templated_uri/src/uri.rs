@@ -45,9 +45,9 @@ use crate::{BasePath, BaseUri, Origin, UriPath};
 #[derive(Clone)]
 pub struct Uri {
     /// The base of the URI, which includes scheme, authority and path prefix
-    base_uri: Option<BaseUri>,
+    pub(crate) base_uri: Option<BaseUri>,
     /// The path and query of the URI.
-    path: Option<UriPath>,
+    pub(crate) path: Option<UriPath>,
 }
 
 impl Default for Uri {
