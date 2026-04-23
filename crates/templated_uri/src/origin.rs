@@ -96,7 +96,7 @@ impl Origin {
 
     /// Returns the port of this origin.
     ///
-    /// This method determines the port based on the same rules as [`BaseUri::port`](super::BaseUri::port).
+    /// This method determines the port based on the same rules as [`BaseUri::port`](crate::BaseUri::port).
     pub fn port(&self) -> u16 {
         if let Some(port) = self.authority.port_u16() {
             return port;
@@ -138,7 +138,7 @@ impl Origin {
     /// Checks if this origin uses the HTTPS scheme.
     ///
     /// This method returns `true` if the scheme is HTTPS, `false` otherwise.
-    /// For more details, see [`BaseUri::is_https`](super::BaseUri::is_https).
+    /// For more details, see [`BaseUri::is_https`](crate::BaseUri::is_https).
     pub fn is_https(&self) -> bool {
         self.scheme == Scheme::HTTPS
     }

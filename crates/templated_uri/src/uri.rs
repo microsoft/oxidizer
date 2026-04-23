@@ -3,18 +3,15 @@
 
 //! Types and traits that constitute a Uri.
 
-use std::borrow::Cow;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
-use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::Arc;
 
-use data_privacy::{Classified, DataClass, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
+use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactionEngine, Sensitive};
 pub use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 
 use crate::error::UriError;
-use crate::{BasePath, BaseUri, Origin, UriTemplate};
+use crate::{BasePath, BaseUri, Origin, UriPath};
 
 /// Represents a URI that can be used as a target for requests.
 ///
@@ -271,126 +268,6 @@ impl TryFrom<Uri> for http::Uri {
     }
 }
 
-/// Path and query component of a [`Uri`].
-///
-/// `UriPath` wraps either a static [`PathAndQuery`] or a dynamic value
-/// produced by a [`UriTemplate`] implementation. Use the `from_*` constructors
-/// or `From` impls to build one; the internal representation is intentionally
-/// not exposed.
-#[derive(Clone)]
-pub struct UriPath(UriPathInner);
-
-#[derive(Clone)]
-enum UriPathInner {
-    Static(Sensitive<PathAndQuery>),
-    Templated(Arc<dyn UriTemplate>),
-}
-
-impl UriPath {
-    /// Creates a new `UriPath` from a [`UriTemplate`].
-    pub fn from_template(template: impl UriTemplate) -> Self {
-        Self(UriPathInner::Templated(Arc::new(template)))
-    }
-
-    /// Creates a new `UriPath` from a static path and query string.
-    #[must_use]
-    pub fn from_static(path: &'static str) -> Self {
-        Self::from(PathAndQuery::from_static(path))
-    }
-
-    /// Returns the template string for this path and query.
-    #[must_use]
-    pub fn template(&self) -> Cow<'static, str> {
-        match &self.0 {
-            UriPathInner::Static(classified_pq) => Cow::Owned(classified_pq.clone().declassify_ref().to_string()),
-            UriPathInner::Templated(templated) => Cow::Borrowed(templated.template()),
-        }
-    }
-
-    /// Returns an optional label for this path and query.
-    /// For templated paths with a label configured, this returns that label.
-    /// For non-templated paths, this returns `None`.
-    #[must_use]
-    pub fn label(&self) -> Option<Cow<'static, str>> {
-        match &self.0 {
-            UriPathInner::Static(_) => None,
-            UriPathInner::Templated(templated) => templated.label().map(Cow::Borrowed),
-        }
-    }
-
-    /// Converts to a URI string.
-    pub fn to_uri_string(&self) -> String {
-        match &self.0 {
-            UriPathInner::Static(classified_pq) => classified_pq.declassify_ref().to_string(),
-            UriPathInner::Templated(templated) => templated.to_uri_string(),
-        }
-    }
-
-    /// Converts to a redacted URI string using the provided redaction engine.
-    pub fn to_uri_string_redacted(&self, redaction_engine: &RedactionEngine) -> String {
-        match &self.0 {
-            UriPathInner::Static(classified_pq) => {
-                // We can't use to_string in redaction because it automatically prepends a slash if the path doesn't start with one.
-                // as_str doesn't do that, so we declassify to get the inner PathAndQuery and then use as_str.
-                let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
-                redaction_engine.redacted_to_string(&reclassified)
-            }
-            UriPathInner::Templated(templated) => templated.deref().to_redacted_string(redaction_engine),
-        }
-    }
-}
-
-impl Debug for UriPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut tuple = f.debug_tuple("UriPath");
-        match &self.0 {
-            UriPathInner::Static(_) => tuple.finish(),
-            UriPathInner::Templated(templated) => tuple.field(templated).finish(),
-        }
-    }
-}
-
-impl TryFrom<Uri> for UriPath {
-    type Error = UriError;
-    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        uri.to_http_path()
-            .map(Self::from)
-            .ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))
-    }
-}
-
-impl From<PathAndQuery> for UriPath {
-    fn from(value: PathAndQuery) -> Self {
-        Self(UriPathInner::Static(Sensitive::new(value, Uri::DATA_CLASS)))
-    }
-}
-
-impl TryFrom<&UriPath> for PathAndQuery {
-    type Error = UriError;
-    fn try_from(value: &UriPath) -> Result<Self, Self::Error> {
-        match &value.0 {
-            UriPathInner::Static(classified_pq) => Ok(classified_pq.declassify_ref().clone()),
-            UriPathInner::Templated(templated) => templated.to_http_path(),
-        }
-    }
-}
-
-impl TryFrom<UriPath> for PathAndQuery {
-    type Error = UriError;
-    fn try_from(value: UriPath) -> Result<Self, Self::Error> {
-        Self::try_from(&value)
-    }
-}
-
-impl From<UriPath> for Uri {
-    fn from(value: UriPath) -> Self {
-        Self {
-            base_uri: None,
-            path: Some(value),
-        }
-    }
-}
-
 impl From<BaseUri> for Uri {
     fn from(value: BaseUri) -> Self {
         Self {
@@ -410,6 +287,8 @@ impl TryFrom<Uri> for PathAndQuery {
 
 #[cfg(test)]
 mod tests {
+    use data_privacy::RedactedToString;
+
     use super::*;
 
     #[test]
@@ -487,19 +366,6 @@ mod tests {
         let uri: Uri = uri_str.parse().unwrap();
         assert!(uri.base_uri.is_none());
         assert_eq!(uri.to_string().declassify_ref(), uri_str);
-    }
-
-    #[test]
-    fn test_path_template() {
-        let path = PathAndQuery::from_str("/path/to/resource?query=param").unwrap();
-        let target_path: UriPath = path.clone().into();
-        assert_eq!(target_path.template(), "/path/to/resource?query=param");
-        assert_eq!(target_path.to_uri_string(), "/path/to/resource?query=param");
-        assert_eq!(PathAndQuery::try_from(&target_path).unwrap(), path);
-        assert_eq!(
-            Uri::from(target_path.clone()).to_string(),
-            Uri::default().with_path(target_path).to_string()
-        );
     }
 
     #[test]
@@ -648,26 +514,6 @@ mod tests {
 
         let http_uri: http::Uri = uri.try_into().unwrap();
         assert_eq!(http_uri.to_string(), "/path?query=value");
-    }
-
-    #[test]
-    fn test_try_from_uri_to_path_error() {
-        // Test error case when URI has no path and query
-        let uri = Uri::default().with_base(BaseUri::from_static("https://example.com/"));
-
-        let result: Result<UriPath, UriError> = uri.try_into();
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not have a path and query component"));
-    }
-
-    #[test]
-    fn test_try_from_uri_to_path_success() {
-        // Test successful conversion when URI has path and query
-        let path = PathAndQuery::from_static("/test/path?query=value");
-        let uri = Uri::default().with_path(path);
-
-        let target_paq: UriPath = uri.try_into().unwrap();
-        assert_eq!(target_paq.to_uri_string(), "/test/path?query=value");
     }
 
     #[test]

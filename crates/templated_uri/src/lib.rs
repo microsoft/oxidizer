@@ -154,19 +154,25 @@
 //! to an [`http::Uri`] for use with HTTP clients
 //! and servers based on [`hyper`](https://docs.rs/hyper/latest/hyper/) like [`reqwest`](https://docs.rs/reqwest/latest/reqwest/).
 
+mod base_path;
 mod base_uri;
 mod error;
 mod macros;
+mod origin;
 mod templated;
 pub mod uri;
 mod uri_param;
+mod uri_path;
 mod uri_safe;
 
-pub use base_uri::{BasePath, BaseUri, Origin};
+pub use base_path::BasePath;
+pub use base_uri::BaseUri;
 pub use error::UriError;
 pub use macros::{UriParam, UriUnsafeParam, templated};
+pub use origin::Origin;
 pub use templated::UriTemplate;
 #[doc(inline)]
-pub use uri::{Uri, UriPath};
+pub use uri::Uri;
 pub use uri_param::{UriParam, UriUnsafeParam};
+pub use uri_path::UriPath;
 pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};
