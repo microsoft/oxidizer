@@ -143,8 +143,10 @@ impl Routing {
     ///
     /// # Errors
     ///
-    /// Returns [`HttpError::validation`] when the target [`Uri`] already has a [`BaseUri`],
-    /// the routing also produces one, and the policy is [`BaseUriConflict::Fail`].
+    /// Returns [`HttpError::validation`] when the policy is [`BaseUriConflict::Fail`] and
+    /// either:
+    /// - the target [`Uri`] already has a [`BaseUri`] and the routing also produces one; or
+    /// - the target [`Uri`] has neither a [`BaseUri`] nor a path.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "while not consuming the context, we might do it at some point"
