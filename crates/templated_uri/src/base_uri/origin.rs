@@ -21,6 +21,28 @@ pub struct Origin {
 }
 
 impl Origin {
+    /// Creates a new `Origin` by parsing a static string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the string is not a valid origin (missing scheme, unsupported scheme,
+    /// or invalid authority). Intended for use with compile-time-known constants;
+    /// use [`Origin::from_str`](std::str::FromStr::from_str) for fallible parsing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::Origin;
+    /// let origin = Origin::from_static("https://example.com:8443");
+    /// assert_eq!(origin.scheme().as_str(), "https");
+    /// assert_eq!(origin.authority().as_str(), "example.com:8443");
+    /// ```
+    #[must_use]
+    #[expect(clippy::expect_used, reason = "from_static is documented to panic on invalid input")]
+    pub fn from_static(s: &'static str) -> Self {
+        s.parse().expect("invalid origin passed to Origin::from_static")
+    }
+
     /// Creates a new `Origin` from the given scheme and authority.
     ///
     /// # Arguments
@@ -281,6 +303,19 @@ mod tests {
     #[test]
     fn from_str_unsupported_scheme() {
         "ftp://example.com".parse::<Origin>().unwrap_err();
+    }
+
+    #[test]
+    fn from_static_valid() {
+        let origin = Origin::from_static("https://example.com:8443");
+        assert_eq!(origin.scheme().as_str(), "https");
+        assert_eq!(origin.authority().as_str(), "example.com:8443");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid origin passed to Origin::from_static")]
+    fn from_static_invalid() {
+        let _ = Origin::from_static("ftp://example.com");
     }
 
     #[cfg(feature = "serde")]

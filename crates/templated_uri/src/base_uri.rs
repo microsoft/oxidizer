@@ -219,70 +219,9 @@ impl BaseUri {
     /// assert_eq!(base_uri.to_string(), "https://example.com/");
     /// ```
     #[must_use]
+    #[expect(clippy::expect_used, reason = "from_static is documented to panic on invalid input")]
     pub fn from_static(uri: &'static str) -> Self {
-        Self::from_http(&http::Uri::from_static(uri)).expect("static str is not a valid base_uri URI")
-    }
-
-    /// Creates a [`BaseUri`] from an existing `http::Uri`.
-    ///
-    /// Extracts the scheme, authority and optional path prefix from a `Uri` object to create
-    /// a [`BaseUri`]. The URI must contain both a scheme and authority component.
-    ///
-    /// Any query string or fragment in the URI is silently discarded - only the scheme,
-    /// authority and path are used.
-    ///
-    /// # Arguments
-    ///
-    /// - `uri`: A reference to an `http::Uri` object.
-    ///
-    /// # Errors
-    ///
-    /// Returns a validation error if the URI is missing either the scheme or authority component.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use templated_uri::BaseUri;
-    /// let uri = "https://example.com".parse::<http::Uri>()?;
-    /// let base_uri = BaseUri::from_http(&uri)?;
-    /// // Note the added trailing slash, this is a behavior of http::Uri parsing which initializes a `/`
-    /// // path if none is present in input string, we can't do anything about it.
-    /// assert_eq!(base_uri.to_string(), "https://example.com/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    ///
-    /// Using a URI string with a path:
-    ///
-    /// ```
-    /// # use templated_uri::BaseUri;
-    /// let uri = "https://example.com/path/".parse::<http::Uri>()?;
-    /// let base_uri = BaseUri::from_http(&uri)?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
-    /// assert_eq!(base_uri.path().as_str(), "/path/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    ///
-    /// Query and fragment are discarded:
-    ///
-    /// ```
-    /// # use templated_uri::BaseUri;
-    /// let uri = "https://example.com/path/?query=1".parse::<http::Uri>()?;
-    /// let base_uri = BaseUri::from_http(&uri)?;
-    /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
-    /// # Ok::<_, Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn from_http(uri: &http::Uri) -> Result<Self, UriError> {
-        let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority()) else {
-            return Err(UriError::invalid_uri("URI must have both scheme and authority components"));
-        };
-
-        // Use only the path component - query and fragment are not part of a base URI.
-        let path = match uri.path() {
-            "" | "/" => BasePath::default(),
-            p => BasePath::try_from(p)?,
-        };
-
-        Ok(Self::from_parts(Origin::from_parts(scheme.clone(), authority.clone())?, path))
+        Self::try_from(&http::Uri::from_static(uri)).expect("static str is not a valid base URI")
     }
 
     /// Returns a reference to the scheme component of this [`BaseUri`].
@@ -518,7 +457,10 @@ impl BaseUri {
 impl TryFrom<http::Uri> for BaseUri {
     type Error = UriError;
 
-    /// Tries to convert a URI into an `base_uri`.
+    /// Tries to convert a URI into a `BaseUri`.
+    ///
+    /// Any query string or fragment in the URI is silently discarded - only the scheme,
+    /// authority and path are used.
     ///
     /// # Errors
     ///
@@ -527,15 +469,46 @@ impl TryFrom<http::Uri> for BaseUri {
     /// - The URI does not have both scheme and authority components.
     /// - The scheme is not HTTP or HTTPS.
     fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
-        Self::from_http(&uri)
+        Self::try_from(&uri)
     }
 }
 
 impl TryFrom<&http::Uri> for BaseUri {
     type Error = UriError;
 
+    /// Tries to convert a URI reference into a `BaseUri`.
+    ///
+    /// Any query string or fragment in the URI is silently discarded - only the scheme,
+    /// authority and path are used.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    ///
+    /// - The URI does not have both scheme and authority components.
+    /// - The scheme is not HTTP or HTTPS.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::BaseUri;
+    /// let uri = "https://example.com/path/?query=1".parse::<http::Uri>()?;
+    /// let base_uri = BaseUri::try_from(&uri)?;
+    /// assert_eq!(base_uri.to_string(), "https://example.com/path/");
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
     fn try_from(uri: &http::Uri) -> Result<Self, Self::Error> {
-        Self::from_http(uri)
+        let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority()) else {
+            return Err(UriError::invalid_uri("URI must have both scheme and authority components"));
+        };
+
+        // Use only the path component - query and fragment are not part of a base URI.
+        let path = match uri.path() {
+            "" | "/" => BasePath::default(),
+            p => BasePath::try_from(p)?,
+        };
+
+        Ok(Self::from_parts(Origin::from_parts(scheme.clone(), authority.clone())?, path))
     }
 }
 
@@ -704,7 +677,7 @@ mod tests {
             assert_eq!(base_uri.to_string(), "https://example.com/path/to/resource/");
         }
 
-        #[should_panic(expected = "static str is not a valid base_uri URI")]
+        #[should_panic(expected = "static str is not a valid base URI")]
         #[test]
         fn invalid_uri() {
             let _base_uri = BaseUri::from_static("not-a-valid-uri");
@@ -749,7 +722,7 @@ mod tests {
         #[test]
         fn valid_uri() {
             let uri = http::Uri::from_static("https://example.com");
-            let base_uri = BaseUri::from_http(&uri).unwrap();
+            let base_uri = BaseUri::try_from(&uri).unwrap();
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
         }
@@ -757,7 +730,7 @@ mod tests {
         #[test]
         fn with_path() {
             let uri = http::Uri::from_static("https://example.com/path/");
-            let base_uri = BaseUri::from_http(&uri).unwrap();
+            let base_uri = BaseUri::try_from(&uri).unwrap();
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
             assert_eq!(base_uri.path().as_str(), "/path/");
@@ -766,14 +739,14 @@ mod tests {
         #[test]
         fn strips_query_from_path() {
             let uri = http::Uri::from_static("https://example.com/path/?query=1");
-            let base_uri = BaseUri::from_http(&uri).unwrap();
+            let base_uri = BaseUri::try_from(&uri).unwrap();
             assert_eq!(base_uri.to_string(), "https://example.com/path/");
         }
 
         #[test]
         fn missing_components() {
             let uri = http::Uri::from_static("/just-a-path");
-            let err = BaseUri::from_http(&uri).unwrap_err();
+            let err = BaseUri::try_from(&uri).unwrap_err();
             assert!(err.to_string().contains("URI must have both scheme and authority"));
         }
     }

@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn returns_template_as_fallback_from_uri_path() {
         let mut extensions = Extensions::new();
-        extensions.insert(UriPath::from("/path".parse().unwrap()));
+        extensions.insert(UriPath::from_static("/path"));
 
         assert_eq!(
             extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),
@@ -90,7 +90,7 @@ mod tests {
     fn explicit_label_takes_precedence_over_target_path() {
         let mut extensions = Extensions::new();
         extensions.insert(UrlTemplateLabel::new("/explicit"));
-        extensions.insert(UriPath::from("/path".parse().unwrap()));
+        extensions.insert(UriPath::from_static("/path"));
 
         assert_eq!(
             extensions.url_template_label().as_ref().map(UrlTemplateLabel::as_str),

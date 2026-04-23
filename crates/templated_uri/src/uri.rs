@@ -341,7 +341,7 @@ impl TryFrom<Uri> for UriPath {
     type Error = UriError;
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         uri.to_http_path()?
-            .map(UriPath::from)
+            .map(Self::from)
             .ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))
     }
 }

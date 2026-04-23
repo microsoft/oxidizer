@@ -20,6 +20,28 @@ impl BasePath {
         self.inner.as_str()
     }
 
+    /// Creates a new `BasePath` by parsing a static string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the string is not a valid base path (must start and end with `/` and
+    /// must not contain a query string). Intended for use with compile-time-known
+    /// constants; use [`BasePath::from_str`](std::str::FromStr::from_str) or the
+    /// `TryFrom<&str>` impl for fallible parsing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::BasePath;
+    /// let path = BasePath::from_static("/api/v1/");
+    /// assert_eq!(path.as_str(), "/api/v1/");
+    /// ```
+    #[must_use]
+    #[expect(clippy::expect_used, reason = "from_static is documented to panic on invalid input")]
+    pub fn from_static(s: &'static str) -> Self {
+        Self::new(PathAndQuery::from_static(s)).expect("invalid base path passed to BasePath::from_static")
+    }
+
     fn validate_path_format(&self) -> Result<(), UriError> {
         let path_str = self.inner.as_str();
         if self.inner.query().is_some() {
@@ -198,6 +220,18 @@ mod test {
         assert_eq!(path.as_str(), "/string/path/");
         let p2 = path.as_str().as_ptr();
         assert_eq!(p, p2, "The string data should not be copied");
+    }
+
+    #[test]
+    fn from_static_valid() {
+        let path = BasePath::from_static("/api/v1/");
+        assert_eq!(path.as_str(), "/api/v1/");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid base path passed to BasePath::from_static")]
+    fn from_static_invalid() {
+        let _ = BasePath::from_static("/no-trailing-slash");
     }
 
     #[cfg(feature = "serde")]
