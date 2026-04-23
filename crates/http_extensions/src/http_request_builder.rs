@@ -352,10 +352,10 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
-        let path_and_query = uri.to_path();
+        let path = uri.to_path();
         let mut request = self.builder.uri(http::Uri::try_from(uri)?).body(body)?;
-        if let Some(path_and_query) = path_and_query {
-            request.extensions_mut().insert(path_and_query);
+        if let Some(path) = path {
+            request.extensions_mut().insert(path);
         }
 
         Ok(request)
@@ -1355,7 +1355,7 @@ mod tests {
 
         assert_eq!(request.method(), Method::HEAD);
         assert_eq!(request.uri(), "https://example.com/api");
-        assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/api");
+        assert_eq!(request.path().unwrap().to_uri_string(), "/api");
     }
 
     #[test]

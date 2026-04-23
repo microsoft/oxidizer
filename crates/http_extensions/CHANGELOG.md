@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- ⚠️ Breaking
+
+  - Rename `RequestExt::path_and_query()` to `RequestExt::path()`.
+
 ## [0.3.2] - 2026-04-22
 
 - 🔧 Maintenance

@@ -111,7 +111,7 @@ fn user_info_uri() {
     );
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(UriPath(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(UriPath(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
     assert_eq!(target.to_path().unwrap().template(), "/users/{user_id}/{path_fragment}");
     assert_eq!(
@@ -143,7 +143,7 @@ fn test_uri_taxonomy() {
 
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(UriPath(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(UriPath(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
     );
 
     assert_eq!(

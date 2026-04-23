@@ -8,8 +8,8 @@ use templated_uri::UriPath;
 
 /// Extensions for HTTP requests.
 pub trait RequestExt: sealed::Sealed {
-    /// Returns the path and query associated with this request, if any.
-    fn path_and_query(&self) -> Option<&UriPath>;
+    /// Returns the URI path associated with this request, if any.
+    fn path(&self) -> Option<&UriPath>;
 
     /// Returns the URL template label for this request, if available.
     ///
@@ -23,7 +23,7 @@ pub trait RequestExt: sealed::Sealed {
 }
 
 impl<B> RequestExt for Request<B> {
-    fn path_and_query(&self) -> Option<&UriPath> {
+    fn path(&self) -> Option<&UriPath> {
         self.extensions().get()
     }
 
@@ -56,7 +56,7 @@ mod tests {
             .extensions_mut()
             .insert(UriPath::from(uri.path_and_query().cloned().unwrap()));
 
-        assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/path");
+        assert_eq!(request.path().unwrap().to_uri_string(), "/path");
     }
 
     #[test]

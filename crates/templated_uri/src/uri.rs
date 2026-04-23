@@ -49,7 +49,7 @@ pub struct Uri {
     /// The base of the URI, which includes scheme, authority and path prefix
     base_uri: Option<BaseUri>,
     /// The path and query of the URI.
-    path_and_query: Option<UriPath>,
+    path: Option<UriPath>,
 }
 
 impl Default for Uri {
@@ -68,7 +68,7 @@ impl Uri {
     pub fn new() -> Self {
         Self {
             base_uri: None,
-            path_and_query: None,
+            path: None,
         }
     }
 
@@ -86,7 +86,7 @@ impl Uri {
     pub fn from_parts(base: BaseUri, path: UriPath) -> Self {
         Self {
             base_uri: Some(base),
-            path_and_query: Some(path),
+            path: Some(path),
         }
     }
 
@@ -96,7 +96,7 @@ impl Uri {
     where
         T: Into<UriPath>,
     {
-        self.path_and_query = Some(path.into());
+        self.path = Some(path.into());
         self
     }
 
@@ -116,20 +116,20 @@ impl Uri {
     ///
     /// Returns a [`UriError`] if the path and query cannot be validated.
     pub fn to_http_path(&self) -> Result<Option<PathAndQuery>, UriError> {
-        self.path_and_query.as_ref().map(PathAndQuery::try_from).transpose()
+        self.path.as_ref().map(PathAndQuery::try_from).transpose()
     }
 
     /// Returns the [`UriPath`] for this URI, if any.
     #[must_use]
     pub fn to_path(&self) -> Option<UriPath> {
-        self.path_and_query.clone()
+        self.path.clone()
     }
 
     /// Converts the URI to a string representation.
     pub fn to_string(&self) -> Sensitive<String> {
         let mut path = self.base_uri.as_ref().map(ToString::to_string).unwrap_or_default();
 
-        match self.path_and_query.as_ref().map(UriPath::to_uri_string) {
+        match self.path.as_ref().map(UriPath::to_uri_string) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => path.push_str(pq.trim_start_matches('/')),
             Some(pq) => path.push_str(&pq),
@@ -147,11 +147,7 @@ impl RedactedDisplay for Uri {
             .as_ref()
             .map_or(Ok(()), |base_uri| f.write_str(base_uri.to_string().as_str()))?;
 
-        match self
-            .path_and_query
-            .as_ref()
-            .map(|path_and_query| path_and_query.to_uri_string_redacted(engine))
-        {
+        match self.path.as_ref().map(|path| path.to_uri_string_redacted(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -168,11 +164,7 @@ impl RedactedDebug for Uri {
             .as_ref()
             .map_or(Ok(()), |base_uri| f.write_str(base_uri.to_string().as_str()))?;
 
-        match self
-            .path_and_query
-            .as_ref()
-            .map(|path_and_query| path_and_query.to_uri_string_redacted(engine))
-        {
+        match self.path.as_ref().map(|path| path.to_uri_string_redacted(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -186,19 +178,16 @@ impl TryFrom<http::Uri> for Uri {
     type Error = UriError;
     fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
         let parts = uri.into_parts();
-        let path_and_query = parts.path_and_query.map(UriPath::from);
+        let path = parts.path_and_query.map(UriPath::from);
 
         let (Some(authority), Some(scheme)) = (parts.authority, parts.scheme) else {
-            return Ok(Self {
-                base_uri: None,
-                path_and_query,
-            });
+            return Ok(Self { base_uri: None, path });
         };
 
         let base_uri = BaseUri::from_parts(Origin::from_parts(scheme, authority)?, BasePath::default());
         Ok(Self {
             base_uri: Some(base_uri),
-            path_and_query,
+            path,
         })
     }
 }
@@ -209,7 +198,7 @@ impl Debug for Uri {
         if let Some(base_uri) = &self.base_uri {
             dbg.field("base_uri", base_uri);
         }
-        dbg.field("path_and_query", &self.path_and_query).finish()
+        dbg.field("path", &self.path).finish()
     }
 }
 
@@ -242,13 +231,13 @@ impl TryFrom<String> for Uri {
 impl TryFrom<Uri> for http::Uri {
     type Error = UriError;
     fn try_from(value: Uri) -> Result<Self, Self::Error> {
-        let Uri { base_uri, path_and_query } = value;
+        let Uri { base_uri, path } = value;
 
-        let path_and_query = path_and_query.map(|pq| PathAndQuery::try_from(&pq)).transpose()?;
+        let path = path.map(|pq| PathAndQuery::try_from(&pq)).transpose()?;
 
-        match (base_uri, path_and_query) {
+        match (base_uri, path) {
             (Some(base_uri), None) => Ok(base_uri.into()),
-            (Some(base_uri), Some(path_and_query)) => base_uri.build_http_uri(path_and_query),
+            (Some(base_uri), Some(path)) => base_uri.build_http_uri(path),
             (None, pq) => {
                 let mut parts = Parts::default();
                 parts.path_and_query = pq;
@@ -281,8 +270,8 @@ impl UriPath {
 
     /// Creates a new `UriPath` from a static path and query string.
     #[must_use]
-    pub fn from_static(path_and_query: &'static str) -> Self {
-        Self::from(PathAndQuery::from_static(path_and_query))
+    pub fn from_static(path: &'static str) -> Self {
+        Self::from(PathAndQuery::from_static(path))
     }
 
     /// Returns the template string for this path and query.
@@ -373,7 +362,7 @@ impl From<UriPath> for Uri {
     fn from(value: UriPath) -> Self {
         Self {
             base_uri: None,
-            path_and_query: Some(value),
+            path: Some(value),
         }
     }
 }
@@ -495,7 +484,7 @@ mod tests {
         let uri = Uri::from_str("https://example.com/path?query=1").unwrap();
         assert_eq!(
             format!("{uri:?}"),
-            r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(UriPath) }"#
+            r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(UriPath) }"#
         );
     }
 
