@@ -47,11 +47,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            # push to main (or any non-PR trigger) → backstop: full workspace.
+            # push to main (or any non-PR trigger) -> full backstop: no excludes.
             {
-              echo "modified=--workspace"
-              echo "affected=--workspace"
-              echo "required=--workspace"
+              echo "modified="
+              echo "affected="
+              echo "required="
               echo "skip=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -64,42 +64,54 @@ jobs:
           git checkout "$head_sha"
           cargo delta -c .delta.toml snapshot > current.json
 
-          # Map each workspace-member name -> "-p name@version". We fully
-          # qualify with @version to disambiguate from transitive deps that
-          # happen to share a name with a workspace member (otherwise cargo
-          # errors with "multiple `<name>` packages, the specification is
-          # ambiguous").
+          # All workspace member names (one per line).
           cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | "\(.name)\t-p \(.name)@\(.version)"' \
-            > name_to_pkg.tsv
+            | jq -r '.packages[].name' | sort -u > workspace_names.txt
+          ws_size=$(wc -l < workspace_names.txt)
 
-          to_pkgs() {
-            local names; names=$(cargo delta -c .delta.toml impact \
-              --baseline baseline.json --current current.json -f names "$1")
-            [[ -z "$names" ]] && return 0
-            # Join names against the lookup table; preserve sort, drop tabs.
-            printf '%s\n' "$names" \
-              | awk -F'\t' 'NR==FNR{m[$1]=$2;next} ($0 in m){print m[$0]}' \
-                  name_to_pkg.tsv - \
+          # We invert: instead of `-p A -p B` (which is ambiguous when a
+          # workspace member shares a name OR name+version with a transitive
+          # registry dep), we emit `--exclude X --exclude Y` for the
+          # *complement*. `--exclude` is defined to match workspace members
+          # only (per `cargo help build`), so collisions with registry crates
+          # are impossible by construction.
+          impacted_for() {
+            cargo delta -c .delta.toml impact \
+              --baseline baseline.json --current current.json -f names "$1" \
+              | sort -u
+          }
+          excludes_for() {
+            comm -23 workspace_names.txt <(printf '%s\n' "$1") \
+              | sed 's/^/--exclude /' \
               | tr '\n' ' ' \
               | sed -e 's/ $//'
           }
 
-          MODIFIED=$(to_pkgs --modified)
-          AFFECTED=$(to_pkgs --affected)
-          REQUIRED=$(to_pkgs --required)
+          mod_imp=$(impacted_for --modified)
+          aff_imp=$(impacted_for --affected)
+          req_imp=$(impacted_for --required)
 
-          echo "Modified: ${MODIFIED:-<none>}"
-          echo "Affected: ${AFFECTED:-<none>}"
-          echo "Required: ${REQUIRED:-<none>}"
+          MODIFIED=$(excludes_for "$mod_imp")
+          AFFECTED=$(excludes_for "$aff_imp")
+          REQUIRED=$(excludes_for "$req_imp")
 
-          # `required` is the superset of `affected` ⊇ `modified`; if it's empty,
-          # nothing is impacted and source-scoped jobs can be skipped entirely.
-          if [[ -z "$REQUIRED" ]]; then
+          # `required` is the superset (required ⊇ affected ⊇ modified), so
+          # if it has no impacted crates, nothing is impacted and downstream
+          # source-scoped jobs can be skipped entirely.
+          req_count=$(printf '%s' "$req_imp" | grep -c . || true)
+          if [[ "$req_count" -eq 0 ]]; then
             skip=true
           else
             skip=false
           fi
+
+          mod_count=$(printf '%s' "$mod_imp" | grep -c . || true)
+          aff_count=$(printf '%s' "$aff_imp" | grep -c . || true)
+          echo "Workspace size  : $ws_size"
+          echo "Modified impact : $mod_count"
+          echo "Affected impact : $aff_count"
+          echo "Required impact : $req_count"
+          echo "Skip downstream : $skip"
 
           {
             echo "modified=$MODIFIED"
@@ -129,18 +141,18 @@ jobs:
 
       # execute
       - name: Build
-        run: cargo hack build --each-feature ${{ needs.delta.outputs.affected }} --verbose --locked --color always
+        run: cargo hack build --each-feature --workspace ${{ needs.delta.outputs.affected }} --verbose --locked --color always
       - name: Tests
         if: success() || failure()
-        run: cargo nextest run --verbose ${{ needs.delta.outputs.affected }} --all-features
+        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.affected }} --all-features
       - name: Docs
         if: success() || failure()
         env:
           RUSTDOCFLAGS: "--cfg docsrs -D warnings"
-        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose ${{ needs.delta.outputs.required }} --all-features
+        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace ${{ needs.delta.outputs.required }} --all-features
       - name: Doc Tests
         if: success() || failure()
-        run: cargo test --doc --verbose ${{ needs.delta.outputs.affected }} --all-features
+        run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.affected }} --all-features
       - name: Examples
         run: just examples
 
@@ -166,10 +178,10 @@ jobs:
 
       # execute
       - name: Clippy
-        run: cargo clippy ${{ needs.delta.outputs.modified }} --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace ${{ needs.delta.outputs.modified }} --all-targets --all-features -- -D warnings
       - name: Source Format
         if: success() || failure()
-        run: cargo fmt ${{ needs.delta.outputs.modified }} -- --check
+        run: cargo fmt --all -- --check
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
@@ -232,7 +244,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          cargo semver-checks --all-features ${{ needs.delta.outputs.affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
+          cargo semver-checks --all-features --workspace ${{ needs.delta.outputs.affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
 
       # report
       - name: Prepare Semver Comment
@@ -296,10 +308,10 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
       - name: Careful
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features ${{ needs.delta.outputs.affected }} --color always --target ${{ matrix.target }}
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.affected }} --color always --target ${{ matrix.target }}
       - name: Miri
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features ${{ needs.delta.outputs.affected }} --lib --tests
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.affected }} --lib --tests
 
   mutation-testing:
     if: github.event_name == 'pull_request'
