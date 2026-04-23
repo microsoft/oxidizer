@@ -59,7 +59,7 @@ pub use templated_uri_macros::UriUnsafeParam;
 ///
 /// ```
 /// # use templated_uri::templated;
-/// #[templated(template = "/topic/{topic_id}", unredacted)]
+/// #[templated(template = "/topic/{topic_id}", bypass_redaction)]
 /// struct ListTopics {
 ///     topic_id: u32,
 /// }
@@ -76,15 +76,15 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// ## Data Privacy
 ///
 /// By default, all fields use `RedactedDisplay` for privacy protection. Use attributes to control:
-/// - `#[templated(template = "...", unredacted)]`: Disable redaction for all fields
-/// - `#[unredacted]`: Disable redaction for a specific field
+/// - `#[templated(template = "...", bypass_redaction)]`: Disable redaction for all fields
+/// - `#[bypass_redaction]`: Disable redaction for a specific field
 ///
 /// ```ignore
 /// # use templated_uri::{templated, UriSafeString};
 /// #[templated(template = "/{org_id}/product/{product_id}")]
 /// struct ProductPath {
 ///     org_id: OrgId,           // Will be redacted
-///     #[unredacted]
+///     #[bypass_redaction]
 ///     product_id: UriSafeString, // Will NOT be redacted
 /// }
 /// ```

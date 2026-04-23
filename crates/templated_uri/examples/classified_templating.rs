@@ -27,7 +27,7 @@ struct UserId(u32);
 struct UserPath {
     org_id: OrgId,
     user_id: UserId,
-    #[unredacted]
+    #[bypass_redaction]
     item: UriSafeString,
 }
 

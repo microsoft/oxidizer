@@ -88,7 +88,7 @@ fn filter_original(input: &DeriveInput) -> TokenStream {
 
     match &input.data {
         syn::Data::Struct(s) => {
-            // Filter out templated and unredacted attributes from fields
+            // Filter out templated and bypass_redaction attributes from fields
             let filtered_fields = match &s.fields {
                 syn::Fields::Named(fields) => {
                     let fields: Vec<_> = fields
@@ -112,7 +112,7 @@ fn filter_original(input: &DeriveInput) -> TokenStream {
                             let attrs: Vec<_> = f
                                 .attrs
                                 .iter()
-                                .filter(|attr| !attr.path().is_ident("templated") && !attr.path().is_ident("unredacted"))
+                                .filter(|attr| !attr.path().is_ident("templated") && !attr.path().is_ident("bypass_redaction"))
                                 .collect();
                             let vis = &f.vis;
                             let ty = &f.ty;
@@ -167,7 +167,7 @@ fn filter_attributes(f: &Field) -> Vec<&Attribute> {
     let attrs: Vec<_> = f
         .attrs
         .iter()
-        .filter(|attr| !attr.path().is_ident("templated") && !attr.path().is_ident("unredacted"))
+        .filter(|attr| !attr.path().is_ident("templated") && !attr.path().is_ident("bypass_redaction"))
         .collect();
     attrs
 }
@@ -303,8 +303,8 @@ mod tests {
     }
 
     #[test]
-    fn test_templated_unredacted_uri_impl() {
-        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}", unredacted };
+    fn test_templated_bypass_redaction_uri_impl() {
+        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}", bypass_redaction };
         let item = quote! {
             struct Test {
                 // #[templated(classify=Public)]
@@ -387,12 +387,12 @@ mod tests {
     }
 
     #[test]
-    fn test_field_level_unredacted() {
+    fn test_field_level_bypass_redaction() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
         let item = quote! {
             struct Test {
                 param: String,
-                #[templated(unredacted)]
+                #[templated(bypass_redaction)]
                 param2: UriSafeString,
                 param3: String,
                 param4: String
@@ -469,12 +469,12 @@ mod tests {
     }
 
     #[test]
-    fn test_standalone_unredacted() {
+    fn test_standalone_bypass_redaction() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
         let item = quote! {
             struct Test {
                 param: String,
-                #[unredacted]
+                #[bypass_redaction]
                 param2: UriSafeString,
                 param3: String,
                 param4: String
@@ -1127,18 +1127,18 @@ mod tests {
     fn test_filter_attributes() {
         use syn::Field;
 
-        // Create a field with multiple attributes including templated and unredacted
+        // Create a field with multiple attributes including templated and bypass_redaction
         let field: Field = syn::parse_quote! {
             #[serde(rename = "test")]
-            #[templated(unredacted)]
-            #[unredacted]
+            #[templated(bypass_redaction)]
+            #[bypass_redaction]
             #[doc = "Test field"]
             pub test_field: String
         };
 
         let filtered = super::filter_attributes(&field);
 
-        // Should only keep serde and doc attributes, filtering out templated and unredacted
+        // Should only keep serde and doc attributes, filtering out templated and bypass_redaction
         assert_eq!(filtered.len(), 2);
         assert!(filtered[0].path().is_ident("serde"));
         assert!(filtered[1].path().is_ident("doc"));
@@ -1184,15 +1184,15 @@ mod tests {
     fn test_filter_original_unnamed_fields() {
         use syn::DeriveInput;
 
-        // Create a tuple struct with various attributes including templated and unredacted
+        // Create a tuple struct with various attributes including templated and bypass_redaction
         let input: DeriveInput = syn::parse_quote! {
             #[derive(Debug, Clone)]
             #[templated(template = "/test")]
             pub struct TestTuple(
                 #[serde(rename = "field1")]
-                #[templated(unredacted)]
+                #[templated(bypass_redaction)]
                 pub String,
-                #[unredacted]
+                #[bypass_redaction]
                 #[doc = "Field 2"]
                 pub i32,
                 pub u64
@@ -1212,12 +1212,12 @@ mod tests {
             "Output should not contain templated: {filtered_str}"
         );
 
-        // Should keep serde and doc attributes, but filter out templated and unredacted from fields
+        // Should keep serde and doc attributes, but filter out templated and bypass_redaction from fields
         assert!(filtered_str.contains("serde"), "Output should contain serde: {filtered_str}");
         assert!(filtered_str.contains("doc"), "Output should contain doc: {filtered_str}");
         assert!(
-            !filtered_str.contains("unredacted"),
-            "Output should not contain unredacted: {filtered_str}"
+            !filtered_str.contains("bypass_redaction"),
+            "Output should not contain bypass_redaction: {filtered_str}"
         );
 
         // Should maintain structure as tuple struct

@@ -36,7 +36,7 @@ struct UserId(UriSafeString);
 #[derive(Clone, UriUnsafeParam)]
 struct PathFragment(String);
 
-#[templated(template = "/{+param}{/param2,param3}{?q1,q2}", unredacted)]
+#[templated(template = "/{+param}{/param2,param3}{?q1,q2}", bypass_redaction)]
 #[derive(Clone)]
 struct PathAndQueryTemplate {
     param: String,
@@ -159,7 +159,7 @@ fn test_uri_taxonomy() {
     );
 }
 
-#[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
+#[templated(template = "/{org_id}/user/{user_id}/", bypass_redaction)]
 #[derive(Clone)]
 struct UserPath {
     org_id: OrgId,
@@ -189,7 +189,7 @@ impl UriUnsafeParam for Action {
     }
 }
 
-#[templated(template = "/{org_id}/user/{user_id}/{+action}/", unredacted)]
+#[templated(template = "/{org_id}/user/{user_id}/{+action}/", bypass_redaction)]
 #[derive(Clone)]
 struct UserActionPath {
     org_id: OrgId,
@@ -242,12 +242,12 @@ fn template_enum() {
 #[derive(Clone)]
 struct MixedRedactionPath {
     org_id: OrgId,
-    #[unredacted]
+    #[bypass_redaction]
     product_id: UriSafeString,
 }
 
 #[test]
-fn test_field_level_unredacted() {
+fn test_field_level_bypass_redaction() {
     let path = MixedRedactionPath {
         org_id: OrgId(UriSafeString::from_static("Acme")),
         product_id: UriSafeString::from_static("product-123"),
@@ -257,11 +257,11 @@ fn test_field_level_unredacted() {
 
     let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
 
-    // The org_id should be redacted (classified), but product_id should not (marked as unredacted)
+    // The org_id should be redacted (classified), but product_id should not (marked as bypass_redaction)
     assert_eq!(
         path.to_redacted_string(&redaction_engine),
         "/****/product/product-123/",
-        "Field-level unredacted attribute should prevent redaction for that field only"
+        "Field-level bypass_redaction attribute should prevent redaction for that field only"
     );
 }
 
@@ -269,9 +269,9 @@ fn test_field_level_unredacted() {
 #[derive(Clone)]
 struct SearchPath {
     org_id: OrgId,
-    #[unredacted]
+    #[bypass_redaction]
     query: UriSafeString,
-    #[unredacted]
+    #[bypass_redaction]
     limit: u32,
 }
 
@@ -299,7 +299,7 @@ fn test_redacted_query_params() {
 #[templated(
     template = "/{org_id}/user/{user_id}/reports/{report_type}/{year}/{month}",
     label = "user_monthly_report",
-    unredacted
+    bypass_redaction
 )]
 struct ComplexReportPath {
     org_id: UriSafeString,
@@ -309,7 +309,7 @@ struct ComplexReportPath {
     month: u32,
 }
 
-#[templated(template = "/simple/{id}", unredacted)]
+#[templated(template = "/simple/{id}", bypass_redaction)]
 struct SimplePath {
     id: UriSafeString,
 }
@@ -380,7 +380,7 @@ fn test_target_path_and_query_from_templated() {
 
     use templated_uri::uri::TargetPathAndQuery;
 
-    #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
+    #[templated(template = "/api/{user_id}/posts", label = "user_posts", bypass_redaction)]
     #[derive(Clone)]
     struct UserPosts {
         user_id: UriSafeString,
@@ -405,7 +405,7 @@ fn test_target_path_and_query_from_templated() {
     let path_and_query = target_paq.to_path_and_query().unwrap();
     assert_eq!(path_and_query.to_string(), "/api/123/posts");
 
-    // Verify redacted string (unredacted because of unredacted attribute)
+    // Verify redacted string (bypass_redaction because of bypass_redaction attribute)
     let redaction_engine = RedactionEngine::builder().build();
     assert_eq!(target_paq.to_uri_string_redacted(&redaction_engine), "/api/123/posts");
 

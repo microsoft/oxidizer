@@ -59,7 +59,7 @@ For dynamic URIs with variable components, use the templating system:
 ```rust
 use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
 
-#[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
+#[templated(template = "/users/{user_id}/posts/{post_id}", bypass_redaction)]
 #[derive(Clone)]
 struct UserPostPath {
     user_id: u32,
@@ -111,7 +111,7 @@ use templated_uri::{UriSafeString, templated};
 #[templated(
     template = "/{org}/users/{user_id}/reports/{report_type}",
     label = "user_report",
-    unredacted
+    bypass_redaction
 )]
 struct ReportPath {
     org: UriSafeString,
@@ -132,7 +132,7 @@ use templated_uri::{UriSafeString, templated};
 #[templated(template = "/{org_id}/user/{user_id}/")]
 #[derive(Clone)]
 struct UserPath {
-    #[unredacted]
+    #[bypass_redaction]
     org_id: UriSafeString,
     user_id: Sensitive<UriSafeString>,
 }
