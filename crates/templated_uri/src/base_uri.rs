@@ -140,7 +140,7 @@ impl BaseUri {
 
     /// Creates a [`BaseUri`] from an [`Origin`] and a [`BasePath`].
     ///
-    /// This constructor is infallible — both inputs are already validated.
+    /// This constructor is infallible - both inputs are already validated.
     ///
     /// # Examples
     ///
@@ -151,9 +151,45 @@ impl BaseUri {
     /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
-    #[must_use]
-    pub fn from_parts(origin: Origin, path: BasePath) -> Self {
-        Self { origin, path }
+    pub fn from_parts(origin: impl Into<Origin>, path: impl Into<BasePath>) -> Self {
+        Self {
+            origin: origin.into(),
+            path: path.into(),
+        }
+    }
+
+    /// Creates a [`BaseUri`] from a scheme, host, port, and path.
+    ///
+    /// This is a convenience constructor for the common case where the host and
+    /// port are available as separate values. For pre-typed components, prefer
+    /// [`BaseUri::from_parts`].
+    ///
+    /// # Arguments
+    ///
+    /// - `scheme`: The URI scheme (must be either HTTP or HTTPS).
+    /// - `host`: The hostname.
+    /// - `port`: The port number.
+    /// - `path`: The path component. Must start and end with a slash (`/`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if:
+    ///
+    /// - The scheme is not HTTP or HTTPS.
+    /// - The provided host is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::{BaseUri, uri::Scheme, BasePath};
+    /// let base_uri =
+    ///     BaseUri::from_host_and_port(Scheme::HTTPS, "example.com", 1234, BasePath::default())?;
+    /// assert_eq!(base_uri.to_string(), "https://example.com:1234/");
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn from_host_and_port(scheme: Scheme, host: impl AsRef<str>, port: u16, path: BasePath) -> Result<Self, UriError> {
+        let origin = Origin::from_parts(scheme, format!("{}:{}", host.as_ref(), port))?;
+        Ok(Self::from_parts(origin, path))
     }
 
     /// Creates an [`BaseUri`] from a static URI string.
@@ -246,7 +282,7 @@ impl BaseUri {
             p => BasePath::try_from(p)?,
         };
 
-        Self::new(scheme.clone(), authority.clone())?.with_path(path)
+        Ok(Self::from_parts(Origin::from_parts(scheme.clone(), authority.clone())?, path))
     }
 
     /// Returns a reference to the scheme component of this [`BaseUri`].

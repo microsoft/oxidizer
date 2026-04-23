@@ -24,6 +24,11 @@
   - Rename `ValidationError` to `UriError`.
   - Replace `DATA_CLASS_UNKNOWN_URI` constant with `Uri::DATA_CLASS` associated constant.
   - Rename `UriPath::from_templated` to `UriPath::from_template`.
+  - Rename `Origin::new(scheme, authority)` to `Origin::from_parts(scheme, authority)`.
+  - Remove `BaseUri::new(scheme, authority)` — use `Origin::from_parts(scheme, authority)?.into()` (via `From<Origin> for BaseUri`).
+  - Replace `BaseUri::from_parts(scheme, host, port, path)` with infallible `BaseUri::from_parts(origin: impl Into<Origin>, path: impl Into<BasePath>) -> Self`.
+  - Add fallible `BaseUri::from_host_and_port(scheme, host, port, path)` convenience constructor (covers the previous 4-arg `from_parts` use case).
+  - Make `Uri::to_http_path`, `UriPath::to_http_path`, and `UriTemplate::to_http_path` infallible. `Uri::to_http_path` now returns `Option<PathAndQuery>`; the trait method returns `PathAndQuery` directly. The proc-macro-generated impl panics if a template parameter produces a non-URI-safe value, which should never happen with `UriSafeString`-backed parameters.
 
 ## [0.1.2] - 2026-04-16
 

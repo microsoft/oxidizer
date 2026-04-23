@@ -109,7 +109,7 @@ impl Origin {
     #[expect(clippy::missing_panics_doc, reason = "impossible panic")]
     pub fn with_port(self, port: u16) -> Self {
         let host = self.authority.host();
-        Self::new(self.scheme, format!("{host}:{port}")).expect("Scheme and host are already valid and port is a valid u16")
+        Self::from_parts(self.scheme, format!("{host}:{port}")).expect("Scheme and host are already valid and port is a valid u16")
     }
 
     /// Checks if this origin uses the HTTPS scheme.
@@ -134,7 +134,7 @@ impl std::str::FromStr for Origin {
         let uri: http::Uri = s.parse().map_err(UriError::from)?;
         let scheme = uri.scheme().ok_or_else(|| UriError::invalid_uri("missing scheme"))?.clone();
         let authority = uri.authority().ok_or_else(|| UriError::invalid_uri("missing authority"))?.clone();
-        Self::new(scheme, authority)
+        Self::from_parts(scheme, authority)
     }
 }
 

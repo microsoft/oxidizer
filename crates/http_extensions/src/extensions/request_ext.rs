@@ -54,7 +54,7 @@ mod tests {
         let mut request = crate::Request::builder().uri(uri.clone()).body(()).unwrap();
         request
             .extensions_mut()
-            .insert(UriPath::from_http_path(uri.path_and_query().cloned().unwrap()));
+            .insert(UriPath::from(uri.path_and_query().cloned().unwrap()));
 
         assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/path");
     }
@@ -92,7 +92,7 @@ mod tests {
         // to template() is exercised.
         request
             .extensions_mut()
-            .insert(UriPath::from_http_path(uri.path_and_query().cloned().unwrap()));
+            .insert(UriPath::from(uri.path_and_query().cloned().unwrap()));
 
         let result = request.url_template_label();
         assert_eq!(result.as_ref().map(UrlTemplateLabel::as_str), Some("/api/users"));

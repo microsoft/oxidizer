@@ -91,7 +91,7 @@ where
     ///
     /// # Errors
     ///
-    /// Returns a [`UriError`] if the path and query string is invalid.
+    /// Returns a [`UriError`] if the rendered URI is not a valid path-and-query.
     fn to_http_path(&self) -> Result<PathAndQuery, UriError>;
 
     /// Returns the original RFC 6570 template string.
@@ -111,7 +111,7 @@ where
     where
         Self: Sized,
     {
-        UriPath::from_template(self).into_uri()
+        Uri::from(UriPath::from_template(self))
     }
 }
 

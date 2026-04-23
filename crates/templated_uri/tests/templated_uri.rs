@@ -9,6 +9,7 @@ use std::fmt::Display;
 use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
+use templated_uri::uri::PathAndQuery;
 use templated_uri::{BaseUri, Uri, UriParam, UriSafeString, UriTemplate, UriUnsafeParam, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
@@ -394,7 +395,7 @@ fn test_uri_path_from_template() {
     assert_eq!(target_paq.to_uri_string(), "/api/123/posts");
 
     // Verify to_http_path
-    let path_and_query = target_paq.to_http_path().unwrap();
+    let path_and_query = PathAndQuery::try_from(&target_paq).unwrap();
     assert_eq!(path_and_query.to_string(), "/api/123/posts");
 
     // Verify redacted string (unredacted because of unredacted attribute)
@@ -402,6 +403,6 @@ fn test_uri_path_from_template() {
     assert_eq!(target_paq.to_uri_string_redacted(&redaction_engine), "/api/123/posts");
 
     // Verify it can be used in a Uri
-    let uri = target_paq.into_uri();
+    let uri = Uri::from(target_paq);
     assert_eq!(uri.to_string().declassify_ref(), "/api/123/posts");
 }
