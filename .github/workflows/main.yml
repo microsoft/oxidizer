@@ -64,9 +64,30 @@ jobs:
           git checkout "$head_sha"
           cargo delta -c .delta.toml snapshot > current.json
 
-          MODIFIED=$(cargo delta -c .delta.toml impact --baseline baseline.json --current current.json -f cargo-args --modified)
-          AFFECTED=$(cargo delta -c .delta.toml impact --baseline baseline.json --current current.json -f cargo-args --affected)
-          REQUIRED=$(cargo delta -c .delta.toml impact --baseline baseline.json --current current.json -f cargo-args --required)
+          # Map each workspace-member name -> "-p name@version". We fully
+          # qualify with @version to disambiguate from transitive deps that
+          # happen to share a name with a workspace member (otherwise cargo
+          # errors with "multiple `<name>` packages, the specification is
+          # ambiguous").
+          cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | "\(.name)\t-p \(.name)@\(.version)"' \
+            > name_to_pkg.tsv
+
+          to_pkgs() {
+            local names; names=$(cargo delta -c .delta.toml impact \
+              --baseline baseline.json --current current.json -f names "$1")
+            [[ -z "$names" ]] && return 0
+            # Join names against the lookup table; preserve sort, drop tabs.
+            printf '%s\n' "$names" \
+              | awk -F'\t' 'NR==FNR{m[$1]=$2;next} ($0 in m){print m[$0]}' \
+                  name_to_pkg.tsv - \
+              | tr '\n' ' ' \
+              | sed -e 's/ $//'
+          }
+
+          MODIFIED=$(to_pkgs --modified)
+          AFFECTED=$(to_pkgs --affected)
+          REQUIRED=$(to_pkgs --required)
 
           echo "Modified: ${MODIFIED:-<none>}"
           echo "Affected: ${AFFECTED:-<none>}"
