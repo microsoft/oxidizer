@@ -127,13 +127,15 @@ impl Uri {
         self
     }
 
-    /// Returns path and query as a `PathAndQuery` if it exists.
+    /// Returns the path and query as a [`PathAndQuery`] if present.
     ///
-    /// # Errors
-    ///
-    /// Returns a [`UriError`] if the path and query cannot be validated.
-    pub fn to_http_path(&self) -> Result<Option<PathAndQuery>, UriError> {
-        self.path.as_ref().map(PathAndQuery::try_from).transpose()
+    /// Conversion errors are suppressed and returned as `None`. In practice
+    /// this should never happen: a templated path that fails to materialize
+    /// into a valid `PathAndQuery` indicates a programming error in the
+    /// template implementation rather than a recoverable runtime condition.
+    #[must_use]
+    pub fn to_http_path(&self) -> Option<PathAndQuery> {
+        self.path.as_ref().and_then(|p| PathAndQuery::try_from(p).ok())
     }
 
     /// Returns the [`UriPath`] for this URI, if any.
@@ -346,7 +348,7 @@ impl Debug for UriPath {
 impl TryFrom<Uri> for UriPath {
     type Error = UriError;
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        uri.to_http_path()?
+        uri.to_http_path()
             .map(Self::from)
             .ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))
     }
@@ -387,7 +389,7 @@ impl From<UriPath> for Uri {
 impl TryFrom<Uri> for PathAndQuery {
     type Error = UriError;
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        uri.to_http_path()?
+        uri.to_http_path()
             .ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))
     }
 }
@@ -453,7 +455,7 @@ mod tests {
     fn test_authority_only_uri_from_str() {
         let uri_str = "https://example.com/";
         let uri: Uri = uri_str.parse().unwrap();
-        assert_eq!(uri.to_http_path().unwrap(), Some(PathAndQuery::from_static("/")));
+        assert_eq!(uri.to_http_path(), Some(PathAndQuery::from_static("/")));
         assert_eq!(&uri.to_string().declassify_ref(), &uri_str);
     }
 

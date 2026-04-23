@@ -18,7 +18,7 @@
   - Rename `BaseUri::from_uri_static` to `BaseUri::from_static`.
   - Remove `BaseUri::from_uri_str` — use the `FromStr` impl (`s.parse::<BaseUri>()`) or new `TryFrom<&str>` impl.
   - Remove `BaseUri::from_http_uri(&http::Uri)` (was briefly renamed to `BaseUri::from_http`) - use the `TryFrom<&http::Uri> for BaseUri` impl (`BaseUri::try_from(&uri)`) instead.
-  - Rename `Uri::to_path_and_query` to `Uri::to_http_path`.
+  - Rename `Uri::to_path_and_query` to `Uri::to_http_path` (now returns `Option<PathAndQuery>`; conversion errors are suppressed as `None`).
   - Rename `UriPath::to_path_and_query` to `TryFrom<&UriPath> for PathAndQuery` (and `TryFrom<UriPath> for PathAndQuery`); was briefly `UriPath::to_http_path`.
   - Rename `UriTemplate::to_path_and_query` to `UriTemplate::to_http_path`.
   - Rename `Uri::target_path_and_query` to `Uri::to_path` (now returns owned `Option<UriPath>`).
