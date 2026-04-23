@@ -119,10 +119,7 @@ impl BaseUri {
     /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
     /// ```
     #[must_use]
-    pub fn with_path<P>(mut self, path: P) -> Self
-    where
-        P: Into<BasePath>,
-    {
+    pub fn with_path(mut self, path: impl Into<BasePath>) -> Self {
         self.path = path.into();
         self
     }

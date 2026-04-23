@@ -98,29 +98,23 @@ impl Uri {
     /// let uri = Uri::from_parts(base, path);
     /// ```
     #[must_use]
-    pub fn from_parts(base: BaseUri, path: UriPath) -> Self {
+    pub fn from_parts(base: impl Into<Option<BaseUri>>, path: impl Into<Option<UriPath>>) -> Self {
         Self {
-            base_uri: Some(base),
-            path: Some(path),
+            base_uri: base.into(),
+            path: path.into(),
         }
     }
 
     /// Sets the path component of this `Uri` and returns the updated value.
     #[must_use]
-    pub fn with_path<T>(mut self, path: T) -> Self
-    where
-        T: Into<UriPath>,
-    {
+    pub fn with_path(mut self, path: impl Into<UriPath>) -> Self {
         self.path = Some(path.into());
         self
     }
 
     /// Sets the [`BaseUri`] of this `Uri` and returns the updated value.
     #[must_use]
-    pub fn with_base<E>(mut self, base: E) -> Self
-    where
-        E: Into<BaseUri>,
-    {
+    pub fn with_base(mut self, base: impl Into<BaseUri>) -> Self {
         self.base_uri = Some(base.into());
         self
     }
