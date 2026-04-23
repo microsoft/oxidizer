@@ -9,7 +9,7 @@ use ohno::{ErrorLabel, Labeled};
 const LABEL_URI_INVALID: ErrorLabel = ErrorLabel::from_static("uri_invalid");
 const LABEL_URI_HTTP_ERROR: ErrorLabel = ErrorLabel::from_static("uri_http_error");
 
-/// Represents errors that occur during URI validation.
+/// Represents errors that occur during URI construction or validation.
 ///
 /// This error type is returned when URI parsing or validation fails,
 /// typically due to malformed syntax or invalid URI components. It can wrap

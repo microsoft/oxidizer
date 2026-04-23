@@ -4,7 +4,7 @@
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, Uri, UriParam, UriValidString, templated};
+use templated_uri::{BaseUri, Uri, UriEscapedString, UriParam, templated};
 
 // Example taxonomy for demonstration purposes
 #[taxonomy(example_taxonomy)]
@@ -17,7 +17,7 @@ enum ExampleTaxonomy {
 
 #[classified(ExampleTaxonomy::Oii)]
 #[derive(UriParam)]
-struct OrgId(UriValidString);
+struct OrgId(UriEscapedString);
 
 #[classified(ExampleTaxonomy::Eupi)]
 #[derive(UriParam)]
@@ -28,15 +28,15 @@ struct UserPath {
     org_id: OrgId,
     user_id: UserId,
     #[unredacted]
-    item: UriValidString,
+    item: UriEscapedString,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let user_path = UserPath {
-        org_id: OrgId(UriValidString::from_static("Contosso")),
+        org_id: OrgId(UriEscapedString::from_static("Contosso")),
         user_id: UserId(42),
-        item: UriValidString::from_static("foo"),
+        item: UriEscapedString::from_static("foo"),
     };
 
     let target = Uri::default()

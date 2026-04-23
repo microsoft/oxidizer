@@ -20,7 +20,7 @@
 //! - [`Uri`] - Flexible URI type composed of an optional [`BaseUri`] and an optional path/query
 //! - [`BaseUri`] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`])
 //! - [`UriTemplate`] - RFC 6570 Level 3 compliant URI templating
-//! - [`UriValid`] and [`UriValidString`] - Generic newtype wrapper proving a value is valid for URI components
+//! - [`UriEscaped`] and [`UriEscapedString`] - Generic newtype wrapper proving a value is properly escaped for URI components
 //!   by not containing any reserved characters
 //!
 //! # Basic Usage
@@ -49,18 +49,18 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, UriTemplate, Uri, UriValidString, templated};
+//! use templated_uri::{BaseUri, UriTemplate, Uri, UriEscapedString, templated};
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
 //! struct UserPostPath {
 //!     user_id: u32,
-//!     post_id: UriValidString,
+//!     post_id: UriEscapedString,
 //! }
 //!
 //! let path = UserPostPath {
 //!     user_id: 42,
-//!     post_id: UriValidString::encode("my-post"),
+//!     post_id: UriEscapedString::escape("my-post"),
 //! };
 //!
 //! let uri = Uri::default()
@@ -68,29 +68,29 @@
 //!     .with_path(path);
 //! ```
 //!
-//! # URI Validation Guarantees
+//! # URI Escaping Guarantees
 //!
-//! The [`UriValid<T>`](UriValid) newtype wraps values that are guaranteed
+//! The [`UriEscaped<T>`](UriEscaped) newtype wraps values that are guaranteed
 //! to contain only valid URI characters. This prevents common URI injection vulnerabilities:
 //!
 //! ```rust
-//! use templated_uri::UriValidString;
+//! use templated_uri::UriEscapedString;
 //!
 //! // This will succeed - percent-encodes any invalid characters
-//! let encoded = UriValidString::encode("hello world?foo=bar");
+//! let encoded = UriEscapedString::escape("hello world?foo=bar");
 //! assert_eq!(encoded.as_str(), "hello%20world%3Ffoo%3Dbar");
 //!
 //! // This will succeed - contains only valid characters
-//! let valid = UriValidString::try_new("hello-world_123").unwrap();
+//! let valid = UriEscapedString::try_new("hello-world_123").unwrap();
 //! assert_eq!(valid.as_str(), "hello-world_123");
 //!
 //! // try_new() fails on URI-reserved characters
-//! let invalid = UriValidString::try_new("hello world?foo=bar");
+//! let invalid = UriEscapedString::try_new("hello world?foo=bar");
 //! assert!(invalid.is_err());
 //! ```
 //!
 //! Built-in valid types include numeric types (`u32`, `u64`, etc.), `Uuid` (with the `uuid` feature),
-//! IP addresses, and validated [`UriValidString`] instances.
+//! IP addresses, and validated [`UriEscapedString`] instances.
 //!
 //! # Telemetry Labels
 //!
@@ -98,7 +98,7 @@
 //! for telemetry. When present, the label takes precedence over the template string.
 //!
 //! ```rust
-//! use templated_uri::{UriValidString, templated};
+//! use templated_uri::{UriEscapedString, templated};
 //!
 //! #[templated(
 //!     template = "/{org}/users/{user_id}/reports/{report_type}",
@@ -106,9 +106,9 @@
 //!     unredacted
 //! )]
 //! struct ReportPath {
-//!     org: UriValidString,
-//!     user_id: UriValidString,
-//!     report_type: UriValidString,
+//!     org: UriEscapedString,
+//!     user_id: UriEscapedString,
+//!     report_type: UriEscapedString,
 //! }
 //! ```
 //!
@@ -119,14 +119,14 @@
 //!
 //! ```rust
 //! use data_privacy::Sensitive;
-//! use templated_uri::{UriValidString, templated};
+//! use templated_uri::{UriEscapedString, templated};
 //!
 //! #[templated(template = "/{org_id}/user/{user_id}/")]
 //! #[derive(Clone)]
 //! struct UserPath {
 //!     #[unredacted]
-//!     org_id: UriValidString,
-//!     user_id: Sensitive<UriValidString>,
+//!     org_id: UriEscapedString,
+//!     user_id: Sensitive<UriEscapedString>,
 //! }
 //! ```
 //!
@@ -161,9 +161,9 @@ mod macros;
 mod origin;
 mod templated;
 mod uri;
+mod uri_escaped;
 mod uri_param;
 mod uri_path;
-mod uri_valid;
 
 pub use base_path::BasePath;
 pub use base_uri::BaseUri;
@@ -173,8 +173,8 @@ pub use origin::Origin;
 pub use templated::UriTemplate;
 #[doc(inline)]
 pub use uri::Uri;
+pub use uri_escaped::{UriEscapeError, UriEscaped, UriEscapedString};
 pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_path::UriPath;
-pub use uri_valid::{UriValid, UriValidString, UriValidationError};
 
 pub use http::uri::{Authority, PathAndQuery, Scheme};

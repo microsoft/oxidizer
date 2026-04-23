@@ -342,8 +342,8 @@ Uri
 UriParam
 URI
 URIs
-UriValid
-UriValidString
+UriEscaped
+UriEscapedString
 UriUnsafeParam
 URL
 URLs
@@ -369,3 +369,5 @@ Xamarin
 xxH3
 waker
 infallible
+
+unescaped

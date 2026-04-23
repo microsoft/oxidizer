@@ -223,7 +223,7 @@ mod tests {
         let item = quote! {
             struct Test {
                 param: String,
-                param2: UriValidString,
+                param2: UriEscapedString,
                 param3: String,
                 param4: String
             }
@@ -233,7 +233,7 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriValidString,
+            param2: UriEscapedString,
             param3: String,
             param4: String,
         }
@@ -248,10 +248,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_valid(&self.param);
+                let param = ::templated_uri::UriParam::as_uri_escaped(&self.param);
                 let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_valid(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_valid(&self.param4);
+                let param3 = ::templated_uri::UriParam::as_uri_escaped(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_escaped(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_http_path(
@@ -280,7 +280,7 @@ mod tests {
                 f.write_str("/example.com/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
                 f.write_str("/")?;
-                <UriValidString as ::data_privacy::RedactedDisplay>::fmt(
+                <UriEscapedString as ::data_privacy::RedactedDisplay>::fmt(
                     &self.param2,
                     engine,
                     f,
@@ -307,7 +307,7 @@ mod tests {
             struct Test {
                 // #[templated(classify=Public)]
                 param: String,
-                param2: UriValidString,
+                param2: UriEscapedString,
                 // #[templated(classify=Restricted)]
                 param3: String,
                 // #[templated(classify=Public)]
@@ -319,7 +319,7 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriValidString,
+            param2: UriEscapedString,
             param3: String,
             param4: String,
         }
@@ -334,10 +334,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_valid(&self.param);
+                let param = ::templated_uri::UriParam::as_uri_escaped(&self.param);
                 let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_valid(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_valid(&self.param4);
+                let param3 = ::templated_uri::UriParam::as_uri_escaped(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_escaped(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_http_path(
@@ -389,7 +389,7 @@ mod tests {
             struct Test {
                 param: String,
                 #[templated(unredacted)]
-                param2: UriValidString,
+                param2: UriEscapedString,
                 param3: String,
                 param4: String
             }
@@ -399,7 +399,7 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriValidString,
+            param2: UriEscapedString,
             param3: String,
             param4: String,
         }
@@ -414,10 +414,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_valid(&self.param);
+                let param = ::templated_uri::UriParam::as_uri_escaped(&self.param);
                 let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_valid(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_valid(&self.param4);
+                let param3 = ::templated_uri::UriParam::as_uri_escaped(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_escaped(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_http_path(
@@ -469,7 +469,7 @@ mod tests {
             struct Test {
                 param: String,
                 #[unredacted]
-                param2: UriValidString,
+                param2: UriEscapedString,
                 param3: String,
                 param4: String
             }
@@ -479,7 +479,7 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriValidString,
+            param2: UriEscapedString,
             param3: String,
             param4: String,
         }
@@ -494,10 +494,10 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_valid(&self.param);
+                let param = ::templated_uri::UriParam::as_uri_escaped(&self.param);
                 let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_valid(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_valid(&self.param4);
+                let param3 = ::templated_uri::UriParam::as_uri_escaped(&self.param3);
+                let param4 = ::templated_uri::UriParam::as_uri_escaped(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_http_path(
@@ -572,9 +572,9 @@ mod tests {
                 ::core::option::Option::None
             }
             fn to_uri_string(&self) -> ::std::string::String {
-                let resource = ::templated_uri::UriParam::as_uri_valid(&self.resource);
-                let page = ::templated_uri::UriParam::as_uri_valid(&self.page);
-                let limit = ::templated_uri::UriParam::as_uri_valid(&self.limit);
+                let resource = ::templated_uri::UriParam::as_uri_escaped(&self.resource);
+                let page = ::templated_uri::UriParam::as_uri_escaped(&self.page);
+                let limit = ::templated_uri::UriParam::as_uri_escaped(&self.limit);
                 ::std::format!("/api/{resource}?page={page}&limit={limit}")
             }
             fn to_http_path(
@@ -625,7 +625,7 @@ mod tests {
         let item = quote! {
             struct ExcessiveTemplate {
                 param: String,
-                param2: UriValidString,
+                param2: UriEscapedString,
                 param3: String,
                 param4: String,
                 extra_param: String, // This should cause an error
@@ -872,7 +872,7 @@ mod tests {
     #[test]
     fn test_uri_unsafe_param_with_custom_type() {
         let input = quote! {
-            struct CustomFragment(UriValidString);
+            struct CustomFragment(UriEscapedString);
         };
 
         let output_pretty = pretty_parse_uri_unsafe_param(input);
@@ -991,8 +991,8 @@ mod tests {
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r"
         impl ::templated_uri::UriParam for SafeFragment {
-            fn as_uri_valid(&self) -> ::templated_uri::UriValid<impl ::std::fmt::Display> {
-                self.0.as_uri_valid()
+            fn as_uri_escaped(&self) -> ::templated_uri::UriEscaped<impl ::std::fmt::Display> {
+                self.0.as_uri_escaped()
             }
         }
         ");

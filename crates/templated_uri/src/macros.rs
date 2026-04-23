@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Derives the `UriParam` trait for newtype wrappers around URI-valid types.
+/// Derives the `UriParam` trait for newtype wrappers around URI-escaped types.
 ///
 /// This derive macro implements `UriParam` for tuple structs with exactly one field.
-/// The implementation calls `as_uri_valid()` on the inner type, making it suitable for
+/// The implementation calls `as_uri_escaped()` on the inner type, making it suitable for
 /// use in URI templates with standard `{param}` (percent-encoded) placeholders.
 ///
 /// # Requirements
@@ -15,9 +15,9 @@
 /// # Example
 ///
 /// ```
-/// # use templated_uri::{UriParam, UriValidString};
+/// # use templated_uri::{UriParam, UriEscapedString};
 /// #[derive(UriParam)]
-/// struct UserId(UriValidString);
+/// struct UserId(UriEscapedString);
 /// ```
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
@@ -68,7 +68,7 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// ## Template Syntax
 ///
 /// Supports RFC 6570 URI template operators:
-/// - `{param}`: URI-valid encoding (percent-encoded)
+/// - `{param}`: URI-escaped (percent-encoded)
 /// - `{+param}`: Unrestricted (allows reserved characters like `/`)
 /// - `{/param1,param2}`: Path segment expansion (`/value1/value2`)
 /// - `{?param1,param2}`: Query parameter expansion (`?param1=value1&param2=value2`)
@@ -80,12 +80,12 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// - `#[unredacted]`: Disable redaction for a specific field
 ///
 /// ```ignore
-/// # use templated_uri::{templated, UriValidString};
+/// # use templated_uri::{templated, UriEscapedString};
 /// #[templated(template = "/{org_id}/product/{product_id}")]
 /// struct ProductPath {
 ///     org_id: OrgId,           // Will be redacted
 ///     #[unredacted]
-///     product_id: UriValidString, // Will NOT be redacted
+///     product_id: UriEscapedString, // Will NOT be redacted
 /// }
 /// ```
 ///

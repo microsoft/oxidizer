@@ -2,22 +2,22 @@
 // Licensed under the MIT License.
 
 //! Example demonstrating the basic usage of templated URI in `fetch`
-use templated_uri::{BaseUri, Uri, UriValidString, templated};
+use templated_uri::{BaseUri, Uri, UriEscapedString, templated};
 
 #[templated(template = "/{org_id}/user/{user_id}/{item}", unredacted)]
 #[derive(Clone)]
 struct UserPath {
-    org_id: UriValidString,
-    user_id: UriValidString,
-    item: UriValidString,
+    org_id: UriEscapedString,
+    user_id: UriEscapedString,
+    item: UriEscapedString,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let user_path = UserPath {
-        org_id: UriValidString::from_static("Acme"),
-        user_id: UriValidString::from_static("Will_E_Coyote"),
-        item: UriValidString::from_static("name"),
+        org_id: UriEscapedString::from_static("Acme"),
+        user_id: UriEscapedString::from_static("Will_E_Coyote"),
+        item: UriEscapedString::from_static("name"),
     };
     let target = Uri::default()
         .with_base(BaseUri::from_static("https://example.com"))

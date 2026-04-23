@@ -275,8 +275,7 @@ impl TryFrom<Uri> for PathAndQuery {
     type Error = UriError;
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         let Uri { path, .. } = uri;
-        let path =
-            path.ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))?;
+        let path = path.ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))?;
 
         PathAndQuery::try_from(&path)
     }

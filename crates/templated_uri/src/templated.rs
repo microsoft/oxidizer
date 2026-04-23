@@ -26,18 +26,18 @@ use crate::{Uri, UriError, UriPath};
 /// # Example
 ///
 /// ```
-/// use templated_uri::{UriTemplate, UriValidString, templated};
+/// use templated_uri::{UriTemplate, UriEscapedString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
 /// struct UserPath {
-///     org_id: UriValidString,
-///     user_id: UriValidString,
+///     org_id: UriEscapedString,
+///     user_id: UriEscapedString,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: UriValidString::from_static("acme"),
-///     user_id: UriValidString::from_static("john_doe"),
+///     org_id: UriEscapedString::from_static("acme"),
+///     user_id: UriEscapedString::from_static("john_doe"),
 /// };
 ///
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
@@ -54,19 +54,19 @@ use crate::{Uri, UriError, UriPath};
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use templated_uri::{UriTemplate, UriValidString, templated};
+/// use templated_uri::{UriTemplate, UriEscapedString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
 /// struct UserPath {
 ///     #[unredacted]
-///     org_id: UriValidString,
-///     user_id: Sensitive<UriValidString>,
+///     org_id: UriEscapedString,
+///     user_id: Sensitive<UriEscapedString>,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: UriValidString::from_static("acme"),
-///     user_id: Sensitive::new(UriValidString::from_static("john_doe"), Pii),
+///     org_id: UriEscapedString::from_static("acme"),
+///     user_id: Sensitive::new(UriEscapedString::from_static("john_doe"), Pii),
 /// };
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
 ///
