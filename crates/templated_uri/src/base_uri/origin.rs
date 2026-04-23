@@ -60,8 +60,12 @@ impl Origin {
         scheme: impl TryInto<Scheme, Error: Into<http::Error>>,
         authority: impl TryInto<Authority, Error: Into<http::Error>>,
     ) -> Result<Self, UriError> {
-        let scheme: Scheme = scheme.try_into().map_err(Into::into)?;
+        let scheme = scheme.try_into().map_err(|e| UriError::from(e.into()))?;
+        let authority = authority.try_into().map_err(|e| UriError::from(e.into()))?;
+        Self::from_parts_inner(scheme, authority)
+    }
 
+    fn from_parts_inner(scheme: Scheme, authority: Authority) -> Result<Self, UriError> {
         // Validate that the scheme is either HTTP or HTTPS
         if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
             return Err(UriError::invalid_uri(format!(
@@ -69,10 +73,7 @@ impl Origin {
             )));
         }
 
-        Ok(Self {
-            scheme,
-            authority: authority.try_into().map_err(Into::into)?,
-        })
+        Ok(Self { scheme, authority })
     }
 
     /// Returns a reference to the scheme.

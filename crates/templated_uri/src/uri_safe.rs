@@ -113,7 +113,10 @@ impl UriSafeString {
     /// assert_eq!(escaped_safe.as_str(), "%7Bhello%7D");
     /// ```
     pub fn encode(s: impl AsRef<str>) -> Self {
-        let s = s.as_ref();
+        Self::encode_str(s.as_ref())
+    }
+
+    fn encode_str(s: &str) -> Self {
         let encoded = PctString::encode(s.chars(), UriReserved::Any);
         if encoded.as_str().len() == s.len() {
             Self(Cow::Owned(s.to_owned()))
@@ -158,8 +161,10 @@ impl UriSafeString {
     ///
     /// Returns a [`UriSafeError`] if the string contains reserved URI characters.
     pub fn try_new(raw: impl Into<String>) -> Result<Self, UriSafeError> {
-        let raw = raw.into();
+        Self::try_new_inner(raw.into())
+    }
 
+    fn try_new_inner(raw: String) -> Result<Self, UriSafeError> {
         let mut characters = raw.chars().enumerate();
 
         while let Some((i, c)) = characters.next() {

@@ -443,7 +443,12 @@ impl BaseUri {
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
     pub fn build_http_uri(&self, path: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<http::Uri, UriError> {
-        let full_path = self.path.join(path)?;
+        let path = path.try_into().map_err(|e| UriError::from(e.into()))?;
+        self.build_http_uri_inner(path)
+    }
+
+    fn build_http_uri_inner(&self, path: PathAndQuery) -> Result<http::Uri, UriError> {
+        let full_path = self.path.join_path_and_query(path)?;
 
         let mut parts = Parts::default();
         parts.scheme = Some(self.scheme().clone());

@@ -63,7 +63,11 @@ impl BasePath {
     }
 
     pub(crate) fn join(&self, other: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<PathAndQuery, UriError> {
-        let other: PathAndQuery = other.try_into().map_err(Into::into)?;
+        let other = other.try_into().map_err(|e| UriError::from(e.into()))?;
+        self.join_path_and_query(other)
+    }
+
+    pub(crate) fn join_path_and_query(&self, other: PathAndQuery) -> Result<PathAndQuery, UriError> {
         let path_str = other.as_str().trim_start_matches('/');
         if path_str.is_empty() {
             return Ok(self.inner.clone());
