@@ -8,7 +8,7 @@ use crate::HttpRequest;
 /// Context passed to the closure of [`Routing::custom`] when resolving a [`BaseUri`].
 ///
 /// This type is intentionally opaque so that fields can be added in the future without
-/// breaking the closure signature. Use the accessors to inspect the available
+/// breaking the closure signature. Use the getters to inspect the available
 /// information about the current request attempt.
 ///
 /// [`Routing::custom`]: super::Routing::custom

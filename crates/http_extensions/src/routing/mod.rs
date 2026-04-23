@@ -22,6 +22,9 @@
 //! [`BaseUriConflict`] policy to decide what to do. The policy can be set with
 //! [`Routing::conflict_policy`] and defaults to [`BaseUriConflict::KeepExisting`].
 
+#[expect(unused_imports, reason = "simplifies the docs")]
+use templated_uri::{BaseUri, Uri};
+
 #[expect(
     clippy::module_inception,
     reason = "routing contains the `Routing` implementation, better to keep it in separate file"
