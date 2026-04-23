@@ -60,13 +60,13 @@ jobs:
           head_sha=$(git rev-parse HEAD)
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           git checkout "origin/$BASE_REF"
-          cargo delta snapshot > baseline.json
+          cargo delta -c .delta.toml snapshot > baseline.json
           git checkout "$head_sha"
-          cargo delta snapshot > current.json
+          cargo delta -c .delta.toml snapshot > current.json
 
-          MODIFIED=$(cargo delta impact --baseline baseline.json --current current.json -f cargo-args --modified)
-          AFFECTED=$(cargo delta impact --baseline baseline.json --current current.json -f cargo-args --affected)
-          REQUIRED=$(cargo delta impact --baseline baseline.json --current current.json -f cargo-args --required)
+          MODIFIED=$(cargo delta -c .delta.toml impact --baseline baseline.json --current current.json -f cargo-args --modified)
+          AFFECTED=$(cargo delta -c .delta.toml impact --baseline baseline.json --current current.json -f cargo-args --affected)
+          REQUIRED=$(cargo delta -c .delta.toml impact --baseline baseline.json --current current.json -f cargo-args --required)
 
           echo "Modified: ${MODIFIED:-<none>}"
           echo "Affected: ${AFFECTED:-<none>}"
