@@ -27,7 +27,7 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use templated_uri::http::PathAndQuery;
+//! use templated_uri::PathAndQuery;
 //! use templated_uri::{BaseUri, Uri, UriPath};
 //!
 //! // Create the base (scheme + authority, optionally a path prefix)
@@ -177,7 +177,4 @@ pub use uri_param::{UriParam, UriUnsafeParam};
 pub use uri_path::UriPath;
 pub use uri_safe::{UriSafe, UriSafeError, UriSafeString};
 
-/// Re-exports of [`http::uri`](::http::uri) types used in this crate's public API.
-pub mod http {
-    pub use http::uri::{Authority, Parts, PathAndQuery, Scheme};
-}
+pub use http::uri::{Authority, PathAndQuery, Scheme};

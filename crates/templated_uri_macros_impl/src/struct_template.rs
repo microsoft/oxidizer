@@ -173,9 +173,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
                 ::std::format!(#format_template)
             }
 
-            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::http::PathAndQuery, ::templated_uri::UriError> {
+            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
                 let uri_string = self.to_uri_string();
-                Ok(::templated_uri::http::PathAndQuery::try_from(uri_string)?)
+                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
             }
         }
 

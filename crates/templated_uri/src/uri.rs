@@ -22,7 +22,7 @@ use crate::{BasePath, BaseUri, Origin, UriPath};
 /// dynamic URI generation.
 ///
 /// ```
-/// use templated_uri::http::PathAndQuery;
+/// use templated_uri::PathAndQuery;
 /// use templated_uri::{BaseUri, Uri};
 /// let base_uri = BaseUri::from_static("http://example.com");
 /// let path = PathAndQuery::from_static("/path?query=1");
@@ -91,7 +91,7 @@ impl Uri {
     ///
     /// ```
     /// use templated_uri::{BaseUri, Uri, UriPath};
-    /// use templated_uri::http::PathAndQuery;
+    /// use templated_uri::PathAndQuery;
     ///
     /// let base = BaseUri::from_static("http://example.com");
     /// let path = UriPath::from(PathAndQuery::from_static("/path?query=1"));
