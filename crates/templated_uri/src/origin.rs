@@ -57,26 +57,15 @@ impl Origin {
     ///
     /// Both components are already validated by their respective types, so this
     /// constructor is infallible.
-    ///
-    /// # Arguments
-    ///
-    /// * `scheme`: The URI scheme.
-    /// * `authority`: The authority component (hostname and optional port).
     #[must_use]
     pub fn from_parts(scheme: Scheme, authority: Authority) -> Self {
         Self { scheme, authority }
     }
 
-    /// Creates a new `Origin` from values that can be converted into a scheme
-    /// and authority (e.g. string slices).
+    /// Creates a new `Origin` from values convertible into a [`Scheme`] and [`Authority`].
     ///
     /// For pre-typed [`Scheme`] and [`Authority`] values, prefer the infallible
     /// [`Origin::from_parts`].
-    ///
-    /// # Arguments
-    ///
-    /// * `scheme`: A value convertible into a [`Scheme`].
-    /// * `authority`: A value convertible into an [`Authority`].
     ///
     /// # Errors
     ///

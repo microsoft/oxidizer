@@ -12,7 +12,7 @@
 /// - Must be a tuple struct (newtype pattern) with exactly one field
 /// - The inner type must implement [`Escape`]
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// # use templated_uri::{Escape, EscapedString};
@@ -33,7 +33,7 @@ pub use templated_uri_macros::Escape;
 /// - Must be a tuple struct (newtype pattern) with exactly one field
 /// - The inner type must implement [`Display`](std::fmt::Display)
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use templated_uri::UnescapedDisplay;

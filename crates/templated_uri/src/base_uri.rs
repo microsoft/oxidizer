@@ -193,23 +193,13 @@ impl BaseUri {
     /// Creates a [`BaseUri`] from a scheme, host, port, and path.
     ///
     /// This is a convenience constructor for the common case where the host and
-    /// port are available as separate values. For pre-typed components, prefer
-    /// [`BaseUri::from_parts`].
-    ///
-    /// # Arguments
-    ///
-    /// - `scheme`: The URI scheme.
-    /// - `host`: The hostname.
-    /// - `port`: The port number.
-    /// - `path`: The path component. Must start and end with a slash (`/`).
+    /// port are available as separate values. The `path` must start and end with a
+    /// slash (`/`). For pre-typed components, prefer [`BaseUri::from_parts`].
     ///
     /// # Errors
     ///
-    /// Returns a [`UriError`] if:
-    ///
-    /// - The scheme conversion fails.
-    /// - The provided host is invalid.
-    /// - The provided path is not a valid [`BasePath`].
+    /// Returns a [`UriError`] if the scheme conversion fails, the host is invalid,
+    /// or the path is not a valid [`BasePath`].
     ///
     /// # Examples
     ///
@@ -232,24 +222,15 @@ impl BaseUri {
         Ok(Self::from_parts(Origin::from_parts(scheme, authority), path))
     }
 
-    /// Creates an [`BaseUri`] from a static URI string.
+    /// Creates a [`BaseUri`] by parsing a static URI string.
     ///
-    /// This method parses a static string as a URI and creates a [`BaseUri`] from it.
-    /// The URI must contain both a scheme (HTTP or HTTPS) and an authority component.
-    ///
-    /// Any query string or fragment in the URI is silently discarded - only the scheme,
-    /// authority and path prefix are preserved.
-    ///
-    /// # Arguments
-    ///
-    /// - `uri`: A static string representing a valid URI with HTTP or HTTPS scheme and authority.
+    /// The URI must contain both a scheme and an authority component. Any query
+    /// string or fragment is silently discarded; only the scheme, authority, and
+    /// path prefix are preserved.
     ///
     /// # Panics
     ///
-    /// Panics if:
-    ///
-    /// - The provided string is not a valid URI.
-    /// - The scheme is not HTTP or HTTPS.
+    /// Panics if the string is not a valid URI with both a scheme and an authority.
     ///
     /// # Examples
     ///
@@ -422,19 +403,14 @@ impl BaseUri {
         self.origin.is_https()
     }
 
-    /// Constructs a complete URI by combining this `base_uri` with the given path.
+    /// Builds a complete [`http::Uri`] by appending `path` to this base.
     ///
-    /// This method combines the [`BaseUri`] with the provided path to create a complete URI.
-    /// The resulting URI will have the scheme, authority and path from this `base_uri`, and the path
-    /// from the argument.
-    ///
-    /// # Arguments
-    ///
-    /// - `path`: A path or path with query parameters that will be converted to a `PathAndQuery`.
+    /// The resulting URI uses the scheme, authority, and path prefix of this base,
+    /// with `path` (a path or path-and-query) appended.
     ///
     /// # Errors
     ///
-    /// Returns a validation error if the provided path cannot be converted into a `PathAndQuery`.
+    /// Returns a [`UriError`] if `path` cannot be converted into a [`PathAndQuery`].
     ///
     /// # Examples
     ///

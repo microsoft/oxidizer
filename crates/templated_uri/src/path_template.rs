@@ -27,7 +27,7 @@ use crate::UriError;
 /// unfiltered expansions (`{+foo}`). This ensures variables cannot contain reserved characters
 /// as defined by the RFC.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use templated_uri::{PathTemplate, EscapedString, templated};
