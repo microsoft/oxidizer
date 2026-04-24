@@ -119,9 +119,8 @@ impl BaseUri {
     /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
     /// ```
     #[must_use]
-    pub fn with_path(mut self, path: impl Into<BasePath>) -> Self {
-        self.path = path.into();
-        self
+    pub fn with_path(self, path: impl Into<BasePath>) -> Self {
+        Self { path: path.into(), ..self }
     }
 
     /// Sets the path of this `BaseUri` from a value that may fail to convert
@@ -144,13 +143,15 @@ impl BaseUri {
     /// # Errors
     ///
     /// Returns a [`UriError`] if the path cannot be converted to a valid [`BasePath`].
-    pub fn try_with_path<P>(mut self, path: P) -> Result<Self, UriError>
+    pub fn try_with_path<P>(self, path: P) -> Result<Self, UriError>
     where
         P: TryInto<BasePath>,
         UriError: From<<P as TryInto<BasePath>>::Error>,
     {
-        self.path = path.try_into()?;
-        Ok(self)
+        Ok(Self {
+            path: path.try_into()?,
+            ..self
+        })
     }
 
     /// Creates a [`BaseUri`] from an [`Origin`] and a [`BasePath`].
@@ -180,7 +181,7 @@ impl BaseUri {
     ///
     /// # Arguments
     ///
-    /// - `scheme`: The URI scheme (must be either HTTP or HTTPS).
+    /// - `scheme`: The URI scheme.
     /// - `host`: The hostname.
     /// - `port`: The port number.
     /// - `path`: The path component. Must start and end with a slash (`/`).
@@ -189,8 +190,9 @@ impl BaseUri {
     ///
     /// Returns a [`UriError`] if:
     ///
-    /// - The scheme is not HTTP or HTTPS.
+    /// - The scheme conversion fails.
     /// - The provided host is invalid.
+    /// - The provided path is not a valid [`BasePath`].
     ///
     /// # Examples
     ///
@@ -207,9 +209,10 @@ impl BaseUri {
         port: u16,
         path: impl TryInto<BasePath, Error: Into<UriError>>,
     ) -> Result<Self, UriError> {
-        let origin = Origin::try_from_parts(scheme, format!("{}:{}", host.as_ref(), port))?;
+        let scheme = scheme.try_into().map_err(|e| UriError::from(e.into()))?;
+        let authority: Authority = format!("{}:{}", host.as_ref(), port).parse()?;
         let path = path.try_into().map_err(Into::into)?;
-        Ok(Self::from_parts(origin, path))
+        Ok(Self::from_parts(Origin::from_parts(scheme, authority), path))
     }
 
     /// Creates an [`BaseUri`] from a static URI string.
@@ -303,13 +306,10 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::{BaseUri, Origin, Scheme, Authority};
     /// let base_uri = BaseUri::from_static("https://example.com:443");
-    /// let new_base_uri = base_uri.with_origin(
-    ///     Origin::try_from_parts(
-    ///         Scheme::HTTPS,
-    ///         Authority::from_static("new-example.com:8080"),
-    ///     )
-    ///     .unwrap(),
-    /// );
+    /// let new_base_uri = base_uri.with_origin(Origin::from_parts(
+    ///     Scheme::HTTPS,
+    ///     Authority::from_static("new-example.com:8080"),
+    /// ));
     /// assert_eq!(new_base_uri.to_string(), "https://new-example.com:8080/");
     /// ```
     #[must_use]
@@ -319,11 +319,10 @@ impl BaseUri {
 
     /// Returns the port of this [`BaseUri`].
     ///
-    /// This method determines the port based on the following rules:
-    /// 1. If the authority explicitly specifies a port, that port is returned.
-    /// 2. If no port is specified, a default port is returned based on the scheme:
-    ///    - `80` for `http` scheme.
-    ///    - `443` for `https` scheme.
+    /// Returns the explicit port from the authority when present. For HTTP and
+    /// HTTPS, the well-known default port is inferred from the scheme when no
+    /// port is specified. For other schemes without an explicit port this
+    /// method returns `None`.
     ///
     /// # Examples
     ///
@@ -331,17 +330,18 @@ impl BaseUri {
     /// # use templated_uri::{BaseUri, Scheme};
     /// // Explicit port
     /// let base_uri = BaseUri::from_static("https://example.com:8443");
-    /// assert_eq!(base_uri.port(), 8443);
+    /// assert_eq!(base_uri.port(), Some(8443));
     ///
     /// // Default HTTPS port
     /// let base_uri = BaseUri::from_static("https://example.com");
-    /// assert_eq!(base_uri.port(), 443);
+    /// assert_eq!(base_uri.port(), Some(443));
     ///
     /// // Default HTTP port
     /// let base_uri = BaseUri::from_static("http://example.com");
-    /// assert_eq!(base_uri.port(), 80);
+    /// assert_eq!(base_uri.port(), Some(80));
     /// ```
-    pub fn port(&self) -> u16 {
+    #[must_use]
+    pub fn port(&self) -> Option<u16> {
         self.origin.port()
     }
 
@@ -351,10 +351,10 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::{BaseUri, Scheme};
     /// let mut base_uri = BaseUri::from_static("https://example.com");
-    /// assert_eq!(base_uri.port(), 443);
+    /// assert_eq!(base_uri.port(), Some(443));
     ///
     /// let base_uri = base_uri.with_port(8443);
-    /// assert_eq!(base_uri.port(), 8443);
+    /// assert_eq!(base_uri.port(), Some(8443));
     /// assert_eq!(base_uri.to_string(), "https://example.com:8443/");
     /// ```
     #[must_use]
@@ -489,10 +489,7 @@ impl TryFrom<http::Uri> for BaseUri {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    ///
-    /// - The URI does not have both scheme and authority components.
-    /// - The scheme is not HTTP or HTTPS.
+    /// Returns an error if the URI does not have both scheme and authority components.
     fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
         Self::try_from(&uri)
     }
@@ -508,10 +505,7 @@ impl TryFrom<&http::Uri> for BaseUri {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    ///
-    /// - The URI does not have both scheme and authority components.
-    /// - The scheme is not HTTP or HTTPS.
+    /// Returns an error if the URI does not have both scheme and authority components.
     ///
     /// # Examples
     ///
@@ -533,7 +527,7 @@ impl TryFrom<&http::Uri> for BaseUri {
             p => BasePath::try_from(p)?,
         };
 
-        Ok(Self::from_parts(Origin::try_from_parts(scheme.clone(), authority.clone())?, path))
+        Ok(Self::from_parts(Origin::from_parts(scheme.clone(), authority.clone()), path))
     }
 }
 
@@ -602,8 +596,8 @@ impl Display for BaseUri {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}://", self.scheme())?;
 
-        match (self.scheme().as_str(), self.port()) {
-            ("http", 80) | ("https", 443) => write!(f, "{}", self.host())?,
+        match (self.scheme().as_str(), self.authority().port_u16()) {
+            ("http", Some(80)) | ("https", Some(443)) => write!(f, "{}", self.host())?,
             _ => write!(f, "{}", self.authority())?,
         }
         write!(f, "{}", self.path)
@@ -634,7 +628,7 @@ mod tests {
 
         #[test]
         fn valid_base_uri() {
-            let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com")).unwrap();
+            let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com"));
             let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com");
@@ -642,21 +636,24 @@ mod tests {
 
         #[test]
         fn with_custom_port() {
-            let origin = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com:8080")).unwrap();
+            let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080"));
             let base_uri = BaseUri::from_parts(origin, BasePath::default());
             assert_eq!(base_uri.scheme(), &Scheme::HTTP);
             assert_eq!(base_uri.authority().as_str(), "example.com:8080");
         }
 
         #[test]
-        fn invalid_scheme() {
-            let err = Origin::try_from_parts(Scheme::try_from("ftp").unwrap(), Authority::from_static("example.com")).unwrap_err();
-            assert!(err.to_string().contains("unsupported scheme: ftp"));
+        fn non_http_scheme_is_accepted() {
+            let origin = Origin::from_parts(Scheme::try_from("ftp").unwrap(), Authority::from_static("example.com:21"));
+            let base_uri = BaseUri::from_parts(origin, BasePath::default());
+            assert_eq!(base_uri.scheme().as_str(), "ftp");
+            assert_eq!(base_uri.port(), Some(21));
+            assert_eq!(base_uri.to_string(), "ftp://example.com:21/");
         }
 
         #[test]
         fn with_path() {
-            let origin = Origin::try_from_parts(Scheme::HTTPS, Authority::from_static("example.com:443")).unwrap();
+            let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443"));
             let base_uri = BaseUri::from_parts(origin, BasePath::from_static("/example/"));
             assert_eq!(base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(base_uri.authority().as_str(), "example.com:443");
@@ -669,7 +666,14 @@ mod tests {
         // Exercises both `TryInto<Scheme>` (via `&str`) and `TryInto<BasePath>` (via `&str`).
         let base_uri = BaseUri::try_from_raw_parts("https", "example.com", 1234, "/api/v1/").unwrap();
         assert_eq!(base_uri.to_string(), "https://example.com:1234/api/v1/");
-        BaseUri::try_from_raw_parts("ftp", "example.com", 21, BasePath::default()).unwrap_err();
+
+        // Non-HTTP schemes are now accepted.
+        let base_uri = BaseUri::try_from_raw_parts("ftp", "example.com", 21, BasePath::default()).unwrap();
+        assert_eq!(base_uri.scheme().as_str(), "ftp");
+        assert_eq!(base_uri.port(), Some(21));
+
+        // An invalid host still produces an error.
+        BaseUri::try_from_raw_parts("https", "not a host", 1234, BasePath::default()).unwrap_err();
     }
 
     mod from_uri_static {
@@ -788,19 +792,19 @@ mod tests {
         #[test]
         fn port_explicit() {
             let base_uri = BaseUri::from_static("https://example.com:8443");
-            assert_eq!(base_uri.port(), 8443);
+            assert_eq!(base_uri.port(), Some(8443));
         }
 
         #[test]
         fn port_default_https() {
             let base_uri = BaseUri::from_static("https://example.com");
-            assert_eq!(base_uri.port(), 443);
+            assert_eq!(base_uri.port(), Some(443));
         }
 
         #[test]
         fn port_default_http() {
             let base_uri = BaseUri::from_static("http://example.com");
-            assert_eq!(base_uri.port(), 80);
+            assert_eq!(base_uri.port(), Some(80));
         }
     }
 
@@ -936,7 +940,7 @@ mod tests {
             assert_eq!(new_base_uri.origin(), &new_origin);
             assert_eq!(new_base_uri.scheme(), &Scheme::HTTPS);
             assert_eq!(new_base_uri.authority().as_str(), "new-example.com:8080");
-            assert_eq!(new_base_uri.port(), 8080);
+            assert_eq!(new_base_uri.port(), Some(8080));
             assert_eq!(new_base_uri.path().as_str(), "/api/");
             assert_eq!(new_base_uri.to_string(), "https://new-example.com:8080/api/");
         }
@@ -951,8 +955,8 @@ mod tests {
 
             let new_base_uri = base_uri.with_port(8443);
 
-            assert_eq!(new_base_uri.origin().port(), 8443);
-            assert_eq!(new_base_uri.port(), 8443);
+            assert_eq!(new_base_uri.origin().port(), Some(8443));
+            assert_eq!(new_base_uri.port(), Some(8443));
             assert_eq!(new_base_uri.to_string(), "https://example.com:8443/api/");
         }
     }

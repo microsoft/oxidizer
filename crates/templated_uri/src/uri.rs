@@ -107,16 +107,20 @@ impl Uri {
 
     /// Sets the path component of this `Uri` and returns the updated value.
     #[must_use]
-    pub fn with_path(mut self, path: impl Into<Path>) -> Self {
-        self.path = Some(path.into());
-        self
+    pub fn with_path(self, path: impl Into<Path>) -> Self {
+        Self {
+            path: Some(path.into()),
+            ..self
+        }
     }
 
     /// Sets the [`BaseUri`] of this `Uri` and returns the updated value.
     #[must_use]
-    pub fn with_base(mut self, base: impl Into<BaseUri>) -> Self {
-        self.base_uri = Some(base.into());
-        self
+    pub fn with_base(self, base: impl Into<BaseUri>) -> Self {
+        Self {
+            base_uri: Some(base.into()),
+            ..self
+        }
     }
 
     /// Returns the path and query as a [`PathAndQuery`] if present.
@@ -199,7 +203,7 @@ impl TryFrom<http::Uri> for Uri {
             return Ok(Self { base_uri: None, path });
         };
 
-        let base_uri = BaseUri::from_parts(Origin::try_from_parts(scheme, authority)?, BasePath::default());
+        let base_uri = BaseUri::from_parts(Origin::from_parts(scheme, authority), BasePath::default());
         Ok(Self {
             base_uri: Some(base_uri),
             path,
