@@ -18,9 +18,9 @@ jobs:
   delta:
     runs-on: ubuntu-latest
     outputs:
-      modified: ${{ steps.compute.outputs.modified }}
-      affected: ${{ steps.compute.outputs.affected }}
-      required: ${{ steps.compute.outputs.required }}
+      exclude_not_modified: ${{ steps.compute.outputs.exclude_not_modified }}
+      exclude_not_affected: ${{ steps.compute.outputs.exclude_not_affected }}
+      exclude_not_required: ${{ steps.compute.outputs.exclude_not_required }}
       skip: ${{ steps.compute.outputs.skip }}
     steps:
       - name: Checkout
@@ -43,9 +43,9 @@ jobs:
           if [[ "${{ github.event_name }}" != "pull_request" ]]; then
             # push to main (or any non-PR trigger) -> full backstop: no excludes.
             {
-              echo "modified="
-              echo "affected="
-              echo "required="
+              echo "exclude_not_modified="
+              echo "exclude_not_affected="
+              echo "exclude_not_required="
               echo "skip=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -70,9 +70,9 @@ jobs:
             cargo delta -c .delta.toml impact --baseline "$baseline" --current "$current" "$@"
           }
 
-          MODIFIED=$(impact -f cargo-excludes --modified)
-          AFFECTED=$(impact -f cargo-excludes --affected)
-          REQUIRED=$(impact -f cargo-excludes --required)
+          exclude_not_modified=$(impact -f cargo-excludes --modified)
+          exclude_not_affected=$(impact -f cargo-excludes --affected)
+          exclude_not_required=$(impact -f cargo-excludes --required)
 
           # `required` is the superset (required ⊇ affected ⊇ modified). If it
           # has no impacted crates, nothing is impacted and downstream
@@ -84,9 +84,9 @@ jobs:
           fi
 
           {
-            echo "modified=$MODIFIED"
-            echo "affected=$AFFECTED"
-            echo "required=$REQUIRED"
+            echo "exclude_not_modified=$exclude_not_modified"
+            echo "exclude_not_affected=$exclude_not_affected"
+            echo "exclude_not_required=$exclude_not_required"
             echo "skip=$skip"
           } | tee -a "$GITHUB_OUTPUT"
 
@@ -111,18 +111,18 @@ jobs:
 
       # execute
       - name: Build
-        run: cargo hack build --each-feature --workspace ${{ needs.delta.outputs.affected }} --verbose --locked --color always
+        run: cargo hack build --each-feature --workspace ${{ needs.delta.outputs.exclude_not_affected }} --verbose --locked --color always
       - name: Tests
         if: success() || failure()
-        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.affected }} --all-features
+        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
       - name: Docs
         if: success() || failure()
         env:
           RUSTDOCFLAGS: "--cfg docsrs -D warnings"
-        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace ${{ needs.delta.outputs.required }} --all-features
+        run: cargo +${{ env.RUST_NIGHTLY }} doc --no-deps --verbose --workspace ${{ needs.delta.outputs.exclude_not_required }} --all-features
       - name: Doc Tests
         if: success() || failure()
-        run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.affected }} --all-features
+        run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
       - name: Examples
         run: just examples
 
@@ -148,7 +148,7 @@ jobs:
 
       # execute
       - name: Clippy
-        run: cargo clippy --workspace ${{ needs.delta.outputs.modified }} --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace ${{ needs.delta.outputs.exclude_not_modified }} --all-targets --all-features -- -D warnings
       - name: Source Format
         if: success() || failure()
         run: cargo fmt -- --check
@@ -214,7 +214,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          cargo semver-checks --all-features --workspace ${{ needs.delta.outputs.affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
+          cargo semver-checks --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
 
       # report
       - name: Prepare Semver Comment
@@ -278,10 +278,10 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
       - name: Careful
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.affected }} --color always --target ${{ matrix.target }}
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
       - name: Miri
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.affected }} --lib --tests
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
 
   mutation-testing:
     if: github.event_name == 'pull_request'
@@ -309,6 +309,8 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
+    needs: [delta]
+    if: needs.delta.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -380,6 +382,8 @@ jobs:
           strict: true
 
   external-type-exposure:
+    needs: [delta]
+    if: needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-slim
     steps:
       # prep
