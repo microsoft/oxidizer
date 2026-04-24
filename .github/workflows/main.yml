@@ -13,7 +13,8 @@ on:
 jobs:
   # Computes the impacted-crate scope for the rest of the pipeline.
   # On pull_request: snapshots origin/<base_ref> and the PR head, then emits
-  # `-p NAME ...` cargo args for each tier (modified / affected / required).
+  # `--exclude NAME ...` cargo args for each tier (modified / affected / required),
+  # intended to be combined with `--workspace` in downstream cargo invocations.
   # On push: emits `--workspace` for all tiers (full backstop build).
   # If a PR touches no crates (e.g. doc-only), `skip=true` and source-related
   # jobs are short-circuited.
