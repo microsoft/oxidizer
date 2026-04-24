@@ -39,7 +39,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         .collect();
 
     quote! {
-        impl ::templated_uri::PathTemplate for #ident {
+        impl ::templated_uri::PathAndQueryTemplate for #ident {
             fn template(&self) -> &'static core::primitive::str {
                 match self {
                     #(#variant_matches => template_variant.template()),*
@@ -58,7 +58,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
                 match self {
                     #(#variant_matches => template_variant.to_path_and_query()),*
                 }
@@ -96,9 +96,9 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
             }
         )*
 
-        impl From<#ident> for ::templated_uri::Path {
+        impl From<#ident> for ::templated_uri::PathAndQuery {
             fn from(value: #ident) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
     }

@@ -48,10 +48,10 @@ pub use templated_uri_macros::UnescapedDisplay;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:
-/// - `PathTemplate`: Methods for URI template expansion and formatting
+/// - `PathAndQueryTemplate`: Methods for URI template expansion and formatting
 /// - `Debug`: Custom debug representation showing the template
 /// - `RedactedDisplay`: Data privacy-aware display with selective field redaction
-/// - `From<T> for Path`: Conversion to a URI path
+/// - `From<T> for PathAndQuery`: Conversion to a URI path
 ///
 /// # Struct Usage
 ///
@@ -91,7 +91,7 @@ pub use templated_uri_macros::UnescapedDisplay;
 ///
 /// # Enum Usage
 ///
-/// For enums, each variant must contain exactly one field that implements `PathTemplate`.
+/// For enums, each variant must contain exactly one field that implements `PathAndQueryTemplate`.
 /// The macro generates delegating implementations that forward to the inner type.
 ///
 /// ```ignore

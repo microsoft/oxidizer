@@ -9,7 +9,7 @@ use std::fmt::Display;
 use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, Escape, EscapedString, PathAndQuery, PathTemplate, UnescapedDisplay, Uri, templated};
+use templated_uri::{BaseUri, Escape, EscapedString, PathAndQueryTemplate, UnescapedDisplay, Uri, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
 #[taxonomy(test_taxonomy)]
@@ -36,7 +36,7 @@ struct PathFragment(String);
 
 #[templated(template = "/{+param}{/param2,param3}{?q1,q2}", unredacted)]
 #[derive(Clone)]
-struct PathAndQueryTemplate {
+struct TemplatedTestPath {
     param: String,
     param2: EscapedString,
     param3: EscapedString,
@@ -46,7 +46,7 @@ struct PathAndQueryTemplate {
 
 #[test]
 fn templated_uri() {
-    let test = PathAndQueryTemplate {
+    let test = TemplatedTestPath {
         param: "value1".to_string(),
         param2: EscapedString::from_static("value2"),
         param3: EscapedString::from_static("value3"),
@@ -56,12 +56,12 @@ fn templated_uri() {
 
     assert_eq!(test.render(), "/value1/value2/value3?q1=query1&q2=42");
     assert_eq!(test.template(), "/{+param}{/param2,param3}{?q1,q2}");
-    assert_eq!(format!("{test:?}"), r#"PathAndQueryTemplate("/{+param}{/param2,param3}{?q1,q2}")"#);
+    assert_eq!(format!("{test:?}"), r#"TemplatedTestPath("/{+param}{/param2,param3}{?q1,q2}")"#);
 }
 
 #[test]
 fn uri_with_template() {
-    let test = PathAndQueryTemplate {
+    let test = TemplatedTestPath {
         param: "value1".to_string(),
         param2: EscapedString::from_static("value2"),
         param3: EscapedString::from_static("value3"),
@@ -71,7 +71,7 @@ fn uri_with_template() {
 
     let target = Uri::default()
         .with_base(BaseUri::from_static("https://example.com"))
-        .with_path(test);
+        .with_path_and_query(test);
     assert_eq!(
         target.to_string().declassify_ref(),
         "https://example.com/value1/value2/value3?q1=query1&q2=42"
@@ -110,9 +110,9 @@ fn user_info_uri() {
     );
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(Path(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(PathAndQuery(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
-    assert_eq!(target.to_path().unwrap().template(), "/users/{user_id}/{+path_fragment}");
+    assert_eq!(target.to_path_and_query().unwrap().template(), "/users/{user_id}/{+path_fragment}");
     assert_eq!(
         target.to_redacted_string(&RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build(),),
         "https://example.com/users/************************************/************",
@@ -142,7 +142,7 @@ fn test_uri_taxonomy() {
 
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(Path(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(PathAndQuery(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
     );
 
     assert_eq!(
@@ -341,7 +341,7 @@ fn test_label_none_when_not_specified() {
 
 #[test]
 fn test_uri_path_label() {
-    use templated_uri::Path;
+    use templated_uri::PathAndQuery;
 
     // Test with label
     let complex_path = ComplexReportPath {
@@ -351,32 +351,35 @@ fn test_uri_path_label() {
         year: 2024,
         month: 12,
     };
-    let target_paq: Path = complex_path.into();
+    let target_paq: PathAndQuery = complex_path.into();
     assert_eq!(target_paq.label().as_deref(), Some("user_monthly_report"));
 
     // Test without label
     let simple_path = SimplePath {
         id: EscapedString::from_static("test"),
     };
-    let target_paq: Path = simple_path.into();
+    let target_paq: PathAndQuery = simple_path.into();
     assert_eq!(target_paq.label().as_deref(), None);
 
     // Test with non-templated path
-    let static_paq = Path::from_static("/static/path");
+    let static_paq = PathAndQuery::from_static("/static/path");
     assert_eq!(static_paq.label().as_deref(), None);
 }
 
 #[test]
 fn test_uri_path_redacted_debug() {
-    use templated_uri::Path;
+    use templated_uri::PathAndQuery;
 
     let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
 
     // Static path: RedactedDebug omits the inner value entirely.
-    let static_path = Path::from_static("/sensitive/path?query=secret");
+    let static_path = PathAndQuery::from_static("/sensitive/path?query=secret");
     let mut buf = String::new();
     redaction_engine.redacted_debug(&static_path, &mut buf).unwrap();
-    assert_eq!(buf, "Path", "static Path's RedactedDebug should not leak the inner value");
+    assert_eq!(
+        buf, "PathAndQuery",
+        "static PathAndQuery's RedactedDebug should not leak the inner value"
+    );
 
     // Templated path: RedactedDebug includes the redacted rendering of the template.
     #[templated(template = "/users/{user_id}/info")]
@@ -384,20 +387,20 @@ fn test_uri_path_redacted_debug() {
     struct UserInfoPath {
         user_id: OrgId,
     }
-    let templated_path: Path = Path::from_template(UserInfoPath {
+    let templated_path: PathAndQuery = PathAndQuery::from_template(UserInfoPath {
         user_id: OrgId(EscapedString::from_static("acme")),
     });
 
     let mut buf = String::new();
     redaction_engine.redacted_debug(&templated_path, &mut buf).unwrap();
-    assert_eq!(buf, "Path(\"/users/****/info\")");
+    assert_eq!(buf, "PathAndQuery(\"/users/****/info\")");
 }
 
 #[test]
 fn test_uri_path_from_template() {
     use std::borrow::Cow;
 
-    use templated_uri::Path;
+    use templated_uri::PathAndQuery;
 
     #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
     #[derive(Clone)]
@@ -409,7 +412,7 @@ fn test_uri_path_from_template() {
         user_id: EscapedString::from_static("123"),
     };
 
-    let target_paq = Path::from_template(user_posts);
+    let target_paq = PathAndQuery::from_template(user_posts);
 
     // Verify template
     assert_eq!(target_paq.template(), "/api/{user_id}/posts");
@@ -421,7 +424,7 @@ fn test_uri_path_from_template() {
     assert_eq!(target_paq.to_string().declassify_ref(), "/api/123/posts");
 
     // Verify to_path_and_query
-    let path = PathAndQuery::try_from(&target_paq).unwrap();
+    let path = http::uri::PathAndQuery::try_from(&target_paq).unwrap();
     assert_eq!(path.to_string(), "/api/123/posts");
 
     // Verify redacted string (unredacted because of unredacted attribute)

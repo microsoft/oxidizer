@@ -154,7 +154,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     );
 
     quote! {
-        impl ::templated_uri::PathTemplate for #ident {
+        impl ::templated_uri::PathAndQueryTemplate for #ident {
             fn template(&self) -> &'static core::primitive::str {
                 #input_template
             }
@@ -173,8 +173,8 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
                 ::std::format!(#format_template)
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
-                Ok(::templated_uri::PathAndQuery::try_from(::templated_uri::PathTemplate::render(self))?)
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
+                Ok(::templated_uri::http::uri::PathAndQuery::try_from(::templated_uri::PathAndQueryTemplate::render(self))?)
             }
         }
 
@@ -192,9 +192,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
         }
 
-        impl From<#ident> for ::templated_uri::Path {
+        impl From<#ident> for ::templated_uri::PathAndQuery {
             fn from(value: #ident) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
     }

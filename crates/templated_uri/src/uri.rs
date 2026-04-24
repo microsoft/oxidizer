@@ -8,15 +8,15 @@ use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 
 use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
-use http::uri::{Parts, PathAndQuery};
+use http::uri::{Parts, PathAndQuery as HttpPathAndQuery};
 
 use crate::error::UriError;
-use crate::{BasePath, BaseUri, Origin, Path};
+use crate::{BasePath, BaseUri, Origin, PathAndQuery};
 
-/// Target URI for HTTP requests, with optional [`BaseUri`] and [`Path`] components.
+/// Target URI for HTTP requests, with optional [`BaseUri`] and [`PathAndQuery`] components.
 ///
 /// A [`Uri`] can be constructed with or without a [`BaseUri`], and may wrap a
-/// templated path produced by a [`PathTemplate`](crate::PathTemplate) for dynamic
+/// templated path produced by a [`PathAndQueryTemplate`](crate::PathAndQueryTemplate) for dynamic
 /// URI generation.
 ///
 /// ```
@@ -24,7 +24,7 @@ use crate::{BasePath, BaseUri, Origin, Path};
 /// use templated_uri::{BaseUri, Uri};
 /// let base_uri = BaseUri::from_static("http://example.com");
 /// let path = PathAndQuery::from_static("/path?query=1");
-/// let uri: Uri = Uri::new().with_base(base_uri).with_path(path);
+/// let uri: Uri = Uri::new().with_base(base_uri).with_path_and_query(path);
 /// ```
 ///
 /// ```
@@ -38,14 +38,14 @@ use crate::{BasePath, BaseUri, Origin, Path};
 ///
 /// let my_template = MyTemplate { param: 42 };
 /// let base_uri = BaseUri::from_static("http://example.com");
-/// let uri: Uri = Uri::new().with_path(my_template).with_base(base_uri);
+/// let uri: Uri = Uri::new().with_path_and_query(my_template).with_base(base_uri);
 /// ```
 #[derive(Clone)]
 pub struct Uri {
     /// The base of the URI, which includes scheme, authority and path prefix
     pub(crate) base_uri: Option<BaseUri>,
     /// The path and query of the URI.
-    pub(crate) path: Option<Path>,
+    pub(crate) path_and_query: Option<PathAndQuery>,
 }
 
 impl Default for Uri {
@@ -64,7 +64,7 @@ impl Uri {
     pub fn new() -> Self {
         Self {
             base_uri: None,
-            path: None,
+            path_and_query: None,
         }
     }
 
@@ -85,48 +85,46 @@ impl Uri {
         Self::try_from(http::Uri::from_static(uri)).expect("static str is not a valid URI")
     }
 
-    /// Creates a new [`Uri`] from a [`BaseUri`] and a [`Path`].
+    /// Creates a new [`Uri`] from a [`BaseUri`] and a [`PathAndQuery`].
     ///
     /// ```
-    /// use templated_uri::{BaseUri, Uri, Path};
-    /// use templated_uri::PathAndQuery;
+    /// use templated_uri::{BaseUri, Uri, PathAndQuery};
     ///
     /// let base = BaseUri::from_static("http://example.com");
-    /// let path = Path::from(PathAndQuery::from_static("/path?query=1"));
-    /// let uri = Uri::from_parts(base, path);
+    /// let path_and_query = PathAndQuery::from(http::uri::PathAndQuery::from_static("/path?query=1"));
+    /// let uri = Uri::from_parts(base, path_and_query);
     /// ```
     #[must_use]
-    pub fn from_parts(base: impl Into<Option<BaseUri>>, path: impl Into<Option<Path>>) -> Self {
+    pub fn from_parts(base: impl Into<Option<BaseUri>>, path_and_query: impl Into<Option<PathAndQuery>>) -> Self {
         Self {
             base_uri: base.into(),
-            path: path.into(),
+            path_and_query: path_and_query.into(),
         }
     }
 
-    /// Consumes the `Uri` and returns its optional [`BaseUri`] and [`Path`] components.
+    /// Consumes the `Uri` and returns its optional [`BaseUri`] and [`PathAndQuery`] components.
     ///
     /// ```
-    /// use templated_uri::{BaseUri, Path, Uri};
-    /// use templated_uri::PathAndQuery;
+    /// use templated_uri::{BaseUri, PathAndQuery, Uri};
     ///
     /// let base = BaseUri::from_static("http://example.com");
-    /// let path = Path::from(PathAndQuery::from_static("/path?query=1"));
-    /// let uri = Uri::from_parts(base.clone(), path.clone());
+    /// let path_and_query = PathAndQuery::from(http::uri::PathAndQuery::from_static("/path?query=1"));
+    /// let uri = Uri::from_parts(base.clone(), path_and_query.clone());
     ///
-    /// let (got_base, got_path) = uri.into_parts();
+    /// let (got_base, got_path_and_query) = uri.into_parts();
     /// assert_eq!(got_base, Some(base));
-    /// assert!(got_path.is_some());
+    /// assert!(got_path_and_query.is_some());
     /// ```
     #[must_use]
-    pub fn into_parts(self) -> (Option<BaseUri>, Option<Path>) {
-        (self.base_uri, self.path)
+    pub fn into_parts(self) -> (Option<BaseUri>, Option<PathAndQuery>) {
+        (self.base_uri, self.path_and_query)
     }
 
-    /// Sets the path component of this `Uri` and returns the updated value.
+    /// Sets the path-and-query component of this `Uri` and returns the updated value.
     #[must_use]
-    pub fn with_path(self, path: impl Into<Path>) -> Self {
+    pub fn with_path_and_query(self, path_and_query: impl Into<PathAndQuery>) -> Self {
         Self {
-            path: Some(path.into()),
+            path_and_query: Some(path_and_query.into()),
             ..self
         }
     }
@@ -140,21 +138,13 @@ impl Uri {
         }
     }
 
-    /// Returns the path and query as a [`PathAndQuery`] if present.
+    /// Returns the [`PathAndQuery`] for this URI, if any.
     ///
-    /// Conversion errors are suppressed and returned as `None`. In practice
-    /// this should never happen: a templated path that fails to materialize
-    /// into a valid `PathAndQuery` indicates a programming error in the
-    /// template implementation rather than a recoverable runtime condition.
+    /// To obtain the validated [`http::uri::PathAndQuery`] use
+    /// [`http::uri::PathAndQuery::try_from`] on the returned value (or directly on the [`Uri`]).
     #[must_use]
     pub fn to_path_and_query(&self) -> Option<PathAndQuery> {
-        self.path.as_ref().and_then(|p| PathAndQuery::try_from(p).ok())
-    }
-
-    /// Returns the [`Path`] for this URI, if any.
-    #[must_use]
-    pub fn to_path(&self) -> Option<Path> {
-        self.path.clone()
+        self.path_and_query.clone()
     }
 
     /// Returns the URI as a [`Sensitive`] string, classified under [`Uri::DATA_CLASS`].
@@ -165,7 +155,7 @@ impl Uri {
     pub fn to_string(&self) -> Sensitive<String> {
         let mut path = self.base_uri.as_ref().map(ToString::to_string).unwrap_or_default();
 
-        match self.path.as_ref().map(Path::to_string) {
+        match self.path_and_query.as_ref().map(PathAndQuery::to_string) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => path.push_str(pq.declassify_ref().trim_start_matches('/')),
             Some(pq) => path.push_str(pq.declassify_ref()),
@@ -183,7 +173,7 @@ impl RedactedDisplay for Uri {
             write!(f, "{base_uri}")?;
         }
 
-        match self.path.as_ref().map(|path| path.to_redacted_string(engine)) {
+        match self.path_and_query.as_ref().map(|p| p.to_redacted_string(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -200,7 +190,7 @@ impl RedactedDebug for Uri {
             write!(f, "{base_uri}")?;
         }
 
-        match self.path.as_ref().map(|path| path.to_redacted_string(engine)) {
+        match self.path_and_query.as_ref().map(|p| p.to_redacted_string(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -221,16 +211,19 @@ impl TryFrom<http::Uri> for Uri {
     /// if internal validation fails.
     fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
         let parts = uri.into_parts();
-        let path = parts.path_and_query.map(Path::from);
+        let path_and_query = parts.path_and_query.map(PathAndQuery::from);
 
         let (Some(authority), Some(scheme)) = (parts.authority, parts.scheme) else {
-            return Ok(Self { base_uri: None, path });
+            return Ok(Self {
+                base_uri: None,
+                path_and_query,
+            });
         };
 
         let base_uri = BaseUri::from_parts(Origin::from_parts(scheme, authority), BasePath::default());
         Ok(Self {
             base_uri: Some(base_uri),
-            path,
+            path_and_query,
         })
     }
 }
@@ -241,7 +234,7 @@ impl Debug for Uri {
         if let Some(base_uri) = &self.base_uri {
             dbg.field("base_uri", base_uri);
         }
-        dbg.field("path", &self.path).finish()
+        dbg.field("path_and_query", &self.path_and_query).finish()
     }
 }
 
@@ -296,13 +289,13 @@ impl TryFrom<Uri> for http::Uri {
     /// Returns a [`UriError`] if the templated path fails to materialize into a valid
     /// path-and-query, or if the resulting parts cannot be assembled into an [`http::Uri`].
     fn try_from(value: Uri) -> Result<Self, Self::Error> {
-        let Uri { base_uri, path } = value;
+        let Uri { base_uri, path_and_query } = value;
 
-        let path = path.map(|pq| PathAndQuery::try_from(&pq)).transpose()?;
+        let path_and_query = path_and_query.map(|pq| HttpPathAndQuery::try_from(&pq)).transpose()?;
 
-        match (base_uri, path) {
+        match (base_uri, path_and_query) {
             (Some(base_uri), None) => Ok(base_uri.into()),
-            (Some(base_uri), Some(path)) => base_uri.build_http_uri(path),
+            (Some(base_uri), Some(path_and_query)) => base_uri.build_http_uri(path_and_query),
             (None, pq) => {
                 let mut parts = Parts::default();
                 parts.path_and_query = pq;
@@ -316,25 +309,34 @@ impl From<BaseUri> for Uri {
     fn from(value: BaseUri) -> Self {
         Self {
             base_uri: Some(value),
-            path: None,
+            path_and_query: None,
         }
     }
 }
 
-impl TryFrom<Uri> for PathAndQuery {
+impl From<http::uri::PathAndQuery> for Uri {
+    fn from(value: http::uri::PathAndQuery) -> Self {
+        Self {
+            base_uri: None,
+            path_and_query: Some(PathAndQuery::from(value)),
+        }
+    }
+}
+
+impl TryFrom<Uri> for HttpPathAndQuery {
     type Error = UriError;
 
-    /// Extracts the [`PathAndQuery`] from a [`Uri`].
+    /// Extracts the [`HttpPathAndQuery`] from a [`Uri`].
     ///
     /// # Errors
     ///
     /// Returns a [`UriError`] if the URI has no path component, or if the templated path
     /// fails to materialize into a valid path-and-query.
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
-        let Uri { path, .. } = uri;
-        let path = path.ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))?;
+        let Uri { path_and_query, .. } = uri;
+        let path_and_query = path_and_query.ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))?;
 
-        Self::try_from(&path)
+        Self::try_from(&path_and_query)
     }
 }
 
@@ -347,7 +349,7 @@ mod tests {
         let base = BaseUri::from_static("https://example.com/api/");
         let uri: Uri = base.into();
         assert_eq!(uri.to_string().declassify_ref(), "https://example.com/api/");
-        assert!(uri.to_path().is_none());
+        assert!(uri.to_path_and_query().is_none());
     }
 
     #[test]
@@ -359,7 +361,7 @@ mod tests {
     #[test]
     fn from_parts_and_into_parts_round_trip() {
         let base = BaseUri::from_static("http://example.com");
-        let path = Path::from(PathAndQuery::from_static("/path?query=1"));
+        let path = PathAndQuery::from(HttpPathAndQuery::from_static("/path?query=1"));
         let uri = Uri::from_parts(base.clone(), path);
 
         let (got_base, got_path) = uri.clone().into_parts();
@@ -402,15 +404,15 @@ mod tests {
     #[test]
     fn test_uri_into_http_uri() {
         let base_uri = BaseUri::from_static("https://example.com/");
-        let path_with_slash = PathAndQuery::from_static("/path?query=1");
-        let path_without_slash = PathAndQuery::from_static("path?query=1");
+        let path_with_slash = HttpPathAndQuery::from_static("/path?query=1");
+        let path_without_slash = HttpPathAndQuery::from_static("path?query=1");
 
-        let uri: Uri = Uri::default().with_base(base_uri).with_path(path_with_slash.clone());
+        let uri: Uri = Uri::default().with_base(base_uri).with_path_and_query(path_with_slash.clone());
         let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");
         assert_eq!(http_uri.to_string(), "https://example.com/path?query=1");
 
         let base_uri = BaseUri::from_static("https://example.com/foo/");
-        let uri: Uri = Uri::default().with_base(base_uri.clone()).with_path(path_with_slash);
+        let uri: Uri = Uri::default().with_base(base_uri.clone()).with_path_and_query(path_with_slash);
         let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");
         assert_eq!(
             http_uri.to_string(),
@@ -418,7 +420,7 @@ mod tests {
             "prefix works correctly with trailing slash"
         );
 
-        let uri: Uri = Uri::default().with_base(base_uri).with_path(path_without_slash);
+        let uri: Uri = Uri::default().with_base(base_uri).with_path_and_query(path_without_slash);
         let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");
         assert_eq!(
             http_uri.to_string(),
@@ -431,7 +433,10 @@ mod tests {
     fn test_authority_only_uri_from_str() {
         let uri_str = "https://example.com/";
         let uri: Uri = uri_str.parse().unwrap();
-        assert_eq!(uri.to_path_and_query(), Some(PathAndQuery::from_static("/")));
+        assert_eq!(
+            HttpPathAndQuery::try_from(uri.clone()).ok(),
+            Some(HttpPathAndQuery::from_static("/"))
+        );
         assert_eq!(&uri.to_string().declassify_ref(), &uri_str);
     }
 
@@ -466,13 +471,13 @@ mod tests {
         let uri = Uri::from_str("https://example.com/path?query=1").unwrap();
         assert_eq!(
             format!("{uri:?}"),
-            r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(Path) }"#
+            r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(PathAndQuery) }"#
         );
     }
 
     #[test]
     fn redact_path_uri() {
-        let insensitive_paq = |paq: &'static str| Path::from_static(paq);
+        let insensitive_paq = |paq: &'static str| PathAndQuery::from_static(paq);
 
         let redaction_engine = RedactionEngine::builder().build();
         let paq_with_trailing_slash = insensitive_paq("/sensitive/path?query=secret");
@@ -481,7 +486,7 @@ mod tests {
 
         let redacted_uri = Uri::default()
             .with_base(base_uri.clone())
-            .with_path(paq_without_trailing_slash.clone())
+            .with_path_and_query(paq_without_trailing_slash.clone())
             .to_redacted_string(&redaction_engine);
         assert_eq!(
             redacted_uri, "https://example.com/api/v1/",
@@ -490,7 +495,7 @@ mod tests {
 
         let redacted_uri = Uri::default()
             .with_base(base_uri)
-            .with_path(paq_with_trailing_slash.clone())
+            .with_path_and_query(paq_with_trailing_slash.clone())
             .to_redacted_string(&redaction_engine);
         assert_eq!(
             redacted_uri, "https://example.com/api/v1/",
@@ -498,26 +503,26 @@ mod tests {
         );
 
         let redacted_uri = Uri::default()
-            .with_path(paq_without_trailing_slash)
+            .with_path_and_query(paq_without_trailing_slash)
             .to_redacted_string(&redaction_engine);
         assert_eq!(redacted_uri, "");
 
         let redacted_uri = Uri::default()
-            .with_path(paq_with_trailing_slash)
+            .with_path_and_query(paq_with_trailing_slash)
             .to_redacted_string(&redaction_engine);
         assert_eq!(redacted_uri, "");
     }
 
     #[test]
     fn test_redacted_debug_uri() {
-        let insensitive_paq = |paq: &'static str| Path::from_static(paq);
+        let insensitive_paq = |paq: &'static str| PathAndQuery::from_static(paq);
 
         let redaction_engine = RedactionEngine::builder().build();
 
         // Test with base URI and path and query
         let base_uri = BaseUri::from_static("https://example.com/api/v1/");
         let paq = insensitive_paq("/sensitive/path?query=secret");
-        let uri = Uri::default().with_base(base_uri.clone()).with_path(paq);
+        let uri = Uri::default().with_base(base_uri.clone()).with_path_and_query(paq);
 
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&uri, &mut redacted_debug).unwrap();
@@ -528,7 +533,7 @@ mod tests {
 
         // Test with path and query only (no base URI)
         let paq_only = insensitive_paq("/sensitive/path");
-        let uri_no_base = Uri::default().with_path(paq_only);
+        let uri_no_base = Uri::default().with_path_and_query(paq_only);
 
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&uri_no_base, &mut redacted_debug).unwrap();
@@ -554,7 +559,7 @@ mod tests {
         let paq_no_slash = insensitive_paq("sensitive/path");
         let uri_no_slash = Uri::default()
             .with_base(BaseUri::from_static("https://example.com/api/"))
-            .with_path(paq_no_slash);
+            .with_path_and_query(paq_no_slash);
 
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&uri_no_slash, &mut redacted_debug).unwrap();
@@ -584,8 +589,8 @@ mod tests {
     #[test]
     fn test_try_from_uri_to_http_uri_path_only() {
         // Test match arm: (None, Some(pq))
-        let path = PathAndQuery::from_static("/path?query=value");
-        let uri = Uri::default().with_path(path);
+        let path = HttpPathAndQuery::from_static("/path?query=value");
+        let uri = Uri::default().with_path_and_query(path);
 
         let http_uri: http::Uri = uri.try_into().unwrap();
         assert_eq!(http_uri.to_string(), "/path?query=value");
@@ -594,10 +599,10 @@ mod tests {
     #[test]
     fn test_try_from_uri_to_path_success_paq() {
         // Test successful conversion when URI has path and query
-        let path = PathAndQuery::from_static("/success/path");
-        let uri = Uri::default().with_path(path);
+        let path = HttpPathAndQuery::from_static("/success/path");
+        let uri = Uri::default().with_path_and_query(path);
 
-        let paq: PathAndQuery = uri.try_into().unwrap();
+        let paq: HttpPathAndQuery = uri.try_into().unwrap();
         assert_eq!(paq.to_string(), "/success/path");
     }
 
@@ -606,7 +611,7 @@ mod tests {
         // Test error case when URI has no path and query
         let uri = Uri::default().with_base(BaseUri::from_static("https://example.com/"));
 
-        let result: Result<PathAndQuery, UriError> = uri.try_into();
+        let result: Result<HttpPathAndQuery, UriError> = uri.try_into();
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not have a path and query component"));
     }

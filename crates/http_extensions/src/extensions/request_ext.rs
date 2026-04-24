@@ -4,12 +4,12 @@
 use crate::UriTemplateLabel;
 use crate::extensions::ExtensionsExt;
 use http::Request;
-use templated_uri::Path;
+use templated_uri::PathAndQuery;
 
 /// Extensions for HTTP requests.
 pub trait RequestExt: sealed::Sealed {
-    /// Returns the URI path associated with this request, if any.
-    fn path(&self) -> Option<&Path>;
+    /// Returns the URI path and query associated with this request, if any.
+    fn path_and_query(&self) -> Option<&PathAndQuery>;
 
     /// Returns the URL template label for this request, if available.
     ///
@@ -23,7 +23,7 @@ pub trait RequestExt: sealed::Sealed {
 }
 
 impl<B> RequestExt for Request<B> {
-    fn path(&self) -> Option<&Path> {
+    fn path_and_query(&self) -> Option<&PathAndQuery> {
         self.extensions().get()
     }
 
@@ -52,9 +52,11 @@ mod tests {
     fn template_extension() {
         let uri = Uri::from_static("https://example.com/path");
         let mut request = crate::Request::builder().uri(uri.clone()).body(()).unwrap();
-        request.extensions_mut().insert(Path::from(uri.path_and_query().cloned().unwrap()));
+        request
+            .extensions_mut()
+            .insert(PathAndQuery::from(uri.path_and_query().cloned().unwrap()));
 
-        assert_eq!(request.path().unwrap().to_string().declassify_ref(), "/path");
+        assert_eq!(request.path_and_query().unwrap().to_string().declassify_ref(), "/path");
     }
 
     #[test]
@@ -85,10 +87,12 @@ mod tests {
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
 
-        // Attach a Path but no UriTemplateLabel.
+        // Attach a PathAndQuery but no UriTemplateLabel.
         // For a plain PathAndQuery, label() returns None so the fallback
         // to template() is exercised.
-        request.extensions_mut().insert(Path::from(uri.path_and_query().cloned().unwrap()));
+        request
+            .extensions_mut()
+            .insert(PathAndQuery::from(uri.path_and_query().cloned().unwrap()));
 
         let result = request.uri_template_label();
         assert_eq!(result.as_ref().map(UriTemplateLabel::as_str), Some("/api/users"));

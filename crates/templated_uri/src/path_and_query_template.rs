@@ -10,7 +10,7 @@ use crate::UriError;
 
 /// Allows for the creation of URIs based on templates.
 ///
-/// A `PathTemplate` describes both the path and the optional query string
+/// A `PathAndQueryTemplate` describes both the path and the optional query string
 /// portion of a URI (everything after the authority and before any fragment).
 /// Variables may appear in either part (e.g. `/users/{id}?filter={kind}`).
 ///
@@ -30,7 +30,7 @@ use crate::UriError;
 /// # Examples
 ///
 /// ```
-/// use templated_uri::{PathTemplate, EscapedString, templated};
+/// use templated_uri::{PathAndQueryTemplate, EscapedString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
@@ -58,7 +58,7 @@ use crate::UriError;
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use templated_uri::{PathTemplate, EscapedString, templated};
+/// use templated_uri::{PathAndQueryTemplate, EscapedString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
@@ -84,13 +84,13 @@ use crate::UriError;
 ///     "/acme/user/********/"
 /// )
 /// ```
-pub trait PathTemplate: RedactedDisplay + Debug + Sync + Send
+pub trait PathAndQueryTemplate: RedactedDisplay + Debug + Sync + Send
 where
     Self: 'static,
 {
     /// Renders the template with its current field values into a path-and-query string.
     ///
-    /// For a validated [`PathAndQuery`] use [`PathTemplate::to_path_and_query`] instead.
+    /// For a validated [`PathAndQuery`] use [`PathAndQueryTemplate::to_path_and_query`] instead.
     fn render(&self) -> String;
 
     /// Converts to a validated [`PathAndQuery`].
@@ -119,8 +119,8 @@ where
     fn label(&self) -> Option<&'static str>;
 }
 
-impl<T: PathTemplate> From<T> for crate::Uri {
+impl<T: PathAndQueryTemplate> From<T> for crate::Uri {
     fn from(value: T) -> Self {
-        Self::from(crate::Path::from_template(value))
+        Self::from(crate::PathAndQuery::from_template(value))
     }
 }

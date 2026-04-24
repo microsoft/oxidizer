@@ -29,7 +29,7 @@ use crate::{BasePath, Origin, UriError};
 /// - Consider declaring frequently used paths as `const`s in your application.
 ///
 /// ```rust
-/// # use templated_uri::{BaseUri, Scheme, PathAndQuery};
+/// # use templated_uri::{BaseUri, Scheme}; use http::uri::PathAndQuery;
 /// let api_path = PathAndQuery::from_static("/api/v1/resources");
 /// let users_path = PathAndQuery::from_static("/api/v1/users");
 ///
@@ -395,7 +395,7 @@ impl BaseUri {
     /// # Examples
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, Scheme, PathAndQuery};
+    /// # use templated_uri::{BaseUri, Scheme}; use http::uri::PathAndQuery;
     /// let base_uri = BaseUri::from_static("https://example.com");
     /// let uri = base_uri.build_http_uri("/api/resource?param=value")?;
     ///
@@ -408,7 +408,7 @@ impl BaseUri {
     ///
     /// Using a path prefix as a part of the [`BaseUri`]:
     /// ```
-    /// # use templated_uri::{BaseUri, Scheme, PathAndQuery};
+    /// # use templated_uri::{BaseUri, Scheme}; use http::uri::PathAndQuery;
     /// let base_uri = BaseUri::from_static("https://example.com/api/");
     /// let uri = base_uri.build_http_uri("resource?param=value")?;
     ///
@@ -422,7 +422,7 @@ impl BaseUri {
     /// Using a pre-existing `PathAndQuery`:
     ///
     /// ```
-    /// # use templated_uri::{BaseUri, Scheme, PathAndQuery};
+    /// # use templated_uri::{BaseUri, Scheme}; use http::uri::PathAndQuery;
     /// let base_uri = BaseUri::from_static("https://example.com");
     ///
     /// // Pre-create and cache path and query to avoid parsing and extra allocations.

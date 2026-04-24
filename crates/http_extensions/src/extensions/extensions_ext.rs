@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use http::Extensions;
-use templated_uri::Path;
+use templated_uri::PathAndQuery;
 
 use crate::UriTemplateLabel;
 
@@ -12,8 +12,8 @@ pub trait ExtensionsExt: sealed::Sealed {
     ///
     /// This method checks for a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension
-    /// 2. From a [`Path`] label (if set via `#[templated(label = "...")]`)
-    /// 3. From a [`Path`] template string
+    /// 2. From a [`PathAndQuery`] label (if set via `#[templated(label = "...")]`)
+    /// 3. From a [`PathAndQuery`] template string
     ///
     /// Returns `None` if no template information is available.
     fn uri_template_label(&self) -> Option<UriTemplateLabel>;
@@ -24,7 +24,7 @@ impl ExtensionsExt for Extensions {
         if let Some(label) = self.get::<UriTemplateLabel>() {
             return Some(label.clone());
         }
-        if let Some(path) = self.get::<Path>() {
+        if let Some(path) = self.get::<PathAndQuery>() {
             return Some(UriTemplateLabel::new(path.label().unwrap_or_else(|| path.template())));
         }
 
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn returns_template_as_fallback_from_uri_path() {
         let mut extensions = Extensions::new();
-        extensions.insert(Path::from_static("/path"));
+        extensions.insert(PathAndQuery::from_static("/path"));
 
         assert_eq!(
             extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
@@ -76,7 +76,7 @@ mod tests {
         }
 
         let mut extensions = Extensions::new();
-        extensions.insert(Path::from_template(UserPosts {
+        extensions.insert(PathAndQuery::from_template(UserPosts {
             user_id: EscapedString::from_static("123"),
         }));
 
@@ -90,7 +90,7 @@ mod tests {
     fn explicit_label_takes_precedence_over_target_path() {
         let mut extensions = Extensions::new();
         extensions.insert(UriTemplateLabel::new("/explicit"));
-        extensions.insert(Path::from_static("/path"));
+        extensions.insert(PathAndQuery::from_static("/path"));
 
         assert_eq!(
             extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),

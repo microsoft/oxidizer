@@ -19,7 +19,7 @@
 //!
 //! - [`Uri`] - Flexible URI type composed of an optional [`BaseUri`] and an optional path/query
 //! - [`BaseUri`] - Lightweight type representing scheme, authority, and optional base path ([`BasePath`])
-//! - [`PathTemplate`] - RFC 6570 Level 3 compliant URI templating
+//! - [`PathAndQueryTemplate`] - RFC 6570 Level 3 compliant URI templating
 //! - [`Escaped`] and [`EscapedString`] - Generic newtype wrapper proving a value is properly escaped for URI components
 //!   by not containing any reserved characters
 //!
@@ -27,17 +27,16 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use templated_uri::PathAndQuery;
-//! use templated_uri::{BaseUri, Uri, Path};
+//! use templated_uri::{BaseUri, Uri, PathAndQuery};
 //!
 //! // Create the base (scheme + authority, optionally a path prefix)
 //! let base_uri = BaseUri::from_static("https://api.example.com");
 //!
 //! // Create a path (can be static for zero-allocation)
-//! let path: Path = Path::from_static("/api/v1/users");
+//! let path: PathAndQuery = PathAndQuery::from_static("/api/v1/users");
 //!
 //! // Combine into complete URI
-//! let uri = Uri::default().with_base(base_uri).with_path(path);
+//! let uri = Uri::default().with_base(base_uri).with_path_and_query(path);
 //! assert_eq!(
 //!     uri.to_string().declassify_ref(),
 //!     "https://api.example.com/api/v1/users"
@@ -49,7 +48,7 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, PathTemplate, Uri, EscapedString, templated};
+//! use templated_uri::{BaseUri, PathAndQueryTemplate, Uri, EscapedString, templated};
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
@@ -65,7 +64,7 @@
 //!
 //! let uri = Uri::default()
 //!     .with_base(BaseUri::from_static("https://api.example.com"))
-//!     .with_path(path);
+//!     .with_path_and_query(path);
 //! ```
 //!
 //! # URI Escaping Guarantees
@@ -161,8 +160,8 @@ mod escape;
 mod escaped;
 mod macros;
 mod origin;
-mod path;
-mod path_template;
+mod path_and_query;
+mod path_and_query_template;
 mod uri;
 
 pub use base_path::BasePath;
@@ -172,8 +171,14 @@ pub use escape::{Escape, UnescapedDisplay};
 pub use escaped::{EscapeError, Escaped, EscapedString};
 pub use macros::{Escape, UnescapedDisplay, templated};
 pub use origin::Origin;
-pub use path::Path;
-pub use path_template::PathTemplate;
+pub use path_and_query::PathAndQuery;
+pub use path_and_query_template::PathAndQueryTemplate;
 pub use uri::Uri;
 
-pub use http::uri::{Authority, PathAndQuery, Scheme};
+pub use http::uri::{Authority, Scheme};
+
+// Re-export the `http` crate so macro-generated code can refer to
+// `http::uri::PathAndQuery` via `::templated_uri::http` without requiring
+// downstream crates to depend on `http` directly.
+#[doc(hidden)]
+pub use http;

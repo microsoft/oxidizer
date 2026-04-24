@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let target = Uri::default()
         .with_base(BaseUri::from_static("https://example.com"))
-        .with_path(user_path);
+        .with_path_and_query(user_path);
 
     // You need to be careful with this as it contains the classified data.
     let _actual_uri: Uri = target.clone();

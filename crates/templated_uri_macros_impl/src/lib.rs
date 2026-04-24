@@ -237,7 +237,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::PathTemplate for Test {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
             fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -257,12 +257,12 @@ mod tests {
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::PathAndQuery,
+                ::templated_uri::http::uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 Ok(
-                    ::templated_uri::PathAndQuery::try_from(
-                        ::templated_uri::PathTemplate::render(self),
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
                     )?,
                 )
             }
@@ -295,9 +295,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::Path {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -326,7 +326,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::PathTemplate for Test {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
             fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -346,12 +346,12 @@ mod tests {
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::PathAndQuery,
+                ::templated_uri::http::uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 Ok(
-                    ::templated_uri::PathAndQuery::try_from(
-                        ::templated_uri::PathTemplate::render(self),
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
                     )?,
                 )
             }
@@ -380,9 +380,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::Path {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -409,7 +409,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::PathTemplate for Test {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
             fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -429,12 +429,12 @@ mod tests {
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::PathAndQuery,
+                ::templated_uri::http::uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 Ok(
-                    ::templated_uri::PathAndQuery::try_from(
-                        ::templated_uri::PathTemplate::render(self),
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
                     )?,
                 )
             }
@@ -463,9 +463,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::Path {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -492,7 +492,7 @@ mod tests {
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::PathTemplate for Test {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
             fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
@@ -512,12 +512,12 @@ mod tests {
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::PathAndQuery,
+                ::templated_uri::http::uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 Ok(
-                    ::templated_uri::PathAndQuery::try_from(
-                        ::templated_uri::PathTemplate::render(self),
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
                     )?,
                 )
             }
@@ -546,9 +546,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::Path {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -573,7 +573,7 @@ mod tests {
             page: String,
             limit: String,
         }
-        impl ::templated_uri::PathTemplate for QueryTest {
+        impl ::templated_uri::PathAndQueryTemplate for QueryTest {
             fn template(&self) -> &'static core::primitive::str {
                 "/api/{resource}{?page,limit}"
             }
@@ -592,12 +592,12 @@ mod tests {
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::PathAndQuery,
+                ::templated_uri::http::uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 Ok(
-                    ::templated_uri::PathAndQuery::try_from(
-                        ::templated_uri::PathTemplate::render(self),
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
                     )?,
                 )
             }
@@ -626,9 +626,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<QueryTest> for ::templated_uri::Path {
+        impl From<QueryTest> for ::templated_uri::PathAndQuery {
             fn from(value: QueryTest) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -786,7 +786,7 @@ mod tests {
             FirstTemplate(First),
             SecondTemplate(Second),
         }
-        impl ::templated_uri::PathTemplate for Test {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
             fn template(&self) -> &'static core::primitive::str {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.template(),
@@ -808,7 +808,7 @@ mod tests {
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::PathAndQuery,
+                ::templated_uri::http::uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 match self {
@@ -864,9 +864,9 @@ mod tests {
                 Self::SecondTemplate(template_variant)
             }
         }
-        impl From<Test> for ::templated_uri::Path {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::Path::from_template(value)
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);

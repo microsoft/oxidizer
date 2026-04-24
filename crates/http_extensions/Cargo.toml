@@ -39,7 +39,7 @@ allowed_external_types = [
     "serde_core::de::*",
     "serde_core::ser::*",
     "templated_uri::error::UriError",
-    "templated_uri::path::Path",
+    "templated_uri::path_and_query::PathAndQuery",
     "templated_uri::uri::Uri",
     "thread_aware::affinity::MemoryAffinity",
     "thread_aware::affinity::PinnedAffinity",
