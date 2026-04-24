@@ -151,7 +151,7 @@
 //!
 //! This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting
 //! and building upon the standard [`http`](https://docs.rs/http/latest/http/) crate types. The resulting [`Uri`] can be converted
-//! to an [`http::Uri`](::http::Uri) for use with HTTP clients
+//! to an [`http::Uri`] for use with HTTP clients
 //! and servers based on [`hyper`](https://docs.rs/hyper/latest/hyper/) like [`reqwest`](https://docs.rs/reqwest/latest/reqwest/).
 
 mod base_path;
@@ -168,9 +168,9 @@ mod uri;
 pub use base_path::BasePath;
 pub use base_uri::BaseUri;
 pub use error::UriError;
-pub use escape::{Escape, UriUnsafeParam};
+pub use escape::{Escape, UnescapedDisplay};
 pub use escaped::{EscapeError, Escaped, EscapedString};
-pub use macros::{Escape, UriUnsafeParam, templated};
+pub use macros::{Escape, UnescapedDisplay, templated};
 pub use origin::Origin;
 pub use path::Path;
 pub use path_template::PathTemplate;

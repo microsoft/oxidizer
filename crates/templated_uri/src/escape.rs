@@ -18,15 +18,15 @@ pub trait Escape {
 }
 
 /// Marks types with possibly dodgy content usable from templates, e.g., `/get/{+foo}`.
-pub trait UriUnsafeParam {
+pub trait UnescapedDisplay {
     /// Returns a displayable representation of this value.
-    fn as_display(&self) -> impl Display;
+    fn unescaped_display(&self) -> impl Display;
 }
 
 macro_rules! impl_uri_unsafe_param {
     ($t:ty) => {
-        impl UriUnsafeParam for $t {
-            fn as_display(&self) -> impl Display {
+        impl UnescapedDisplay for $t {
+            fn unescaped_display(&self) -> impl Display {
                 self
             }
         }
@@ -51,8 +51,8 @@ impl Escape for EscapedString {
     }
 }
 
-impl UriUnsafeParam for EscapedString {
-    fn as_display(&self) -> impl Display {
+impl UnescapedDisplay for EscapedString {
+    fn unescaped_display(&self) -> impl Display {
         self.as_str()
     }
 }
@@ -73,11 +73,11 @@ impl_uri_param!(IpAddr);
 #[cfg(feature = "uuid")]
 impl_uri_param!(Uuid);
 
-impl<T> UriUnsafeParam for Sensitive<T>
+impl<T> UnescapedDisplay for Sensitive<T>
 where
     T: Display,
 {
-    fn as_display(&self) -> impl Display {
+    fn unescaped_display(&self) -> impl Display {
         self.declassify_ref()
     }
 }
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn test_uri_unsafe_param_string() {
         let value = String::from("test_value");
-        let display = value.as_display();
+        let display = value.unescaped_display();
         assert_eq!(format!("{display}"), "test_value");
     }
 
@@ -137,16 +137,16 @@ mod tests {
     #[test]
     fn uri_unsafe_param_uri_escaped_string() {
         let s = EscapedString::escape("hello world");
-        assert_eq!(format!("{}", s.as_display()), "hello%20world");
+        assert_eq!(format!("{}", s.unescaped_display()), "hello%20world");
     }
 
     #[test]
     fn test_uri_unsafe_param_sensitive() {
-        // Test line 78-84: UriUnsafeParam for Sensitive<T> where T: Display
+        // Test line 78-84: UnescapedDisplay for Sensitive<T> where T: Display
         let data_class = DataClass::new("test", "sensitive");
         let sensitive_string = Sensitive::new(String::from("secret_value"), data_class);
 
-        let display = sensitive_string.as_display();
+        let display = sensitive_string.unescaped_display();
         assert_eq!(format!("{display}"), "secret_value");
     }
 

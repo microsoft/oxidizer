@@ -29,7 +29,7 @@ pub fn uri_param(input: TokenStream) -> TokenStream {
 }
 
 #[cfg_attr(test, mutants::skip)] // The macro is tested indirectly through the `templated_uri` crate's tests, so we can skip it in mutation testing here.
-#[proc_macro_derive(UriUnsafeParam)]
+#[proc_macro_derive(UnescapedDisplay)]
 pub fn uri_unsafe_param(input: TokenStream) -> TokenStream {
     let output = uri_unsafe_param_derive_impl(input.into());
     output.into()

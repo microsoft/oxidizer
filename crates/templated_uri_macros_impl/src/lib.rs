@@ -249,7 +249,7 @@ mod tests {
             }
             fn to_uri_string(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -335,7 +335,7 @@ mod tests {
             }
             fn to_uri_string(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -415,7 +415,7 @@ mod tests {
             }
             fn to_uri_string(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -495,7 +495,7 @@ mod tests {
             }
             fn to_uri_string(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
+                let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -861,8 +861,8 @@ mod tests {
 
         let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriUnsafeParam for MyFragment {
-            fn as_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::UnescapedDisplay for MyFragment {
+            fn unescaped_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }
@@ -877,8 +877,8 @@ mod tests {
 
         let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriUnsafeParam for CustomFragment {
-            fn as_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::UnescapedDisplay for CustomFragment {
+            fn unescaped_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }
@@ -896,7 +896,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam can only be derived for tuple structs (newtype pattern)"
+            "UnescapedDisplay can only be derived for tuple structs (newtype pattern)"
         }
         "#);
     }
@@ -910,7 +910,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam requires exactly one field, found 2"
+            "UnescapedDisplay requires exactly one field, found 2"
         }
         "#);
     }
@@ -926,7 +926,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam cannot be derived for enums"
+            "UnescapedDisplay cannot be derived for enums"
         }
         "#);
     }
@@ -942,7 +942,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_unsafe_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam cannot be derived for unions"
+            "UnescapedDisplay cannot be derived for unions"
         }
         "#);
     }
@@ -1243,7 +1243,7 @@ mod tests {
         let output_str = output.to_string();
         assert!(
             output_str.contains("compile_error"),
-            "Should reject generic UriUnsafeParam: {output_str}"
+            "Should reject generic UnescapedDisplay: {output_str}"
         );
     }
 

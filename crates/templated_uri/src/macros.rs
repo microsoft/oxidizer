@@ -22,9 +22,9 @@
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
 pub use templated_uri_macros::Escape;
-/// Derives the `UriUnsafeParam` trait for newtype wrappers with unrestricted characters.
+/// Derives the `UnescapedDisplay` trait for newtype wrappers with unrestricted characters.
 ///
-/// This derive macro implements `UriUnsafeParam` for tuple structs with exactly one field.
+/// This derive macro implements `UnescapedDisplay` for tuple structs with exactly one field.
 /// The implementation delegates to the inner field's [`Display`](std::fmt::Display) impl, making it suitable for use in
 /// URI templates with unrestricted `{+param}` placeholders that allow reserved characters.
 ///
@@ -36,15 +36,15 @@ pub use templated_uri_macros::Escape;
 /// # Example
 ///
 /// ```
-/// use templated_uri::UriUnsafeParam;
+/// use templated_uri::UnescapedDisplay;
 ///
-/// #[derive(UriUnsafeParam)]
+/// #[derive(UnescapedDisplay)]
 /// struct PathSegment(String);
 /// ```
 ///
 /// This allows `PathSegment` to be used in URI templates with `{+param}` syntax where
 /// reserved characters like `/` should be preserved rather than percent-encoded.
-pub use templated_uri_macros::UriUnsafeParam;
+pub use templated_uri_macros::UnescapedDisplay;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:

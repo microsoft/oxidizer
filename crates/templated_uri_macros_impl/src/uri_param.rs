@@ -48,12 +48,12 @@ pub(crate) fn uri_param_impl(input: DeriveInput) -> TokenStream {
     }
 }
 
-/// Generates the `UriUnsafeParam` trait implementation for a newtype struct.
+/// Generates the `UnescapedDisplay` trait implementation for a newtype struct.
 pub(crate) fn uri_unsafe_param_impl(input: DeriveInput) -> TokenStream {
     let ident = &input.ident;
 
     if !input.generics.params.is_empty() {
-        return syn::Error::new_spanned(&input.generics, "UriUnsafeParam cannot be derived for generic types").to_compile_error();
+        return syn::Error::new_spanned(&input.generics, "UnescapedDisplay cannot be derived for generic types").to_compile_error();
     }
 
     // Only support tuple structs (newtype pattern)
@@ -61,27 +61,27 @@ pub(crate) fn uri_unsafe_param_impl(input: DeriveInput) -> TokenStream {
         Data::Struct(ref data) => match data.fields {
             Fields::Unnamed(ref fields) => fields,
             _ => {
-                bail!(input, "UriUnsafeParam can only be derived for tuple structs (newtype pattern)");
+                bail!(input, "UnescapedDisplay can only be derived for tuple structs (newtype pattern)");
             }
         },
         Data::Enum(_) => {
-            bail!(input, "UriUnsafeParam cannot be derived for enums");
+            bail!(input, "UnescapedDisplay cannot be derived for enums");
         }
         Data::Union(_) => {
-            bail!(input, "UriUnsafeParam cannot be derived for unions");
+            bail!(input, "UnescapedDisplay cannot be derived for unions");
         }
     };
 
     // Ensure exactly one field
     let field_count = fields.unnamed.len();
     if field_count != 1 {
-        bail!(fields, "UriUnsafeParam requires exactly one field, found {}", field_count);
+        bail!(fields, "UnescapedDisplay requires exactly one field, found {}", field_count);
     }
 
     // Generate the implementation
     quote! {
-        impl ::templated_uri::UriUnsafeParam for #ident {
-            fn as_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::UnescapedDisplay for #ident {
+            fn unescaped_display(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }

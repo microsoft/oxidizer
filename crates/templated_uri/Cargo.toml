@@ -33,7 +33,7 @@ allowed_external_types = [
     "http::uri::Uri",
     "templated_uri_macros::templated",
     "templated_uri_macros::Escape",
-    "templated_uri_macros::UriUnsafeParam",
+    "templated_uri_macros::UnescapedDisplay",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
     "ohno::error_label::ErrorLabel",
