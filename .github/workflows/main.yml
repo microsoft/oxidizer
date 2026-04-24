@@ -275,7 +275,7 @@ jobs:
 
       # execute
       - name: Udeps
-        run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace --color always
+        run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
       - name: Careful
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
