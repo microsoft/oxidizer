@@ -174,7 +174,6 @@ pub use macros::{Escape, UnescapedDisplay, templated};
 pub use origin::Origin;
 pub use path::Path;
 pub use path_template::PathTemplate;
-#[doc(inline)]
 pub use uri::Uri;
 
 pub use http::uri::{Authority, PathAndQuery, Scheme};

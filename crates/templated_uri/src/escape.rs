@@ -23,7 +23,7 @@ pub trait UnescapedDisplay {
     fn unescaped_display(&self) -> impl Display;
 }
 
-macro_rules! impl_uri_unsafe_param {
+macro_rules! impl_unescaped_display {
     ($t:ty) => {
         impl UnescapedDisplay for $t {
             fn unescaped_display(&self) -> impl Display {
@@ -33,7 +33,7 @@ macro_rules! impl_uri_unsafe_param {
     };
 }
 
-macro_rules! impl_uri_param {
+macro_rules! impl_escape {
     ($t:ty) => {
         impl Escape for $t {
             fn escape(&self) -> Escaped<impl Display> {
@@ -43,7 +43,7 @@ macro_rules! impl_uri_param {
     };
 }
 
-impl_uri_unsafe_param!(String);
+impl_unescaped_display!(String);
 
 impl Escape for EscapedString {
     fn escape(&self) -> Escaped<impl Display> {
@@ -57,21 +57,21 @@ impl UnescapedDisplay for EscapedString {
     }
 }
 
-impl_uri_param!(usize);
-impl_uri_param!(u8);
-impl_uri_param!(u16);
-impl_uri_param!(u32);
-impl_uri_param!(u64);
-impl_uri_param!(u128);
-impl_uri_param!(NonZeroU8);
-impl_uri_param!(NonZeroU16);
-impl_uri_param!(NonZeroU32);
-impl_uri_param!(NonZeroU64);
-impl_uri_param!(NonZeroU128);
-impl_uri_param!(NonZeroUsize);
-impl_uri_param!(IpAddr);
+impl_escape!(usize);
+impl_escape!(u8);
+impl_escape!(u16);
+impl_escape!(u32);
+impl_escape!(u64);
+impl_escape!(u128);
+impl_escape!(NonZeroU8);
+impl_escape!(NonZeroU16);
+impl_escape!(NonZeroU32);
+impl_escape!(NonZeroU64);
+impl_escape!(NonZeroU128);
+impl_escape!(NonZeroUsize);
+impl_escape!(IpAddr);
 #[cfg(feature = "uuid")]
-impl_uri_param!(Uuid);
+impl_escape!(Uuid);
 
 impl<T> UnescapedDisplay for Sensitive<T>
 where

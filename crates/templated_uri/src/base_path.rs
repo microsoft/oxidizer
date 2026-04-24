@@ -83,6 +83,12 @@ impl Default for BasePath {
 impl FromStr for BasePath {
     type Err = UriError;
 
+    /// Parses a [`BasePath`] from a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string is not a valid path-and-query, contains a query string,
+    /// or does not start and end with a slash (`/`).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let p: PathAndQuery = s.try_into()?;
         Self::new(p)
@@ -92,6 +98,11 @@ impl FromStr for BasePath {
 impl TryFrom<&str> for BasePath {
     type Error = UriError;
 
+    /// Parses a [`BasePath`] from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// See [`BasePath::from_str`].
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::from_str(value)
     }
@@ -100,6 +111,11 @@ impl TryFrom<&str> for BasePath {
 impl TryFrom<String> for BasePath {
     type Error = UriError;
 
+    /// Parses a [`BasePath`] from an owned `String`, reusing the allocation when possible.
+    ///
+    /// # Errors
+    ///
+    /// See [`BasePath::from_str`].
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let p = PathAndQuery::try_from(value)?;
         Self::new(p)
@@ -109,6 +125,11 @@ impl TryFrom<String> for BasePath {
 impl TryFrom<PathAndQuery> for BasePath {
     type Error = UriError;
 
+    /// Validates the given [`PathAndQuery`] as a [`BasePath`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the value contains a query string or does not start and end with a slash (`/`).
     fn try_from(paq: PathAndQuery) -> Result<Self, Self::Error> {
         Self::new(paq)
     }
@@ -117,6 +138,11 @@ impl TryFrom<PathAndQuery> for BasePath {
 impl TryFrom<&PathAndQuery> for BasePath {
     type Error = UriError;
 
+    /// Validates a borrowed [`PathAndQuery`] as a [`BasePath`].
+    ///
+    /// # Errors
+    ///
+    /// See [`<BasePath as TryFrom<PathAndQuery>>::try_from`].
     fn try_from(paq: &PathAndQuery) -> Result<Self, Self::Error> {
         paq.clone().try_into()
     }
@@ -150,7 +176,7 @@ impl<'de> serde::Deserialize<'de> for BasePath {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use ohno::ErrorExt;
 
     use super::*;

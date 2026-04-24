@@ -181,9 +181,9 @@ impl Uri {
 impl RedactedDisplay for Uri {
     #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> fmt::Result {
-        self.base_uri
-            .as_ref()
-            .map_or(Ok(()), |base_uri| f.write_str(base_uri.to_string().as_str()))?;
+        if let Some(base_uri) = self.base_uri.as_ref() {
+            write!(f, "{base_uri}")?;
+        }
 
         match self.path.as_ref().map(|path| path.to_redacted_string(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
@@ -198,9 +198,9 @@ impl RedactedDisplay for Uri {
 impl RedactedDebug for Uri {
     #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
     fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> fmt::Result {
-        self.base_uri
-            .as_ref()
-            .map_or(Ok(()), |base_uri| f.write_str(base_uri.to_string().as_str()))?;
+        if let Some(base_uri) = self.base_uri.as_ref() {
+            write!(f, "{base_uri}")?;
+        }
 
         match self.path.as_ref().map(|path| path.to_redacted_string(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
@@ -214,6 +214,13 @@ impl RedactedDebug for Uri {
 
 impl TryFrom<http::Uri> for Uri {
     type Error = UriError;
+
+    /// Converts an [`http::Uri`] into a [`Uri`].
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible in practice, but returns [`UriError`] for forward-compatibility
+    /// if internal validation fails.
     fn try_from(uri: http::Uri) -> Result<Self, Self::Error> {
         let parts = uri.into_parts();
         let path = parts.path_and_query.map(Path::from);
@@ -243,6 +250,11 @@ impl Debug for Uri {
 impl FromStr for Uri {
     type Err = UriError;
 
+    /// Parses a [`Uri`] from a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string is not a valid URI.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let uri: http::Uri = http::Uri::from_str(s)?;
         uri.try_into()
@@ -252,6 +264,11 @@ impl FromStr for Uri {
 impl TryFrom<&str> for Uri {
     type Error = UriError;
 
+    /// Parses a [`Uri`] from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// See [`Uri::from_str`].
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::from_str(value)
     }
@@ -260,6 +277,11 @@ impl TryFrom<&str> for Uri {
 impl TryFrom<String> for Uri {
     type Error = UriError;
 
+    /// Parses a [`Uri`] from an owned `String`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string is not a valid URI.
     fn try_from(s: String) -> Result<Self, Self::Error> {
         let uri = http::Uri::try_from(s)?;
         uri.try_into()
@@ -268,6 +290,13 @@ impl TryFrom<String> for Uri {
 
 impl TryFrom<Uri> for http::Uri {
     type Error = UriError;
+
+    /// Converts a [`Uri`] into an [`http::Uri`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the templated path fails to materialize into a valid
+    /// path-and-query, or if the resulting parts cannot be assembled into an [`http::Uri`].
     fn try_from(value: Uri) -> Result<Self, Self::Error> {
         let Uri { base_uri, path } = value;
 
@@ -296,6 +325,13 @@ impl From<BaseUri> for Uri {
 
 impl TryFrom<Uri> for PathAndQuery {
     type Error = UriError;
+
+    /// Extracts the [`PathAndQuery`] from a [`Uri`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the URI has no path component, or if the templated path
+    /// fails to materialize into a valid path-and-query.
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         let Uri { path, .. } = uri;
         let path = path.ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))?;

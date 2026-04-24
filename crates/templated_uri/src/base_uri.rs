@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 
+use crate::origin::{HTTP_DEFAULT_PORT, HTTPS_DEFAULT_PORT};
 use crate::{BasePath, Origin, UriError};
 
 /// An HTTP or HTTPS [`BaseUri`] representing a target location with an optional path prefix.
@@ -550,6 +551,11 @@ impl TryFrom<&http::Uri> for BaseUri {
 impl TryFrom<&str> for BaseUri {
     type Error = UriError;
 
+    /// Parses a [`BaseUri`] from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// See [`BaseUri::from_str`].
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         s.parse()
     }
@@ -570,6 +576,12 @@ impl From<Origin> for BaseUri {
 impl FromStr for BaseUri {
     type Err = UriError;
 
+    /// Parses a [`BaseUri`] from a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string is not a valid URI, or if it does not contain
+    /// both a scheme and an authority.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         http::Uri::from_str(s)?.try_into()
     }
@@ -613,7 +625,8 @@ impl Display for BaseUri {
         write!(f, "{}://", self.scheme())?;
 
         match (self.scheme().as_str(), self.authority().port_u16()) {
-            ("http", Some(80)) | ("https", Some(443)) => write!(f, "{}", self.host())?,
+            (s, Some(HTTP_DEFAULT_PORT)) if s == Scheme::HTTP.as_str() => write!(f, "{}", self.host())?,
+            (s, Some(HTTPS_DEFAULT_PORT)) if s == Scheme::HTTPS.as_str() => write!(f, "{}", self.host())?,
             _ => write!(f, "{}", self.authority())?,
         }
         write!(f, "{}", self.path)

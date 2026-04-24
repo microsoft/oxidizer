@@ -7,6 +7,11 @@ use http::uri::{Authority, Scheme};
 
 use crate::UriError;
 
+/// Default TCP port for the `http` scheme as defined by [RFC 9110, section 4.2.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.2.1).
+pub(crate) const HTTP_DEFAULT_PORT: u16 = 80;
+/// Default TCP port for the `https` scheme as defined by [RFC 9110, section 4.2.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.2.2).
+pub(crate) const HTTPS_DEFAULT_PORT: u16 = 443;
+
 /// Represents the origin of a URI, consisting of the scheme and authority components.
 ///
 /// This struct is useful for scenarios where you need to work with the base parts of a URI
@@ -116,11 +121,11 @@ impl Origin {
         }
 
         if self.scheme == Scheme::HTTP {
-            return Some(80);
+            return Some(HTTP_DEFAULT_PORT);
         }
 
         if self.scheme == Scheme::HTTPS {
-            return Some(443);
+            return Some(HTTPS_DEFAULT_PORT);
         }
 
         None
@@ -212,7 +217,8 @@ impl Display for Origin {
         write!(f, "{}://", self.scheme)?;
 
         match (self.scheme.as_str(), self.authority.port_u16()) {
-            ("http", Some(80)) | ("https", Some(443)) => write!(f, "{}", self.authority.host()),
+            (s, Some(HTTP_DEFAULT_PORT)) if s == Scheme::HTTP.as_str() => write!(f, "{}", self.authority.host()),
+            (s, Some(HTTPS_DEFAULT_PORT)) if s == Scheme::HTTPS.as_str() => write!(f, "{}", self.authority.host()),
             _ => write!(f, "{}", self.authority),
         }
     }

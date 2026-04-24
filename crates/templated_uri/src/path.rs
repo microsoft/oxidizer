@@ -48,7 +48,7 @@ impl Path {
     #[must_use]
     pub fn template(&self) -> Cow<'static, str> {
         match &self.0 {
-            PathInner::Static(classified_pq) => Cow::Owned(classified_pq.clone().declassify_ref().to_string()),
+            PathInner::Static(classified_pq) => Cow::Owned(classified_pq.declassify_ref().to_string()),
             PathInner::Templated(templated) => Cow::Borrowed(templated.template()),
         }
     }
@@ -119,6 +119,12 @@ impl RedactedDebug for Path {
 
 impl TryFrom<Uri> for Path {
     type Error = UriError;
+
+    /// Extracts the [`Path`] component from a [`Uri`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the URI does not contain a path-and-query component.
     fn try_from(uri: Uri) -> Result<Self, Self::Error> {
         uri.path
             .ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))
@@ -133,6 +139,13 @@ impl From<PathAndQuery> for Path {
 
 impl TryFrom<&Path> for PathAndQuery {
     type Error = UriError;
+
+    /// Materializes the [`Path`] into a validated [`PathAndQuery`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the underlying templated path renders to a value that
+    /// is not a valid path-and-query.
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         match &value.0 {
             PathInner::Static(classified_pq) => Ok(classified_pq.declassify_ref().clone()),
@@ -143,6 +156,12 @@ impl TryFrom<&Path> for PathAndQuery {
 
 impl TryFrom<Path> for PathAndQuery {
     type Error = UriError;
+
+    /// Materializes the [`Path`] into a validated [`PathAndQuery`].
+    ///
+    /// # Errors
+    ///
+    /// See [`<PathAndQuery as TryFrom<&Path>>::try_from`].
     fn try_from(value: Path) -> Result<Self, Self::Error> {
         Self::try_from(&value)
     }
