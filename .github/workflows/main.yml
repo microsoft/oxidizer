@@ -51,21 +51,23 @@ jobs:
             exit 0
           fi
 
+          # Snapshots written outside the working tree so `git checkout` can't trip on them.
+          baseline="$RUNNER_TEMP/delta-baseline.json"
+          current="$RUNNER_TEMP/delta-current.json"
+
           head_sha=$(git rev-parse HEAD)
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           git checkout "origin/$BASE_REF"
-          cargo delta -c .delta.toml snapshot > baseline.json
+          cargo delta -c .delta.toml snapshot > "$baseline"
           git checkout "$head_sha"
-          cargo delta -c .delta.toml snapshot > current.json
+          cargo delta -c .delta.toml snapshot > "$current"
 
-          # Use cargo-delta's `cargo-excludes` format: emits `--exclude X --exclude Y ...`
-          # for the workspace *complement* of the selected tier. Combined with
-          # `cargo --workspace` downstream, this scopes the build without `-p`
-          # ambiguity (since `--exclude` only matches workspace members, it can't
-          # collide with same-named transitive registry deps like `ohno`/`ohno_macros`).
+          # `cargo-excludes` emits the workspace complement of the selected tier as
+          # `--exclude NAME ...`, scoped via downstream `cargo --workspace`. `--exclude`
+          # only matches workspace members, avoiding `-p` ambiguity with same-named
+          # registry deps.
           impact() {
-            cargo delta -c .delta.toml impact \
-              --baseline baseline.json --current current.json "$@"
+            cargo delta -c .delta.toml impact --baseline "$baseline" --current "$current" "$@"
           }
 
           MODIFIED=$(impact -f cargo-excludes --modified)
