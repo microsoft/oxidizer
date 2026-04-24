@@ -173,6 +173,22 @@ impl BaseUri {
         }
     }
 
+    /// Consumes the `BaseUri` and returns its [`Origin`] and [`BasePath`] components.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::{BaseUri, BasePath, Origin};
+    /// let base_uri = BaseUri::from_static("https://example.com:1234/api/");
+    /// let (origin, path) = base_uri.into_parts();
+    /// assert_eq!(origin, Origin::from_static("https://example.com:1234"));
+    /// assert_eq!(path, BasePath::from_static("/api/"));
+    /// ```
+    #[must_use]
+    pub fn into_parts(self) -> (Origin, BasePath) {
+        (self.origin, self.path)
+    }
+
     /// Creates a [`BaseUri`] from a scheme, host, port, and path.
     ///
     /// This is a convenience constructor for the common case where the host and

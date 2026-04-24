@@ -1,0 +1,5 @@
+[mcps]
+
+[mcps.builtins]
+enghub = true
+ado = true

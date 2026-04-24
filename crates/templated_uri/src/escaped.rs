@@ -196,6 +196,7 @@ impl EscapedString {
     /// # Panics
     /// if the provided string contains any reserved characters.
     #[cfg_attr(test, mutants::skip)] // Mutating this function leads to infinite loop and timeout
+    #[expect(clippy::panic, reason = "accepts only static string and behavior is clearly documented")]
     #[inline]
     #[must_use]
     pub const fn from_static(s: &'static str) -> Self {

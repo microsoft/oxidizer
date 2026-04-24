@@ -105,6 +105,25 @@ impl Uri {
         }
     }
 
+    /// Consumes the `Uri` and returns its optional [`BaseUri`] and [`Path`] components.
+    ///
+    /// ```
+    /// use templated_uri::{BaseUri, Path, Uri};
+    /// use templated_uri::PathAndQuery;
+    ///
+    /// let base = BaseUri::from_static("http://example.com");
+    /// let path = Path::from(PathAndQuery::from_static("/path?query=1"));
+    /// let uri = Uri::from_parts(base.clone(), path.clone());
+    ///
+    /// let (got_base, got_path) = uri.into_parts();
+    /// assert_eq!(got_base, Some(base));
+    /// assert!(got_path.is_some());
+    /// ```
+    #[must_use]
+    pub fn into_parts(self) -> (Option<BaseUri>, Option<Path>) {
+        (self.base_uri, self.path)
+    }
+
     /// Sets the path component of this `Uri` and returns the updated value.
     #[must_use]
     pub fn with_path(self, path: impl Into<Path>) -> Self {
@@ -281,14 +300,12 @@ impl TryFrom<Uri> for PathAndQuery {
         let Uri { path, .. } = uri;
         let path = path.ok_or_else(|| UriError::invalid_uri("URI does not have a path and query component"))?;
 
-        PathAndQuery::try_from(&path)
+        Self::try_from(&path)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use data_privacy::RedactedToString;
-
     use super::*;
 
     #[test]

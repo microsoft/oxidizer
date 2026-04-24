@@ -88,7 +88,7 @@ impl RedactedDisplay for Path {
                 let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
                 f.write_str(&engine.redacted_to_string(&reclassified))
             }
-            PathInner::Templated(templated) => RedactedDisplay::fmt(templated.deref(), engine, f),
+            PathInner::Templated(templated) => RedactedDisplay::fmt(&**templated, engine, f),
         }
     }
 }
