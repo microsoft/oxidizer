@@ -153,6 +153,8 @@
 //! to an [`http::Uri`] for use with HTTP clients
 //! and servers based on [`hyper`](https://docs.rs/hyper/latest/hyper/) like [`reqwest`](https://docs.rs/reqwest/latest/reqwest/).
 
+pub mod _documentation;
+
 mod base_path;
 mod base_uri;
 mod error;
