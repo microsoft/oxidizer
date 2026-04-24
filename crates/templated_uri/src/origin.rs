@@ -248,39 +248,39 @@ mod tests {
     #[test]
     fn test_origin_display() {
         // Default ports omitted
-        let origin_http = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
-        assert_eq!(format!("{origin_http}"), "http://example.com");
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
+        assert_eq!(format!("{origin}"), "http://example.com");
 
         // Explicit HTTP default port is also omitted
-        let origin_http_explicit = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:80"));
-        assert_eq!(format!("{origin_http_explicit}"), "http://example.com");
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:80"));
+        assert_eq!(format!("{origin}"), "http://example.com");
 
-        let origin_https = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443"));
-        assert_eq!(format!("{origin_https}"), "https://example.com");
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443"));
+        assert_eq!(format!("{origin}"), "https://example.com");
 
         // Custom ports included
-        let origin_custom = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443"));
-        assert_eq!(format!("{origin_custom}"), "https://example.com:8443");
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443"));
+        assert_eq!(format!("{origin}"), "https://example.com:8443");
 
         // IPv6 with custom port
-        let origin_ipv6 = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8443"));
-        assert_eq!(format!("{origin_ipv6}"), "https://[::1]:8443");
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8443"));
+        assert_eq!(format!("{origin}"), "https://[::1]:8443");
 
         // IPv6 with explicit default HTTPS port: brackets preserved, port stripped.
-        let origin_ipv6_https_default = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[2001:db8::1]:443"));
-        assert_eq!(format!("{origin_ipv6_https_default}"), "https://[2001:db8::1]");
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[2001:db8::1]:443"));
+        assert_eq!(format!("{origin}"), "https://[2001:db8::1]");
 
         // IPv6 with explicit default HTTP port: brackets preserved, port stripped.
-        let origin_ipv6_http_default = Origin::from_parts(Scheme::HTTP, Authority::from_static("[::1]:80"));
-        assert_eq!(format!("{origin_ipv6_http_default}"), "http://[::1]");
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("[::1]:80"));
+        assert_eq!(format!("{origin}"), "http://[::1]");
 
         // IPv6 without an explicit port.
-        let origin_ipv6_no_port = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]"));
-        assert_eq!(format!("{origin_ipv6_no_port}"), "https://[::1]");
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]"));
+        assert_eq!(format!("{origin}"), "https://[::1]");
 
         // Other schemes round-trip the authority verbatim.
-        let origin_ftp = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
-        assert_eq!(format!("{origin_ftp}"), "ftp://example.com:21");
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
+        assert_eq!(format!("{origin}"), "ftp://example.com:21");
     }
 
     #[test]
