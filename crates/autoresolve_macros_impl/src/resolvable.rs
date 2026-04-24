@@ -131,6 +131,10 @@ pub fn resolvable(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStr
     let generated = quote! {
         #impl_block
 
+        #(
+            impl ::autoresolve::DependencyOf<#self_ty> for #dep_types {}
+        )*
+
         impl<__AutoresolveBase> ::autoresolve::ResolveFrom<__AutoresolveBase> for #self_ty
         where
             __AutoresolveBase: Send + Sync + 'static,

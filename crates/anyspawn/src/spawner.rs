@@ -33,7 +33,7 @@ use crate::handle::JoinHandleInner;
 ///     println!("Task running!");
 /// });
 /// handle.await; // Wait for task to complete
-///     
+///
 /// # }
 /// ```
 ///

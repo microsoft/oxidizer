@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/resolvable.rs
+assertion_line: 197
 expression: pretty_print(result)
 ---
 impl Validator {
@@ -7,6 +8,7 @@ impl Validator {
         Self { builtins: builtins.clone() }
     }
 }
+impl ::autoresolve::DependencyOf<Validator> for Builtins {}
 impl<__AutoresolveBase> ::autoresolve::ResolveFrom<__AutoresolveBase> for Validator
 where
     __AutoresolveBase: Send + Sync + 'static,

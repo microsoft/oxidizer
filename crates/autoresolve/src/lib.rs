@@ -6,6 +6,8 @@
 //! root types that seed the resolver.
 
 mod base_type;
+mod dependency_of;
+mod provide_path;
 mod resolve_deps;
 mod resolve_from;
 mod resolver;
@@ -20,6 +22,8 @@ pub use autoresolve_macros::reexport_base;
 #[cfg(feature = "macros")]
 pub use autoresolve_macros::resolvable;
 pub use base_type::BaseType;
+pub use dependency_of::DependencyOf;
+pub use provide_path::{Scoped, Unscoped};
 pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};
 pub use resolve_from::ResolveFrom;
 pub use resolver::Resolver;

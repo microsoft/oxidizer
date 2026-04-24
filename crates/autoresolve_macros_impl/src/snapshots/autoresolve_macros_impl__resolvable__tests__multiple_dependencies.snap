@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/resolvable.rs
+assertion_line: 219
 expression: pretty_print(result)
 ---
 impl Client {
@@ -14,6 +15,9 @@ impl Client {
         42
     }
 }
+impl ::autoresolve::DependencyOf<Client> for Validator {}
+impl ::autoresolve::DependencyOf<Client> for Builtins {}
+impl ::autoresolve::DependencyOf<Client> for Telemetry {}
 impl<__AutoresolveBase> ::autoresolve::ResolveFrom<__AutoresolveBase> for Client
 where
     __AutoresolveBase: Send + Sync + 'static,
