@@ -1,0 +1,88 @@
+   Compiling autoresolve_macros_impl v0.1.0 (D:\repos\oxidizer-github\crates\autoresolve_macros_impl)
+warning: error finalizing incremental compilation session directory `\\?\D:\repos\oxidizer-github\target\debug\incremental\autoresolve_macros_impl-205398cl3ah2w\s-hhwsbktqju-0gvnz2z-working`: Access is denied. (os error 5)
+
+warning: `autoresolve_macros_impl` (lib) generated 1 warning
+   Compiling autoresolve_macros v0.1.0 (D:\repos\oxidizer-github\crates\autoresolve_macros)
+   Compiling autoresolve v0.1.0 (D:\repos\oxidizer-github\crates\autoresolve)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.15s
+     Running unittests src\lib.rs (target\debug\deps\autoresolve-3aff6caabd76441f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\basic\main.rs (target\debug\deps\basic-c75862cbf2ebe40e.exe)
+
+running 1 test
+test test_autoresolve ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\combined\main.rs (target\debug\deps\combined-cbb6ed049032d299.exe)
+
+running 1 test
+test test_combined ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\compile_fail.rs (target\debug\deps\compile_fail-96e2589177f8e63f.exe)
+
+running 1 test
+   Compiling autoresolve_macros_impl v0.1.0 (D:\repos\oxidizer-github\crates\autoresolve_macros_impl)
+   Compiling autoresolve_macros v0.1.0 (D:\repos\oxidizer-github\crates\autoresolve_macros)
+    Checking autoresolve v0.1.0 (D:\repos\oxidizer-github\crates\autoresolve)
+    Checking autoresolve-tests v0.0.0 (D:\repos\oxidizer-github\target\tests\trybuild\autoresolve)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.23s
+
+
+test tests/compile_fail/resolvable_on_trait_impl.rs ... ok
+test tests/compile_fail/resolvable_missing_new.rs ... ok
+test tests/compile_fail/resolvable_non_ref_param.rs ... ok
+test tests/compile_fail/resolvable_mut_ref_param.rs ... ok
+test tests/compile_fail/resolvable_wrong_return.rs ... ok
+test tests/compile_fail/resolvable_no_return.rs ... ok
+test tests/compile_fail/resolvable_generic_impl.rs ... ok
+test tests/compile_fail/resolvable_self_receiver.rs ... ok
+test tests/compile_fail/missing_dependency.rs ... ok
+test tests/compile_fail/dependency_cycle.rs ... ok
+test tests/compile_fail/scoped_type_not_resolvable_from_parent.rs ... ok
+test tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs ... ok
+test tests/compile_fail/scoped_parent_not_module_qualified.rs ... ok
+test tests/compile_fail/scoped_base_as_top_level.rs ... ok
+
+
+test compile_fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.54s
+
+     Running tests\reexport\main.rs (target\debug\deps\reexport-bad3676a28975ae5.exe)
+
+running 1 test
+test test_reexport ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\scoped\main.rs (target\debug\deps\scoped-aefb74a62d5ea0ce.exe)
+
+running 9 tests
+test auto_promotes_to_parent ... ok
+test child_types_are_independent ... ok
+test client_shares_validator_across_siblings ... ok
+test parent_types_inherited_by_children ... ok
+test three_level_promotes_cv_to_request ... ok
+test three_level_task_client_shares_client_within_request ... ok
+test three_level_promotes_validator_to_app ... ok
+test try_get_checks_both_stores ... ok
+test three_level_task_handler_local_but_shares_cv ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests autoresolve
+
+running 2 tests
+test crates\autoresolve\src\dependency_of.rs - dependency_of::DependencyOf (line 7) ... ignored
+test crates\autoresolve\src\resolver_macro.rs - resolver_macro::resolver (line 15) ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 2.37s; merged doctests compilation took 0.72s

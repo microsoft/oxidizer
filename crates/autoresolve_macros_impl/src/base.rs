@@ -253,7 +253,7 @@ fn generate_primary(
         })
         .collect();
 
-    // Insertion logic: spread fields delegate to their macro, regular fields use store_value.
+    // Insertion logic: spread fields delegate to their macro, regular fields use the resolver's `insert`.
     let insert_stmts: Vec<_> = fields
         .iter()
         .map(|f| {
@@ -262,7 +262,7 @@ fn generate_primary(
                 let path = spread_macro_path(f.ty);
                 quote! { #path!(@insert __store, #ident); }
             } else {
-                quote! { __store.store_value(#ident); }
+                quote! { __store.insert(#ident); }
             }
         })
         .collect();
@@ -352,7 +352,7 @@ fn generate_primary(
         impl ::autoresolve::BaseType for #struct_name {
             type Parent = ();
 
-            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
+            fn insert_into(self, __store: &mut ::autoresolve::Resolver<#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
             }
@@ -403,7 +403,7 @@ fn impls_body_for_generator(struct_name: &Ident, fields: &[BaseField<'_>]) -> To
 /// Builds the body of the `@insert` macro arm for the generator pattern.
 ///
 /// - `#[spread]` fields: delegates to `$crate::helper::__spread_MacroName!(@insert ...)`
-/// - Regular fields: calls `$dollar store.store_value($dollar name.field)`
+/// - Regular fields: calls `$dollar store.insert($dollar name.field)`
 fn insert_body_for_generator(fields: &[BaseField<'_>]) -> TokenStream {
     let stmts: Vec<_> = fields
         .iter()
@@ -418,7 +418,7 @@ fn insert_body_for_generator(fields: &[BaseField<'_>]) -> TokenStream {
                     }
                 }
             } else {
-                quote! { $dollar store.store_value($dollar name.#ident); }
+                quote! { $dollar store.insert($dollar name.#ident); }
             }
         })
         .collect();
@@ -558,7 +558,7 @@ fn generate_scoped(
                 let path = spread_macro_path(f.ty);
                 quote! { #path!(@insert __store, #ident); }
             } else {
-                quote! { __store.store_value(#ident); }
+                quote! { __store.insert(#ident); }
             }
         })
         .collect();
@@ -645,7 +645,7 @@ fn generate_scoped(
         impl ::autoresolve::BaseType for #struct_name {
             type Parent = #parent;
 
-            fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<#struct_name>) {
+            fn insert_into(self, __store: &mut ::autoresolve::Resolver<#struct_name>) {
                 let Self { #(#field_idents),* } = self;
                 #(#insert_stmts)*
             }

@@ -34,7 +34,7 @@ note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
 note: required by a bound in `Resolver::<T>::get`
   --> src/resolver.rs
    |
-   |     pub fn get<O>(&mut self) -> &O
+   |     pub fn get<O>(&mut self) -> Arc<O>
    |            --- required by a bound in this associated function
    |     where
    |         O: ResolveFrom<T>,
@@ -68,7 +68,7 @@ note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`
 note: required by a bound in `Resolver::<T>::get`
   --> src/resolver.rs
    |
-   |     pub fn get<O>(&mut self) -> &O
+   |     pub fn get<O>(&mut self) -> Arc<O>
    |            --- required by a bound in this associated function
    |     where
    |         O: ResolveFrom<T>,

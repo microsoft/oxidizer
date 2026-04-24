@@ -38,7 +38,7 @@ where
     fn new(
         inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<
             __AutoresolveBase,
-        >>::Resolved<'_>,
+        >>::Resolved,
     ) -> Self {
         let ::autoresolve::ResolutionDepsNode(
             dep_0,
@@ -50,6 +50,6 @@ where
                 ),
             ),
         ) = inputs;
-        Client::new(dep_0, dep_1, dep_2)
+        Client::new(&dep_0, &dep_1, &dep_2)
     }
 }

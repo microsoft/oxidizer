@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/base.rs
+assertion_line: 861
 expression: pretty_print(result)
 ---
 struct ScopedRoots {
@@ -30,7 +31,7 @@ pub mod scoped_helper {
             insert $dollar store : ident, $dollar name : ident) => { { let __spread =
             $dollar name.builtins; $dollar crate $(:: $helper_seg)*
             ::__spread_Builtins!(@ insert $dollar store, __spread); } $dollar store
-            .store_value($dollar name.request_context); }; (@ reexport[$dollar ($dollar
+            .insert($dollar name.request_context); }; (@ reexport[$dollar ($dollar
             new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => {
             #[allow(unused_imports)] pub use $crate::scoped_helper::__spread_Builtins;
             #[allow(unused_imports)] pub use
@@ -52,10 +53,10 @@ pub use scoped_helper::ScopedRoots;
 ScopedRoots!(@ impls ScopedRoots);
 impl ::autoresolve::BaseType for ScopedRoots {
     type Parent = Base;
-    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<ScopedRoots>) {
+    fn insert_into(self, __store: &mut ::autoresolve::Resolver<ScopedRoots>) {
         let Self { builtins, request_context } = self;
         Builtins!(@ insert __store, builtins);
-        __store.store_value(request_context);
+        __store.insert(request_context);
     }
 }
 const _: fn() = || {

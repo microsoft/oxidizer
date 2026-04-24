@@ -12,7 +12,6 @@ macros = ["autoresolve_macros"]
 
 [dependencies]
 autoresolve_macros = { workspace = true, optional = true }
-type-map.workspace = true
 
 [dev-dependencies]
 autoresolve_macros.workspace = true

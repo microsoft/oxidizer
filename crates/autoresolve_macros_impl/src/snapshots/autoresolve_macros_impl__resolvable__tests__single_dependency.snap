@@ -21,9 +21,9 @@ where
     fn new(
         inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<
             __AutoresolveBase,
-        >>::Resolved<'_>,
+        >>::Resolved,
     ) -> Self {
         let ::autoresolve::ResolutionDepsNode(dep_0, ::autoresolve::ResolutionDepsEnd) = inputs;
-        Validator::new(dep_0)
+        Validator::new(&dep_0)
     }
 }

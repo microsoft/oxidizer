@@ -1,0 +1,420 @@
+warning: error finalizing incremental compilation session directory `\\?\D:\repos\oxidizer-github\target\debug\incremental\autoresolve_macros-11f7apuffki4w\s-hhwsspel07-0xw95b9-working`: Access is denied. (os error 5)
+
+warning: `autoresolve_macros` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.15s
+     Running tests\compile_fail.rs (target\debug\deps\compile_fail-96e2589177f8e63f.exe)
+
+running 1 test
+    Checking autoresolve-tests v0.0.0 (D:\repos\oxidizer-github\target\tests\trybuild\autoresolve)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+
+
+test tests/compile_fail/resolvable_on_trait_impl.rs ... ok
+test tests/compile_fail/resolvable_missing_new.rs ... ok
+test tests/compile_fail/resolvable_non_ref_param.rs ... ok
+test tests/compile_fail/resolvable_mut_ref_param.rs ... ok
+test tests/compile_fail/resolvable_wrong_return.rs ... ok
+test tests/compile_fail/resolvable_no_return.rs ... ok
+test tests/compile_fail/resolvable_generic_impl.rs ... ok
+test tests/compile_fail/resolvable_self_receiver.rs ... ok
+test tests/compile_fail/missing_dependency.rs ... mismatch
+
+EXPECTED:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0277]: the trait bound `Telemetry: ResolveFrom<Base>` is not satisfied
+  --> tests/compile_fail/missing_dependency.rs:30:34
+   |
+30 |     let _client = resolver.get::<Client>();
+   |                            ---   ^^^^^^ unsatisfied trait bound
+   |                            |
+   |                            required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<Base>` is not implemented for `Telemetry`
+  --> tests/compile_fail/missing_dependency.rs:7:1
+   |
+ 7 | struct Telemetry;
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveFrom<T>`
+  --> tests/compile_fail/missing_dependency.rs:15:1
+   |
+15 | #[resolvable]
+   | ^^^^^^^^^^^^^ `Client` implements `ResolveFrom<__AutoresolveBase>`
+...
+29 |     let mut resolver = autoresolve::resolver!(Base, builtins: Builtins);
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Builtins` implements `ResolveFrom<Base>`
+note: required for `Client` to implement `ResolveFrom<Base>`
+  --> tests/compile_fail/missing_dependency.rs:15:1
+   |
+15 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+16 | impl Client {
+   |      ^^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+
+ACTUAL OUTPUT:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0277]: the trait bound `Telemetry: ResolveFrom<Base>` is not satisfied
+  --> tests/compile_fail/missing_dependency.rs:30:34
+   |
+30 |     let _client = resolver.get::<Client>();
+   |                            ---   ^^^^^^ unsatisfied trait bound
+   |                            |
+   |                            required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<Base>` is not implemented for `Telemetry`
+  --> tests/compile_fail/missing_dependency.rs:7:1
+   |
+ 7 | struct Telemetry;
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveFrom<T>`
+  --> tests/compile_fail/missing_dependency.rs:15:1
+   |
+15 | #[resolvable]
+   | ^^^^^^^^^^^^^ `Client` implements `ResolveFrom<__AutoresolveBase>`
+...
+29 |     let mut resolver = autoresolve::resolver!(Base, builtins: Builtins);
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Builtins` implements `ResolveFrom<Base>`
+note: required for `Client` to implement `ResolveFrom<Base>`
+  --> tests/compile_fail/missing_dependency.rs:15:1
+   |
+15 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+16 | impl Client {
+   |      ^^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> Arc<O>
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+note: If the actual output is the correct output you can bless it by rerunning
+      your test with the environment variable TRYBUILD=overwrite
+
+test tests/compile_fail/dependency_cycle.rs ... mismatch
+
+EXPECTED:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0275]: overflow evaluating the requirement `Beta: ResolveFrom<ResolverBase>`
+  --> tests/compile_fail/dependency_cycle.rs:39:27
+   |
+39 |     let _alpha = resolver.get::<Alpha>();
+   |                           ^^^
+   |
+note: required for `Alpha` to implement `ResolveFrom<ResolverBase>`
+  --> tests/compile_fail/dependency_cycle.rs:13:1
+   |
+13 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+14 | impl Alpha {
+   |      ^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+
+ACTUAL OUTPUT:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0275]: overflow evaluating the requirement `Beta: ResolveFrom<ResolverBase>`
+  --> tests/compile_fail/dependency_cycle.rs:39:27
+   |
+39 |     let _alpha = resolver.get::<Alpha>();
+   |                           ^^^
+   |
+note: required for `Alpha` to implement `ResolveFrom<ResolverBase>`
+  --> tests/compile_fail/dependency_cycle.rs:13:1
+   |
+13 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+14 | impl Alpha {
+   |      ^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> Arc<O>
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+note: If the actual output is the correct output you can bless it by rerunning
+      your test with the environment variable TRYBUILD=overwrite
+
+test tests/compile_fail/scoped_type_not_resolvable_from_parent.rs ... mismatch
+
+EXPECTED:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+   |
+70 |     let _ = parent.get::<TaskHandler>();
+   |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:7:1
+   |
+ 7 | pub struct Request;
+   | ^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveFrom<T>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:1
+   |
+55 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | |
+   | `Request` implements `ResolveFrom<RequestBase>`
+   | `Request` implements `ResolveFrom<TaskBase>`
+...
+60 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+   | --------------------------------------------------------------------------------- in this macro invocation
+note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
+   |
+17 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+18 | impl CorrelationVector {
+   |      ^^^^^^^^^^^^^^^^^
+   = note: 1 redundant requirement hidden
+   = note: required for `TaskHandler` to implement `ResolveFrom<AppBase>`
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the macro `RequestBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Task: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+   |
+70 |     let _ = parent.get::<TaskHandler>();
+   |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Task`
+      but trait `ResolveFrom<TaskBase>` is implemented for it
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:60:1
+   |
+60 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `TaskBase`, found `AppBase`
+note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:29:1
+   |
+29 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+30 | impl TaskProperties {
+   |      ^^^^^^^^^^^^^^
+   = note: 1 redundant requirement hidden
+   = note: required for `TaskHandler` to implement `ResolveFrom<AppBase>`
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the macro `TaskBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+
+ACTUAL OUTPUT:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+   |
+70 |     let _ = parent.get::<TaskHandler>();
+   |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:7:1
+   |
+ 7 | pub struct Request;
+   | ^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `ResolveFrom<T>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:55:1
+   |
+55 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | |
+   | `Request` implements `ResolveFrom<RequestBase>`
+   | `Request` implements `ResolveFrom<TaskBase>`
+...
+60 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+   | --------------------------------------------------------------------------------- in this macro invocation
+note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:17:1
+   |
+17 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+18 | impl CorrelationVector {
+   |      ^^^^^^^^^^^^^^^^^
+   = note: 1 redundant requirement hidden
+   = note: required for `TaskHandler` to implement `ResolveFrom<AppBase>`
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> Arc<O>
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the macro `RequestBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Task: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:70:26
+   |
+70 |     let _ = parent.get::<TaskHandler>();
+   |                    ---   ^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Task`
+      but trait `ResolveFrom<TaskBase>` is implemented for it
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:60:1
+   |
+60 | #[base(scoped(RequestBase), helper_module_exported_as = crate::task_base_helper)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `TaskBase`, found `AppBase`
+note: required for `TaskProperties` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent.rs:29:1
+   |
+29 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+30 | impl TaskProperties {
+   |      ^^^^^^^^^^^^^^
+   = note: 1 redundant requirement hidden
+   = note: required for `TaskHandler` to implement `ResolveFrom<AppBase>`
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> Arc<O>
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the macro `TaskBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+note: If the actual output is the correct output you can bless it by rerunning
+      your test with the environment variable TRYBUILD=overwrite
+
+test tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs ... mismatch
+
+EXPECTED:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:34:26
+   |
+34 |     let _ = parent.get::<CorrelationVector>();
+   |                    ---   ^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
+      but trait `ResolveFrom<RequestBase>` is implemented for it
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:1
+   |
+24 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `RequestBase`, found `AppBase`
+note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:12:1
+   |
+12 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+13 | impl CorrelationVector {
+   |      ^^^^^^^^^^^^^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> &O
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the macro `RequestBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+
+ACTUAL OUTPUT:
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+error[E0277]: the trait bound `Request: ResolveFrom<AppBase>` is not satisfied
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:34:26
+   |
+34 |     let _ = parent.get::<CorrelationVector>();
+   |                    ---   ^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |                    |
+   |                    required by a bound introduced by this call
+   |
+help: the trait `ResolveFrom<AppBase>` is not implemented for `Request`
+      but trait `ResolveFrom<RequestBase>` is implemented for it
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:24:1
+   |
+24 | #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `RequestBase`, found `AppBase`
+note: required for `CorrelationVector` to implement `ResolveFrom<AppBase>`
+  --> tests/compile_fail/scoped_type_not_resolvable_from_parent_cv.rs:12:1
+   |
+12 | #[resolvable]
+   | ^^^^^^^^^^^^^ unsatisfied trait bound introduced here
+13 | impl CorrelationVector {
+   |      ^^^^^^^^^^^^^^^^^
+note: required by a bound in `Resolver::<T>::get`
+  --> src/resolver.rs
+   |
+   |     pub fn get<O>(&mut self) -> Arc<O>
+   |            --- required by a bound in this associated function
+   |     where
+   |         O: ResolveFrom<T>,
+   |            ^^^^^^^^^^^^^^ required by this bound in `Resolver::<T>::get`
+   = note: this error originates in the macro `RequestBase` which comes from the expansion of the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)
+ΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöêΓöê
+note: If the actual output is the correct output you can bless it by rerunning
+      your test with the environment variable TRYBUILD=overwrite
+
+test tests/compile_fail/scoped_parent_not_module_qualified.rs ... ok
+test tests/compile_fail/scoped_base_as_top_level.rs ... ok
+
+
+test compile_fail ... FAILED
+
+failures:
+
+---- compile_fail stdout ----
+
+thread 'compile_fail' (51732) panicked at C:\Users\makolnek\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\trybuild-1.0.114\src\run.rs:102:13:
+4 of 14 tests failed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    compile_fail
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.69s
+
+error: test failed, to rerun pass `-p autoresolve --test compile_fail`

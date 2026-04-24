@@ -7,13 +7,14 @@
 
 mod base_type;
 mod dependency_of;
+mod path_cache;
+mod path_stack;
 mod provide_path;
 mod resolve_deps;
 mod resolve_from;
+mod resolve_output;
 mod resolver;
 mod resolver_macro;
-mod resolver_store;
-pub(crate) mod shared_type_map;
 
 #[cfg(feature = "macros")]
 pub use autoresolve_macros::base;
@@ -23,8 +24,9 @@ pub use autoresolve_macros::reexport_base;
 pub use autoresolve_macros::resolvable;
 pub use base_type::BaseType;
 pub use dependency_of::DependencyOf;
+pub use path_stack::PathStack;
 pub use provide_path::{Scoped, Unscoped};
 pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};
 pub use resolve_from::ResolveFrom;
+pub use resolve_output::ResolveOutput;
 pub use resolver::Resolver;
-pub use resolver_store::ResolverStore;

@@ -143,10 +143,10 @@ pub fn resolvable(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStr
             type Inputs = #inputs_type;
 
             fn new(
-                inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<__AutoresolveBase>>::Resolved<'_>,
+                inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<__AutoresolveBase>>::Resolved,
             ) -> Self {
                 let #destructure = inputs;
-                #self_ty::new(#( #dep_idents ),*)
+                #self_ty::new(#( &#dep_idents ),*)
             }
         }
     };

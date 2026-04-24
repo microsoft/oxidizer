@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/base.rs
+assertion_line: 809
 expression: pretty_print(result)
 ---
 struct ScopedRoots {
@@ -24,7 +25,7 @@ pub mod scoped_helper {
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("root types are pre-inserted into the resolver") } } }; (@
             insert $dollar store : ident, $dollar name : ident) => { $dollar store
-            .store_value($dollar name.request_context); }; (@ reexport[$dollar ($dollar
+            .insert($dollar name.request_context); }; (@ reexport[$dollar ($dollar
             new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => {
             #[allow(unused_imports)] pub use
             $crate::scoped_helper::ScopedRoots_Part0_RequestContext;
@@ -45,9 +46,9 @@ pub use scoped_helper::ScopedRoots;
 ScopedRoots!(@ impls ScopedRoots);
 impl ::autoresolve::BaseType for ScopedRoots {
     type Parent = Base;
-    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<ScopedRoots>) {
+    fn insert_into(self, __store: &mut ::autoresolve::Resolver<ScopedRoots>) {
         let Self { request_context } = self;
-        __store.store_value(request_context);
+        __store.insert(request_context);
     }
 }
 const _: fn() = || {

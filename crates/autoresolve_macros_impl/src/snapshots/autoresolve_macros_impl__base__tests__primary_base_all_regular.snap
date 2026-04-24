@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/base.rs
+assertion_line: 796
 expression: pretty_print(result)
 ---
 struct Base {
@@ -31,9 +32,9 @@ pub mod base_helper {
             ::autoresolve::ResolutionDepsEnd) -> Self {
             unreachable!("root types are pre-inserted into the resolver") } } }; (@
             insert $dollar store : ident, $dollar name : ident) => { $dollar store
-            .store_value($dollar name.scheduler); $dollar store.store_value($dollar name
-            .clock); }; (@ reexport[$dollar ($dollar new_helper : tt) *], $dollar
-            new_mangled : ident, $dollar dd : tt) => { #[allow(unused_imports)] pub use
+            .insert($dollar name.scheduler); $dollar store.insert($dollar name.clock); };
+            (@ reexport[$dollar ($dollar new_helper : tt) *], $dollar new_mangled :
+            ident, $dollar dd : tt) => { #[allow(unused_imports)] pub use
             $crate::base_helper::Base_Part0_Scheduler; #[allow(unused_imports)] pub use
             $crate::base_helper::Base_Part1_Clock; #[allow(unused_imports)] pub use
             $crate::base_helper::__generator; $crate::base_helper::__generator!([$dollar
@@ -51,10 +52,10 @@ pub use base_helper::Base;
 Base!(@ impls Base);
 impl ::autoresolve::BaseType for Base {
     type Parent = ();
-    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
+    fn insert_into(self, __store: &mut ::autoresolve::Resolver<Base>) {
         let Self { scheduler, clock } = self;
-        __store.store_value(scheduler);
-        __store.store_value(clock);
+        __store.insert(scheduler);
+        __store.insert(clock);
     }
 }
 const _: fn() = || {

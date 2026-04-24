@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/base.rs
+assertion_line: 782
 expression: pretty_print(result)
 ---
 struct Base {
@@ -28,8 +29,8 @@ pub mod app_base_helper {
             insert $dollar store : ident, $dollar name : ident) => { { let __spread =
             $dollar name.builtins; $dollar crate $(:: $helper_seg)*
             ::__spread_Builtins!(@ insert $dollar store, __spread); } $dollar store
-            .store_value($dollar name.telemetry); }; (@ reexport[$dollar ($dollar
-            new_helper : tt) *], $dollar new_mangled : ident, $dollar dd : tt) => {
+            .insert($dollar name.telemetry); }; (@ reexport[$dollar ($dollar new_helper :
+            tt) *], $dollar new_mangled : ident, $dollar dd : tt) => {
             #[allow(unused_imports)] pub use $crate::app_base_helper::__spread_Builtins;
             #[allow(unused_imports)] pub use
             $crate::app_base_helper::Base_Part0_Telemetry; #[allow(unused_imports)] pub
@@ -49,10 +50,10 @@ pub use app_base_helper::Base;
 Base!(@ impls Base);
 impl ::autoresolve::BaseType for Base {
     type Parent = ();
-    fn insert_into(self, __store: &mut impl ::autoresolve::ResolverStore<Base>) {
+    fn insert_into(self, __store: &mut ::autoresolve::Resolver<Base>) {
         let Self { builtins, telemetry } = self;
         Builtins!(@ insert __store, builtins);
-        __store.store_value(telemetry);
+        __store.insert(telemetry);
     }
 }
 const _: fn() = || {

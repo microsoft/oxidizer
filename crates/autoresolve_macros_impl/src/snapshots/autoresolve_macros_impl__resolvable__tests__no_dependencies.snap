@@ -1,5 +1,6 @@
 ---
 source: crates/autoresolve_macros_impl/src/resolvable.rs
+assertion_line: 233
 expression: pretty_print(result)
 ---
 impl Leaf {
@@ -15,7 +16,7 @@ where
     fn new(
         inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<
             __AutoresolveBase,
-        >>::Resolved<'_>,
+        >>::Resolved,
     ) -> Self {
         let ::autoresolve::ResolutionDepsEnd = inputs;
         Leaf::new()
