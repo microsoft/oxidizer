@@ -87,7 +87,7 @@ impl fmt::Display for EscapeError {
 impl Error for EscapeError {}
 
 impl EscapedString {
-    /// Creates a `EscapedString` by percent-encoding any reserved or invalid characters.
+    /// Creates an `EscapedString` by percent-encoding any reserved or invalid characters.
     ///
     /// This is the preferred constructor - it always succeeds by encoding any characters
     /// that are not permitted unescaped in URI templates as defined in RFC 6570.
@@ -127,7 +127,7 @@ impl EscapedString {
         }
     }
 
-    /// Creates a `EscapedString` from an already-encoded string, validating that it
+    /// Creates an `EscapedString` from an already-encoded string, validating that it
     /// contains only characters that are permitted unescaped in URI templates as defined in RFC 6570.
     ///
     /// Unlike [`EscapedString::escape`], this constructor does **not** encode anything -
@@ -152,7 +152,7 @@ impl EscapedString {
     ///
     /// # Errors
     ///
-    /// Returns a [`EscapeError`] if the string contains reserved URI characters.
+    /// Returns an [`EscapeError`] if the string contains reserved URI characters.
     pub fn try_new(raw: impl Into<Cow<'static, str>>) -> Result<Self, EscapeError> {
         Self::try_new_inner(raw.into())
     }
@@ -170,7 +170,7 @@ impl EscapedString {
         self.0.borrow()
     }
 
-    /// Creates a `EscapedString` from a string literal.
+    /// Creates an `EscapedString` from a string literal.
     ///
     /// This is a `const fn`, so when used in a `const` context the validation runs at
     /// compile time. When called at runtime, invalid input panics instead.
@@ -235,8 +235,7 @@ const fn validate_escaped(bytes: &[u8]) -> Option<&'static str> {
 }
 
 impl From<String> for EscapedString {
-    /// Converts a String to a `EscapedString`, automatically percent-encoding
-    /// any RFC 6570 reserved characters.
+    /// Converts a [`String`] to an `EscapedString`, percent-encoding any RFC 6570 reserved characters.
     ///
     /// # Examples
     ///
@@ -255,8 +254,7 @@ impl From<String> for EscapedString {
 }
 
 impl<'a> From<&'a str> for EscapedString {
-    /// Converts a `&str` to a `EscapedString`, automatically percent-encoding
-    /// any RFC 6570 reserved characters.
+    /// Converts a `&str` to an `EscapedString`, percent-encoding any RFC 6570 reserved characters.
     ///
     /// # Examples
     ///

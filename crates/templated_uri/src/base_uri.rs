@@ -9,44 +9,35 @@ use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 use crate::origin::{HTTP_DEFAULT_PORT, HTTPS_DEFAULT_PORT};
 use crate::{BasePath, Origin, UriError};
 
-/// An HTTP or HTTPS [`BaseUri`] representing a target location with an optional path prefix.
+/// URI prefix consisting of a scheme, an authority, and an optional path prefix.
 ///
-/// [`BaseUri`] is a lightweight type that stores the scheme, authority, and an optional
-/// path prefix of a URI, making it ideal for representing target destinations in HTTP scenarios.
-/// It omits query string and fragment components, focusing on the base location information.
+/// `BaseUri` represents a target location to which paths can be appended. Query and
+/// fragment components are intentionally not part of a base URI.
 ///
 /// Use [`BaseUri`] when you need to:
 ///
 /// - Store a base server location that will be combined with different paths.
-/// - Handle scenarios where storing the full URI is unnecessary. For example, a list
-///   of servers or [`BaseUri`] values.
-/// - Expose a way to configure the base server location in your library. In this case,
-///   the library manages its own paths and the consumer cares only about the target [`BaseUri`].
+/// - Manage a list of server locations or configure one in a library API where
+///   the consumer only cares about the target.
 ///
 /// # Best Practices
 ///
-/// For optimal performance when working with [`BaseUri`], follow these practices:
+/// For optimal performance:
 ///
-/// - Pre-create and cache static paths using `PathAndQuery::from_static` for frequently used paths.
-/// - Combine static paths with [`BaseUri`] to create complete URIs without allocations.
-/// - Use the `build_uri` method with these cached paths instead of passing strings each time.
-/// - Consider making common paths constants in your application code.
+/// - Pre-create and cache static paths using `PathAndQuery::from_static`.
+/// - Combine cached paths with [`BaseUri::build_http_uri`] to avoid re-parsing.
+/// - Consider declaring frequently used paths as `const`s in your application.
 ///
 /// ```rust
 /// # use templated_uri::{BaseUri, Scheme, PathAndQuery};
-///
-/// // Pre-create PathAndQuery objects (can be static or stored in a cache)
 /// let api_path = PathAndQuery::from_static("/api/v1/resources");
 /// let users_path = PathAndQuery::from_static("/api/v1/users");
 ///
-/// // Create base_uri once
 /// let base_uri = BaseUri::from_static("https://api.example.com");
 ///
-/// // Combine with a path to create a complete URI
 /// let uri = base_uri.build_http_uri(api_path)?;
 /// assert_eq!(uri.to_string(), "https://api.example.com/api/v1/resources");
 ///
-/// // Reuse the base_uri with different paths without additional allocations
 /// let uri = base_uri.build_http_uri(users_path)?;
 /// assert_eq!(uri.to_string(), "https://api.example.com/api/v1/users");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -54,7 +45,7 @@ use crate::{BasePath, Origin, UriError};
 ///
 /// # Examples
 ///
-/// Creating `base_uri` with various constructors:
+/// Constructing a [`BaseUri`]:
 ///
 /// ```
 /// # use templated_uri::{BasePath, BaseUri, Origin};
@@ -62,46 +53,35 @@ use crate::{BasePath, Origin, UriError};
 /// let base_uri1: BaseUri = Origin::from_static("https://example.com").into();
 /// assert_eq!(base_uri1.to_string(), "https://example.com/");
 ///
-/// // From an Origin and a path
+/// // From an Origin and a path prefix
 /// let origin = Origin::from_static("http://api.example.com:8080");
 /// let base_uri2 = BaseUri::from_parts(origin, BasePath::default());
 /// assert_eq!(base_uri2.to_string(), "http://api.example.com:8080/");
 ///
-/// // From a URI string with path prefix
+/// // From a URI string with a path prefix
 /// let base_uri3: BaseUri = "https://auth.example.com/path/prefix/".parse()?;
-/// assert_eq!(
-///     base_uri3.to_string(),
-///     "https://auth.example.com/path/prefix/"
-/// );
-///
+/// assert_eq!(base_uri3.to_string(), "https://auth.example.com/path/prefix/");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 ///
-/// Converting an `base_uri` to a complete URI:
+/// Building a complete URI from a [`BaseUri`]:
 ///
 /// ```
 /// # use templated_uri::BaseUri;
 /// let base_uri = BaseUri::from_static("https://api.example.com");
-///
-/// // Combine with a path to create a complete URI
 /// let uri = base_uri.build_http_uri("/users/123?active=true")?;
-/// assert_eq!(
-///     uri.to_string(),
-///     "https://api.example.com/users/123?active=true"
-/// );
-///
+/// assert_eq!(uri.to_string(), "https://api.example.com/users/123?active=true");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BaseUri {
     /// The origin part of the URI, consisting of scheme and authority.
     origin: Origin,
-    /// path prefix for the URI, always starts and ends with a slash
+    /// The path prefix of the URI; always starts and ends with a slash.
     ///
-    /// In a perfect world, this would be `Option<BasePath>` and None would represent no path,
-    /// but [`http::Uri`] which we need to interface with
-    /// parses absent path (`http://example.com`) into a `/` path - which would lead into confusing
-    /// behavior and inconsistency, so we are explicit about it.
+    /// This is intentionally a [`BasePath`] (not `Option<BasePath>`): [`http::Uri`]
+    /// parses an absent path (`http://example.com`) as `/`, so an explicit empty
+    /// state would behave inconsistently with the underlying type.
     path: BasePath,
 }
 
@@ -297,7 +277,7 @@ impl BaseUri {
         &self.origin
     }
 
-    /// Consumes `BaseUri` and returns a new instance with different origin
+    /// Returns a new [`BaseUri`] with `origin` replacing this one's origin.
     ///
     /// # Examples
     ///
@@ -343,9 +323,10 @@ impl BaseUri {
         self.origin.port()
     }
 
-    /// Consume this `BaseUri` instance and return a new one with the specified port.
+    /// Returns a new [`BaseUri`] with the given port.
     ///
     /// # Examples
+    ///
     /// ```
     /// # use templated_uri::{BaseUri, Scheme};
     /// let mut base_uri = BaseUri::from_static("https://example.com");
@@ -363,9 +344,10 @@ impl BaseUri {
         }
     }
 
-    /// Returns a reference to the path component of this `base_uri`.
+    /// Returns a reference to the path prefix of this [`BaseUri`].
     ///
     /// The path is guaranteed to start and end with a slash (`/`).
+    ///
     /// # Examples
     ///
     /// ```
@@ -385,9 +367,7 @@ impl BaseUri {
         &self.path
     }
 
-    /// Checks if this `base_uri` uses the HTTPS scheme.
-    ///
-    /// Returns `true` if the scheme is HTTPS, `false` otherwise.
+    /// Returns `true` if this [`BaseUri`] uses the HTTPS scheme.
     ///
     /// # Examples
     ///
@@ -538,9 +518,7 @@ impl TryFrom<&str> for BaseUri {
 }
 
 impl From<Origin> for BaseUri {
-    /// Converts an `Origin` into a `BaseUri` with a root path ("/").
-    ///
-    /// This conversion adds a minimal path component to ensure the resulting URI is valid.
+    /// Converts an [`Origin`] into a [`BaseUri`] with a root path (`/`).
     fn from(origin: Origin) -> Self {
         Self {
             origin,
@@ -564,9 +542,7 @@ impl FromStr for BaseUri {
 }
 
 impl From<BaseUri> for http::Uri {
-    /// Converts an `base_uri` into a `Uri` with a root path ("/").
-    ///
-    /// This conversion adds a minimal path component to ensure the resulting URI is valid.
+    /// Converts a [`BaseUri`] into an [`http::Uri`], using `/` as the root path when no prefix is set.
     fn from(value: BaseUri) -> Self {
         let (scheme, authority) = value.origin.into_parts();
         let mut parts = Parts::default();
@@ -579,13 +555,11 @@ impl From<BaseUri> for http::Uri {
 }
 
 impl Display for BaseUri {
-    /// Formats the `base_uri` as a string in the form `scheme://authority/base_path/`.
+    /// Formats the [`BaseUri`] as `scheme://authority/base_path/`.
     ///
     /// The [`BasePath`] always starts and ends with `/`, so the minimal form is
-    /// `scheme://authority/` when no path prefix is set.
-    ///
-    /// Default ports (80 for HTTP, 443 for HTTPS) are omitted from the display string.
-    /// Custom ports are included when present.
+    /// `scheme://authority/` when no path prefix is set. The default ports for
+    /// HTTP (80) and HTTPS (443) are omitted; custom ports are included.
     ///
     /// # Examples
     ///

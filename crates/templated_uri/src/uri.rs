@@ -13,13 +13,11 @@ use http::uri::{Parts, PathAndQuery};
 use crate::error::UriError;
 use crate::{BasePath, BaseUri, Origin, Path};
 
-/// Represents a URI that can be used as a target for requests.
+/// Target URI for HTTP requests, with optional [`BaseUri`] and [`Path`] components.
 ///
-/// This struct encapsulates the [`BaseUri`] (scheme, authority and path prefix) and the path and query components of the URI.
-///
-/// The `Uri` struct is designed to be flexible and can be constructed with or without a [`BaseUri`].
-/// It can also wrap a templated path produced by a [`PathTemplate`](crate::PathTemplate) implementation, allowing for
-/// dynamic URI generation.
+/// A [`Uri`] can be constructed with or without a [`BaseUri`], and may wrap a
+/// templated path produced by a [`PathTemplate`](crate::PathTemplate) for dynamic
+/// URI generation.
 ///
 /// ```
 /// use templated_uri::PathAndQuery;
@@ -61,7 +59,7 @@ impl Uri {
     /// have not been further classified.
     pub const DATA_CLASS: DataClass = DataClass::new(env!("CARGO_PKG_NAME"), "unknown_uri");
 
-    /// Creates a new [`Uri`], empty instance.
+    /// Creates a new, empty [`Uri`].
     #[must_use]
     pub fn new() -> Self {
         Self {

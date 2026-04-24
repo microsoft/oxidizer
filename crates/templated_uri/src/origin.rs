@@ -12,10 +12,10 @@ pub(crate) const HTTP_DEFAULT_PORT: u16 = 80;
 /// Default TCP port for the `https` scheme as defined by [RFC 9110, section 4.2.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.2.2).
 pub(crate) const HTTPS_DEFAULT_PORT: u16 = 443;
 
-/// Represents the origin of a URI, consisting of the scheme and authority components.
+/// Scheme and authority components of a URI.
 ///
-/// This struct is useful for scenarios where you need to work with the base parts of a URI
-/// without the path, query, or fragment components.
+/// Use [`Origin`] when you need to work with the base parts of a URI without
+/// the path, query, or fragment components.
 ///
 /// `Origin` accepts any valid URI scheme. For HTTP and HTTPS the well-known default
 /// ports are inferred from the scheme when the authority does not specify one
