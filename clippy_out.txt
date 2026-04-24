@@ -1,0 +1,933 @@
+cargo clippy -p autoresolve --profile dev --all-targets --all-features --locked
+warning: package `autoresolve` is missing `package.description` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+  = note: `-W clippy::cargo-common-metadata` implied by `-W clippy::cargo`
+  = help: to override `-W clippy::cargo` add `#[allow(clippy::cargo_common_metadata)]`
+
+warning: package `autoresolve` is missing `package.repository` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve` is missing `package.readme` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve` is missing `package.keywords` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve` is missing `package.categories` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros` is missing `package.repository` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros` is missing `package.readme` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros` is missing `package.keywords` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros` is missing `package.categories` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros_impl` is missing `package.repository` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros_impl` is missing `package.readme` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros_impl` is missing `package.keywords` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: package `autoresolve_macros_impl` is missing `package.categories` metadata
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#cargo_common_metadata
+
+warning: docs for function which may panic missing `# Panics` section
+   --> crates\autoresolve_macros_impl\src\base.rs:91:1
+    |
+ 91 | pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: first possible panic found here
+   --> crates\autoresolve_macros_impl\src\base.rs:120:25
+    |
+120 |             let ident = field.ident.as_ref().expect("guarded by named-fields check above");
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#missing_panics_doc
+    = note: `-W clippy::missing-panics-doc` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::missing_panics_doc)]`
+
+warning: docs for function returning `Result` missing `# Errors` section
+  --> crates\autoresolve_macros_impl\src\base.rs:91:1
+   |
+91 | pub fn base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#missing_errors_doc
+   = note: `-W clippy::missing-errors-doc` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::missing_errors_doc)]`
+
+warning: it is more concise to loop over references to containers instead of using explicit iteration methods
+   --> crates\autoresolve_macros_impl\src\base.rs:130:18
+    |
+130 |     for field in named_fields.iter() {
+    |                  ^^^^^^^^^^^^^^^^^^^ help: to write this more concisely, try: `named_fields`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#explicit_iter_loop
+    = note: `-W clippy::explicit-iter-loop` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::explicit_iter_loop)]`
+
+warning: `panic` should not be present in production code
+   --> crates\autoresolve_macros_impl\src\base.rs:166:14
+    |
+166 |         _ => panic!("guarded by path validation above"),
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#panic
+    = note: requested on the command line with `-W clippy::panic`
+
+warning: this function's return value is unnecessarily wrapped by `Result`
+   --> crates\autoresolve_macros_impl\src\base.rs:220:1
+    |
+220 | / fn generate_primary(
+221 | |     attrs: &BaseAttrs,
+222 | |     struct_name: &Ident,
+223 | |     clean_struct: &TokenStream,
+224 | |     fields: &[BaseField<'_>],
+225 | | ) -> syn::Result<TokenStream> {
+    | |_____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_wraps
+    = note: `-W clippy::unnecessary-wraps` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::unnecessary_wraps)]`
+help: remove `Result` from the return type...
+    |
+225 - ) -> syn::Result<TokenStream> {
+225 + ) -> proc_macro2::TokenStream {
+    |
+help: ...and then remove the surrounding `Ok()` from returning expressions
+    |
+296 ~     quote! {
+297 +         #clean_struct
+298 + 
+299 +         #[doc(hidden)]
+300 +         pub mod #helper_mod {
+301 +             use super::*;
+302 + 
+303 +             #(#aliases)*
+304 + 
+305 +             #(#spread_helper_items)*
+306 + 
+307 +             // Generator macro: takes a `crate::`-rooted helper path in brackets
+308 +             // and emits the final macro with `$crate::` path segments baked in.
+309 +             // The pattern `[crate $(:: $helper_seg:ident)*]` strips the leading
+310 +             // `crate` keyword; the generated macro uses `$crate $(:: $helper_seg)*`
+311 ~             // so the path resolves to the *defining* crate ΓÇö crucial for cross-crate
+312 +             // usage where `crate::` would incorrectly resolve to the expansion site.
+313 +             #[doc(hidden)]
+314 +             #[macro_export]
+315 +             macro_rules! #mangled_gen_name {
+316 +                 ([crate $(:: $helper_seg:ident)*], $mangled:ident, $dollar:tt) => {
+317 +                     #[doc(hidden)]
+318 +                     #[macro_export]
+319 +                     macro_rules! $mangled {
+320 +                         (@ impls $dollar base:path) => {
+321 +                             #impls_body
+322 +                         };
+323 +                         (@ insert $dollar store:ident, $dollar name:ident) => {
+324 +                             #insert_body
+325 +                         };
+326 +                         (@ reexport [$dollar ($dollar new_helper:tt)*], $dollar new_mangled:ident, $dollar dd:tt) => {
+327 +                             #(#[allow(unused_imports)] pub use #dollar_crate_helper :: #reexport_items;)*
+328 +                             #dollar_crate_helper :: __generator!([$dollar ($dollar new_helper)*], $dollar new_mangled, $dollar dd);
+329 +                         };
+330 +                     }
+331 +                 };
+332 +             }
+333 +             #[doc(hidden)]
+334 +             pub use #mangled_gen_name as __generator;
+335 + 
+336 +             // Invoke the generator with the original helper path to produce the
+337 +             // final macro.  The generator strips `crate` and uses `$crate` so the
+338 +             // generated macro resolves paths cross-crate.
+339 +             __generator!([#helper_path], #mangled_macro_name, $);
+340 +             #[doc(hidden)]
+341 +             pub use #mangled_macro_name as #struct_name;
+342 +         }
+343 +         #[doc(hidden)]
+344 +         pub use #helper_mod :: #struct_name;
+345 + 
+346 +         // Self-invoke the macro to generate ResolveFrom<Self> impls for all
+347 +         // types (own + spread). Uses the `pub use` alias which routes through
+348 +         // the helper module path, avoiding the
+349 +         // `macro_expanded_macro_exports_accessed_by_absolute_paths` lint.
+350 +         #struct_name!(@impls #struct_name);
+351 + 
+352 +         impl ::autoresolve::BaseType for #struct_name {
+353 +             type Parent = ();
+354 + 
+355 +             fn insert_into(self, __store: &mut ::autoresolve::Resolver<#struct_name>) {
+356 +                 let Self { #(#field_idents),* } = self;
+357 +                 #(#insert_stmts)*
+358 +             }
+359 +         }
+360 + 
+361 +         const _: fn() = || {
+362 +             #(#canaries)*
+363 +         };
+364 +     }
+    |
+
+warning: `panic` should not be present in production code
+   --> crates\autoresolve_macros_impl\src\base.rs:462:14
+    |
+462 |         _ => panic!("guarded by path validation above"),
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#panic
+
+warning: `panic` should not be present in production code
+   --> crates\autoresolve_macros_impl\src\base.rs:472:14
+    |
+472 |         _ => panic!("guarded by path validation above"),
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#panic
+
+warning: `panic` should not be present in production code
+   --> crates\autoresolve_macros_impl\src\base.rs:503:14
+    |
+503 |         _ => panic!("guarded by path validation above"),
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#panic
+
+warning: this function has too many lines (103/100)
+   --> crates\autoresolve_macros_impl\src\base.rs:507:1
+    |
+507 | / fn generate_scoped(
+508 | |     attrs: &BaseAttrs,
+509 | |     struct_name: &Ident,
+510 | |     clean_struct: &TokenStream,
+511 | |     fields: &[BaseField<'_>],
+512 | |     parent: &syn::Path,
+513 | | ) -> syn::Result<TokenStream> {
+    | |_____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#too_many_lines
+    = note: `-W clippy::too-many-lines` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::too_many_lines)]`
+
+warning: this function's return value is unnecessarily wrapped by `Result`
+   --> crates\autoresolve_macros_impl\src\base.rs:507:1
+    |
+507 | / fn generate_scoped(
+508 | |     attrs: &BaseAttrs,
+509 | |     struct_name: &Ident,
+510 | |     clean_struct: &TokenStream,
+511 | |     fields: &[BaseField<'_>],
+512 | |     parent: &syn::Path,
+513 | | ) -> syn::Result<TokenStream> {
+    | |_____________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unnecessary_wraps
+help: remove `Result` from the return type...
+    |
+513 - ) -> syn::Result<TokenStream> {
+513 + ) -> proc_macro2::TokenStream {
+    |
+help: ...and then remove the surrounding `Ok()` from returning expressions
+    |
+587 ~     quote! {
+588 +         #clean_struct
+589 + 
+590 +         #[doc(hidden)]
+591 +         pub mod #helper_mod {
+592 +             use super::*;
+593 + 
+594 +             // Re-export the parent macro into this helper module so that
+595 +             // `$crate::helper::#parent_ident!()` works without an absolute path to the
+596 +             // parent, avoiding the `macro_expanded_macro_exports_accessed_by_absolute_paths` lint.
+597 +             //
+598 +             // Bare ident: `pub use super::Parent;` (resolves via `use super::*;`)
+599 +             // Qualified path: `pub use crate::path::Parent;` (used as-is)
+600 +             pub use #parent_reexport;
+601 + 
+602 +             #(#aliases)*
+603 + 
+604 +             #(#spread_helper_items)*
+605 + 
+606 +             // Generator macro for the scoped base. The `@impls` arm delegates
+607 +             // to the parent's macro (routed through `$crate::helper`) and then
+608 +             // emits its own impls.
+609 +             #[doc(hidden)]
+610 +             #[macro_export]
+611 +             macro_rules! #mangled_gen_name {
+612 +                 ([crate $(:: $helper_seg:ident)*], $mangled:ident, $dollar:tt) => {
+613 +                     #[doc(hidden)]
+614 +                     #[macro_export]
+615 +                     macro_rules! $mangled {
+616 +                         (@ impls $dollar base:path) => {
+617 +                             $dollar crate $(:: $helper_seg)* :: #parent_ident!(@ impls $dollar base);
+618 +                             #own_impls_body
+619 +                         };
+620 +                         (@ insert $dollar store:ident, $dollar name:ident) => {
+621 +                             #own_insert_body
+622 +                         };
+623 +                         (@ reexport [$dollar ($dollar new_helper:tt)*], $dollar new_mangled:ident, $dollar dd:tt) => {
+624 +                             #(#[allow(unused_imports)] pub use #dollar_crate_helper :: #reexport_items;)*
+625 +                             #dollar_crate_helper :: __generator!([$dollar ($dollar new_helper)*], $dollar new_mangled, $dollar dd);
+626 +                         };
+627 +                     }
+628 +                 };
+629 +             }
+630 +             #[doc(hidden)]
+631 +             pub use #mangled_gen_name as __generator;
+632 + 
+633 +             // Invoke the generator with the original helper path to produce the
+634 +             // final macro.
+635 +             __generator!([#helper_path], #mangled_macro_name, $);
+636 +             #[doc(hidden)]
+637 +             pub use #mangled_macro_name as #struct_name;
+638 +         }
+639 +         #[doc(hidden)]
+640 +         pub use #helper_mod :: #struct_name;
+641 + 
+642 +         // Self-invocation: propagate parent + own types into this scope.
+643 +         #struct_name!(@impls #struct_name);
+644 + 
+645 +         impl ::autoresolve::BaseType for #struct_name {
+646 +             type Parent = #parent;
+647 + 
+648 +             fn insert_into(self, __store: &mut ::autoresolve::Resolver<#struct_name>) {
+649 +                 let Self { #(#field_idents),* } = self;
+650 +                 #(#insert_stmts)*
+651 +             }
+652 +         }
+653 + 
+654 +         const _: fn() = || {
+655 +             #(#canaries)*
+656 +         };
+657 +     }
+    |
+
+warning: docs for function returning `Result` missing `# Errors` section
+   --> crates\autoresolve_macros_impl\src\base.rs:664:1
+    |
+664 | pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#missing_errors_doc
+
+warning: docs for function returning `Result` missing `# Errors` section
+  --> crates\autoresolve_macros_impl\src\resolvable.rs:11:1
+   |
+11 | pub fn resolvable(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#missing_errors_doc
+
+warning: this function has too many lines (113/100)
+  --> crates\autoresolve_macros_impl\src\resolvable.rs:11:1
+   |
+11 | pub fn resolvable(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#too_many_lines
+
+warning: this `if` statement can be collapsed
+  --> crates\autoresolve_macros_impl\src\resolvable.rs:38:13
+   |
+38 | /             if let ImplItem::Fn(method) = item {
+39 | |                 if method.sig.ident == "new" {
+40 | |                     return Some(method);
+41 | |                 }
+42 | |             }
+   | |_____________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#collapsible_if
+   = note: `-W clippy::collapsible-if` implied by `-W clippy::style`
+   = help: to override `-W clippy::style` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+   |
+38 ~             if let ImplItem::Fn(method) = item
+39 ~                 && method.sig.ident == "new" {
+40 |                     return Some(method);
+41 ~                 }
+   |
+
+warning: `autoresolve_macros_impl` (lib) generated 27 warnings (run `cargo clippy --fix --lib -p autoresolve_macros_impl` to apply 2 suggestions)
+warning: error finalizing incremental compilation session directory `\\?\D:\repos\oxidizer-github\target\debug\incremental\autoresolve_macros-39glp1te1lzfu\s-hhwueuew0m-142v7sd-working`: Access is denied. (os error 5)
+
+warning: `autoresolve_macros` (lib) generated 14 warnings (13 duplicates)
+warning: `if _ { .. } else { .. }` is an expression
+   --> crates\autoresolve\src\resolver.rs:183:9
+    |
+183 | /         let mut best: Option<(Slot, usize, usize)> = None; // (slot, path_len, tier)
+184 | |
+185 | |         // Self first (closest).
+186 | |         if let Some((slot, len)) = self.types.find_best_slot(key, target) {
+187 | |             best = Some((slot, len, self.level));
+188 | |         }
+    | |_________^ help: it is more idiomatic to write: `let <mut> best = if let Some((slot, len)) = self.types.find_best_slot(key, target) { Some((slot, len, self.level)) } else { None };`
+    |
+    = note: you might not need `mut` at all
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#useless_let_if_seq
+    = note: `-W clippy::useless-let-if-seq` implied by `-W clippy::nursery`
+    = help: to override `-W clippy::nursery` add `#[allow(clippy::useless_let_if_seq)]`
+
+warning: `autoresolve` (lib) generated 14 warnings (13 duplicates)
+warning: `autoresolve` (lib test) generated 14 warnings (14 duplicates)
+warning: `allow` attribute without specifying a reason
+ --> crates\autoresolve\tests\scoped\main.rs:1:1
+  |
+1 | #![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#allow_attributes_without_reason
+  = note: requested on the command line with `-W clippy::allow-attributes-without-reason`
+
+warning: binding's name is too similar to existing binding
+   --> crates\autoresolve\tests\scoped\main.rs:218:13
+    |
+218 |     let mut task1b = req1.scoped(TaskBase { task: Task { id: 200 } });
+    |             ^^^^^^
+    |
+note: existing binding defined here
+   --> crates\autoresolve\tests\scoped\main.rs:214:13
+    |
+214 |     let mut task1a = req1.scoped(TaskBase { task: Task { id: 100 } });
+    |             ^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#similar_names
+    = note: `-W clippy::similar-names` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::similar_names)]`
+
+warning: binding's name is too similar to existing binding
+   --> crates\autoresolve\tests\scoped\main.rs:255:13
+    |
+255 |     let mut task1b = req1.scoped(TaskBase { task: Task { id: 200 } });
+    |             ^^^^^^
+    |
+note: existing binding defined here
+   --> crates\autoresolve\tests\scoped\main.rs:251:13
+    |
+251 |     let mut task1a = req1.scoped(TaskBase { task: Task { id: 100 } });
+    |             ^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#similar_names
+
+warning: binding's name is too similar to existing binding
+   --> crates\autoresolve\tests\scoped\main.rs:320:13
+    |
+320 |     let mut task1b = req1.scoped(TaskBase { task: Task { id: 20 } });
+    |             ^^^^^^
+    |
+note: existing binding defined here
+   --> crates\autoresolve\tests\scoped\main.rs:319:13
+    |
+319 |     let mut task1a = req1.scoped(TaskBase { task: Task { id: 10 } });
+    |             ^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#similar_names
+
+warning: binding's name is too similar to existing binding
+   --> crates\autoresolve\tests\scoped\main.rs:323:9
+    |
+323 |     let tc1b = task1b.get::<TaskClient>();
+    |         ^^^^
+    |
+note: existing binding defined here
+   --> crates\autoresolve\tests\scoped\main.rs:322:9
+    |
+322 |     let tc1a = task1a.get::<TaskClient>();
+    |         ^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#similar_names
+
+warning: module has the same name as its containing module
+ --> crates\autoresolve\tests\scoped\task.rs:3:1
+  |
+3 | pub mod task;
+  | ^^^^^^^^^^^^^
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#module_inception
+  = note: `-W clippy::module-inception` implied by `-W clippy::style`
+  = help: to override `-W clippy::style` add `#[allow(clippy::module_inception)]`
+
+warning: item in documentation is missing backticks
+ --> crates\autoresolve\tests\scoped\client.rs:6:45
+  |
+6 | /// App + Request: depends on Validator and CorrelationVector.
+  |                                             ^^^^^^^^^^^^^^^^^
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+  = note: `-W clippy::doc-markdown` implied by `-W clippy::pedantic`
+  = help: to override `-W clippy::pedantic` add `#[allow(clippy::doc_markdown)]`
+help: try
+  |
+6 - /// App + Request: depends on Validator and CorrelationVector.
+6 + /// App + Request: depends on Validator and `CorrelationVector`.
+  |
+
+warning: item in documentation is missing backticks
+ --> crates\autoresolve\tests\scoped\task_client.rs:6:41
+  |
+6 | /// Task + App (via Client): depends on TaskProperties and Client.
+  |                                         ^^^^^^^^^^^^^^
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+  |
+6 - /// Task + App (via Client): depends on TaskProperties and Client.
+6 + /// Task + App (via Client): depends on `TaskProperties` and Client.
+  |
+
+warning: item in documentation is missing backticks
+ --> crates\autoresolve\tests\scoped\task_handler.rs:6:32
+  |
+6 | /// Request + Task: depends on CorrelationVector and TaskProperties.
+  |                                ^^^^^^^^^^^^^^^^^
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+  |
+6 - /// Request + Task: depends on CorrelationVector and TaskProperties.
+6 + /// Request + Task: depends on `CorrelationVector` and TaskProperties.
+  |
+
+warning: item in documentation is missing backticks
+ --> crates\autoresolve\tests\scoped\task_handler.rs:6:54
+  |
+6 | /// Request + Task: depends on CorrelationVector and TaskProperties.
+  |                                                      ^^^^^^^^^^^^^^
+  |
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+  |
+6 - /// Request + Task: depends on CorrelationVector and TaskProperties.
+6 + /// Request + Task: depends on CorrelationVector and `TaskProperties`.
+  |
+
+warning: using `.clone()` on a ref-counted pointer
+  --> crates\autoresolve\tests\scoped\main.rs:78:26
+   |
+78 |     let mut parent = app(counter.clone());
+   |                          ^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&counter)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+   = note: requested on the command line with `-W clippy::clone-on-ref-ptr`
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:104:22
+    |
+104 |     let parent = app(counter.clone()); // Validator NOT eagerly resolved
+    |                      ^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&counter)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:146:16
+    |
+146 | /// Two-level: try_get checks local and ancestor stores.
+    |                ^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+146 - /// Two-level: try_get checks local and ancestor stores.
+146 + /// Two-level: `try_get` checks local and ancestor stores.
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:170:47
+    |
+170 | /// Two-level: Client (depends on Validator + CorrelationVector) ΓÇö the Validator
+    |                                               ^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+170 - /// Two-level: Client (depends on Validator + CorrelationVector) ΓÇö the Validator
+170 + /// Two-level: Client (depends on Validator + `CorrelationVector`) ΓÇö the Validator
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:171:37
+    |
+171 | /// half comes from the parent, the CorrelationVector half is request-scoped.
+    |                                     ^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+171 - /// half comes from the parent, the CorrelationVector half is request-scoped.
+171 + /// half comes from the parent, the `CorrelationVector` half is request-scoped.
+    |
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:176:22
+    |
+176 |     let parent = app(counter.clone());
+    |                      ^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&counter)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:205:22
+    |
+205 |     let parent = app(counter.clone());
+    |                      ^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&counter)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:234:18
+    |
+234 | /// Three-level: CorrelationVector (request-dep only) is promoted to the request
+    |                  ^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+234 - /// Three-level: CorrelationVector (request-dep only) is promoted to the request
+234 + /// Three-level: `CorrelationVector` (request-dep only) is promoted to the request
+    |
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:247:22
+    |
+247 |             counter: req_counter1.clone(),
+    |                      ^^^^^^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&req_counter1)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:262:22
+    |
+262 |             counter: req_counter2.clone(),
+    |                      ^^^^^^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&req_counter2)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:271:18
+    |
+271 | /// Three-level: TaskHandler (depends on CV + TaskProperties) stays local because
+    |                  ^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+271 - /// Three-level: TaskHandler (depends on CV + TaskProperties) stays local because
+271 + /// Three-level: `TaskHandler` (depends on CV + TaskProperties) stays local because
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:271:47
+    |
+271 | /// Three-level: TaskHandler (depends on CV + TaskProperties) stays local because
+    |                                               ^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+271 - /// Three-level: TaskHandler (depends on CV + TaskProperties) stays local because
+271 + /// Three-level: TaskHandler (depends on CV + `TaskProperties`) stays local because
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:273:14
+    |
+273 | /// the same CorrelationVector instance within a request.
+    |              ^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+273 - /// the same CorrelationVector instance within a request.
+273 + /// the same `CorrelationVector` instance within a request.
+    |
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:282:22
+    |
+282 |             counter: req_counter.clone(),
+    |                      ^^^^^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&req_counter)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:299:18
+    |
+299 | /// Three-level: TaskClient (depends on TaskProperties + Client) ΓÇö Client is
+    |                  ^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+299 - /// Three-level: TaskClient (depends on TaskProperties + Client) ΓÇö Client is
+299 + /// Three-level: `TaskClient` (depends on TaskProperties + Client) ΓÇö Client is
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:299:41
+    |
+299 | /// Three-level: TaskClient (depends on TaskProperties + Client) ΓÇö Client is
+    |                                         ^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+299 - /// Three-level: TaskClient (depends on TaskProperties + Client) ΓÇö Client is
+299 + /// Three-level: TaskClient (depends on `TaskProperties` + Client) ΓÇö Client is
+    |
+
+warning: item in documentation is missing backticks
+   --> crates\autoresolve\tests\scoped\main.rs:301:28
+    |
+301 | /// Each task gets its own TaskClient, but all share the same Client within a
+    |                            ^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#doc_markdown
+help: try
+    |
+301 - /// Each task gets its own TaskClient, but all share the same Client within a
+301 + /// Each task gets its own `TaskClient`, but all share the same Client within a
+    |
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:306:22
+    |
+306 |     let parent = app(app_counter.clone());
+    |                      ^^^^^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&app_counter)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:315:22
+    |
+315 |             counter: req_counter1.clone(),
+    |                      ^^^^^^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&req_counter1)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: using `.clone()` on a ref-counted pointer
+   --> crates\autoresolve\tests\scoped\main.rs:338:22
+    |
+338 |             counter: req_counter2.clone(),
+    |                      ^^^^^^^^^^^^^^^^^^^^ help: try: `std::sync::Arc::<std::sync::atomic::AtomicUsize>::clone(&req_counter2)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#clone_on_ref_ptr
+
+warning: `allow` attribute without specifying a reason
+ --> crates\autoresolve\tests\reexport\main.rs:1:1
+  |
+1 | #![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#allow_attributes_without_reason
+  = note: requested on the command line with `-W clippy::allow-attributes-without-reason`
+
+warning: this method could have a `#[must_use]` attribute
+  --> crates\autoresolve\tests\reexport\main.rs:16:12
+   |
+16 |     pub fn new(_clock: &Clock) -> Self {
+   |            ^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#must_use_candidate
+   = note: `-W clippy::must-use-candidate` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::must_use_candidate)]`
+help: add the attribute
+   |
+16 ~     #[must_use] 
+17 ~     pub fn new(_clock: &Clock) -> Self {
+   |
+
+warning: `allow` attribute without specifying a reason
+ --> crates\autoresolve\tests\compile_fail.rs:1:1
+  |
+1 | #![allow(missing_docs)] // Test helpers.
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#allow_attributes_without_reason
+  = note: requested on the command line with `-W clippy::allow-attributes-without-reason`
+
+warning: `allow` attribute without specifying a reason
+ --> crates\autoresolve\tests\combined\main.rs:1:1
+  |
+1 | #![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#allow_attributes_without_reason
+  = note: requested on the command line with `-W clippy::allow-attributes-without-reason`
+
+warning: unused `self` argument
+ --> crates\autoresolve\tests\combined\scheduler.rs:5:26
+  |
+5 |     pub(crate) fn number(&self) -> i32 {
+  |                          ^^^^^
+  |
+  = help: consider refactoring to an associated function
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unused_self
+  = note: `-W clippy::unused-self` implied by `-W clippy::pedantic`
+  = help: to override `-W clippy::pedantic` add `#[allow(clippy::unused_self)]`
+
+warning: `allow` attribute without specifying a reason
+ --> crates\autoresolve\tests\basic\main.rs:1:1
+  |
+1 | #![allow(dead_code, missing_docs, missing_debug_implementations)] // Test helpers.
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#allow_attributes_without_reason
+  = note: requested on the command line with `-W clippy::allow-attributes-without-reason`
+
+warning: unused `self` argument
+ --> crates\autoresolve\tests\basic\clock.rs:5:26
+  |
+5 |     pub(crate) fn number(&self) -> i32 {
+  |                          ^^^^^
+  |
+  = help: consider refactoring to an associated function
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unused_self
+  = note: `-W clippy::unused-self` implied by `-W clippy::pedantic`
+  = help: to override `-W clippy::pedantic` add `#[allow(clippy::unused_self)]`
+
+warning: unused `self` argument
+ --> crates\autoresolve\tests\basic\scheduler.rs:5:26
+  |
+5 |     pub(crate) fn number(&self) -> i32 {
+  |                          ^^^^^
+  |
+  = help: consider refactoring to an associated function
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#unused_self
+
+warning: `allow` attribute without specifying a reason
+ --> crates\autoresolve\tests\overrides\main.rs:1:1
+  |
+1 | #![allow(dead_code, missing_docs, missing_debug_implementations, clippy::missing_panics_doc)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: try adding a reason at the end with `, reason = ".."`
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#allow_attributes_without_reason
+  = note: requested on the command line with `-W clippy::allow-attributes-without-reason`
+
+warning: you should consider adding a `Default` implementation for `Gamma`
+  --> crates\autoresolve\tests\overrides\main.rs:22:5
+   |
+22 | /     pub fn new() -> Self {
+23 | |         Self { tag: "default-gamma" }
+24 | |     }
+   | |_____^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#new_without_default
+   = note: `-W clippy::new-without-default` implied by `-W clippy::style`
+   = help: to override `-W clippy::style` add `#[allow(clippy::new_without_default)]`
+help: try adding this
+   |
+21 + impl Default for Gamma {
+22 +     fn default() -> Self {
+23 +         Self::new()
+24 +     }
+25 + }
+   |
+
+warning: this method could have a `#[must_use]` attribute
+  --> crates\autoresolve\tests\overrides\main.rs:22:12
+   |
+22 |     pub fn new() -> Self {
+   |            ^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#must_use_candidate
+   = note: `-W clippy::must-use-candidate` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::must_use_candidate)]`
+help: add the attribute
+   |
+22 ~     #[must_use] 
+23 ~     pub fn new() -> Self {
+   |
+
+warning: this method could have a `#[must_use]` attribute
+  --> crates\autoresolve\tests\overrides\main.rs:35:12
+   |
+35 |     pub fn new(gamma: &Gamma) -> Self {
+   |            ^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#must_use_candidate
+help: add the attribute
+   |
+35 ~     #[must_use] 
+36 ~     pub fn new(gamma: &Gamma) -> Self {
+   |
+
+warning: this method could have a `#[must_use]` attribute
+  --> crates\autoresolve\tests\overrides\main.rs:51:12
+   |
+51 |     pub fn new(beta: &Beta) -> Self {
+   |            ^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#must_use_candidate
+help: add the attribute
+   |
+51 ~     #[must_use] 
+52 ~     pub fn new(beta: &Beta) -> Self {
+   |
+
+warning: this method could have a `#[must_use]` attribute
+  --> crates\autoresolve\tests\overrides\main.rs:69:12
+   |
+69 |     pub fn new(gamma: &Gamma) -> Self {
+   |            ^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#must_use_candidate
+help: add the attribute
+   |
+69 ~     #[must_use] 
+70 ~     pub fn new(gamma: &Gamma) -> Self {
+   |
+
+warning: field marked as public but also inferred as unused because it's prefixed with `_`
+  --> crates\autoresolve\tests\overrides\main.rs:79:5
+   |
+79 |     pub _marker: Marker,
+   |     ^^^^^^^^^^^
+   |
+   = help: consider removing the underscore, or making the field private
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#pub_underscore_fields
+   = note: `-W clippy::pub-underscore-fields` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::pub_underscore_fields)]`
+
+warning: used underscore-prefixed binding
+  --> crates\autoresolve\tests\overrides\main.rs:79:9
+   |
+79 |     pub _marker: Marker,
+   |         ^^^^^^^
+   |
+note: binding is defined here
+  --> crates\autoresolve\tests\overrides\main.rs:79:9
+   |
+79 |     pub _marker: Marker,
+   |         ^^^^^^^
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.93.0/index.html#used_underscore_binding
+   = note: `-W clippy::used-underscore-binding` implied by `-W clippy::pedantic`
+   = help: to override `-W clippy::pedantic` add `#[allow(clippy::used_underscore_binding)]`
+
+warning: `autoresolve` (test "scoped") generated 43 warnings (13 duplicates) (run `cargo clippy --fix --test "scoped" -p autoresolve` to apply 14 suggestions)
+warning: `autoresolve` (test "reexport") generated 15 warnings (13 duplicates) (run `cargo clippy --fix --test "reexport" -p autoresolve` to apply 1 suggestion)
+warning: `autoresolve` (test "compile_fail") generated 14 warnings (13 duplicates)
+warning: `autoresolve` (test "combined") generated 15 warnings (13 duplicates)
+warning: `autoresolve` (test "basic") generated 16 warnings (13 duplicates)
+warning: `autoresolve` (test "overrides") generated 21 warnings (13 duplicates) (run `cargo clippy --fix --test "overrides" -p autoresolve` to apply 5 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.64s

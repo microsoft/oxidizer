@@ -25,4 +25,7 @@ fn compile_fail() {
     // Base macro validation errors
     t.compile_fail("tests/compile_fail/scoped_parent_not_module_qualified.rs");
     t.compile_fail("tests/compile_fail/scoped_base_as_top_level.rs");
+
+    // Override builder validation errors
+    t.compile_fail("tests/compile_fail/provide_chain_not_dependency.rs");
 }
