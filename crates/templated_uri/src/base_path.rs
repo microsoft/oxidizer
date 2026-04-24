@@ -139,10 +139,6 @@ impl TryFrom<&PathAndQuery> for BasePath {
     type Error = UriError;
 
     /// Validates a borrowed [`PathAndQuery`] as a [`BasePath`].
-    ///
-    /// # Errors
-    ///
-    /// See [`<BasePath as TryFrom<PathAndQuery>>::try_from`].
     fn try_from(paq: &PathAndQuery) -> Result<Self, Self::Error> {
         paq.clone().try_into()
     }

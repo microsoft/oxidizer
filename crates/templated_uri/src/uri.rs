@@ -360,7 +360,7 @@ mod tests {
     fn from_parts_and_into_parts_round_trip() {
         let base = BaseUri::from_static("http://example.com");
         let path = Path::from(PathAndQuery::from_static("/path?query=1"));
-        let uri = Uri::from_parts(base.clone(), path.clone());
+        let uri = Uri::from_parts(base.clone(), path);
 
         let (got_base, got_path) = uri.clone().into_parts();
         assert_eq!(got_base, Some(base));

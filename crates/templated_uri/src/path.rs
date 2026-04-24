@@ -158,10 +158,6 @@ impl TryFrom<Path> for PathAndQuery {
     type Error = UriError;
 
     /// Materializes the [`Path`] into a validated [`PathAndQuery`].
-    ///
-    /// # Errors
-    ///
-    /// See [`<PathAndQuery as TryFrom<&Path>>::try_from`].
     fn try_from(value: Path) -> Result<Self, Self::Error> {
         Self::try_from(&value)
     }
