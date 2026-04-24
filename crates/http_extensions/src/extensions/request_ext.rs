@@ -54,7 +54,7 @@ mod tests {
         let mut request = crate::Request::builder().uri(uri.clone()).body(()).unwrap();
         request.extensions_mut().insert(Path::from(uri.path_and_query().cloned().unwrap()));
 
-        assert_eq!(request.path().unwrap().to_uri_string(), "/path");
+        assert_eq!(request.path().unwrap().to_string().declassify_ref(), "/path");
     }
 
     #[test]

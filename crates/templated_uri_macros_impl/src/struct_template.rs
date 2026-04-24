@@ -155,11 +155,11 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
 
     quote! {
         impl ::templated_uri::PathTemplate for #ident {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+            fn template(&self) -> &'static core::primitive::str {
                 #input_template
             }
 
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 #format_template
             }
 
@@ -167,15 +167,14 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
                 #label_impl
             }
 
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 #(#collect_params)*
 
                 ::std::format!(#format_template)
             }
 
-            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
+                Ok(::templated_uri::PathAndQuery::try_from(::templated_uri::PathTemplate::render(self))?)
             }
         }
 

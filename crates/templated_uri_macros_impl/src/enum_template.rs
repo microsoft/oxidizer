@@ -40,15 +40,15 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
 
     quote! {
         impl ::templated_uri::PathTemplate for #ident {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
-                match self {
-                    #(#variant_matches => template_variant.rfc_6570_template()),*
-                }
-            }
-
             fn template(&self) -> &'static core::primitive::str {
                 match self {
                     #(#variant_matches => template_variant.template()),*
+                }
+            }
+
+            fn format_template(&self) -> &'static core::primitive::str {
+                match self {
+                    #(#variant_matches => template_variant.format_template()),*
                 }
             }
 
@@ -58,15 +58,15 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
                 match self {
-                    #(#variant_matches => template_variant.to_uri_string()),*
+                    #(#variant_matches => template_variant.to_path_and_query()),*
                 }
             }
 
-            fn to_http_path(&self) -> ::std::result::Result<::templated_uri::PathAndQuery, ::templated_uri::UriError> {
+            fn render(&self) -> ::std::string::String {
                 match self {
-                    #(#variant_matches => template_variant.to_http_path()),*
+                    #(#variant_matches => template_variant.render()),*
                 }
             }
         }
@@ -82,7 +82,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         impl ::data_privacy::RedactedDisplay for #ident {
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 match self {
-                    #(#variant_matches => template_variant.fmt(engine, f)?),*
+                    #(#variant_matches => ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?),*
                 }
                 Ok(())
             }

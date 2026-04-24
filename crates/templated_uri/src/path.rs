@@ -3,11 +3,11 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Formatter;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use data_privacy::{Classified, RedactedToString, RedactionEngine, Sensitive};
+use data_privacy::{Classified, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
 use http::uri::PathAndQuery;
 
 use crate::error::UriError;
@@ -64,34 +64,55 @@ impl Path {
         }
     }
 
-    /// Converts to a URI string.
-    pub fn to_uri_string(&self) -> String {
-        match &self.0 {
+    /// Returns the path and query as a [`Sensitive`] string, classified under [`Uri::DATA_CLASS`].
+    ///
+    /// This shadows [`ToString::to_string`] to ensure callers receive a classified value
+    /// rather than a plain `String`. Use [`Sensitive::declassify_ref`] (or the
+    /// [`RedactedDisplay`] impl) when you need access to the underlying text.
+    pub fn to_string(&self) -> Sensitive<String> {
+        let s = match &self.0 {
             PathInner::Static(classified_pq) => classified_pq.declassify_ref().to_string(),
-            PathInner::Templated(templated) => templated.to_uri_string(),
-        }
+            PathInner::Templated(templated) => templated.render(),
+        };
+        Sensitive::new(s, Uri::DATA_CLASS)
     }
+}
 
-    /// Converts to a redacted URI string using the provided redaction engine.
-    pub fn to_uri_string_redacted(&self, redaction_engine: &RedactionEngine) -> String {
+impl RedactedDisplay for Path {
+    #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
+    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.0 {
             PathInner::Static(classified_pq) => {
                 // We can't use to_string in redaction because it automatically prepends a slash if the path doesn't start with one.
                 // as_str doesn't do that, so we declassify to get the inner PathAndQuery and then use as_str.
                 let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
-                redaction_engine.redacted_to_string(&reclassified)
+                f.write_str(&engine.redacted_to_string(&reclassified))
             }
-            PathInner::Templated(templated) => templated.deref().to_redacted_string(redaction_engine),
+            PathInner::Templated(templated) => RedactedDisplay::fmt(templated.deref(), engine, f),
         }
     }
 }
 
-impl Debug for Path {
+impl fmt::Debug for Path {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut tuple = f.debug_tuple("Path");
         match &self.0 {
             PathInner::Static(_) => tuple.finish(),
             PathInner::Templated(templated) => tuple.field(templated).finish(),
+        }
+    }
+}
+
+impl RedactedDebug for Path {
+    #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
+    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut tuple = f.debug_tuple("Path");
+        match &self.0 {
+            PathInner::Static(_) => tuple.finish(),
+            PathInner::Templated(templated) => {
+                let rendered = templated.deref().to_redacted_string(engine);
+                tuple.field(&rendered).finish()
+            }
         }
     }
 }
@@ -115,7 +136,7 @@ impl TryFrom<&Path> for PathAndQuery {
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         match &value.0 {
             PathInner::Static(classified_pq) => Ok(classified_pq.declassify_ref().clone()),
-            PathInner::Templated(templated) => templated.to_http_path(),
+            PathInner::Templated(templated) => templated.to_path_and_query(),
         }
     }
 }
@@ -145,7 +166,7 @@ mod tests {
         let path = PathAndQuery::from_str("/path/to/resource?query=param").unwrap();
         let target_path: Path = path.clone().into();
         assert_eq!(target_path.template(), "/path/to/resource?query=param");
-        assert_eq!(target_path.to_uri_string(), "/path/to/resource?query=param");
+        assert_eq!(target_path.to_string().declassify_ref(), "/path/to/resource?query=param");
         assert_eq!(PathAndQuery::try_from(&target_path).unwrap(), path);
         assert_eq!(
             Uri::from(target_path.clone()).to_string(),
@@ -168,7 +189,7 @@ mod tests {
         let uri = Uri::default().with_path(path);
 
         let target_paq: Path = uri.try_into().unwrap();
-        assert_eq!(target_paq.to_uri_string(), "/test/path?query=value");
+        assert_eq!(target_paq.to_string().declassify_ref(), "/test/path?query=value");
     }
 
     #[test]

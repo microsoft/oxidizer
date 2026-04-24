@@ -1355,7 +1355,7 @@ mod tests {
 
         assert_eq!(request.method(), Method::HEAD);
         assert_eq!(request.uri(), "https://example.com/api");
-        assert_eq!(request.path().unwrap().to_uri_string(), "/api");
+        assert_eq!(request.path().unwrap().to_string().declassify_ref(), "/api");
     }
 
     #[test]

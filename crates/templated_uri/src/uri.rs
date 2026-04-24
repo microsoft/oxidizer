@@ -7,7 +7,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 
-use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactionEngine, Sensitive};
+use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
 use http::uri::{Parts, PathAndQuery};
 
 use crate::error::UriError;
@@ -126,7 +126,7 @@ impl Uri {
     /// into a valid `PathAndQuery` indicates a programming error in the
     /// template implementation rather than a recoverable runtime condition.
     #[must_use]
-    pub fn to_http_path(&self) -> Option<PathAndQuery> {
+    pub fn to_path_and_query(&self) -> Option<PathAndQuery> {
         self.path.as_ref().and_then(|p| PathAndQuery::try_from(p).ok())
     }
 
@@ -144,10 +144,10 @@ impl Uri {
     pub fn to_string(&self) -> Sensitive<String> {
         let mut path = self.base_uri.as_ref().map(ToString::to_string).unwrap_or_default();
 
-        match self.path.as_ref().map(Path::to_uri_string) {
+        match self.path.as_ref().map(Path::to_string) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
-            Some(pq) if self.base_uri.is_some() => path.push_str(pq.trim_start_matches('/')),
-            Some(pq) => path.push_str(&pq),
+            Some(pq) if self.base_uri.is_some() => path.push_str(pq.declassify_ref().trim_start_matches('/')),
+            Some(pq) => path.push_str(pq.declassify_ref()),
             None => {}
         }
 
@@ -162,7 +162,7 @@ impl RedactedDisplay for Uri {
             .as_ref()
             .map_or(Ok(()), |base_uri| f.write_str(base_uri.to_string().as_str()))?;
 
-        match self.path.as_ref().map(|path| path.to_uri_string_redacted(engine)) {
+        match self.path.as_ref().map(|path| path.to_redacted_string(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -179,7 +179,7 @@ impl RedactedDebug for Uri {
             .as_ref()
             .map_or(Ok(()), |base_uri| f.write_str(base_uri.to_string().as_str()))?;
 
-        match self.path.as_ref().map(|path| path.to_uri_string_redacted(engine)) {
+        match self.path.as_ref().map(|path| path.to_redacted_string(engine)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -352,7 +352,7 @@ mod tests {
     fn test_authority_only_uri_from_str() {
         let uri_str = "https://example.com/";
         let uri: Uri = uri_str.parse().unwrap();
-        assert_eq!(uri.to_http_path(), Some(PathAndQuery::from_static("/")));
+        assert_eq!(uri.to_path_and_query(), Some(PathAndQuery::from_static("/")));
         assert_eq!(&uri.to_string().declassify_ref(), &uri_str);
     }
 

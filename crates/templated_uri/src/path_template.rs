@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use data_privacy::RedactedDisplay;
 use http::uri::PathAndQuery;
 
-use crate::{Path, Uri, UriError};
+use crate::UriError;
 
 /// Allows for the creation of URIs based on templates.
 ///
@@ -14,7 +14,7 @@ use crate::{Path, Uri, UriError};
 /// portion of a URI (everything after the authority and before any fragment).
 /// Variables may appear in either part (e.g. `/users/{id}?filter={kind}`).
 ///
-/// This trait is not meant to be implemented directly; use the `#[templated]` attribute macro instead.
+/// Use the `#[templated]` attribute macro to derive an implementation.
 ///
 /// Templates are based on [RFC 6570](https://datatracker.ietf.org/doc/html/rfc6570) Level 3,
 /// with additional constraints for valid HTTP URI construction:
@@ -44,7 +44,7 @@ use crate::{Path, Uri, UriError};
 ///     user_id: EscapedString::from_static("john_doe"),
 /// };
 ///
-/// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
+/// assert_eq!(user_path.render(), "/acme/user/john_doe/");
 /// ```
 ///
 /// # Classified fields
@@ -72,7 +72,7 @@ use crate::{Path, Uri, UriError};
 ///     org_id: EscapedString::from_static("acme"),
 ///     user_id: Sensitive::new(EscapedString::from_static("john_doe"), Pii),
 /// };
-/// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
+/// assert_eq!(user_path.render(), "/acme/user/john_doe/");
 ///
 /// let asterisk_redactor = SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*'));
 /// let redaction_engine = RedactionEngine::builder()
@@ -88,39 +88,39 @@ pub trait PathTemplate: RedactedDisplay + Debug + Sync + Send
 where
     Self: 'static,
 {
-    /// Returns the URI path string with template values filled in.
-    fn to_uri_string(&self) -> String;
+    /// Renders the template with its current field values into a path-and-query string.
+    ///
+    /// For a validated [`PathAndQuery`] use [`PathTemplate::to_path_and_query`] instead.
+    fn render(&self) -> String;
 
     /// Converts to a validated [`PathAndQuery`].
     ///
     /// # Errors
     ///
     /// Returns a [`UriError`] if the rendered URI is not a valid path-and-query.
-    fn to_http_path(&self) -> Result<PathAndQuery, UriError>;
+    fn to_path_and_query(&self) -> Result<PathAndQuery, UriError>;
 
     /// Returns the original RFC 6570 template string.
-    fn rfc_6570_template(&self) -> &'static str;
-
-    /// Returns the template in Rust format string syntax.
+    ///
+    /// This is the string the user wrote in `#[templated(template = "...")]`,
+    /// containing variables in the form `{var}`, `{+var}`, `{/var}`, `{?var}`, etc.
     fn template(&self) -> &'static str;
+
+    /// Returns the template in Rust format-string syntax.
+    ///
+    /// The original RFC 6570 expansions are flattened into bare `{var}` placeholders
+    /// suitable for use with [`std::format!`] and friends. Used internally during expansion.
+    fn format_template(&self) -> &'static str;
 
     /// Returns the optional label for this template.
     ///
     /// Set via `#[templated(template = "...", label = "my_label")]`.
     /// Useful for telemetry when the full template is too verbose.
     fn label(&self) -> Option<&'static str>;
-
-    /// Converts this template into a [`Uri`].
-    fn into_uri(self) -> Uri
-    where
-        Self: Sized,
-    {
-        Uri::from(Path::from_template(self))
-    }
 }
 
-impl<T: PathTemplate> From<T> for Uri {
+impl<T: PathTemplate> From<T> for crate::Uri {
     fn from(value: T) -> Self {
-        value.into_uri()
+        Self::from(crate::Path::from_template(value))
     }
 }

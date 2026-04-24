@@ -238,30 +238,33 @@ mod tests {
             param4: String,
         }
         impl ::templated_uri::PathTemplate for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
                 let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_http_path(
+            fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::PathAndQuery::try_from(
+                        ::templated_uri::PathTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -324,30 +327,33 @@ mod tests {
             param4: String,
         }
         impl ::templated_uri::PathTemplate for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
                 let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_http_path(
+            fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::PathAndQuery::try_from(
+                        ::templated_uri::PathTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -404,30 +410,33 @@ mod tests {
             param4: String,
         }
         impl ::templated_uri::PathTemplate for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
                 let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_http_path(
+            fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::PathAndQuery::try_from(
+                        ::templated_uri::PathTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -484,30 +493,33 @@ mod tests {
             param4: String,
         }
         impl ::templated_uri::PathTemplate for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
                 let param2 = ::templated_uri::UnescapedDisplay::unescaped_display(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
-            fn to_http_path(
+            fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::PathAndQuery::try_from(
+                        ::templated_uri::PathTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -562,29 +574,32 @@ mod tests {
             limit: String,
         }
         impl ::templated_uri::PathTemplate for QueryTest {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+            fn template(&self) -> &'static core::primitive::str {
                 "/api/{resource}{?page,limit}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/api/{resource}?page={page}&limit={limit}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 let resource = ::templated_uri::Escape::escape(&self.resource);
                 let page = ::templated_uri::Escape::escape(&self.page);
                 let limit = ::templated_uri::Escape::escape(&self.limit);
                 ::std::format!("/api/{resource}?page={page}&limit={limit}")
             }
-            fn to_http_path(
+            fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::PathAndQuery::try_from(
+                        ::templated_uri::PathTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for QueryTest {
@@ -772,18 +787,16 @@ mod tests {
             SecondTemplate(Second),
         }
         impl ::templated_uri::PathTemplate for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.rfc_6570_template(),
-                    Test::SecondTemplate(template_variant) => {
-                        template_variant.rfc_6570_template()
-                    }
-                }
-            }
             fn template(&self) -> &'static core::primitive::str {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.template(),
                     Test::SecondTemplate(template_variant) => template_variant.template(),
+                }
+            }
+            fn format_template(&self) -> &'static core::primitive::str {
+                match self {
+                    Test::FirstTemplate(template_variant) => template_variant.format_template(),
+                    Test::SecondTemplate(template_variant) => template_variant.format_template(),
                 }
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
@@ -792,21 +805,23 @@ mod tests {
                     Test::SecondTemplate(template_variant) => template_variant.label(),
                 }
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.to_uri_string(),
-                    Test::SecondTemplate(template_variant) => template_variant.to_uri_string(),
-                }
-            }
-            fn to_http_path(
+            fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
                 ::templated_uri::PathAndQuery,
                 ::templated_uri::UriError,
             > {
                 match self {
-                    Test::FirstTemplate(template_variant) => template_variant.to_http_path(),
-                    Test::SecondTemplate(template_variant) => template_variant.to_http_path(),
+                    Test::FirstTemplate(template_variant) => template_variant.to_path_and_query(),
+                    Test::SecondTemplate(template_variant) => {
+                        template_variant.to_path_and_query()
+                    }
+                }
+            }
+            fn render(&self) -> ::std::string::String {
+                match self {
+                    Test::FirstTemplate(template_variant) => template_variant.render(),
+                    Test::SecondTemplate(template_variant) => template_variant.render(),
                 }
             }
         }
@@ -829,8 +844,12 @@ mod tests {
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
                 match self {
-                    Test::FirstTemplate(template_variant) => template_variant.fmt(engine, f)?,
-                    Test::SecondTemplate(template_variant) => template_variant.fmt(engine, f)?,
+                    Test::FirstTemplate(template_variant) => {
+                        ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+                    }
+                    Test::SecondTemplate(template_variant) => {
+                        ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+                    }
                 }
                 Ok(())
             }

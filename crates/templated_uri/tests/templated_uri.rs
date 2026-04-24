@@ -54,8 +54,8 @@ fn templated_uri() {
         q2: 42,
     };
 
-    assert_eq!(test.to_uri_string(), "/value1/value2/value3?q1=query1&q2=42");
-    assert_eq!(test.rfc_6570_template(), "/{+param}{/param2,param3}{?q1,q2}");
+    assert_eq!(test.render(), "/value1/value2/value3?q1=query1&q2=42");
+    assert_eq!(test.template(), "/{+param}{/param2,param3}{?q1,q2}");
     assert_eq!(format!("{test:?}"), r#"PathAndQueryTemplate("/{+param}{/param2,param3}{?q1,q2}")"#);
 }
 
@@ -102,7 +102,7 @@ fn user_info_uri() {
         "https://example.com/users/123e4567-e89b-12d3-a456-426614174000/info/details"
     );
 
-    let target = test.into_uri().with_base(BaseUri::from_static("https://example.com"));
+    let target = Uri::from(test).with_base(BaseUri::from_static("https://example.com"));
 
     assert_eq!(
         target.to_string().declassify_ref(),
@@ -112,7 +112,7 @@ fn user_info_uri() {
         format!("{target:?}"),
         r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(Path(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
-    assert_eq!(target.to_path().unwrap().template(), "/users/{user_id}/{path_fragment}");
+    assert_eq!(target.to_path().unwrap().template(), "/users/{user_id}/{+path_fragment}");
     assert_eq!(
         target.to_redacted_string(&RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build(),),
         "https://example.com/users/************************************/************",
@@ -138,7 +138,7 @@ fn test_uri_taxonomy() {
         user_id: Sensitive::new(Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap(), Uri::DATA_CLASS),
     };
 
-    let target = user_info.into_uri().with_base(BaseUri::from_static("https://example.com"));
+    let target = Uri::from(user_info).with_base(BaseUri::from_static("https://example.com"));
 
     assert_eq!(
         format!("{target:?}"),
@@ -203,17 +203,17 @@ fn template_enum() {
         user_id: UserId(EscapedString::from_static("Will_E_Coyote")),
         action: Action::Edit,
     });
-    assert_eq!(api_edit.to_uri_string(), "/Acme/user/Will_E_Coyote/edit/");
+    assert_eq!(api_edit.render(), "/Acme/user/Will_E_Coyote/edit/");
     assert_eq!(
         format!("{api_edit:?}"),
         r#"UserApi(UserActionPath("/{org_id}/user/{user_id}/{+action}/"))"#
     );
-    assert_eq!(api_edit.rfc_6570_template(), "/{org_id}/user/{user_id}/{+action}/");
+    assert_eq!(api_edit.template(), "/{org_id}/user/{user_id}/{+action}/");
     let api_read = UserApi::UserPath(UserPath {
         org_id: OrgId(EscapedString::from_static("Acme")),
         user_id: UserId(EscapedString::from_static("Will_E_Coyote")),
     });
-    assert_eq!(api_read.to_uri_string(), "/Acme/user/Will_E_Coyote/");
+    assert_eq!(api_read.render(), "/Acme/user/Will_E_Coyote/");
     assert_eq!(format!("{api_read:?}"), r#"UserApi(UserPath("/{org_id}/user/{user_id}/"))"#);
 
     // Test RedactedDisplay implementation for enums
@@ -245,7 +245,7 @@ fn test_field_level_unredacted() {
         product_id: EscapedString::from_static("product-123"),
     };
 
-    assert_eq!(path.to_uri_string(), "/Acme/product/product-123/");
+    assert_eq!(path.render(), "/Acme/product/product-123/");
 
     let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
 
@@ -275,7 +275,7 @@ fn test_redacted_query_params() {
         limit: 10,
     };
 
-    assert_eq!(path.to_uri_string(), "/Acme/search?query=rust&limit=10");
+    assert_eq!(path.render(), "/Acme/search?query=rust&limit=10");
 
     let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
 
@@ -323,7 +323,7 @@ fn test_label_with_complex_template() {
     assert_eq!(path.label(), Some("user_monthly_report"));
 
     // Verify URI generation still works correctly
-    assert_eq!(path.to_uri_string(), "/acme/user/user123/reports/sales/2024/12");
+    assert_eq!(path.render(), "/acme/user/user123/reports/sales/2024/12");
 }
 
 #[test]
@@ -390,16 +390,16 @@ fn test_uri_path_from_template() {
     // Verify label
     assert_eq!(target_paq.label(), Some(Cow::Borrowed("user_posts")));
 
-    // Verify to_uri_string
-    assert_eq!(target_paq.to_uri_string(), "/api/123/posts");
+    // Verify to_string
+    assert_eq!(target_paq.to_string().declassify_ref(), "/api/123/posts");
 
-    // Verify to_http_path
+    // Verify to_path_and_query
     let path = PathAndQuery::try_from(&target_paq).unwrap();
     assert_eq!(path.to_string(), "/api/123/posts");
 
     // Verify redacted string (unredacted because of unredacted attribute)
     let redaction_engine = RedactionEngine::builder().build();
-    assert_eq!(target_paq.to_uri_string_redacted(&redaction_engine), "/api/123/posts");
+    assert_eq!(target_paq.to_redacted_string(&redaction_engine), "/api/123/posts");
 
     // Verify it can be used in a Uri
     let uri = Uri::from(target_paq);
