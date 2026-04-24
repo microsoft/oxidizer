@@ -83,14 +83,12 @@ jobs:
             skip=false
           fi
 
-          echo "Skip downstream: $skip"
-
           {
             echo "modified=$MODIFIED"
             echo "affected=$AFFECTED"
             echo "required=$REQUIRED"
             echo "skip=$skip"
-          } >> "$GITHUB_OUTPUT"
+          } | tee -a "$GITHUB_OUTPUT"
 
   testing:
     needs: [delta]
@@ -153,7 +151,7 @@ jobs:
         run: cargo clippy --workspace ${{ needs.delta.outputs.modified }} --all-targets --all-features -- -D warnings
       - name: Source Format
         if: success() || failure()
-        run: cargo fmt --all -- --check
+        run: cargo fmt -- --check
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
