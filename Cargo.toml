@@ -46,9 +46,9 @@ templated_uri = { path = "crates/templated_uri", default-features = false, versi
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.1" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.1" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.0.1" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.0.1" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.0.1" }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.0.2" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.0.2" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.0.2" }
 tick = { path = "crates/tick", default-features = false, version = "0.2.1" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 
