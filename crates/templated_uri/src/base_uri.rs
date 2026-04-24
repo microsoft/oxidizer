@@ -747,6 +747,46 @@ mod tests {
         }
     }
 
+    mod with_path {
+        use super::*;
+
+        #[test]
+        fn replaces_path_infallibly() {
+            let base_uri = BaseUri::from_static("https://example.com/old/").with_path(BasePath::from_static("/api/v1/"));
+            assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
+        }
+
+        #[test]
+        fn try_with_path_from_str() {
+            let base_uri = BaseUri::from_static("https://example.com/").try_with_path("/api/v1/").unwrap();
+            assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
+        }
+
+        #[test]
+        fn try_with_path_invalid_returns_error() {
+            BaseUri::from_static("https://example.com/")
+                .try_with_path("no-leading-slash/")
+                .unwrap_err();
+        }
+    }
+
+    #[test]
+    fn into_parts_round_trips_with_from_parts() {
+        let base_uri = BaseUri::from_static("https://example.com:1234/api/");
+        let (origin, path) = base_uri.clone().into_parts();
+        assert_eq!(origin, Origin::from_static("https://example.com:1234"));
+        assert_eq!(path, BasePath::from_static("/api/"));
+        assert_eq!(BaseUri::from_parts(origin, path), base_uri);
+    }
+
+    #[test]
+    fn try_from_str_delegates_to_from_str() {
+        let base_uri = BaseUri::try_from("https://example.com/api/").unwrap();
+        assert_eq!(base_uri.to_string(), "https://example.com/api/");
+
+        BaseUri::try_from("not-a-valid-uri").unwrap_err();
+    }
+
     mod accessors {
         use super::*;
 

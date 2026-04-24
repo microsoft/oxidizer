@@ -251,6 +251,10 @@ mod tests {
         let origin_http = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
         assert_eq!(format!("{origin_http}"), "http://example.com");
 
+        // Explicit HTTP default port is also omitted
+        let origin_http_explicit = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:80"));
+        assert_eq!(format!("{origin_http_explicit}"), "http://example.com");
+
         let origin_https = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:443"));
         assert_eq!(format!("{origin_https}"), "https://example.com");
 
@@ -303,6 +307,29 @@ mod tests {
         let with_port = origin.with_port(8443);
         assert_eq!(with_port.port(), Some(8443));
         assert_eq!(format!("{with_port}"), "https://example.com:8443");
+    }
+
+    #[test]
+    fn try_from_parts_valid() {
+        // Exercises both `TryInto<Scheme>` and `TryInto<Authority>` via `&str`.
+        let origin = Origin::try_from_parts("https", "example.com:8443").unwrap();
+        assert_eq!(origin.scheme().as_str(), "https");
+        assert_eq!(origin.authority().as_str(), "example.com:8443");
+
+        // Pre-typed values also work.
+        let origin = Origin::try_from_parts(Scheme::HTTP, Authority::from_static("example.com")).unwrap();
+        assert_eq!(origin.scheme(), &Scheme::HTTP);
+        assert_eq!(origin.authority().as_str(), "example.com");
+    }
+
+    #[test]
+    fn try_from_parts_invalid_scheme() {
+        Origin::try_from_parts("not a scheme", "example.com").unwrap_err();
+    }
+
+    #[test]
+    fn try_from_parts_invalid_authority() {
+        Origin::try_from_parts("https", "not a host").unwrap_err();
     }
 
     #[test]

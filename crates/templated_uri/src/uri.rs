@@ -351,6 +351,30 @@ mod tests {
     }
 
     #[test]
+    fn from_static_parses_full_uri() {
+        let uri = Uri::from_static("https://example.com/path?query=1");
+        assert_eq!(uri.to_string().declassify_ref(), "https://example.com/path?query=1");
+    }
+
+    #[test]
+    fn from_parts_and_into_parts_round_trip() {
+        let base = BaseUri::from_static("http://example.com");
+        let path = Path::from(PathAndQuery::from_static("/path?query=1"));
+        let uri = Uri::from_parts(base.clone(), path.clone());
+
+        let (got_base, got_path) = uri.clone().into_parts();
+        assert_eq!(got_base, Some(base));
+        assert!(got_path.is_some());
+        assert_eq!(uri.to_string().declassify_ref(), "http://example.com/path?query=1");
+
+        // Both arguments are optional.
+        let empty = Uri::from_parts(None, None);
+        let (b, p) = empty.into_parts();
+        assert!(b.is_none());
+        assert!(p.is_none());
+    }
+
+    #[test]
     fn test_uri_try_from_str() {
         let uri_str = "https://example.com/path?query=1";
         let uri = Uri::try_from(uri_str).unwrap();

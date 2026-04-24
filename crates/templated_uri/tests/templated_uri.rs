@@ -367,6 +367,33 @@ fn test_uri_path_label() {
 }
 
 #[test]
+fn test_uri_path_redacted_debug() {
+    use templated_uri::Path;
+
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+
+    // Static path: RedactedDebug omits the inner value entirely.
+    let static_path = Path::from_static("/sensitive/path?query=secret");
+    let mut buf = String::new();
+    redaction_engine.redacted_debug(&static_path, &mut buf).unwrap();
+    assert_eq!(buf, "Path", "static Path's RedactedDebug should not leak the inner value");
+
+    // Templated path: RedactedDebug includes the redacted rendering of the template.
+    #[templated(template = "/users/{user_id}/info")]
+    #[derive(Clone)]
+    struct UserInfoPath {
+        user_id: OrgId,
+    }
+    let templated_path: Path = Path::from_template(UserInfoPath {
+        user_id: OrgId(EscapedString::from_static("acme")),
+    });
+
+    let mut buf = String::new();
+    redaction_engine.redacted_debug(&templated_path, &mut buf).unwrap();
+    assert_eq!(buf, "Path(\"/users/****/info\")");
+}
+
+#[test]
 fn test_uri_path_from_template() {
     use std::borrow::Cow;
 
