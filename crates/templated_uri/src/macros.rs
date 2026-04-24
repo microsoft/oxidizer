@@ -1,27 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Derives the `UriParam` trait for newtype wrappers around URI-escaped types.
+/// Derives the `Escape` trait for newtype wrappers around URI-escaped types.
 ///
-/// This derive macro implements `UriParam` for tuple structs with exactly one field.
-/// The implementation calls `as_uri_escaped()` on the inner type, making it suitable for
+/// This derive macro implements `Escape` for tuple structs with exactly one field.
+/// The implementation calls `escape()` on the inner type, making it suitable for
 /// use in URI templates with standard `{param}` (percent-encoded) placeholders.
 ///
 /// # Requirements
 ///
 /// - Must be a tuple struct (newtype pattern) with exactly one field
-/// - The inner type must implement [`UriParam`]
+/// - The inner type must implement [`Escape`]
 ///
 /// # Example
 ///
 /// ```
-/// # use templated_uri::{UriParam, UriEscapedString};
-/// #[derive(UriParam)]
-/// struct UserId(UriEscapedString);
+/// # use templated_uri::{Escape, EscapedString};
+/// #[derive(Escape)]
+/// struct UserId(EscapedString);
 /// ```
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
-pub use templated_uri_macros::UriParam;
+pub use templated_uri_macros::Escape;
 /// Derives the `UriUnsafeParam` trait for newtype wrappers with unrestricted characters.
 ///
 /// This derive macro implements `UriUnsafeParam` for tuple structs with exactly one field.
@@ -48,10 +48,10 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:
-/// - `UriTemplate`: Methods for URI template expansion and formatting
+/// - `PathTemplate`: Methods for URI template expansion and formatting
 /// - `Debug`: Custom debug representation showing the template
 /// - `RedactedDisplay`: Data privacy-aware display with selective field redaction
-/// - `From<T> for UriPath`: Conversion to a URI path
+/// - `From<T> for Path`: Conversion to a URI path
 ///
 /// # Struct Usage
 ///
@@ -80,18 +80,18 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// - `#[unredacted]`: Disable redaction for a specific field
 ///
 /// ```ignore
-/// # use templated_uri::{templated, UriEscapedString};
+/// # use templated_uri::{templated, EscapedString};
 /// #[templated(template = "/{org_id}/product/{product_id}")]
 /// struct ProductPath {
 ///     org_id: OrgId,           // Will be redacted
 ///     #[unredacted]
-///     product_id: UriEscapedString, // Will NOT be redacted
+///     product_id: EscapedString, // Will NOT be redacted
 /// }
 /// ```
 ///
 /// # Enum Usage
 ///
-/// For enums, each variant must contain exactly one field that implements `UriTemplate`.
+/// For enums, each variant must contain exactly one field that implements `PathTemplate`.
 /// The macro generates delegating implementations that forward to the inner type.
 ///
 /// ```ignore

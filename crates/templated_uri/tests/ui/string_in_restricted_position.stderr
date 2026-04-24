@@ -1,13 +1,14 @@
-error[E0277]: the trait bound `String: UriParam` is not satisfied
+error[E0277]: the trait bound `String: templated_uri::Escape` is not satisfied
   --> tests/ui/string_in_restricted_position.rs:12:5
    |
 12 |     user_id: String,
    |     ^^^^^^^^^------
    |     |        |
    |     |        required by a bound introduced by this call
-   |     the trait `UriParam` is not implemented for `String`
+   |     the trait `templated_uri::Escape` is not implemented for `String`
    |
-   = help: the following other types implement trait `UriParam`:
+   = help: the following other types implement trait `templated_uri::Escape`:
+             Escaped<Cow<'static, str>>
              IpAddr
              NonZero<u128>
              NonZero<u16>
@@ -15,16 +16,16 @@ error[E0277]: the trait bound `String: UriParam` is not satisfied
              NonZero<u64>
              NonZero<u8>
              NonZero<usize>
-             Sensitive<T>
            and $N others
 
-error[E0277]: the trait bound `String: UriParam` is not satisfied
+error[E0277]: the trait bound `String: templated_uri::Escape` is not satisfied
   --> tests/ui/string_in_restricted_position.rs:12:14
    |
 12 |     user_id: String,
-   |              ^^^^^^ the trait `UriParam` is not implemented for `String`
+   |              ^^^^^^ the trait `templated_uri::Escape` is not implemented for `String`
    |
-   = help: the following other types implement trait `UriParam`:
+   = help: the following other types implement trait `templated_uri::Escape`:
+             Escaped<Cow<'static, str>>
              IpAddr
              NonZero<u128>
              NonZero<u16>
@@ -32,5 +33,4 @@ error[E0277]: the trait bound `String: UriParam` is not satisfied
              NonZero<u64>
              NonZero<u8>
              NonZero<usize>
-             Sensitive<T>
            and $N others

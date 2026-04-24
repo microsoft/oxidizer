@@ -9,7 +9,7 @@ use std::fmt::Display;
 use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, PathAndQuery, Uri, UriEscapedString, UriParam, UriTemplate, UriUnsafeParam, templated};
+use templated_uri::{BaseUri, Escape, EscapedString, PathAndQuery, PathTemplate, Uri, UriUnsafeParam, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
 #[taxonomy(test_taxonomy)]
@@ -23,12 +23,12 @@ enum TestTaxonomy {
 }
 
 #[classified(TestTaxonomy::Oii)]
-#[derive(Clone, UriParam)]
-struct OrgId(UriEscapedString);
+#[derive(Clone, Escape)]
+struct OrgId(EscapedString);
 
 #[classified(TestTaxonomy::Eupi)]
-#[derive(Clone, UriParam)]
-struct UserId(UriEscapedString);
+#[derive(Clone, Escape)]
+struct UserId(EscapedString);
 
 #[classified(TestTaxonomy::Public)]
 #[derive(Clone, UriUnsafeParam)]
@@ -38,9 +38,9 @@ struct PathFragment(String);
 #[derive(Clone)]
 struct PathAndQueryTemplate {
     param: String,
-    param2: UriEscapedString,
-    param3: UriEscapedString,
-    q1: UriEscapedString,
+    param2: EscapedString,
+    param3: EscapedString,
+    q1: EscapedString,
     q2: u32,
 }
 
@@ -48,9 +48,9 @@ struct PathAndQueryTemplate {
 fn templated_uri() {
     let test = PathAndQueryTemplate {
         param: "value1".to_string(),
-        param2: UriEscapedString::from_static("value2"),
-        param3: UriEscapedString::from_static("value3"),
-        q1: UriEscapedString::from_static("query1"),
+        param2: EscapedString::from_static("value2"),
+        param3: EscapedString::from_static("value3"),
+        q1: EscapedString::from_static("query1"),
         q2: 42,
     };
 
@@ -63,9 +63,9 @@ fn templated_uri() {
 fn uri_with_template() {
     let test = PathAndQueryTemplate {
         param: "value1".to_string(),
-        param2: UriEscapedString::from_static("value2"),
-        param3: UriEscapedString::from_static("value3"),
-        q1: UriEscapedString::from_static("query1"),
+        param2: EscapedString::from_static("value2"),
+        param3: EscapedString::from_static("value3"),
+        q1: EscapedString::from_static("query1"),
         q2: 42,
     };
 
@@ -90,7 +90,7 @@ struct UserInfo {
 #[test]
 fn user_info_uri() {
     let test = UserInfo {
-        user_id: UserId(UriEscapedString::from_static("123e4567-e89b-12d3-a456-426614174000")),
+        user_id: UserId(EscapedString::from_static("123e4567-e89b-12d3-a456-426614174000")),
         path_fragment: PathFragment("info/details".to_string()),
     };
 
@@ -110,7 +110,7 @@ fn user_info_uri() {
     );
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(UriPath(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(Path(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
     assert_eq!(target.to_path().unwrap().template(), "/users/{user_id}/{path_fragment}");
     assert_eq!(
@@ -142,7 +142,7 @@ fn test_uri_taxonomy() {
 
     assert_eq!(
         format!("{target:?}"),
-        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(UriPath(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
+        r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path: Some(Path(ClassifiedUserInfo("/users/{user_id}/info"))) }"#
     );
 
     assert_eq!(
@@ -199,8 +199,8 @@ enum UserApi {
 #[test]
 fn template_enum() {
     let api_edit = UserApi::UserEditPath(UserActionPath {
-        org_id: OrgId(UriEscapedString::from_static("Acme")),
-        user_id: UserId(UriEscapedString::from_static("Will_E_Coyote")),
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        user_id: UserId(EscapedString::from_static("Will_E_Coyote")),
         action: Action::Edit,
     });
     assert_eq!(api_edit.to_uri_string(), "/Acme/user/Will_E_Coyote/edit/");
@@ -210,8 +210,8 @@ fn template_enum() {
     );
     assert_eq!(api_edit.rfc_6570_template(), "/{org_id}/user/{user_id}/{+action}/");
     let api_read = UserApi::UserPath(UserPath {
-        org_id: OrgId(UriEscapedString::from_static("Acme")),
-        user_id: UserId(UriEscapedString::from_static("Will_E_Coyote")),
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        user_id: UserId(EscapedString::from_static("Will_E_Coyote")),
     });
     assert_eq!(api_read.to_uri_string(), "/Acme/user/Will_E_Coyote/");
     assert_eq!(format!("{api_read:?}"), r#"UserApi(UserPath("/{org_id}/user/{user_id}/"))"#);
@@ -235,14 +235,14 @@ fn template_enum() {
 struct MixedRedactionPath {
     org_id: OrgId,
     #[unredacted]
-    product_id: UriEscapedString,
+    product_id: EscapedString,
 }
 
 #[test]
 fn test_field_level_unredacted() {
     let path = MixedRedactionPath {
-        org_id: OrgId(UriEscapedString::from_static("Acme")),
-        product_id: UriEscapedString::from_static("product-123"),
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        product_id: EscapedString::from_static("product-123"),
     };
 
     assert_eq!(path.to_uri_string(), "/Acme/product/product-123/");
@@ -262,7 +262,7 @@ fn test_field_level_unredacted() {
 struct SearchPath {
     org_id: OrgId,
     #[unredacted]
-    query: UriEscapedString,
+    query: EscapedString,
     #[unredacted]
     limit: u32,
 }
@@ -270,8 +270,8 @@ struct SearchPath {
 #[test]
 fn test_redacted_query_params() {
     let path = SearchPath {
-        org_id: OrgId(UriEscapedString::from_static("Acme")),
-        query: UriEscapedString::from_static("rust"),
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        query: EscapedString::from_static("rust"),
         limit: 10,
     };
 
@@ -294,24 +294,24 @@ fn test_redacted_query_params() {
     unredacted
 )]
 struct ComplexReportPath {
-    org_id: UriEscapedString,
-    user_id: UriEscapedString,
-    report_type: UriEscapedString,
+    org_id: EscapedString,
+    user_id: EscapedString,
+    report_type: EscapedString,
     year: u32,
     month: u32,
 }
 
 #[templated(template = "/simple/{id}", unredacted)]
 struct SimplePath {
-    id: UriEscapedString,
+    id: EscapedString,
 }
 
 #[test]
 fn test_label_with_complex_template() {
     let path = ComplexReportPath {
-        org_id: UriEscapedString::from_static("acme"),
-        user_id: UriEscapedString::from_static("user123"),
-        report_type: UriEscapedString::from_static("sales"),
+        org_id: EscapedString::from_static("acme"),
+        user_id: EscapedString::from_static("user123"),
+        report_type: EscapedString::from_static("sales"),
         year: 2024,
         month: 12,
     };
@@ -329,7 +329,7 @@ fn test_label_with_complex_template() {
 #[test]
 fn test_label_none_when_not_specified() {
     let path = SimplePath {
-        id: UriEscapedString::from_static("test"),
+        id: EscapedString::from_static("test"),
     };
 
     // Without label attribute, label() returns None
@@ -341,28 +341,28 @@ fn test_label_none_when_not_specified() {
 
 #[test]
 fn test_uri_path_label() {
-    use templated_uri::UriPath;
+    use templated_uri::Path;
 
     // Test with label
     let complex_path = ComplexReportPath {
-        org_id: UriEscapedString::from_static("acme"),
-        user_id: UriEscapedString::from_static("user123"),
-        report_type: UriEscapedString::from_static("sales"),
+        org_id: EscapedString::from_static("acme"),
+        user_id: EscapedString::from_static("user123"),
+        report_type: EscapedString::from_static("sales"),
         year: 2024,
         month: 12,
     };
-    let target_paq: UriPath = complex_path.into();
+    let target_paq: Path = complex_path.into();
     assert_eq!(target_paq.label().as_deref(), Some("user_monthly_report"));
 
     // Test without label
     let simple_path = SimplePath {
-        id: UriEscapedString::from_static("test"),
+        id: EscapedString::from_static("test"),
     };
-    let target_paq: UriPath = simple_path.into();
+    let target_paq: Path = simple_path.into();
     assert_eq!(target_paq.label().as_deref(), None);
 
     // Test with non-templated path
-    let static_paq = UriPath::from_static("/static/path");
+    let static_paq = Path::from_static("/static/path");
     assert_eq!(static_paq.label().as_deref(), None);
 }
 
@@ -370,19 +370,19 @@ fn test_uri_path_label() {
 fn test_uri_path_from_template() {
     use std::borrow::Cow;
 
-    use templated_uri::UriPath;
+    use templated_uri::Path;
 
     #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
     #[derive(Clone)]
     struct UserPosts {
-        user_id: UriEscapedString,
+        user_id: EscapedString,
     }
 
     let user_posts = UserPosts {
-        user_id: UriEscapedString::from_static("123"),
+        user_id: EscapedString::from_static("123"),
     };
 
-    let target_paq = UriPath::from_template(user_posts);
+    let target_paq = Path::from_template(user_posts);
 
     // Verify template
     assert_eq!(target_paq.template(), "/api/{user_id}/posts");

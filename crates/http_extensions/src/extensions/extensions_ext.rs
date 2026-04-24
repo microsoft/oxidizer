@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use http::Extensions;
-use templated_uri::UriPath;
+use templated_uri::Path;
 
 use crate::UriTemplateLabel;
 
@@ -12,8 +12,8 @@ pub trait ExtensionsExt: sealed::Sealed {
     ///
     /// This method checks for a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension
-    /// 2. From a [`UriPath`] label (if set via `#[templated(label = "...")]`)
-    /// 3. From a [`UriPath`] template string
+    /// 2. From a [`Path`] label (if set via `#[templated(label = "...")]`)
+    /// 3. From a [`Path`] template string
     ///
     /// Returns `None` if no template information is available.
     fn uri_template_label(&self) -> Option<UriTemplateLabel>;
@@ -24,7 +24,7 @@ impl ExtensionsExt for Extensions {
         if let Some(label) = self.get::<UriTemplateLabel>() {
             return Some(label.clone());
         }
-        if let Some(path) = self.get::<UriPath>() {
+        if let Some(path) = self.get::<Path>() {
             return Some(UriTemplateLabel::new(path.label().unwrap_or_else(|| path.template())));
         }
 
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn returns_template_as_fallback_from_uri_path() {
         let mut extensions = Extensions::new();
-        extensions.insert(UriPath::from_static("/path"));
+        extensions.insert(Path::from_static("/path"));
 
         assert_eq!(
             extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
@@ -67,17 +67,17 @@ mod tests {
 
     #[test]
     fn returns_label_from_templated_uri_path() {
-        use templated_uri::{UriEscapedString, templated};
+        use templated_uri::{EscapedString, templated};
 
         #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
         #[derive(Clone)]
         struct UserPosts {
-            user_id: UriEscapedString,
+            user_id: EscapedString,
         }
 
         let mut extensions = Extensions::new();
-        extensions.insert(UriPath::from_template(UserPosts {
-            user_id: UriEscapedString::from_static("123"),
+        extensions.insert(Path::from_template(UserPosts {
+            user_id: EscapedString::from_static("123"),
         }));
 
         assert_eq!(
@@ -90,7 +90,7 @@ mod tests {
     fn explicit_label_takes_precedence_over_target_path() {
         let mut extensions = Extensions::new();
         extensions.insert(UriTemplateLabel::new("/explicit"));
-        extensions.insert(UriPath::from_static("/path"));
+        extensions.insert(Path::from_static("/path"));
 
         assert_eq!(
             extensions.uri_template_label().as_ref().map(UriTemplateLabel::as_str),

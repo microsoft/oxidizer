@@ -121,7 +121,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         crate::bail!(ident, "Excess values in struct: {excess_values:?}")
     }
 
-    // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `UriEscaped`).
+    // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `Escaped`).
     let unrestricted_params: HashSet<String> = template_params
         .iter()
         .filter(|p| p.is_unrestricted)
@@ -137,9 +137,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             let is_restricted = is_restricted(ident);
             let ty_span = f.ty.span();
 
-            // Restricted fields use .as_uri_escaped(), unrestricted use .as_display()
+            // Restricted fields use .escape(), unrestricted use .as_display()
             if is_restricted {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::UriParam::as_uri_escaped(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::Escape::escape(&self.#ident); }
             } else {
                 quote_spanned! { ty_span => let #ident = ::templated_uri::UriUnsafeParam::as_display(&self.#ident); }
             }
@@ -154,7 +154,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     );
 
     quote! {
-        impl ::templated_uri::UriTemplate for #ident {
+        impl ::templated_uri::PathTemplate for #ident {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 #input_template
             }
@@ -193,9 +193,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
         }
 
-        impl From<#ident> for ::templated_uri::UriPath {
+        impl From<#ident> for ::templated_uri::Path {
             fn from(value: #ident) -> Self {
-                ::templated_uri::UriPath::from_template(value)
+                ::templated_uri::Path::from_template(value)
             }
         }
     }

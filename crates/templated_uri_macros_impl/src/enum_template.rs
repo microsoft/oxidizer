@@ -39,7 +39,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         .collect();
 
     quote! {
-        impl ::templated_uri::UriTemplate for #ident {
+        impl ::templated_uri::PathTemplate for #ident {
             fn rfc_6570_template(&self) -> &'static core::primitive::str {
                 match self {
                     #(#variant_matches => template_variant.rfc_6570_template()),*
@@ -96,9 +96,9 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
             }
         )*
 
-        impl From<#ident> for ::templated_uri::UriPath {
+        impl From<#ident> for ::templated_uri::Path {
             fn from(value: #ident) -> Self {
-                ::templated_uri::UriPath::from_template(value)
+                ::templated_uri::Path::from_template(value)
             }
         }
     }

@@ -6,9 +6,13 @@ use std::fmt::Debug;
 use data_privacy::RedactedDisplay;
 use http::uri::PathAndQuery;
 
-use crate::{Uri, UriError, UriPath};
+use crate::{Path, Uri, UriError};
 
 /// Allows for the creation of URIs based on templates.
+///
+/// A `PathTemplate` describes both the path and the optional query string
+/// portion of a URI (everything after the authority and before any fragment).
+/// Variables may appear in either part (e.g. `/users/{id}?filter={kind}`).
 ///
 /// This trait is not meant to be implemented directly; use the `#[templated]` attribute macro instead.
 ///
@@ -19,25 +23,25 @@ use crate::{Uri, UriError, UriPath};
 /// - Templates must start with a leading `/`
 /// - Fragment expansion (`{#var}`) is not supported (fragments are ignored by HTTP clients)
 ///
-/// All template values must implement [`UriParam`](crate::UriParam), except for
+/// All template values must implement [`Escape`](crate::Escape), except for
 /// unfiltered expansions (`{+foo}`). This ensures variables cannot contain reserved characters
 /// as defined by the RFC.
 ///
 /// # Example
 ///
 /// ```
-/// use templated_uri::{UriTemplate, UriEscapedString, templated};
+/// use templated_uri::{PathTemplate, EscapedString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
 /// struct UserPath {
-///     org_id: UriEscapedString,
-///     user_id: UriEscapedString,
+///     org_id: EscapedString,
+///     user_id: EscapedString,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: UriEscapedString::from_static("acme"),
-///     user_id: UriEscapedString::from_static("john_doe"),
+///     org_id: EscapedString::from_static("acme"),
+///     user_id: EscapedString::from_static("john_doe"),
 /// };
 ///
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
@@ -54,19 +58,19 @@ use crate::{Uri, UriError, UriPath};
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use templated_uri::{UriTemplate, UriEscapedString, templated};
+/// use templated_uri::{PathTemplate, EscapedString, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
 /// struct UserPath {
 ///     #[unredacted]
-///     org_id: UriEscapedString,
-///     user_id: Sensitive<UriEscapedString>,
+///     org_id: EscapedString,
+///     user_id: Sensitive<EscapedString>,
 /// }
 ///
 /// let user_path = UserPath {
-///     org_id: UriEscapedString::from_static("acme"),
-///     user_id: Sensitive::new(UriEscapedString::from_static("john_doe"), Pii),
+///     org_id: EscapedString::from_static("acme"),
+///     user_id: Sensitive::new(EscapedString::from_static("john_doe"), Pii),
 /// };
 /// assert_eq!(user_path.to_uri_string(), "/acme/user/john_doe/");
 ///
@@ -80,7 +84,7 @@ use crate::{Uri, UriError, UriPath};
 ///     "/acme/user/********/"
 /// )
 /// ```
-pub trait UriTemplate: RedactedDisplay + Debug + Sync + Send
+pub trait PathTemplate: RedactedDisplay + Debug + Sync + Send
 where
     Self: 'static,
 {
@@ -111,11 +115,11 @@ where
     where
         Self: Sized,
     {
-        Uri::from(UriPath::from_template(self))
+        Uri::from(Path::from_template(self))
     }
 }
 
-impl<T: UriTemplate> From<T> for Uri {
+impl<T: PathTemplate> From<T> for Uri {
     fn from(value: T) -> Self {
         value.into_uri()
     }

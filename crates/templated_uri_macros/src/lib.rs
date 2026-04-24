@@ -22,7 +22,7 @@ pub fn templated(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[cfg_attr(test, mutants::skip)] // The macro is tested indirectly through the `templated_uri` crate's tests, so we can skip it in mutation testing here.
-#[proc_macro_derive(UriParam)]
+#[proc_macro_derive(Escape)]
 pub fn uri_param(input: TokenStream) -> TokenStream {
     let output = uri_param_derive_impl(input.into());
     output.into()

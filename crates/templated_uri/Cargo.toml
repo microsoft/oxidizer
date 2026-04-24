@@ -32,7 +32,7 @@ allowed_external_types = [
     "http::uri::scheme::Scheme",
     "http::uri::Uri",
     "templated_uri_macros::templated",
-    "templated_uri_macros::UriParam",
+    "templated_uri_macros::Escape",
     "templated_uri_macros::UriUnsafeParam",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
