@@ -3,7 +3,11 @@
 
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
-use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
+use data_privacy::{
+    RedactedToString, RedactionEngine, classified,
+    simple_redactor::{SimpleRedactor, SimpleRedactorMode},
+    taxonomy,
+};
 use templated_uri::{BaseUri, Escape, EscapedString, Uri, templated};
 
 // Example taxonomy for demonstration purposes
@@ -33,6 +37,10 @@ struct UserPath {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let engine = RedactionEngine::builder()
+        .set_fallback_redactor(SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .build();
+
     let user_path = UserPath {
         org_id: OrgId(EscapedString::from_static("Contosso")),
         user_id: UserId(42),
@@ -47,11 +55,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _actual_uri: Uri = target.clone();
 
     // Either of these is safe for telemetry:
-    println!("Redacted URI: {target:?}"); // Prints safe generic debug representation
+    println!("URI (debug): {target:?}"); // Prints safe generic debug representation
     println!(
-        "Redacted URI: {}",
-        target.to_redacted_string(&RedactionEngine::default()) // Prints via redactor
+        "URI (redacted): {}",
+        target.to_redacted_string(&engine) // Prints via redactor
     );
+    println!("URI (unredacted): {}", target.to_string().declassify_ref());
 
     Ok(())
 }
