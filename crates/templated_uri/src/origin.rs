@@ -266,6 +266,18 @@ mod tests {
         let origin_ipv6 = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]:8443"));
         assert_eq!(format!("{origin_ipv6}"), "https://[::1]:8443");
 
+        // IPv6 with explicit default HTTPS port: brackets preserved, port stripped.
+        let origin_ipv6_https_default = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[2001:db8::1]:443"));
+        assert_eq!(format!("{origin_ipv6_https_default}"), "https://[2001:db8::1]");
+
+        // IPv6 with explicit default HTTP port: brackets preserved, port stripped.
+        let origin_ipv6_http_default = Origin::from_parts(Scheme::HTTP, Authority::from_static("[::1]:80"));
+        assert_eq!(format!("{origin_ipv6_http_default}"), "http://[::1]");
+
+        // IPv6 without an explicit port.
+        let origin_ipv6_no_port = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]"));
+        assert_eq!(format!("{origin_ipv6_no_port}"), "https://[::1]");
+
         // Other schemes round-trip the authority verbatim.
         let origin_ftp = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
         assert_eq!(format!("{origin_ftp}"), "ftp://example.com:21");
@@ -307,6 +319,22 @@ mod tests {
         let with_port = origin.with_port(8443);
         assert_eq!(with_port.port(), Some(8443));
         assert_eq!(format!("{with_port}"), "https://example.com:8443");
+    }
+
+    #[test]
+    fn test_with_port_ipv6() {
+        // Replacing the port on an IPv6 origin must preserve the brackets.
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[2001:db8::1]:8080"));
+        let with_port = origin.with_port(9090);
+        assert_eq!(with_port.authority().as_str(), "[2001:db8::1]:9090");
+        assert_eq!(with_port.port(), Some(9090));
+        assert_eq!(format!("{with_port}"), "https://[2001:db8::1]:9090");
+
+        // Adding a port to a bracketed IPv6 authority that had none.
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("[::1]"));
+        let with_port = origin.with_port(8443);
+        assert_eq!(with_port.authority().as_str(), "[::1]:8443");
+        assert_eq!(format!("{with_port}"), "https://[::1]:8443");
     }
 
     #[test]
