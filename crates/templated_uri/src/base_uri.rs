@@ -312,11 +312,11 @@ impl BaseUri {
     ///
     /// // Default HTTPS port
     /// let base_uri = BaseUri::from_static("https://example.com");
-    /// assert_eq!(base_uri.port(), Some(443));
+    /// assert_eq!(base_uri.port(), None);
     ///
     /// // Default HTTP port
     /// let base_uri = BaseUri::from_static("http://example.com");
-    /// assert_eq!(base_uri.port(), Some(80));
+    /// assert_eq!(base_uri.port(), None);
     /// ```
     #[must_use]
     pub fn port(&self) -> Option<u16> {
@@ -330,7 +330,7 @@ impl BaseUri {
     /// ```
     /// # use templated_uri::{BaseUri, Scheme};
     /// let mut base_uri = BaseUri::from_static("https://example.com");
-    /// assert_eq!(base_uri.port(), Some(443));
+    /// assert_eq!(base_uri.port(), None);
     ///
     /// let base_uri = base_uri.with_port(8443);
     /// assert_eq!(base_uri.port(), Some(8443));
@@ -813,18 +813,6 @@ mod tests {
             let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.port(), Some(8443));
         }
-
-        #[test]
-        fn port_default_https() {
-            let base_uri = BaseUri::from_static("https://example.com");
-            assert_eq!(base_uri.port(), Some(443));
-        }
-
-        #[test]
-        fn port_default_http() {
-            let base_uri = BaseUri::from_static("http://example.com");
-            assert_eq!(base_uri.port(), Some(80));
-        }
     }
 
     mod is_https {
@@ -943,6 +931,22 @@ mod tests {
         fn custom_port() {
             let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.to_string(), "https://example.com:8443/");
+        }
+
+        #[test]
+        fn https_with_http_default_port_keeps_port() {
+            // Port 80 is only the default for `http`; with `https` it must be preserved.
+            // Catches mutation of the scheme guard for HTTP_DEFAULT_PORT to `true`.
+            let base_uri = BaseUri::from_static("https://example.com:80");
+            assert_eq!(base_uri.to_string(), "https://example.com:80/");
+        }
+
+        #[test]
+        fn http_with_https_default_port_keeps_port() {
+            // Port 443 is only the default for `https`; with `http` it must be preserved.
+            // Catches mutation of the scheme guard for HTTPS_DEFAULT_PORT to `true`.
+            let base_uri = BaseUri::from_static("http://example.com:443");
+            assert_eq!(base_uri.to_string(), "http://example.com:443/");
         }
     }
 

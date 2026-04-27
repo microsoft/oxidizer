@@ -8,7 +8,7 @@ use crate::UriTemplateLabel;
 
 /// Extensions for [`http::Extensions`].
 pub trait ExtensionsExt: sealed::Sealed {
-    /// Returns the URL template label from extensions, if available.
+    /// Returns the URI template label from extensions, if available.
     ///
     /// This method checks for a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension

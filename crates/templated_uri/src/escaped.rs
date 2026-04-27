@@ -400,6 +400,38 @@ mod tests {
     }
 
     #[test]
+    fn try_new_lone_percent_sign_is_unfinished() {
+        // Input is exactly `%` (length 1, percent at i=0). Catches mutation that
+        // replaces `i + 2 >= bytes.len()` with `i * 2 >= bytes.len()`: the original
+        // correctly reports "unfinished", while the mutant computes 0*2=0 < 1 and
+        // then indexes out-of-bounds when checking the next two bytes.
+        let err = EscapedString::try_new("%").unwrap_err();
+        assert_eq!(err.to_string(), "string contains unfinished URL encoded character");
+    }
+
+    #[test]
+    fn try_new_percent_sequence_at_start_advances_correctly() {
+        // Input begins with a `%XX` sequence at index 0. Catches mutation that
+        // replaces `i += 3` with `i -= 3`: with i=0, the subtraction underflows
+        // and panics under the test profile's overflow checks, while the original
+        // cleanly advances to i=3 and returns Ok.
+        let result = EscapedString::try_new("%3D").unwrap();
+        assert_eq!(result.as_str(), "%3D");
+    }
+
+    #[test]
+    fn try_new_percent_advance_skips_exactly_three_bytes() {
+        // After accepting `%3D` starting at i=2, the next iteration must land on the
+        // `%` at i=5 and detect that `%2G` contains an invalid hex digit. Catches
+        // mutation that replaces `i += 3` with `i *= 3`: the mutant jumps i from 2
+        // to 6, skipping past the bad escape entirely and returning Ok, while the
+        // original returns the "invalid URL encoding character" error. This kills the
+        // mutant without relying on a timeout.
+        let err = EscapedString::try_new("ab%3D%2G").unwrap_err();
+        assert_eq!(err.to_string(), "string contains invalid URL encoding character");
+    }
+
+    #[test]
     fn test_from_string_reserved() {
         let result = EscapedString::from("reserved{string}".to_string());
         assert_eq!(result.as_str(), "reserved%7Bstring%7D");

@@ -11,7 +11,7 @@ pub trait RequestExt: sealed::Sealed {
     /// Returns the URI path and query associated with this request, if any.
     fn path_and_query(&self) -> Option<&PathAndQuery>;
 
-    /// Returns the URL template label for this request, if available.
+    /// Returns the URI template label for this request, if available.
     ///
     /// This method checks for a template label in the following order:
     /// 1. From an explicit [`UriTemplateLabel`] extension attached to the request

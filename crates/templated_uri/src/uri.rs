@@ -353,6 +353,21 @@ mod tests {
     }
 
     #[test]
+    fn test_uri_from_http_path_and_query() {
+        // Catches mutation that replaces the From<http::uri::PathAndQuery> impl
+        // with `Default::default()`: the resulting Uri must carry the original
+        // path-and-query rather than being empty.
+        let paq = http::uri::PathAndQuery::from_static("/path?query=1");
+        let uri: Uri = paq.into();
+        assert!(uri.base_uri.is_none());
+        assert_eq!(uri.to_string().declassify_ref(), "/path?query=1");
+        assert_eq!(
+            HttpPathAndQuery::try_from(uri).ok(),
+            Some(HttpPathAndQuery::from_static("/path?query=1"))
+        );
+    }
+
+    #[test]
     fn from_static_parses_full_uri() {
         let uri = Uri::from_static("https://example.com/path?query=1");
         assert_eq!(uri.to_string().declassify_ref(), "https://example.com/path?query=1");

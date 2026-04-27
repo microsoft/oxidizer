@@ -17,10 +17,9 @@ pub(crate) const HTTPS_DEFAULT_PORT: u16 = 443;
 /// Use [`Origin`] when you need to work with the base parts of a URI without
 /// the path, query, or fragment components.
 ///
-/// `Origin` accepts any valid URI scheme. For HTTP and HTTPS the well-known default
-/// ports are inferred from the scheme when the authority does not specify one
-/// explicitly; for other schemes the port is reported as `None` unless explicitly
-/// provided in the authority.
+/// `Origin` accepts any valid URI scheme. The port is only reported when it is
+/// explicitly present in the authority; default ports are not inferred from the
+/// scheme.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Origin {
@@ -97,27 +96,13 @@ impl Origin {
         (self.scheme, self.authority)
     }
 
-    /// Returns the port of this origin.
+    /// Returns the explicit port of this origin, if any.
     ///
-    /// Returns the explicit port from the authority when present. Otherwise, for
-    /// the well-known HTTP and HTTPS schemes the default port is inferred from
-    /// the scheme (`80` for `http`, `443` for `https`). For all other schemes
-    /// without an explicit port this method returns `None`.
+    /// Returns the explicit port from the authority when present, or `None` when
+    /// the authority does not specify a port.
     #[must_use]
     pub fn port(&self) -> Option<u16> {
-        if let Some(port) = self.authority.port_u16() {
-            return Some(port);
-        }
-
-        if self.scheme == Scheme::HTTP {
-            return Some(HTTP_DEFAULT_PORT);
-        }
-
-        if self.scheme == Scheme::HTTPS {
-            return Some(HTTPS_DEFAULT_PORT);
-        }
-
-        None
+        self.authority.port_u16()
     }
 
     /// Set port for this `Origin` instance.
@@ -222,10 +207,10 @@ mod tests {
     #[test]
     fn test_port() {
         let origin_implicit_http = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
-        assert_eq!(origin_implicit_http.port(), Some(80));
+        assert_eq!(origin_implicit_http.port(), None);
 
         let origin_implicit_https = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com"));
-        assert_eq!(origin_implicit_https.port(), Some(443));
+        assert_eq!(origin_implicit_https.port(), None);
 
         let origin_explicit = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080"));
         assert_eq!(origin_explicit.port(), Some(8080));
@@ -236,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_port_other_scheme() {
-        // Non-HTTP schemes without an explicit port have no inferable default.
+        // Without an explicit port, no port is reported regardless of the scheme.
         let origin_no_port = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com"));
         assert_eq!(origin_no_port.port(), None);
 
@@ -394,6 +379,34 @@ mod tests {
         let origin = Origin::from_static("ftp://example.com:21");
         assert_eq!(origin.scheme().as_str(), "ftp");
         assert_eq!(origin.port(), Some(21));
+    }
+
+    #[test]
+    fn display_non_http_scheme_with_http_default_port_keeps_port() {
+        // Catches mutation that replaces the `s == Scheme::HTTP.as_str()` match
+        // guard with `true`: a non-HTTP scheme using port 80 must still display
+        // the explicit port rather than being treated as HTTP.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:80"));
+        assert_eq!(format!("{origin}"), "ftp://example.com:80");
+
+        // Same idea, but ensures the HTTPS scheme with port 80 still keeps the
+        // port (the first arm must not match an https scheme just because the
+        // port happens to be 80).
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:80"));
+        assert_eq!(format!("{origin}"), "https://example.com:80");
+    }
+
+    #[test]
+    fn display_non_http_scheme_with_https_default_port_keeps_port() {
+        // Catches mutation that replaces the `s == Scheme::HTTPS.as_str()` match
+        // guard with `true`: a non-HTTPS scheme using port 443 must still display
+        // the explicit port.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:443"));
+        assert_eq!(format!("{origin}"), "ftp://example.com:443");
+
+        // HTTP scheme on port 443 must keep the port too.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:443"));
+        assert_eq!(format!("{origin}"), "http://example.com:443");
     }
 
     #[test]
