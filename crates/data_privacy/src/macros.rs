@@ -7,7 +7,7 @@
 /// library's [`Debug`](std::fmt::Debug) trait, but produces redacted output based on the provided [`RedactionEngine`](crate::RedactionEngine).
 /// All fields implementing [`Classified`](crate::Classified) will be automatically redacted according to the engine's policy.
 ///
-/// Fields can be marked with `#[unredacted]` to exclude them from redaction.
+/// Fields can be marked with `#[bypass_redaction]` to exclude them from redaction.
 ///
 /// # Example
 ///
@@ -25,7 +25,7 @@
 /// #[derive(RedactedDebug)]
 /// struct User {
 ///     id: UserId,
-///     #[unredacted]
+///     #[bypass_redaction]
 ///     age: u32,
 /// }
 /// ```
@@ -36,7 +36,7 @@ pub use data_privacy_macros::RedactedDebug;
 /// library's [`Display`](std::fmt::Display) trait, but produces redacted output based on the provided [`RedactionEngine`](crate::RedactionEngine).
 /// All fields implementing [`Classified`](crate::Classified) will be automatically redacted according to the engine's policy.
 ///
-/// Fields can be marked with `#[unredacted]` to exclude them from redaction.
+/// Fields can be marked with `#[bypass_redaction]` to exclude them from redaction.
 ///
 /// # Example
 ///
@@ -54,7 +54,7 @@ pub use data_privacy_macros::RedactedDebug;
 /// #[derive(RedactedDisplay)]
 /// struct User {
 ///     id: UserId,
-///     #[unredacted]
+///     #[bypass_redaction]
 ///     age: u32,
 /// }
 /// ```

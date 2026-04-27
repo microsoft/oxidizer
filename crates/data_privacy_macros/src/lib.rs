@@ -30,7 +30,7 @@ pub fn classified(attr_args: proc_macro::TokenStream, item: proc_macro::TokenStr
 }
 
 #[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
-#[proc_macro_derive(RedactedDebug, attributes(unredacted))]
+#[proc_macro_derive(RedactedDebug, attributes(bypass_redaction))]
 #[cfg_attr(test, mutants::skip)]
 pub fn redacted_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     data_privacy_macros_impl::derive::redacted_debug(input.into())
@@ -39,7 +39,7 @@ pub fn redacted_debug(input: proc_macro::TokenStream) -> proc_macro::TokenStream
 }
 
 #[expect(missing_docs, reason = "this is documented in the data_privacy reexport")]
-#[proc_macro_derive(RedactedDisplay, attributes(unredacted))]
+#[proc_macro_derive(RedactedDisplay, attributes(bypass_redaction))]
 #[cfg_attr(test, mutants::skip)]
 pub fn redacted_display(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     data_privacy_macros_impl::derive::redacted_display(input.into())
