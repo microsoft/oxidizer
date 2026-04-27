@@ -86,7 +86,7 @@ impl RedactedDisplay for PathAndQuery {
                 // We can't use to_string in redaction because it automatically prepends a slash if the path doesn't start with one.
                 // as_str doesn't do that, so we declassify to get the inner PathAndQuery and then use as_str.
                 let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
-                f.write_str(&engine.redacted_to_string(&reclassified))
+                RedactedDisplay::fmt(&reclassified, engine, f)
             }
             PathAndQueryInner::Templated(templated) => RedactedDisplay::fmt(&**templated, engine, f),
         }
