@@ -211,6 +211,7 @@ impl EscapedString {
 /// `%XX` percent-escape sequences. Returns `None` on success or a static description of
 /// the first fault found. Shared by [`EscapedString::try_new`] (runtime) and
 /// [`EscapedString::from_static`] (compile-time).
+#[cfg_attr(test, mutants::skip)] // mutating this function leads to infinite loop and timeout
 const fn validate_escaped(bytes: &[u8]) -> Option<&'static str> {
     let mut i = 0;
     while i < bytes.len() {
