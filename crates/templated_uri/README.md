@@ -151,15 +151,15 @@ Level 3 URI Template specification. Supported expansions include:
 Note: Fragment expansion (`{#var}`) from RFC 6570 is **not supported** because URI
 fragments are stripped by the `http` crate and ignored by HTTP clients.
 
-Template variables must implement [`Escape`][__link10] (except for reserved expansions)
-to ensure the resulting URI is valid.
+Template variables must implement [`Escape`][__link10] (except for reserved expansions,
+which use [`RawDisplay`][__link11]) to ensure the resulting URI is valid.
 
 ## Integration with HTTP Ecosystem
 
 This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting
-and building upon the standard [`http`][__link11] crate types. The resulting [`Uri`][__link12] can be converted
-to an [`http::Uri`][__link13] for use with HTTP clients
-and servers based on [`hyper`][__link14] like [`reqwest`][__link15].
+and building upon the standard [`http`][__link12] crate types. The resulting [`Uri`][__link13] can be converted
+to an [`http::Uri`][__link14] for use with HTTP clients
+and servers based on [`hyper`][__link15] like [`reqwest`][__link16].
 
 
 <hr/>
@@ -167,15 +167,16 @@ and servers based on [`hyper`][__link14] like [`reqwest`][__link15].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1L5PO26pwmIG7LCl0varlN6G8yE6JSZOZnTGxj5rTe_4rmSYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3GPhTs4GLykG5u-lnGGnPr3G3Sr-hdhkju5G_TUaPxrYqnQYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
  [__link0]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Uri
  [__link1]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Escape
- [__link11]: https://docs.rs/http/latest/http/
- [__link12]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Uri
- [__link13]: https://docs.rs/http/1.4.0/http/?search=Uri
- [__link14]: https://docs.rs/hyper/latest/hyper/
- [__link15]: https://docs.rs/reqwest/latest/reqwest/
+ [__link11]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=RawDisplay
+ [__link12]: https://docs.rs/http/latest/http/
+ [__link13]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Uri
+ [__link14]: https://docs.rs/http/1.4.0/http/?search=Uri
+ [__link15]: https://docs.rs/hyper/latest/hyper/
+ [__link16]: https://docs.rs/reqwest/latest/reqwest/
  [__link2]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
  [__link3]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BasePath
  [__link4]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=PathAndQueryTemplate
