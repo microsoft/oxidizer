@@ -25,6 +25,6 @@ pub struct Employee {
     pub name: UserName,
     pub address: UserAddress,
     pub id: EmployeeID,
-    #[unredacted]
+    #[bypass_redaction]
     pub age: u32,
 }

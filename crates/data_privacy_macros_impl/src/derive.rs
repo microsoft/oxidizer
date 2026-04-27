@@ -7,9 +7,9 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, Result, parse2};
 
-/// Check if a field has the `#[unredacted]` attribute
-fn is_unredacted(field: &syn::Field) -> bool {
-    field.attrs.iter().any(|attr| attr.path().is_ident("unredacted"))
+/// Check if a field has the `#[bypass_redaction]` attribute
+fn has_bypass_redaction(field: &syn::Field) -> bool {
+    field.attrs.iter().any(|attr| attr.path().is_ident("bypass_redaction"))
 }
 
 /// Derive the `RedactedDebug` trait for a struct.
@@ -29,11 +29,11 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                 let field_name = &field.ident;
                 let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                let unredacted = is_unredacted(field);
+                let bypass_redaction = has_bypass_redaction(field);
 
                 let separator = if i == 0 { " " } else { ", " };
 
-                if unredacted {
+                if bypass_redaction {
                     quote! {
                         ::std::write!(f, "{}{}: {:?}", #separator, #field_name_str, &self.#field_name)?;
                     }
@@ -50,7 +50,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                let unredacted = is_unredacted(field);
+                let bypass_redaction = has_bypass_redaction(field);
 
                 let separator = if i > 0 {
                     quote! { ::std::write!(f, ", ")?; }
@@ -58,7 +58,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                     quote! {}
                 };
 
-                let format_call = if unredacted {
+                let format_call = if bypass_redaction {
                     quote! {
                         ::std::write!(f, "{:?}", &self.#index)?;
                     }
@@ -120,11 +120,11 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                 let field_name = &field.ident;
                 let field_name_str = field_name.as_ref().unwrap().to_string();
                 let field_type = &field.ty;
-                let unredacted = is_unredacted(field);
+                let bypass_redaction = has_bypass_redaction(field);
 
                 let separator = if i == 0 { " " } else { ", " };
 
-                if unredacted {
+                if bypass_redaction {
                     quote! {
                         ::std::write!(f, "{}{}: {}", #separator, #field_name_str, &self.#field_name)?;
                     }
@@ -141,7 +141,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
             let calls = fields.unnamed.iter().enumerate().map(|(i, field)| {
                 let field_type = &field.ty;
                 let index = syn::Index::from(i);
-                let unredacted = is_unredacted(field);
+                let bypass_redaction = has_bypass_redaction(field);
 
                 let separator = if i > 0 {
                     quote! { ::std::write!(f, ", ")?; }
@@ -149,7 +149,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                     quote! {}
                 };
 
-                let format_call = if unredacted {
+                let format_call = if bypass_redaction {
                     quote! {
                         ::std::write!(f, "{}", &self.#index)?;
                     }

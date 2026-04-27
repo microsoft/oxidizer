@@ -23,7 +23,7 @@ pub struct Opts {
     #[darling(rename = "template")]
     pub input_template: String,
     #[darling(default)]
-    pub unredacted: bool,
+    pub bypass_redaction: bool,
     /// Optional label for telemetry. When provided, this label is used in metrics
     /// instead of the full template string, which is useful for complex templates.
     #[darling(default)]
@@ -35,7 +35,7 @@ pub struct Opts {
 pub struct FieldOpts {
     pub ident: Option<Ident>,
     #[darling(default)]
-    pub unredacted: bool,
+    pub bypass_redaction: bool,
 }
 
 /// Represents the fields of a struct with their options parsed from attributes.
@@ -50,9 +50,9 @@ impl Fields {
             .iter()
             .map(|&f| {
                 let mut opts = FieldOpts::from_field(f)?;
-                // Also check for standalone #[unredacted] attribute
-                if !opts.unredacted {
-                    opts.unredacted = f.attrs.iter().any(|attr| attr.path().is_ident("unredacted"));
+                // Also check for standalone #[bypass_redaction] attribute
+                if !opts.bypass_redaction {
+                    opts.bypass_redaction = f.attrs.iter().any(|attr| attr.path().is_ident("bypass_redaction"));
                 }
                 Ok(opts)
             })
@@ -69,7 +69,7 @@ impl Fields {
     }
 }
 
-// #[proc_macro_derive(TemplatedPathAndQuery, attributes(templated, unredacted))]
+// #[proc_macro_derive(TemplatedPathAndQuery, attributes(templated, bypass_redaction))]
 pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> TokenStream {
     if !matches!(data.fields, syn::Fields::Named(_)) {
         crate::bail!(ident, "#[templated] can only be applied to structs with named fields");
@@ -79,7 +79,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     let struct_name = ident.to_string();
     let Opts {
         input_template,
-        unredacted,
+        bypass_redaction,
         label,
     } = match Opts::from_attributes(attrs) {
         Ok(opts) => opts,
@@ -146,7 +146,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         })
         .collect();
 
-    let redacted_display = construct_redacted_display(&template, &struct_fields, &fields, unredacted);
+    let redacted_display = construct_redacted_display(&template, &struct_fields, &fields, bypass_redaction);
 
     let label_impl = label.as_ref().map_or_else(
         || quote! { ::core::option::Option::None },
@@ -201,14 +201,14 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     }
 }
 
-fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], fields: &Fields, unredacted: bool) -> TokenStream {
+fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], fields: &Fields, bypass_redaction: bool) -> TokenStream {
     // Build a map from field name to field for lookup
     let field_map: std::collections::HashMap<String, &Field> = struct_fields
         .iter()
         .filter_map(|f| f.ident.as_ref().map(|ident| (ident.to_string(), *f)))
         .collect();
 
-    // Build a map from field name to field options for checking unredacted attribute
+    // Build a map from field name to field options for checking bypass_redaction attribute
     let field_opts_map: std::collections::HashMap<String, &FieldOpts> = fields
         .fields
         .iter()
@@ -247,10 +247,10 @@ fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], 
                     let field_ident = field.ident.as_ref().expect("struct fields must be named");
                     let field_type = &field.ty;
 
-                    // Check if this specific field is marked as unredacted
-                    let field_unredacted = field_opts_map.get(*param_name).is_some_and(|opts| opts.unredacted);
+                    // Check if this specific field is marked as bypass_redaction
+                    let field_bypass_redaction = field_opts_map.get(*param_name).is_some_and(|opts| opts.bypass_redaction);
 
-                    if unredacted || field_unredacted {
+                    if bypass_redaction || field_bypass_redaction {
                         stmts.push(quote! {
                             ::std::write!(f, "{}", self.#field_ident)?;
                         });

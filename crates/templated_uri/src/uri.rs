@@ -37,7 +37,7 @@ pub const DATA_CLASS_UNKNOWN_URI: DataClass = DataClass::new(env!("CARGO_PKG_NAM
 /// ```
 /// use templated_uri::{BaseUri, Uri, templated};
 ///
-/// #[templated(template = "/example.com/{param}", unredacted)]
+/// #[templated(template = "/example.com/{param}", bypass_redaction)]
 /// #[derive(Clone)]
 /// struct MyTemplate {
 ///     param: usize,

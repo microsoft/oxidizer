@@ -30,7 +30,7 @@ use crate::{Uri, ValidationError};
 /// ```
 /// use templated_uri::{TemplatedPathAndQuery, UriSafeString, templated};
 ///
-/// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
+/// #[templated(template = "/{org_id}/user/{user_id}/", bypass_redaction)]
 /// #[derive(Clone)]
 /// struct UserPath {
 ///     org_id: UriSafeString,
@@ -61,7 +61,7 @@ use crate::{Uri, ValidationError};
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]
 /// struct UserPath {
-///     #[unredacted]
+///     #[bypass_redaction]
 ///     org_id: UriSafeString,
 ///     user_id: Sensitive<UriSafeString>,
 /// }

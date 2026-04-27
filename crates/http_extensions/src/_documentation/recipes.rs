@@ -184,7 +184,7 @@
 //! use uuid::Uuid;
 //! use templated_uri::templated;
 //!
-//! #[templated(template = "/users/{user_id}/profile", unredacted)]
+//! #[templated(template = "/users/{user_id}/profile", bypass_redaction)]
 //! #[derive(Clone)]
 //! struct UserProfilePath {
 //!     user_id: Uuid,

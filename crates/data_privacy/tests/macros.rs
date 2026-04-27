@@ -18,7 +18,7 @@ struct EMailAddress(String);
 
 #[derive(Clone, Eq, PartialEq, Hash, RedactedDisplay, RedactedDebug)]
 struct Contact {
-    #[unredacted]
+    #[bypass_redaction]
     name: String,
     email: EMailAddress,
 }

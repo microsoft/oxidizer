@@ -4,7 +4,7 @@
 //! Example demonstrating the basic usage of templated URI in `fetch`
 use templated_uri::{BaseUri, Uri, UriSafeString, templated};
 
-#[templated(template = "/{org_id}/user/{user_id}/{item}", unredacted)]
+#[templated(template = "/{org_id}/user/{user_id}/{item}", bypass_redaction)]
 #[derive(Clone)]
 struct UserPath {
     org_id: UriSafeString,

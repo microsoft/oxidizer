@@ -69,7 +69,7 @@ mod tests {
     fn returns_label_from_templated_target_path_and_query() {
         use templated_uri::{UriSafeString, templated};
 
-        #[templated(template = "/api/{user_id}/posts", label = "user_posts", unredacted)]
+        #[templated(template = "/api/{user_id}/posts", label = "user_posts", bypass_redaction)]
         #[derive(Clone)]
         struct UserPosts {
             user_id: UriSafeString,

@@ -59,7 +59,7 @@ For dynamic URIs with variable components, use the templating system:
 ```rust
 use templated_uri::{BaseUri, TemplatedPathAndQuery, Uri, UriSafeString, templated};
 
-#[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
+#[templated(template = "/users/{user_id}/posts/{post_id}", bypass_redaction)]
 #[derive(Clone)]
 struct UserPostPath {
     user_id: u32,
@@ -111,7 +111,7 @@ use templated_uri::{UriSafeString, templated};
 #[templated(
     template = "/{org}/users/{user_id}/reports/{report_type}",
     label = "user_report",
-    unredacted
+    bypass_redaction
 )]
 struct ReportPath {
     org: UriSafeString,
@@ -132,7 +132,7 @@ use templated_uri::{UriSafeString, templated};
 #[templated(template = "/{org_id}/user/{user_id}/")]
 #[derive(Clone)]
 struct UserPath {
-    #[unredacted]
+    #[bypass_redaction]
     org_id: UriSafeString,
     user_id: Sensitive<UriSafeString>,
 }
@@ -168,7 +168,7 @@ and servers based on [`hyper`][__link13] like [`reqwest`][__link14].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyftk28CR_jhG9_WxkUHtfBdG9giB010pVAzGwCsTyFCPqO3YWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6qPC7Eh-CJnG9oZSv9XpdZjG-MyU_Ev-xW0G3ZSzDcdsXROYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
  [__link0]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=uri::Uri
  [__link1]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/http/latest/http/

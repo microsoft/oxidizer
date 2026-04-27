@@ -6,7 +6,7 @@
 
 use templated_uri::templated;
 
-#[templated(template = "/users/{user_id}", unredacted)]
+#[templated(template = "/users/{user_id}", bypass_redaction)]
 #[derive(Clone)]
 struct UserPath {
     user_id: String,
