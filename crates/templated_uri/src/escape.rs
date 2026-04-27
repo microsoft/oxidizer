@@ -33,8 +33,8 @@ pub trait Escape {
 /// placeholders (`{foo}`) that must percent-encode reserved characters, use
 /// [`Escape`] instead.
 ///
-/// Implementors are responsible for ensuring the rendered output is valid in the
-/// target URI position; no encoding is performed by the renderer.
+/// Implementers are responsible for ensuring the rendered output is valid in the
+/// target URI position; no encoding is performed by the render.
 pub trait RawDisplay {
     /// Returns this value's raw `Display` form, to be inserted into a URI without escaping.
     fn raw_display(&self) -> impl Display;
