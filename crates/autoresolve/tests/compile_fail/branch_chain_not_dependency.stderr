@@ -1,0 +1,25 @@
+error[E0277]: the trait bound `A: DependencyOf<Unrelated>` is not satisfied
+  --> tests/compile_fail/branch_chain_not_dependency.rs:49:38
+   |
+49 |     resolver.provide(A).either(|x| x.when_injected_in::<Unrelated>());
+   |                                      ^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `DependencyOf<Unrelated>` is not implemented for `A`
+  --> tests/compile_fail/branch_chain_not_dependency.rs:8:1
+   |
+ 8 | pub struct A;
+   | ^^^^^^^^^^^^
+help: the trait `DependencyOf<Unrelated>` is implemented for `B`
+  --> tests/compile_fail/branch_chain_not_dependency.rs:31:1
+   |
+31 | #[resolvable]
+   | ^^^^^^^^^^^^^
+note: required by a bound in `BranchBuilder::<Initial, Path>::when_injected_in`
+  --> src/provide/branching.rs
+   |
+   |     pub fn when_injected_in<Target>(self) -> BranchBuilder<Initial, Scoped<Target, Path>>
+   |            ---------------- required by a bound in this associated function
+...
+   |         <Path as PathHead<Initial>>::Head: DependencyOf<Target>,
+   |                                            ^^^^^^^^^^^^^^^^^^^^ required by this bound in `BranchBuilder::<Initial, Path>::when_injected_in`
+   = note: this error originates in the attribute macro `resolvable` (in Nightly builds, run with -Z macro-backtrace for more info)

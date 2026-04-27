@@ -26,7 +26,7 @@ pub use autoresolve_macros::resolvable;
 pub use base_type::BaseType;
 pub use dependency_of::DependencyOf;
 pub use path_stack::PathStack;
-pub use provide::ProvideBuilder;
+pub use provide::{BranchBuilder, Branched, ProvideBuilder};
 pub use provide_path::{Scoped, Unscoped};
 pub use resolve_deps::{ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode};
 pub use resolve_from::ResolveFrom;

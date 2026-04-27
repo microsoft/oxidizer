@@ -6,6 +6,13 @@
 //! [`DependencyOf`](crate::DependencyOf) marker emitted by `#[resolvable]`).
 //! When the builder is dropped the registration commits: pre-allocated empty
 //! slots for every prefix of the chain, and a filled slot at the leaf.
+//!
+//! Branched registration via `either` / `or` lives in the [`branching`]
+//! submodule.
+
+mod branching;
+
+pub use branching::{BranchBuilder, Branched};
 
 use core::any::TypeId;
 use core::marker::PhantomData;
@@ -70,9 +77,9 @@ pub struct ProvideBuilder<'r, Initial: Send + Sync + 'static, Path = Unscoped>
 where
     Path: CollectPath<Initial>,
 {
-    cache: &'r Arc<PathCache>,
+    pub(super) cache: &'r Arc<PathCache>,
     /// `Some(value)` until commit on drop.
-    value: Option<Initial>,
+    pub(super) value: Option<Initial>,
     _path: PhantomData<fn() -> Path>,
 }
 
@@ -110,6 +117,29 @@ where
             value,
             _path: PhantomData,
         }
+    }
+
+    /// Opens a branched section: the same value applies to multiple
+    /// alternative path tails. Add more alternatives with [`Branched::or`].
+    ///
+    /// The closure receives a [`BranchBuilder`] rooted at the *current*
+    /// chain. Returning it unchanged (`|x| x`) registers the current chain
+    /// itself as one of the alternatives.
+    pub fn either<F, B>(self, f: F) -> Branched<'r, Initial, Path>
+    where
+        F: FnOnce(BranchBuilder<Initial, Path>) -> BranchBuilder<Initial, B>,
+        B: CollectPath<Initial>,
+    {
+        // Suppress the linear `Drop` and steal the value/cache.
+        let mut me = core::mem::ManuallyDrop::new(self);
+        let value = me.value.take();
+        let cache = me.cache;
+
+        let _branch: BranchBuilder<Initial, B> = f(BranchBuilder::new());
+        let mut leaf: Vec<TypeId> = Vec::new();
+        B::collect(&mut leaf);
+
+        Branched::from_first_branch(cache, value, leaf)
     }
 }
 

@@ -28,4 +28,5 @@ fn compile_fail() {
 
     // Override builder validation errors
     t.compile_fail("tests/compile_fail/provide_chain_not_dependency.rs");
+    t.compile_fail("tests/compile_fail/branch_chain_not_dependency.rs");
 }
