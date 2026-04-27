@@ -9,7 +9,7 @@ use std::fmt::Display;
 use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
 use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, Escape, EscapedString, PathAndQueryTemplate, UnescapedDisplay, Uri, templated};
+use templated_uri::{BaseUri, Escape, EscapedString, PathAndQueryTemplate, RawDisplay, Uri, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
 #[taxonomy(test_taxonomy)]
@@ -31,7 +31,7 @@ struct OrgId(EscapedString);
 struct UserId(EscapedString);
 
 #[classified(TestTaxonomy::Public)]
-#[derive(Clone, UnescapedDisplay)]
+#[derive(Clone, RawDisplay)]
 struct PathFragment(String);
 
 #[templated(template = "/{+param}{/param2,param3}{?q1,q2}", unredacted)]
@@ -175,8 +175,8 @@ impl Display for Action {
     }
 }
 
-impl UnescapedDisplay for Action {
-    fn unescaped_display(&self) -> impl Display {
+impl RawDisplay for Action {
+    fn raw_display(&self) -> impl Display {
         self
     }
 }

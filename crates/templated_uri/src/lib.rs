@@ -143,8 +143,8 @@
 //! Note: Fragment expansion (`{#var}`) from RFC 6570 is **not supported** because URI
 //! fragments are stripped by the `http` crate and ignored by HTTP clients.
 //!
-//! Template variables must implement [`Escape`] (except for reserved expansions)
-//! to ensure the resulting URI is valid.
+//! Template variables must implement [`Escape`] (except for reserved expansions,
+//! which use [`RawDisplay`]) to ensure the resulting URI is valid.
 //!
 //! # Integration with HTTP Ecosystem
 //!
@@ -169,9 +169,9 @@ mod uri;
 pub use base_path::BasePath;
 pub use base_uri::BaseUri;
 pub use error::UriError;
-pub use escape::{Escape, UnescapedDisplay};
+pub use escape::{Escape, RawDisplay};
 pub use escaped::{EscapeError, Escaped, EscapedString};
-pub use macros::{Escape, UnescapedDisplay, templated};
+pub use macros::{Escape, RawDisplay, templated};
 pub use origin::Origin;
 pub use path_and_query::PathAndQuery;
 pub use path_and_query_template::PathAndQueryTemplate;

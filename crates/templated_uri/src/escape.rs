@@ -11,22 +11,39 @@ use uuid::Uuid;
 
 use crate::{Escaped, EscapedString};
 
-/// Marks types usable from templates, e.g., `/get/{foo}`.
+/// Marks types whose values are percent-encoded before being inserted into a URI.
+///
+/// Used for RFC 6570 simple-expansion placeholders (`{foo}`), where reserved characters
+/// like `/`, `?`, and `#` must be percent-encoded so the resulting URI parses as intended.
+/// For reserved-expansion placeholders (`{+foo}`) that emit reserved characters verbatim,
+/// use [`RawDisplay`] instead.
+///
+/// The returned [`Escaped`] wrapper acts as a proof-token that the value is safe to splice
+/// into a URI without further encoding.
 pub trait Escape {
     /// Returns this value wrapped in [`Escaped`], proving it is properly escaped for URI use.
     fn escape(&self) -> Escaped<impl Display>;
 }
 
-/// Marks types with possibly dodgy content usable from templates, e.g., `/get/{+foo}`.
-pub trait UnescapedDisplay {
-    /// Returns a displayable representation of this value.
-    fn unescaped_display(&self) -> impl Display;
+/// Marks types whose `Display` output is emitted verbatim into a URI, without
+/// percent-encoding reserved characters.
+///
+/// Used for RFC 6570 reserved expansion placeholders (`{+foo}`), where characters
+/// like `/`, `?`, and `#` are intentionally allowed through unchanged. For ordinary
+/// placeholders (`{foo}`) that must percent-encode reserved characters, use
+/// [`Escape`] instead.
+///
+/// Implementors are responsible for ensuring the rendered output is valid in the
+/// target URI position; no encoding is performed by the renderer.
+pub trait RawDisplay {
+    /// Returns this value's raw `Display` form, to be inserted into a URI without escaping.
+    fn raw_display(&self) -> impl Display;
 }
 
-macro_rules! impl_unescaped_display {
+macro_rules! impl_raw_display {
     ($t:ty) => {
-        impl UnescapedDisplay for $t {
-            fn unescaped_display(&self) -> impl Display {
+        impl RawDisplay for $t {
+            fn raw_display(&self) -> impl Display {
                 self
             }
         }
@@ -43,7 +60,7 @@ macro_rules! impl_escape {
     };
 }
 
-impl_unescaped_display!(String);
+impl_raw_display!(String);
 
 impl Escape for EscapedString {
     fn escape(&self) -> Escaped<impl Display> {
@@ -51,8 +68,8 @@ impl Escape for EscapedString {
     }
 }
 
-impl UnescapedDisplay for EscapedString {
-    fn unescaped_display(&self) -> impl Display {
+impl RawDisplay for EscapedString {
+    fn raw_display(&self) -> impl Display {
         self.as_str()
     }
 }
@@ -73,11 +90,11 @@ impl_escape!(IpAddr);
 #[cfg(feature = "uuid")]
 impl_escape!(Uuid);
 
-impl<T> UnescapedDisplay for Sensitive<T>
+impl<T> RawDisplay for Sensitive<T>
 where
     T: Display,
 {
-    fn unescaped_display(&self) -> impl Display {
+    fn raw_display(&self) -> impl Display {
         self.declassify_ref()
     }
 }
@@ -98,9 +115,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_uri_unsafe_param_string() {
+    fn test_raw_display_string() {
         let value = String::from("test_value");
-        let display = value.unescaped_display();
+        let display = value.raw_display();
         assert_eq!(format!("{display}"), "test_value");
     }
 
@@ -135,18 +152,18 @@ mod tests {
     }
 
     #[test]
-    fn uri_unsafe_param_uri_escaped_string() {
+    fn raw_display_uri_escaped_string() {
         let s = EscapedString::escape("hello world");
-        assert_eq!(format!("{}", s.unescaped_display()), "hello%20world");
+        assert_eq!(format!("{}", s.raw_display()), "hello%20world");
     }
 
     #[test]
-    fn test_uri_unsafe_param_sensitive() {
-        // Test line 78-84: UnescapedDisplay for Sensitive<T> where T: Display
+    fn test_raw_display_sensitive() {
+        // Test RawDisplay for Sensitive<T> where T: Display
         let data_class = DataClass::new("test", "sensitive");
         let sensitive_string = Sensitive::new(String::from("secret_value"), data_class);
 
-        let display = sensitive_string.unescaped_display();
+        let display = sensitive_string.raw_display();
         assert_eq!(format!("{display}"), "secret_value");
     }
 

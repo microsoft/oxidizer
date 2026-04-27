@@ -137,11 +137,11 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             let is_restricted = is_restricted(ident);
             let ty_span = f.ty.span();
 
-            // Restricted fields use .escape(), unrestricted use .unescaped_display()
+            // Restricted fields use .escape(), unrestricted use .raw_display()
             if is_restricted {
                 quote_spanned! { ty_span => let #ident = ::templated_uri::Escape::escape(&self.#ident); }
             } else {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::UnescapedDisplay::unescaped_display(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::RawDisplay::raw_display(&self.#ident); }
             }
         })
         .collect();

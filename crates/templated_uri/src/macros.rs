@@ -22,11 +22,12 @@
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
 pub use templated_uri_macros::Escape;
-/// Derives the `UnescapedDisplay` trait for newtype wrappers with unrestricted characters.
+/// Derives [`RawDisplay`](crate::RawDisplay) for a newtype, delegating to the inner
+/// field's [`Display`](std::fmt::Display) impl.
 ///
-/// This derive macro implements `UnescapedDisplay` for tuple structs with exactly one field.
-/// The implementation delegates to the inner field's [`Display`](std::fmt::Display) impl, making it suitable for use in
-/// URI templates with unrestricted `{+param}` placeholders that allow reserved characters.
+/// Use this for types meant to fill RFC 6570 reserved-expansion placeholders (`{+param}`),
+/// where reserved characters like `/` must be emitted verbatim rather than percent-encoded.
+/// For ordinary `{param}` placeholders, derive [`Escape`] instead.
 ///
 /// # Requirements
 ///
@@ -36,15 +37,12 @@ pub use templated_uri_macros::Escape;
 /// # Examples
 ///
 /// ```
-/// use templated_uri::UnescapedDisplay;
+/// use templated_uri::RawDisplay;
 ///
-/// #[derive(UnescapedDisplay)]
+/// #[derive(RawDisplay)]
 /// struct PathSegment(String);
 /// ```
-///
-/// This allows `PathSegment` to be used in URI templates with `{+param}` syntax where
-/// reserved characters like `/` should be preserved rather than percent-encoded.
-pub use templated_uri_macros::UnescapedDisplay;
+pub use templated_uri_macros::RawDisplay;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:

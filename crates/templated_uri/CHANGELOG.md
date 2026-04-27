@@ -5,7 +5,7 @@
 - ⚠️ Breaking
 
   - Broad API cleanup with many breaking changes across the crate. Review call sites against the updated API surface. Highlights:
-    - Dropped the `Uri` prefix from most types (e.g. `UriPath` → `PathAndQuery`, `UriTemplate` → `PathAndQueryTemplate`, `UriSafe*` → `Escaped*`, `UriParam` → `Escape`, `UriUnsafeParam` → `UnescapedDisplay`), and renamed several other types and methods for consistency (e.g. `ValidationError` → `UriError`, `Uri::to_http_path()` → `Uri::to_path_and_query()`).
+    - Dropped the `Uri` prefix from most types (e.g. `UriPath` → `PathAndQuery`, `UriTemplate` → `PathAndQueryTemplate`, `UriSafe*` → `Escaped*`, `UriParam` → `Escape`, `UriUnsafeParam` → `RawDisplay`), and renamed several other types and methods for consistency (e.g. `ValidationError` → `UriError`, `Uri::to_http_path()` → `Uri::to_path_and_query()`).
     - `Origin` (and `BaseUri`) now accept any URI scheme, not just HTTP/HTTPS; `Origin::port()` returns `Option<u16>` and `Origin::try_from_parts` was replaced by the infallible `Origin::from_parts`.
     - `PathAndQuery` now mirrors `Uri` for redaction: it implements `RedactedDisplay`/`RedactedDebug` and `to_string()` returns a `Sensitive<String>`.
     - Refined the `PathAndQueryTemplate` trait: added `render()`, removed `Display`/`to_uri_string()`/`into_uri()`, and swapped the meanings of `template()` and `format_template()`.
