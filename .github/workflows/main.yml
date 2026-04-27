@@ -21,6 +21,7 @@ jobs:
       exclude_not_modified: ${{ steps.compute.outputs.exclude_not_modified }}
       exclude_not_affected: ${{ steps.compute.outputs.exclude_not_affected }}
       exclude_not_required: ${{ steps.compute.outputs.exclude_not_required }}
+      affected_names: ${{ steps.compute.outputs.affected_names }}
       skip: ${{ steps.compute.outputs.skip }}
     steps:
       - name: Checkout
@@ -46,6 +47,7 @@ jobs:
               echo "exclude_not_modified="
               echo "exclude_not_affected="
               echo "exclude_not_required="
+              echo "affected_names="
               echo "skip=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -73,6 +75,7 @@ jobs:
           exclude_not_modified=$(impact -f cargo-excludes --modified)
           exclude_not_affected=$(impact -f cargo-excludes --affected)
           exclude_not_required=$(impact -f cargo-excludes --required)
+          affected_names=$(impact -f names --affected | tr '\n' ' ')
 
           # `required` is the superset (required ⊇ affected ⊇ modified). If it
           # has no impacted crates, nothing is impacted and downstream
@@ -87,6 +90,7 @@ jobs:
             echo "exclude_not_modified=$exclude_not_modified"
             echo "exclude_not_affected=$exclude_not_affected"
             echo "exclude_not_required=$exclude_not_required"
+            echo "affected_names=$affected_names"
             echo "skip=$skip"
           } | tee -a "$GITHUB_OUTPUT"
 
@@ -124,7 +128,15 @@ jobs:
         if: success() || failure()
         run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
       - name: Examples
-        run: just examples
+        if: (success() || failure()) && !(github.event_name == 'pull_request' && needs.delta.outputs.affected_names == '')
+        shell: pwsh
+        env:
+          AFFECTED_NAMES: ${{ needs.delta.outputs.affected_names }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $packages = @($env:AFFECTED_NAMES -split '\s+' | Where-Object { $_ })
+          ./scripts/run-examples.ps1 -CargoProfile dev -Package $packages
 
   static-analysis:
     needs: [delta]

@@ -11,7 +11,7 @@ param(
     [string]$CargoProfile,
 
     [Parameter(Mandatory = $false)]
-    [string]$Package = ""
+    [string[]]$Package = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,14 +34,11 @@ $success_count = 0
 $timeout_seconds = 30
 
 # Determine which packages to process
-$packages_to_process = @()
-if ($Package -eq "") {
+$packages_to_process = @($Package | Where-Object { $_ })
+if ($packages_to_process.Count -eq 0) {
     # Get all workspace members (assuming here they are just subdirectories).
     $workspace_members = Get-ChildItem -Path $packages_root -Directory | Where-Object { Test-Path (Join-Path $_.FullName "Cargo.toml") }
     $packages_to_process = $workspace_members | ForEach-Object { $_.Name }
-}
-else {
-    $packages_to_process = @($Package)
 }
 
 Write-Host "Running examples for packages: $($packages_to_process -join ', ')"
