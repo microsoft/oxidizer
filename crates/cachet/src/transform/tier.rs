@@ -147,4 +147,30 @@ mod tests {
         );
         assert_eq!(adapter.len().await.expect("MockCache::len returns Ok"), 2);
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn get_preserves_ttl_and_cached_at() {
+        use std::time::{Duration, SystemTime};
+
+        use crate::infallible;
+
+        let ttl = Duration::from_secs(300);
+        let cached_at = SystemTime::now();
+        let mut entry = CacheEntry::new(42);
+        entry.set_ttl(ttl);
+        entry.ensure_cached_at(cached_at);
+
+        let inner = MockCache::with_data([(1, entry)].into_iter().collect());
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
+            Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
+        );
+
+        let result = adapter.get(&1).await.unwrap().expect("should be Some");
+        assert_eq!(*result.value(), 42);
+        assert_eq!(result.ttl(), Some(ttl));
+        assert_eq!(result.cached_at(), Some(cached_at));
+    }
 }
