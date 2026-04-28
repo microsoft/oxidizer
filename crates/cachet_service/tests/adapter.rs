@@ -116,11 +116,15 @@ async fn adapter_clear_removes_all_entries() {
     assert!(adapter.get(&"key3".to_string()).await.unwrap().is_none());
 }
 
-#[test]
-fn adapter_len_returns_none() {
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn adapter_len_returns_unsupported() {
+    use cachet_tier::SizeErrorKind;
+
     let service = InMemoryCacheService::<String, i32>::new();
     let adapter = ServiceAdapter::new(service);
-    assert_eq!(adapter.len(), None);
+    let err = adapter.len().await.unwrap_err();
+    assert_eq!(err.kind, SizeErrorKind::Unsupported);
 }
 
 #[test]

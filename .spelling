@@ -39,6 +39,7 @@ buildable
 bytesbuf
 callee
 cancelled
+cardinality
 Cargo.toml
 C-BITFLAG
 C-CONV
@@ -164,6 +165,7 @@ Kubernetes
 L1
 L2
 L3
+len
 LFU
 libc
 libs
@@ -201,6 +203,7 @@ msvc
 mutex
 Namespace
 NeutralMemoryPool
+NFS
 NewRelic
 newtype
 newtypes
@@ -221,6 +224,7 @@ OpenSource
 openssl-devel
 OpenTelemetry
 parameterless
+parameterized
 parser
 passthrough
 performant
@@ -238,6 +242,7 @@ RAII
 RDME
 reallocation
 reallocations
+recency
 recoverability
 recoverable
 Redis
@@ -298,6 +303,7 @@ templating
 testability
 timestamp
 timestamps
+TinyLFU
 TOCTOU
 Tokio
 Tokio's
@@ -317,6 +323,7 @@ tuples
 typesafe
 typestate
 UDEPS
+uncategorized
 unconfigured
 Multithreaded
 uncontended

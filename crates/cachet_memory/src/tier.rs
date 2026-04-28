@@ -13,7 +13,7 @@ use foldhash::fast::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
-use cachet_tier::{CacheEntry, CacheTier, Error};
+use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
 use moka::Expiry;
 use moka::future::Cache;
 use thread_aware::{Arc, PerProcess, ThreadAware};
@@ -140,7 +140,7 @@ where
     ///
     /// This is called by `InMemoryCacheBuilder::build()` and should not
     /// be called directly by users.
-    pub(crate) fn from_builder(builder: &InMemoryCacheBuilder<K, V, H>) -> Self {
+    pub(crate) fn from_builder(builder: InMemoryCacheBuilder<K, V, H>) -> Self {
         let mut moka_builder = Cache::builder();
 
         if let Some(capacity) = builder.max_capacity {
@@ -164,7 +164,12 @@ where
         }
 
         Self {
-            inner: Arc::from_unaware(moka_builder.expire_after(EntryExpiry).build_with_hasher(builder.hasher.clone())),
+            inner: Arc::from_unaware(
+                moka_builder
+                    .expire_after(EntryExpiry)
+                    .eviction_policy(builder.eviction_policy.into_moka_policy())
+                    .build_with_hasher(builder.hasher),
+            ),
         }
     }
 }
@@ -194,8 +199,8 @@ where
         Ok(())
     }
 
-    fn len(&self) -> Option<u64> {
-        Some(self.inner.entry_count())
+    async fn len(&self) -> Result<u64, SizeError> {
+        Ok(self.inner.entry_count())
     }
 }
 
@@ -221,8 +226,6 @@ impl<K, V> Expiry<K, CacheEntry<V>> for EntryExpiry {
 mod tests {
     use std::time::SystemTime;
 
-    use futures::executor::block_on;
-
     use super::*;
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
@@ -233,19 +236,17 @@ mod tests {
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn len_returns_nonzero_after_insert() {
+    #[tokio::test]
+    async fn len_returns_nonzero_after_insert() {
         let cache = InMemoryCache::<String, i32>::new();
-        futures::executor::block_on(async {
-            cache.inner.insert("key".to_string(), CacheEntry::new(42)).await;
-            cache.inner.run_pending_tasks().await;
-        });
-        assert!(cache.len().unwrap() > 0);
+        cache.inner.insert("key".to_string(), CacheEntry::new(42)).await;
+        cache.inner.run_pending_tasks().await;
+        assert!(cache.len().await.expect("len should return Ok") > 0);
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn custom_hasher_get_insert_invalidate() {
+    #[tokio::test]
+    async fn custom_hasher_get_insert_invalidate() {
         use std::collections::hash_map::RandomState;
 
         let cache = InMemoryCache::<String, i32>::builder()
@@ -254,21 +255,19 @@ mod tests {
             .build()
             .expect("Failed to build cache");
 
-        futures::executor::block_on(async {
-            cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-            cache.inner.run_pending_tasks().await;
+        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.unwrap();
-            assert_eq!(*value.unwrap().value(), 42);
+        let value = cache.get(&"key".to_string()).await.unwrap();
+        assert_eq!(*value.unwrap().value(), 42);
 
-            assert_eq!(cache.len(), Some(1));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 1);
 
-            cache.invalidate(&"key".to_string()).await.unwrap();
-            cache.inner.run_pending_tasks().await;
+        cache.invalidate(&"key".to_string()).await.unwrap();
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.unwrap();
-            assert!(value.is_none());
-        });
+        let value = cache.get(&"key".to_string()).await.unwrap();
+        assert!(value.is_none());
     }
 
     #[cfg_attr(miri, ignore)]
@@ -316,200 +315,182 @@ mod tests {
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn insert_and_get_returns_value() {
+    #[tokio::test]
+    async fn insert_and_get_returns_value() {
         let cache = InMemoryCache::<String, i32>::new();
-        block_on(async {
-            cache
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
-            assert_eq!(*value.unwrap().value(), 42);
-        });
+        let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
+        assert_eq!(*value.unwrap().value(), 42);
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn get_returns_none_after_per_entry_ttl() {
+    #[tokio::test]
+    async fn get_returns_none_after_per_entry_ttl() {
         let cache = InMemoryCache::<String, i32>::new();
-        block_on(async {
-            cache
-                .insert("key".to_string(), CacheEntry::expires_at(42, Duration::ZERO, SystemTime::now()))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key".to_string(), CacheEntry::expires_at(42, Duration::ZERO, SystemTime::now()))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-            assert!(value.is_none());
-        });
+        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+        assert!(value.is_none());
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn update_with_per_entry_ttl_expires_entry() {
+    #[tokio::test]
+    async fn update_with_per_entry_ttl_expires_entry() {
         let cache = InMemoryCache::<String, i32>::new();
-        block_on(async {
-            // Insert entry without per-entry TTL (will not expire on its own)
-            cache
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        // Insert entry without per-entry TTL (will not expire on its own)
+        cache
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            // Re-insert same key with zero TTL (should expire immediately via expire_after_update)
-            cache
-                .insert("key".to_string(), CacheEntry::expires_at(99, Duration::ZERO, SystemTime::now()))
-                .await
-                .expect("Update should succeed");
-            cache.inner.run_pending_tasks().await;
+        // Re-insert same key with zero TTL (should expire immediately via expire_after_update)
+        cache
+            .insert("key".to_string(), CacheEntry::expires_at(99, Duration::ZERO, SystemTime::now()))
+            .await
+            .expect("Update should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
-            assert!(value.is_none(), "Entry should expire after update with zero TTL");
-        });
+        let value = cache.get(&"key".to_string()).await.expect("Get should succeed");
+        assert!(value.is_none(), "Entry should expire after update with zero TTL");
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn get_returns_none_after_cache_ttl() {
+    #[tokio::test]
+    async fn get_returns_none_after_cache_ttl() {
         let cache = InMemoryCache::<String, i32>::builder()
             .time_to_live(Duration::ZERO)
             .build()
             .expect("Failed to build cache");
-        block_on(async {
-            cache
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-            assert!(value.is_none());
-        });
+        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+        assert!(value.is_none());
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn get_returns_none_after_cache_tti() {
+    #[tokio::test]
+    async fn get_returns_none_after_cache_tti() {
         let cache = InMemoryCache::<String, i32>::builder()
             .time_to_idle(Duration::ZERO)
             .build()
             .expect("Failed to build cache");
-        block_on(async {
-            cache
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-            assert!(value.is_none());
-        });
+        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+        assert!(value.is_none());
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn invalidate_removes_entry() {
+    #[tokio::test]
+    async fn invalidate_removes_entry() {
         let cache = InMemoryCache::<String, i32>::new();
-        block_on(async {
-            cache
-                .insert("key".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            cache.invalidate(&"key".to_string()).await.expect("Invalidate should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache.invalidate(&"key".to_string()).await.expect("Invalidate should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value = cache.get(&"key".to_string()).await.expect("Get should return none");
-            assert!(value.is_none());
-        });
+        let value = cache.get(&"key".to_string()).await.expect("Get should return none");
+        assert!(value.is_none());
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn clear_removes_all_entries() {
+    #[tokio::test]
+    async fn clear_removes_all_entries() {
         let cache = InMemoryCache::<String, i32>::new();
-        block_on(async {
-            cache
-                .insert("key1".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache
-                .insert("key2".to_string(), CacheEntry::new(43))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key1".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache
+            .insert("key2".to_string(), CacheEntry::new(43))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            cache.clear().await.expect("Clear should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache.clear().await.expect("Clear should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            let value1 = cache.get(&"key1".to_string()).await.expect("Get should return none");
-            let value2 = cache.get(&"key2".to_string()).await.expect("Get should return none");
-            assert!(value1.is_none());
-            assert!(value2.is_none());
-        });
+        let value1 = cache.get(&"key1".to_string()).await.expect("Get should return none");
+        let value2 = cache.get(&"key2".to_string()).await.expect("Get should return none");
+        assert!(value1.is_none());
+        assert!(value2.is_none());
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn len_returns_correct_count() {
+    #[tokio::test]
+    async fn len_returns_correct_count() {
         let cache = InMemoryCache::<String, i32>::new();
-        block_on(async {
-            assert_eq!(cache.len(), Some(0));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 0);
 
-            cache
-                .insert("key1".to_string(), CacheEntry::new(42))
-                .await
-                .expect("Insert should succeed");
-            cache
-                .insert("key2".to_string(), CacheEntry::new(43))
-                .await
-                .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache
+            .insert("key1".to_string(), CacheEntry::new(42))
+            .await
+            .expect("Insert should succeed");
+        cache
+            .insert("key2".to_string(), CacheEntry::new(43))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            assert_eq!(cache.len(), Some(2));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 2);
 
-            cache.invalidate(&"key1".to_string()).await.expect("Invalidate should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache.invalidate(&"key1".to_string()).await.expect("Invalidate should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            assert_eq!(cache.len(), Some(1));
+        assert_eq!(cache.len().await.expect("len should return Ok"), 1);
 
-            cache.clear().await.expect("Clear should succeed");
-            cache.inner.run_pending_tasks().await;
+        cache.clear().await.expect("Clear should succeed");
+        cache.inner.run_pending_tasks().await;
 
-            assert_eq!(cache.len(), Some(0));
-        });
+        assert_eq!(cache.len().await.expect("len should return Ok"), 0);
     }
 
     #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
-    #[test]
-    fn max_capacity_evicts_at_capacity() {
+    #[tokio::test]
+    async fn max_capacity_evicts_at_capacity() {
         let capacity = 5;
         let cache = InMemoryCache::<String, u64>::builder()
             .max_capacity(capacity)
             .build()
             .expect("Cache should build successfully");
-        block_on(async {
-            for i in 0..=capacity {
-                cache
-                    .insert(format!("key{i}"), CacheEntry::new(i))
-                    .await
-                    .expect("Insert should succeed");
-            }
-            cache.inner.run_pending_tasks().await;
-
-            // Insert one more entry to trigger eviction
+        for i in 0..capacity {
             cache
-                .insert(format!("key{capacity}"), CacheEntry::new(capacity))
+                .insert(format!("key{i}"), CacheEntry::new(i))
                 .await
                 .expect("Insert should succeed");
-            cache.inner.run_pending_tasks().await;
+        }
+        cache.inner.run_pending_tasks().await;
 
-            // The cache should only have max_capacity entries
-            assert_eq!(cache.len(), Some(capacity));
-        });
+        // Insert one more entry to trigger eviction
+        cache
+            .insert(format!("key{capacity}"), CacheEntry::new(capacity))
+            .await
+            .expect("Insert should succeed");
+        cache.inner.run_pending_tasks().await;
+
+        // The cache should only have max_capacity entries
+        assert_eq!(cache.len().await.expect("len should return Ok"), capacity);
     }
 }

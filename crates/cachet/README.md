@@ -266,23 +266,23 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0ThCHrI3fG_G6hc0guS7WAoG_cdlJovN8ZoG1hnb2I3DeGJYWSHgmhieXRlc2J1ZmUwLjQuMYJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
- [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0ThCHrI3fG_G6hc0guS7WAoG_cdlJovN8ZoG1hnb2I3DeGJYWSHgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMS4xgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjKCaXVuaWZsaWdodGUwLjEuMA
+ [__link0]: https://docs.rs/cachet/0.1.1/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
- [__link11]: https://docs.rs/cachet/0.1.0/cachet/?search=FallbackPromotionPolicy
- [__link12]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
+ [__link11]: https://docs.rs/cachet/0.1.1/cachet/?search=FallbackPromotionPolicy
+ [__link12]: https://docs.rs/cachet/0.1.1/cachet/?search=TimeToRefresh
  [__link13]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error
  [__link14]: https://crates.io/crates/cachet_tier/0.1.0
  [__link15]: https://crates.io/crates/cachet_memory/0.1.0
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.1.0
- [__link18]: https://docs.rs/bytesbuf/0.4.1/bytesbuf/?search=BytesView
- [__link2]: https://docs.rs/cachet/0.1.0/cachet/?search=CacheBuilder::stampede_protection
+ [__link18]: https://docs.rs/bytesbuf/0.4.2/bytesbuf/?search=BytesView
+ [__link2]: https://docs.rs/cachet/0.1.1/cachet/?search=CacheBuilder::stampede_protection
  [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=DynamicCache
- [__link5]: https://docs.rs/cachet/0.1.0/cachet/?search=FallbackPromotionPolicy
- [__link6]: https://docs.rs/tick/0.2.1/tick/?search=Clock
- [__link7]: https://docs.rs/cachet/0.1.0/cachet/?search=Cache
- [__link8]: https://docs.rs/cachet/0.1.0/cachet/?search=CacheBuilder
+ [__link5]: https://docs.rs/cachet/0.1.1/cachet/?search=FallbackPromotionPolicy
+ [__link6]: https://docs.rs/tick/0.2.2/tick/?search=Clock
+ [__link7]: https://docs.rs/cachet/0.1.1/cachet/?search=Cache
+ [__link8]: https://docs.rs/cachet/0.1.1/cachet/?search=CacheBuilder
  [__link9]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry

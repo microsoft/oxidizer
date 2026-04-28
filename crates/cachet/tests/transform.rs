@@ -124,8 +124,8 @@ async fn len_delegates_through_transform() {
     let l2 = MockCache::<i32, i32>::new();
     let cache = build_transform_cache(clock, l1, l2);
 
-    let len = cache.len();
-    assert_eq!(len, Some(2));
+    let len = cache.len().await.expect("MockCache::len returns Ok");
+    assert_eq!(len, 2);
 }
 
 // -- Error propagation --

@@ -26,21 +26,20 @@ fn cache_builder_with_storage() {
     });
 }
 
-#[test]
-fn mock_cache_with_storage() {
-    block_on(async {
-        let clock = Clock::new_frozen();
-        let mock = MockCache::<String, i32>::new();
-        let cache = Cache::builder(clock).storage(mock.clone()).build();
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn mock_cache_with_storage() {
+    let clock = Clock::new_frozen();
+    let mock = MockCache::<String, i32>::new();
+    let cache = Cache::builder(clock).storage(mock.clone()).build();
 
-        // Cache operations work
-        cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
-        let value = cache.get(&"key".to_string()).await.unwrap();
-        assert_eq!(*value.unwrap().value(), 42);
+    // Cache operations work
+    cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+    let value = cache.get(&"key".to_string()).await.unwrap();
+    assert_eq!(*value.unwrap().value(), 42);
 
-        // Mock handle records operations
-        assert_eq!(mock.operations().len(), 2);
-    });
+    // Mock handle records operations (insert + get)
+    assert_eq!(mock.operations().len(), 2);
 }
 
 #[test]

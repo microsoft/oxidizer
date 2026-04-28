@@ -42,7 +42,7 @@ impl Origin {
 
         // Validate that the scheme is either HTTP or HTTPS
         if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
-            return Err(ValidationError::caused_by(format!(
+            return Err(ValidationError::invalid_uri(format!(
                 "unsupported scheme: {scheme}, only HTTP and HTTPS schemes are supported",
             )));
         }
@@ -132,10 +132,10 @@ impl std::str::FromStr for Origin {
     /// (missing scheme, unsupported scheme, or invalid authority).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let uri: http::Uri = s.parse().map_err(ValidationError::from)?;
-        let scheme = uri.scheme().ok_or_else(|| ValidationError::caused_by("missing scheme"))?.clone();
+        let scheme = uri.scheme().ok_or_else(|| ValidationError::invalid_uri("missing scheme"))?.clone();
         let authority = uri
             .authority()
-            .ok_or_else(|| ValidationError::caused_by("missing authority"))?
+            .ok_or_else(|| ValidationError::invalid_uri("missing authority"))?
             .clone();
         Self::new(scheme, authority)
     }

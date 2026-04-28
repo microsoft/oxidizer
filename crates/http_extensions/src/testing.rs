@@ -8,24 +8,24 @@ use bytesbuf::BytesView;
 use futures::stream;
 use http_body::Frame;
 
-use crate::{HttpBodyBuilder, HttpError, Result};
+use crate::{HttpBodyBuilder, HttpBodyOptions, HttpError, Result};
 
-pub(crate) fn create_stream_body(builder: &HttpBodyBuilder, body: impl AsRef<[u8]>) -> crate::HttpBody {
+pub(crate) fn create_stream_body(builder: &HttpBodyBuilder, body: impl AsRef<[u8]>, options: &HttpBodyOptions) -> crate::HttpBody {
     let data = body.as_ref();
     if data.is_empty() {
-        builder.stream(stream::iter(Vec::<Result<BytesView>>::new()))
+        builder.stream(stream::iter(Vec::<Result<BytesView>>::new()), options)
     } else {
         let chunk = BytesView::copied_from_slice(data, builder);
-        builder.stream(stream::iter(vec![Ok(chunk)]))
+        builder.stream(stream::iter(vec![Ok(chunk)]), options)
     }
 }
 
-pub(crate) fn create_stream_body_from_chunks(builder: &HttpBodyBuilder, chunks: &[&[u8]]) -> crate::HttpBody {
+pub(crate) fn create_stream_body_from_chunks(builder: &HttpBodyBuilder, chunks: &[&[u8]], options: &HttpBodyOptions) -> crate::HttpBody {
     let items: Vec<Result<BytesView>> = chunks
         .iter()
         .map(|chunk| Ok(BytesView::copied_from_slice(chunk, builder)))
         .collect();
-    builder.stream(stream::iter(items))
+    builder.stream(stream::iter(items), options)
 }
 
 /// A minimal [`http_body::Body`] implementation that yields a single chunk of data.

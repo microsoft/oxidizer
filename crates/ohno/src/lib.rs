@@ -246,6 +246,39 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Error Labeling
+//!
+//! [`ErrorLabel`] is a low-cardinality string label for errors, intended for use as a metric
+//! tag or structured log field. Labels must be chosen from a small, bounded set known at
+//! development time to avoid high-cardinality metric series.
+//!
+//! ```rust
+//! use ohno::ErrorLabel;
+//!
+//! let label: ErrorLabel = ErrorLabel::from_static("timeout");
+//! assert_eq!(label, "timeout");
+//!
+//! let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
+//! assert_eq!(label, "http.client.timeout");
+//! ```
+//!
+//! Use [`ErrorLabel::from_error_chain`] to walk an error's [`source`](std::error::Error::source)
+//! chain and build a dotted label from recognized errors:
+//!
+//! ```rust
+//! use ohno::ErrorLabel;
+//!
+//! let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+//! let label = ErrorLabel::from_error_chain(&io_err, |e| {
+//!     e.downcast_ref::<std::io::Error>()
+//!         .map(|io| ErrorLabel::from(io.kind()))
+//! });
+//! assert_eq!(label, "connection_refused");
+//! ```
+//!
+//! Types that carry an [`ErrorLabel`] can implement the [`Labeled`] trait to expose it
+//! uniformly via [`Labeled::label`].
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno/favicon.ico")]
@@ -260,12 +293,14 @@ mod core;
 mod enrichable;
 mod enrichment_entry;
 mod error_ext;
+mod error_label;
 mod source;
 
 #[cfg(any(feature = "test-util", test))]
 pub mod test_util;
 
 pub use core::OhnoCore;
+pub use error_label::{ErrorLabel, Labeled};
 
 #[cfg(feature = "app-err")]
 pub use app::{AppError, IntoAppError};

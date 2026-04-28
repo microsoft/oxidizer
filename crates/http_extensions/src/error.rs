@@ -9,11 +9,16 @@ use http::header::{InvalidHeaderValue, MaxSizeReached};
 use http::method::InvalidMethod;
 use http::status::InvalidStatusCode;
 use http::uri::{InvalidUri, InvalidUriParts};
+use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
 
 use crate::HttpRequest;
+use crate::error_labels::{
+    LABEL_BODY_SIZE_LIMIT_REACHED, LABEL_BODY_TIMEOUT, LABEL_HEADER_VALUE_INVALID, LABEL_HTTP_ERROR, LABEL_IO, LABEL_METHOD_INVALID,
+    LABEL_RESPONSE_TIMEOUT, LABEL_RESPONSE_UNSUCCESSFUL, LABEL_STATUS_CODE_INVALID, LABEL_UNAVAILABLE, LABEL_URI_INVALID, LABEL_VALIDATION,
+};
 use crate::http_utils::SyncHolder;
 
 /// A convenient type alias for results in this crate.
@@ -26,7 +31,8 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// - Captures backtraces automatically
 /// - Tells you if an error is temporary (transient) or permanent
 /// - Works with `http` crate errors out of the box
-/// - Provides access to status codes
+/// - Carries an [`ErrorLabel`] for metrics and logging (see its docs for
+///   cardinality requirements)
 ///
 /// # Examples
 ///
@@ -40,6 +46,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///         println!("temporary error, let's retry");
 ///     }
 /// }
+/// # check_error(HttpError::unavailable("test"));
 /// ```
 ///
 /// # Error Interoperability
@@ -49,7 +56,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// ## Standard Library Errors
 ///
-/// - [`std::io::Error`] - Auto-classified as temporary or permanent
+/// - [`std::io::Error`] - Auto-classified as retry, unavailable, or never based on error kind
 /// - [`std::convert::Infallible`] - Handled for pattern matching completeness
 ///
 /// ## Works with `http` crate
@@ -98,18 +105,18 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 /// ```
 #[ohno::error]
 #[from(
-    http::Error(label: "http_error", recovery: RecoveryInfo::never()),
-    InvalidUriParts(label: "invalid_uri_parts", recovery: RecoveryInfo::never()),
-    InvalidUri(label: "invalid_uri", recovery: RecoveryInfo::never()),
-    InvalidHeaderValue(label: "invalid_header_value", recovery: RecoveryInfo::never()),
-    InvalidMethod(label: "invalid_method", recovery: RecoveryInfo::never()),
-    InvalidStatusCode(label: "invalid_status_code", recovery: RecoveryInfo::never()),
-    MaxSizeReached(label: "max_size_reached", recovery: RecoveryInfo::never()),
-    std::io::Error(label: "io", recovery: crate::resilience::detect_io_recovery(error.kind())),
-    templated_uri::ValidationError(label: "invalid_uri", recovery: RecoveryInfo::never())
+    http::Error(label: LABEL_HTTP_ERROR, recovery: RecoveryInfo::never()),
+    InvalidUriParts(label: LABEL_URI_INVALID, recovery: RecoveryInfo::never()),
+    InvalidUri(label: LABEL_URI_INVALID, recovery: RecoveryInfo::never()),
+    InvalidHeaderValue(label: LABEL_HEADER_VALUE_INVALID, recovery: RecoveryInfo::never()),
+    InvalidMethod(label: LABEL_METHOD_INVALID, recovery: RecoveryInfo::never()),
+    InvalidStatusCode(label: LABEL_STATUS_CODE_INVALID, recovery: RecoveryInfo::never()),
+    MaxSizeReached(label: LABEL_BODY_SIZE_LIMIT_REACHED, recovery: RecoveryInfo::never()),
+    std::io::Error(label: LABEL_IO, recovery: RecoveryInfo::from(error.kind())),
+    templated_uri::ValidationError(label: error.label().clone(), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
-    label: &'static str,
+    label: ErrorLabel,
     recovery: RecoveryInfo,
     // NOTE: Boxed to keep the size of HttpError small and wrapped
     // in SyncHolder to make HttpError Sync even if HttpRequest is not Sync.
@@ -124,26 +131,21 @@ impl ThreadAware for HttpError {
 }
 
 impl HttpError {
-    /// Creates a new Error from any error type.
+    /// Wraps any error type into an [`HttpError`] with the given `recovery`
+    /// strategy and a `label` for metrics and logging.
     ///
-    /// A flexible way to wrap your own errors in our Error type.
-    ///
-    /// # Parameters
-    ///
-    /// - `error`: Any error that can become a boxed error trait object
-    /// - `recovery`: Recovery information for this error
-    /// - `label`: A low-cardinality label for this error (for metrics/logging)
-    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: &'static str) -> Self {
+    /// The `label` accepts anything that implements `Into<ErrorLabel>`.
+    /// See [`ErrorLabel`] docs for cardinality requirements.
+    pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: impl Into<ErrorLabel>) -> Self {
         Self::caused_by(label, recovery, None, error)
     }
 
-    /// Creates a new error from any error type that implements `Recovery`.
+    /// Wraps an error that implements [`Recovery`] into an [`HttpError`],
+    /// extracting recovery information automatically via [`Recovery::recovery()`].
     ///
-    /// # Parameters
-    ///
-    /// - `error`: Any error that can become a boxed error trait object
-    /// - `label`: A low-cardinality label for this error (for metrics/logging)
-    pub fn other_with_recovery<E>(error: E, label: &'static str) -> Self
+    /// The `label` accepts anything that implements `Into<ErrorLabel>`.
+    /// See [`ErrorLabel`] docs for cardinality requirements.
+    pub fn other_with_recovery<E>(error: E, label: impl Into<ErrorLabel>) -> Self
     where
         E: std::error::Error + Send + Sync + Recovery + 'static,
     {
@@ -152,20 +154,14 @@ impl HttpError {
         Self::other(error, recovery, label)
     }
 
-    /// Creates a new Error with a specific HTTP status code.
-    ///
-    /// Use this when you receive an unsuccessful HTTP status code as a response.
-    ///
-    /// # Parameters
-    ///
-    /// - `code`: The HTTP status code
-    /// - `recovery`: Recovery information for this error
+    /// Creates an error from an unsuccessful HTTP status `code` with the given
+    /// `recovery` strategy.
     #[must_use]
     pub fn invalid_status_code(code: StatusCode, recovery: RecoveryInfo) -> Self {
         Self::other(
             format!("the response was not successful, status code: {}", code.as_u16()),
             recovery,
-            "invalid_status_code",
+            LABEL_RESPONSE_UNSUCCESSFUL,
         )
     }
 
@@ -175,10 +171,16 @@ impl HttpError {
     /// The error is classified as non-retryable.
     #[must_use]
     pub fn validation(msg: impl Into<Cow<'static, str>>) -> Self {
-        Self::other(msg.into(), RecoveryInfo::never(), "validation")
+        Self::other(msg.into(), RecoveryInfo::never(), LABEL_VALIDATION)
     }
 
-    /// Creates error that indicates a service is currently unavailable.
+    /// Like [`validation`](Self::validation) but with a custom label for finer-grained telemetry.
+    #[must_use]
+    pub(crate) fn validation_with_label(msg: impl Into<Cow<'static, str>>, label: impl Into<ErrorLabel>) -> Self {
+        Self::other(msg.into(), RecoveryInfo::never(), label)
+    }
+
+    /// Creates an error that indicates a service is currently unavailable.
     ///
     /// This indicates that the service is currently down, unreachable, or
     /// experiencing an increased rate of failures.
@@ -190,7 +192,10 @@ impl HttpError {
     ///
     /// ```
     /// # use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder};
-    /// # fn example(http_request: HttpRequest) {
+    /// # let http_request = HttpRequestBuilder::new_fake()
+    /// #     .get("https://example.com")
+    /// #     .build()
+    /// #     .unwrap();
     /// // attach the request
     /// let mut error = HttpError::unavailable("service is down").with_request(http_request);
     /// // later you can try to extract the request
@@ -198,12 +203,11 @@ impl HttpError {
     ///    // execute the retry
     ///    execute_retry(request);
     /// }
-    /// # }
     /// # fn execute_retry(http_request: HttpRequest) {}
     /// ```
     #[must_use]
     pub fn unavailable(msg: impl Into<Cow<'static, str>>) -> Self {
-        Self::other(msg.into(), RecoveryInfo::unavailable(), "unavailable")
+        Self::other(msg.into(), RecoveryInfo::unavailable(), LABEL_UNAVAILABLE)
     }
 
     /// Creates a timeout error with the specified duration.
@@ -218,7 +222,20 @@ impl HttpError {
                 duration.as_millis()
             ),
             RecoveryInfo::retry(),
-            "timeout",
+            LABEL_RESPONSE_TIMEOUT,
+        )
+    }
+
+    /// Creates a timeout error for body data retrieval.
+    ///
+    /// Used when streaming body data is not fully received within the configured timeout.
+    /// The error is classified as retryable.
+    #[must_use]
+    pub(crate) fn timeout_for_body(duration: Duration) -> Self {
+        Self::other(
+            format!("body data was not fully received, timeout: {}ms", duration.as_millis()),
+            RecoveryInfo::retry(),
+            LABEL_BODY_TIMEOUT,
         )
     }
 
@@ -231,14 +248,6 @@ impl HttpError {
         self
     }
 
-    /// Low-cardinality label for this error.
-    ///
-    /// Useful for metrics and logging.
-    #[must_use]
-    pub fn label(&self) -> &'static str {
-        self.label
-    }
-
     /// Extracts the HTTP request from this error, if any.
     ///
     /// The request can be extracted only once. Further calls return `None`.
@@ -248,6 +257,29 @@ impl HttpError {
     pub fn take_request(&mut self) -> Option<HttpRequest> {
         self.request.take().map(|holder| *holder.into_inner())
     }
+
+    /// Resolves the error label for pre-defined set of errors.
+    ///
+    /// This method recognizes the following error types:
+    /// - [`HttpError`]
+    /// - [`JsonError`][crate::json::JsonError]
+    /// - [`std::io::Error`]
+    #[cfg(test)]
+    pub(crate) fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<ErrorLabel> {
+        if let Some(err) = error.downcast_ref::<Self>() {
+            return Some(err.label().clone());
+        }
+
+        if let Some(err) = error.downcast_ref::<crate::json::JsonError>() {
+            return Some(err.label().clone());
+        }
+
+        if let Some(err) = error.downcast_ref::<std::io::Error>() {
+            return Some(err.kind().into());
+        }
+
+        None
+    }
 }
 
 impl Recovery for HttpError {
@@ -256,24 +288,32 @@ impl Recovery for HttpError {
     }
 }
 
+impl Labeled for HttpError {
+    fn label(&self) -> &ErrorLabel {
+        &self.label
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::fmt::{Debug, Display};
 
+    use futures::executor::block_on;
     use ohno::ErrorExt;
     use recoverable::RecoveryKind;
+    use serde::Deserialize;
     use thread_aware::affinity::pinned_affinities;
 
     use super::*;
-    use crate::HttpRequestBuilder;
+    use crate::{FakeHandler, HttpRequestBuilder, HttpRequestBuilderExt, HttpResponseBuilder, JsonError};
 
     static_assertions::assert_impl_all!(HttpError: std::error::Error, Send, Sync, Display, Debug, ThreadAware);
 
     #[test]
     fn assert_size_small() {
         // Keep the size of HttpError small to avoid excessive stack usage.
-        assert_eq!(size_of::<HttpError>(), 56);
+        assert_eq!(size_of::<HttpError>(), 64);
     }
 
     #[test]
@@ -290,7 +330,7 @@ mod tests {
         let error = HttpError::invalid_status_code(StatusCode::NOT_FOUND, RecoveryInfo::unknown());
 
         assert_eq!(error.message(), "the response was not successful, status code: 404");
-        assert_eq!(error.label(), "invalid_status_code");
+        assert_eq!(error.label(), "response_unsuccessful");
         assert_eq!(error.recovery(), RecoveryInfo::unknown());
     }
 
@@ -309,7 +349,7 @@ mod tests {
         let invalid_method = http::Method::from_bytes(b"INVALID METHOD").unwrap_err();
         let error = HttpError::from(invalid_method);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_method");
+        assert_eq!(error.label(), "method_invalid");
     }
 
     #[test]
@@ -318,6 +358,10 @@ mod tests {
         assert_eq!(error.message(), "test");
         assert_eq!(error.recovery(), RecoveryInfo::never());
         assert_eq!(error.label(), "io");
+
+        let error = HttpError::from(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "some message"));
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        assert_eq!(error.label(), "io");
     }
 
     #[test]
@@ -325,7 +369,39 @@ mod tests {
         let uri_error = "invalid uri with spaces".parse::<http::Uri>().unwrap_err();
         let error = HttpError::from(uri_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        assert_eq!(error.label(), "invalid_uri");
+        assert_eq!(error.label(), "uri_invalid");
+    }
+
+    #[test]
+    fn from_uri_template_validation_error() {
+        let validation_error = templated_uri::ValidationError::from("not a valid uri".parse::<http::Uri>().unwrap_err());
+        let error = HttpError::from(validation_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "uri_invalid");
+    }
+
+    #[test]
+    fn from_invalid_header_value() {
+        let header_error = http::header::HeaderValue::from_bytes(&[0x00]).unwrap_err();
+        let error = HttpError::from(header_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "header_value_invalid");
+    }
+
+    #[test]
+    fn from_invalid_status_code() {
+        let status_error = StatusCode::from_u16(9999).unwrap_err();
+        let error = HttpError::from(status_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "status_code_invalid");
+    }
+
+    #[test]
+    fn from_http_error() {
+        let http_error = http::Request::builder().header("invalid\nheader", "value").body(()).unwrap_err();
+        let error = HttpError::from(http_error);
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "http_error");
     }
 
     #[test]
@@ -356,7 +432,17 @@ mod tests {
             timeout_error.message(),
             "request timed out while receiving the response, timeout: 1500ms"
         );
-        assert_eq!(timeout_error.label(), "timeout");
+        assert_eq!(timeout_error.label(), "response_timeout");
+    }
+
+    #[test]
+    fn timeout_for_body_error() {
+        let duration = Duration::from_millis(2500);
+        let error = HttpError::timeout_for_body(duration);
+
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        assert_eq!(error.message(), "body data was not fully received, timeout: 2500ms");
+        assert_eq!(error.label(), "body_timeout");
     }
 
     #[test]
@@ -399,5 +485,37 @@ mod tests {
 
         assert_eq!(relocated.message(), "relocated test");
         assert_eq!(relocated.label(), "validation");
+    }
+
+    #[test]
+    fn resolve_label() {
+        // HttpError variant
+        let http_err = HttpError::validation("bad input");
+        assert_eq!(HttpError::resolve_error_label(&http_err).unwrap(), "validation");
+
+        // JsonError variant
+        let json_err = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("bad json")));
+        assert_eq!(HttpError::resolve_error_label(&json_err).unwrap(), "json_deserialization");
+
+        // std::io::Error variant
+        let io_err = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
+        assert_eq!(HttpError::resolve_error_label(&io_err).unwrap(), "connection_reset");
+
+        // Unrecognized error returns None
+        let unknown: Box<dyn std::error::Error + Send + Sync> = "unknown".into();
+        assert!(HttpError::resolve_error_label(unknown.as_ref()).is_none());
+    }
+
+    #[test]
+    fn error_chain() {
+        #[derive(Debug, Deserialize)]
+        struct Person;
+
+        let handler = FakeHandler::from_sync_handler(|_| HttpResponseBuilder::new_fake().text("invalid json").build());
+
+        let err = block_on(handler.request_builder().uri("https://dummy.com").fetch_json_owned::<Person>()).unwrap_err();
+
+        let label = ErrorLabel::from_error_chain(&err, HttpError::resolve_error_label);
+        assert_eq!(label, "json.json_deserialization");
     }
 }

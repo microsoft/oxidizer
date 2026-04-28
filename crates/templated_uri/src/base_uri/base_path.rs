@@ -23,10 +23,10 @@ impl BasePath {
     fn validate_path_format(&self) -> Result<(), ValidationError> {
         let path_str = self.inner.as_str();
         if self.inner.query().is_some() {
-            return Err(ValidationError::caused_by("the path must not contain a query string"));
+            return Err(ValidationError::invalid_uri("the path must not contain a query string"));
         }
         if !(path_str.starts_with('/') && path_str.ends_with('/')) {
-            return Err(ValidationError::caused_by("the path must start and end with a slash"));
+            return Err(ValidationError::invalid_uri("the path must start and end with a slash"));
         }
 
         Ok(())

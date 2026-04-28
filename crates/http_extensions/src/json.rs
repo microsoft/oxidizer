@@ -11,11 +11,13 @@ use std::marker::PhantomData;
 
 use bytes::{Buf, Bytes};
 use bytesbuf::BytesView;
+use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
 use serde_core::Deserialize;
 use serde_core::de::DeserializeOwned;
 
 use crate::HttpError;
+use crate::error_labels::{LABEL_JSON, LABEL_JSON_DESERIALIZATION, LABEL_JSON_SERIALIZATION};
 
 /// Error type for JSON serialization and deserialization operations.
 ///
@@ -25,6 +27,7 @@ use crate::HttpError;
 #[no_constructors]
 #[display("{message}")]
 pub struct JsonError {
+    label: ErrorLabel,
     message: &'static str,
     inner: ohno::OhnoCore,
 }
@@ -33,6 +36,7 @@ impl JsonError {
     #[must_use]
     pub(crate) fn serialization(error: serde_json::Error) -> Self {
         Self {
+            label: LABEL_JSON_SERIALIZATION,
             message: "JSON serialization error",
             inner: ohno::OhnoCore::from(error),
         }
@@ -41,15 +45,22 @@ impl JsonError {
     #[must_use]
     pub(crate) fn deserialization(error: serde_json::Error) -> Self {
         Self {
+            label: LABEL_JSON_DESERIALIZATION,
             message: "JSON deserialization error",
             inner: ohno::OhnoCore::from(error),
         }
     }
 }
 
+impl Labeled for JsonError {
+    fn label(&self) -> &ErrorLabel {
+        &self.label
+    }
+}
+
 impl From<JsonError> for HttpError {
     fn from(value: JsonError) -> Self {
-        Self::other(value, RecoveryInfo::never(), "json")
+        Self::other(value, RecoveryInfo::never(), LABEL_JSON)
     }
 }
 
@@ -67,14 +78,15 @@ impl Recovery for JsonError {
 /// The type supports two parsing modes:
 ///
 /// - **Lifetime-aware parsing** via [`read`](Self::read): Can borrow from the buffer when possible.
-///   Multiple read calls can be made, and the returned value, if it contains lifetime, is tied to the lifetime
+///   Multiple read calls can be made, and the returned value, if it contains a lifetime, is tied to the lifetime
 ///   of the parser.
 ///
 /// - **Owned parsing** via [`read_owned`](Self::read_owned): For types that own their data, the parser consumes itself
 ///   and returns an owned deserialized value.
 ///
-/// See the `JSON Support` section in `http_extensions` documentation for more details and examples on
-/// how to use this type.
+/// See the [`HttpBody::into_json`](crate::HttpBody::into_json) and
+/// [`HttpBody::into_json_owned`](crate::HttpBody::into_json_owned) methods for more details and
+/// examples on how to use this type.
 #[derive(Debug)]
 pub struct Json<T> {
     state: JsonState,
@@ -99,7 +111,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     /// containers, it creates new values as needed.
     ///
     /// The returned value is tied to the lifetime of this parser, but that doesn't
-    /// mean all fields must be borrowed - you can mix borrowed and owned fields
+    /// mean all fields must be borrowed - you can mix borrowed and owned fields.
     ///
     /// # Examples
     ///
@@ -107,7 +119,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     /// # use serde::Deserialize;
     /// # use bytesbuf::BytesView;
     /// # use std::borrow::Cow;
-    /// # use http_extensions::{HttpError, Json};
+    /// # use http_extensions::{HttpBodyBuilder, HttpError, Json};
     ///
     /// #[derive(Deserialize)]
     /// struct Person<'a> {
@@ -120,6 +132,12 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///     let person: Person = json.read()?;
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
+    /// #     let mut json = body.into_json::<Person>().await.unwrap();
+    /// #     handle_json(&mut json).unwrap();
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -151,7 +169,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// ```
     /// # use serde::Deserialize;
     /// # use bytesbuf::BytesView;
-    /// # use http_extensions::{Json, HttpError};
+    /// # use http_extensions::{Json, HttpBodyBuilder, HttpError};
     ///
     /// #[derive(Deserialize)]
     /// struct Person {
@@ -163,6 +181,11 @@ impl<T: DeserializeOwned> Json<T> {
     ///     let person: Person = json.read_owned()?; // Consumes the parser
     ///     Ok(())
     /// }
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
+    /// #     handle_json(body.into_json().await.unwrap()).unwrap();
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -208,7 +231,7 @@ mod tests {
     use std::borrow::Cow;
 
     use bytes::Bytes;
-    use ohno::ErrorExt;
+    use ohno::{ErrorExt, Labeled};
     use recoverable::{Recovery, RecoveryInfo};
     use serde::Deserialize;
     use serde_json::json;
@@ -325,6 +348,7 @@ mod tests {
     fn json_error_deserialization() {
         let error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("json de error")));
         assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "json_deserialization");
         assert_eq!(error.message(), "JSON deserialization error\ncaused by: json de error");
     }
 
@@ -332,11 +356,12 @@ mod tests {
     fn json_error_serialization() {
         let error = JsonError::serialization(serde_json::Error::io(std::io::Error::other("json se error")));
         assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_eq!(error.label(), "json_serialization");
         assert_eq!(error.message(), "JSON serialization error\ncaused by: json se error");
     }
 
     #[test]
-    fn http_error_from_json_error() {
+    fn http_error_from_json_deserialization() {
         use ohno::assert_error_message;
 
         let json_error = JsonError::deserialization(serde_json::Error::io(std::io::Error::other("json de error")));
@@ -344,5 +369,16 @@ mod tests {
         assert_eq!(http_error.recovery(), RecoveryInfo::never());
         assert_eq!(http_error.label(), "json");
         assert_error_message!(http_error, "JSON deserialization error\ncaused by: json de error");
+    }
+
+    #[test]
+    fn http_error_from_json_serialization() {
+        use ohno::assert_error_message;
+
+        let json_error = JsonError::serialization(serde_json::Error::io(std::io::Error::other("json se error")));
+        let http_error: crate::HttpError = json_error.into();
+        assert_eq!(http_error.recovery(), RecoveryInfo::never());
+        assert_eq!(http_error.label(), "json");
+        assert_error_message!(http_error, "JSON serialization error\ncaused by: json se error");
     }
 }
