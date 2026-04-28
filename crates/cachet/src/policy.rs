@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::sync::Arc;
+
+use cachet_tier::CacheEntry;
+
 /// Type alias for insert predicate functions.
 type InsertPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
 
@@ -24,13 +28,11 @@ type InsertPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
 /// // Promote based on a condition
 /// let policy = InsertPolicy::<String>::when(|entry| entry.value().len() >= 5);
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InsertPolicy<V>(PolicyType<V>);
 
-#[derive(Default)]
 enum PolicyType<V> {
     /// Always insert values to primary cache.
-    #[default]
     Always,
     /// Never insert values to primary cache.
     Never,
@@ -39,6 +41,12 @@ enum PolicyType<V> {
     /// Use this when you need to capture external state in the predicate.
     /// Has slight overhead from dynamic dispatch.
     When(InsertPredicate<V>),
+}
+
+impl<V> Default for InsertPolicy<V> {
+    fn default() -> Self {
+        Self::always()
+    }
 }
 
 impl<V> std::fmt::Debug for PolicyType<V> {

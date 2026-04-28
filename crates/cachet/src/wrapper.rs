@@ -48,9 +48,9 @@ pub struct CacheWrapper<K, V, CT> {
     pub(crate) name: CacheName,
     pub(crate) inner: CT,
     pub(crate) clock: Clock,
-    pub(crate) policy: InsertPolicy<V>,
     pub(crate) ttl: Option<Duration>,
     pub(crate) telemetry: CacheTelemetry,
+    pub(crate) policy: InsertPolicy<V>,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -62,6 +62,7 @@ impl<K, V, CT> CacheWrapper<K, V, CT> {
             clock,
             ttl,
             telemetry,
+            policy: InsertPolicy::default(),
             _phantom: PhantomData,
         }
     }

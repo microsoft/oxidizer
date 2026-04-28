@@ -14,7 +14,7 @@ use tick::Clock;
 use super::buildable::Buildable;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
-use crate::fallback::FallbackPromotionPolicy;
+use crate::policy::InsertPolicy;
 use crate::telemetry::TelemetryConfig;
 use crate::wrapper::CacheWrapper;
 use crate::{Cache, CacheTier};
@@ -43,6 +43,7 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) name: Option<&'static str>,
     pub(crate) storage: CT,
     pub(crate) ttl: Option<Duration>,
+    pub(crate) policy: InsertPolicy<V>,
     pub(crate) clock: Clock,
     pub(crate) telemetry: TelemetryConfig,
     pub(crate) stampede_protection: bool,
@@ -55,6 +56,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             name: None,
             storage: (),
             ttl: None,
+            policy: InsertPolicy::default(),
             clock,
             telemetry: TelemetryConfig::new(),
             stampede_protection: false,
@@ -87,6 +89,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             name: self.name,
             storage,
             ttl: self.ttl,
+            policy: self.policy,
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -234,6 +237,32 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
         self
     }
 
+    /// Sets the insert policy for this fallback tier.
+    ///
+    /// The policy determines when values from the fallback tier should be
+    /// inserted to the primary tier.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::{Cache, InsertPolicy};
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
+    ///
+    /// let cache = Cache::builder::<String, String>(clock)
+    ///     .memory()
+    ///     .fallback(l2)
+    ///     .insert_policy(InsertPolicy::always())
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn insert_policy(mut self, policy: InsertPolicy<V>) -> Self {
+        self.policy = policy;
+        self
+    }
+
     /// Returns a reference to the builder's clock.
     pub fn clock(&self) -> &Clock {
         &self.clock
@@ -249,7 +278,7 @@ where
     /// Creates a fallback cache with this as the primary tier.
     ///
     /// The primary tier is checked first; on a miss, the fallback tier is queried
-    /// and the result is promoted to the primary tier based on the promotion policy.
+    /// and the result is inserted to the primary tier based on the insert policy.
     ///
     /// Accepts either a `CacheBuilder` or another `FallbackBuilder` as the fallback.
     pub fn fallback<FB>(self, fallback: FB) -> FallbackBuilder<K, V, Self, FB>
@@ -264,7 +293,6 @@ where
             name: self.name,
             primary_builder: self,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::always(),
             clock,
             refresh: None,
             telemetry,
@@ -392,13 +420,13 @@ mod tests {
     }
 
     #[test]
-    fn mock_builder_fallback_promotion_policy() {
+    fn mock_builder_fallback_insert_policy() {
         let clock = Clock::new_frozen();
         let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
             .fallback(fb)
-            .promotion_policy(FallbackPromotionPolicy::never())
+            .insert_policy(InsertPolicy::never())
             .build();
         assert!(!cache.name().is_empty());
     }

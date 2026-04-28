@@ -158,9 +158,7 @@ where
         self.telemetry
             .record(self.name, CacheOperation::Get, CacheActivity::RefreshHit, fetch_duration);
 
-        if self.policy.should_promote(&value) {
-            self.promote_to_primary(key, value).await;
-        }
+        self.promote_to_primary(key, value).await;
     }
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {

@@ -27,7 +27,7 @@ pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
     pub(crate) telemetry: CacheTelemetry,
-    _phantom: PhantomData<K>,
+    _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {

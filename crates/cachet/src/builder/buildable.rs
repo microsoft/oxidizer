@@ -77,7 +77,6 @@ where
             type_name::<Self::TierOutput>(self.name),
             primary,
             fallback,
-            self.policy,
             clock,
             self.refresh,
             telemetry,
