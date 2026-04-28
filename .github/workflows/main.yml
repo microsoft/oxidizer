@@ -126,7 +126,7 @@ jobs:
       - name: Examples
         if: success() || failure()
         shell: pwsh
-        run: ./scripts/run-examples.ps1 -CargoProfile dev -CargoExcludes "${{ needs.delta.outputs.exclude_not_affected }}"
+        run: ./scripts/run-examples.ps1 -CargoProfile dev -Exclude "${{ needs.delta.outputs.exclude_not_affected }}"
 
   static-analysis:
     needs: [delta]

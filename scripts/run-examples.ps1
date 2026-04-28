@@ -12,7 +12,7 @@ param(
     [string]$CargoProfile,
 
     # Run examples for a single workspace package only. Intended for the local
-    # `just package=foo examples` flow. Mutually exclusive with -CargoExcludes.
+    # `just package=foo examples` flow. Mutually exclusive with -Exclude.
     [Parameter(Mandatory = $false)]
     [string]$Package = "",
 
@@ -24,15 +24,15 @@ param(
     # -p Y) avoids cargo's ambiguity between workspace members and remote
     # crates of the same name.
     [Parameter(Mandatory = $false)]
-    [string]$CargoExcludes = ""
+    [string]$Exclude = ""
 )
 
 $ErrorActionPreference = "Stop"
 # We disable this because we manually handle exit codes and do not want to fail fast.
 $PSNativeCommandUseErrorActionPreference = $false
 
-if ($Package -ne "" -and $CargoExcludes -ne "") {
-    Write-Host "✗ -Package and -CargoExcludes are mutually exclusive." -ForegroundColor Red
+if ($Package -ne "" -and $Exclude -ne "") {
+    Write-Host "✗ -Package and -Exclude are mutually exclusive." -ForegroundColor Red
     exit 1
 }
 
@@ -64,7 +64,7 @@ if ($Package -ne "") {
 else {
     # Workspace mode: forward the cargo-excludes string to cargo and compute
     # the matching local iteration set.
-    $excluded_packages = @($CargoExcludes -split '\s+' | Where-Object { $_ -and $_ -ne '--exclude' })
+    $excluded_packages = @($Exclude -split '\s+' | Where-Object { $_ -and $_ -ne '--exclude' })
     $packages_to_process = @($workspace_members | Where-Object { $excluded_packages -notcontains $_ })
     $cargo_scope_args = @("--workspace")
     foreach ($pkg in $excluded_packages) {
