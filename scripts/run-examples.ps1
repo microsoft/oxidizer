@@ -46,6 +46,23 @@ Write-Host "Timeout per example: $timeout_seconds seconds"
 Write-Host "Cargo profile: $CargoProfile"
 Write-Host ""
 
+# Pre-build all examples for the selected packages so that the per-example
+# timeout below only covers execution (and a fingerprint check), not the
+# compile + link cost. On Windows debug builds the link step alone for the
+# first example in a package can blow past the 30 s timeout.
+$package_args = @()
+foreach ($pkg in $packages_to_process) {
+    $package_args += @("--package", $pkg)
+}
+
+Write-Host "Pre-building examples for selected packages..." -ForegroundColor Cyan
+& cargo build --examples --profile $CargoProfile --all-features --locked @package_args
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "✗ Pre-build of examples failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+Write-Host ""
+
 foreach ($pkg in $packages_to_process) {
     $examples_dir = Join-Path $packages_root $pkg "examples"
 
