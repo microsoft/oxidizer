@@ -79,20 +79,29 @@ impl Routing {
     }
 
     /// Creates a [`Routing`] that selects between a primary and a fallback [`BaseUri`]
-    /// based on the previous attempt's [`RecoveryInfo`].
+    /// based on the previous attempt's [`RecoveryInfo`] and the current attempt's
+    /// position in the retry sequence.
     ///
-    /// The primary [`BaseUri`] is used unless the previous attempt's
-    /// [`RecoveryInfo`] reports [`RecoveryKind::Unavailable`], in which case the
-    /// fallback [`BaseUri`] is used. This is intended for scenarios where the
-    /// primary endpoint becomes unavailable (e.g., a circuit breaker is open) but
-    /// requests can still be served by a fallback endpoint.
+    /// The fallback [`BaseUri`] is used when either:
+    ///
+    /// - the previous attempt's [`RecoveryInfo`] reports
+    ///   [`RecoveryKind::Unavailable`] (e.g., a circuit breaker is open), or
+    /// - the current attempt is not the first attempt and is the last attempt
+    ///   that will be performed (a final best-effort try against the fallback
+    ///   endpoint).
+    ///
+    /// Otherwise, the primary [`BaseUri`] is used. This is intended for
+    /// scenarios where the primary endpoint becomes unavailable but requests
+    /// can still be served by a fallback endpoint.
     ///
     /// [`RecoveryInfo`]: recoverable::RecoveryInfo
     /// [`RecoveryKind::Unavailable`]: recoverable::RecoveryKind::Unavailable
     #[must_use]
     pub fn fallback(primary: BaseUri, fallback: BaseUri) -> Self {
         Self::custom(move |ctx| {
-            let use_fallback = ctx.previous_recovery().is_some_and(|info| info.kind() == RecoveryKind::Unavailable);
+            let use_fallback = ctx.previous_recovery().is_some_and(|info| info.kind() == RecoveryKind::Unavailable)
+                || (ctx.attempt() > 0 && ctx.is_last_attempt());
+
             Some(if use_fallback { fallback.clone() } else { primary.clone() })
         })
     }
@@ -359,6 +368,39 @@ mod tests {
         let ctx = RoutingContext::new().with_previous_recovery(recoverable::RecoveryInfo::unavailable());
         let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_uses_fallback_on_last_attempt_after_first() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        let ctx = RoutingContext::new().with_attempt(2, true);
+        let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
+        assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_uses_primary_on_first_attempt_even_when_last() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        let ctx = RoutingContext::new().with_attempt(0, true);
+        let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
+        assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_uses_primary_on_non_last_attempt() {
+        let routing = Routing::fallback(
+            BaseUri::from_uri_static("https://primary.example.com"),
+            BaseUri::from_uri_static("https://fallback.example.com"),
+        );
+        let ctx = RoutingContext::new().with_attempt(1, false);
+        let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
+        assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
 
     #[test]
