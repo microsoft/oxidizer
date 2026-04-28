@@ -207,7 +207,7 @@ let cache = Cache::builder::<String, String>(clock)
 ### Serialization Boundary
 
 When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
-to add a bincode serialization boundary. Keys and values are automatically serialized
+to add a postcard serialization boundary. Keys and values are automatically serialized
 to [`BytesView`][__link18] before reaching the fallback tier, and
 deserialized on the way back.
 
@@ -266,7 +266,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzvIllTWh1feG7anF_nW9EdpG0HGdEmuJSE4G0dZmB_lIBHTYWSHgmhieXRlc2J1ZmUwLjQuMYJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0ThCHrI3fG_G6hc0guS7WAoG_cdlJovN8ZoG1hnb2I3DeGJYWSHgmhieXRlc2J1ZmUwLjQuMYJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
