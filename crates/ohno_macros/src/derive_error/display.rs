@@ -51,9 +51,8 @@ pub fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInp
                 }
             }
             // Note: `}}` does not need a dedicated arm. The `_` arm pushes each `}`
-            // verbatim, producing the same `}}` sequence in the result format string,
-            // which `format!` then interprets as a literal `}`. A dedicated arm would
-            // be functionally equivalent and create an untestable mutation gap.
+            // verbatim, producing the required `}}` sequence in the result format
+            // string, which `format!` interprets as a literal `}`.
             _ => result.push(ch),
         }
     }
