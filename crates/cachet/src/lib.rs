@@ -262,6 +262,8 @@ mod builder;
 mod cache;
 mod fallback;
 mod refresh;
+#[cfg(any(feature = "serialize", test))]
+mod serialize;
 mod telemetry;
 mod transform;
 mod wrapper;

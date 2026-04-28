@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::Error;
+use std::fmt::Debug;
 
 /// Wraps an infallible closure taking a reference so it can be used where a fallible one is expected.
 ///
@@ -64,6 +65,95 @@ pub trait Codec<A, B>: Encoder<A, B> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the decoding fails.
-    fn decode(&self, value: B) -> Result<A, Error>;
+    /// Returns `Ok(Some(value))` on success, `Ok(None)` if the stored data
+    /// is undecodable and should be treated as a cache miss (e.g., stale
+    /// format, corrupt bytes), or `Err` for hard failures that should
+    /// propagate to the caller.
+    fn decode(&self, value: B) -> Result<Option<A>, Error>;
+}
+
+type EncodeFn<A, B> = Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>;
+type DecodeFn<A, B> = Box<dyn Fn(A) -> Result<Option<B>, Error> + Send + Sync>;
+
+/// A boxed-closure encoder for custom one-directional transforms (keys).
+pub struct TransformEncoder<A, B> {
+    encode_fn: EncodeFn<A, B>,
+}
+
+impl<A, B> TransformEncoder<A, B> {
+    /// Creates a new `TransformEncoder` from a fallible closure.
+    pub fn new<EncodeError>(encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static) -> Self
+    where
+        EncodeError: std::error::Error + Send + Sync + 'static,
+    {
+        Self {
+            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
+        }
+    }
+
+    /// Creates a new `TransformEncoder` from an infallible closure.
+    pub fn infallible(encode_fn: impl Fn(&A) -> B + Send + Sync + 'static) -> Self {
+        Self {
+            encode_fn: Box::new(move |a| Ok(encode_fn(a))),
+        }
+    }
+}
+
+impl<A, B> Encoder<A, B> for TransformEncoder<A, B> {
+    fn encode(&self, value: &A) -> Result<B, Error> {
+        (self.encode_fn)(value)
+    }
+}
+
+impl<A, B> Debug for TransformEncoder<A, B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformEncoder")
+            .field("A", &std::any::type_name::<A>())
+            .field("B", &std::any::type_name::<B>())
+            .finish()
+    }
+}
+
+/// A boxed-closure codec for custom bidirectional transforms (values).
+pub struct TransformCodec<A, B> {
+    encode_fn: EncodeFn<A, B>,
+    decode_fn: DecodeFn<B, A>,
+}
+
+impl<A, B> TransformCodec<A, B> {
+    /// Creates a new `TransformCodec` from a pair of fallible closures.
+    pub fn new<EncodeError, DecodeError>(
+        encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static,
+        decode_fn: impl Fn(B) -> Result<A, DecodeError> + Send + Sync + 'static,
+    ) -> Self
+    where
+        EncodeError: std::error::Error + Send + Sync + 'static,
+        DecodeError: std::error::Error + Send + Sync + 'static,
+    {
+        Self {
+            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
+            decode_fn: Box::new(move |b| decode_fn(b).map(Some).map_err(|e| Error::from_source(e))),
+        }
+    }
+}
+
+impl<A, B> Encoder<A, B> for TransformCodec<A, B> {
+    fn encode(&self, value: &A) -> Result<B, Error> {
+        (self.encode_fn)(value)
+    }
+}
+
+impl<A, B> Codec<A, B> for TransformCodec<A, B> {
+    fn decode(&self, value: B) -> Result<Option<A>, Error> {
+        (self.decode_fn)(value)
+    }
+}
+
+impl<A, B> Debug for TransformCodec<A, B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformCodec")
+            .field("A", &std::any::type_name::<A>())
+            .field("B", &std::any::type_name::<B>())
+            .finish()
+    }
 }

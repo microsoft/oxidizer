@@ -1,95 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CacheEntry, CacheTier, Codec, Encoder, Error};
-
 use std::fmt::Debug;
 
-type EncodeFn<A, B> = Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>;
-type DecodeFn<A, B> = Box<dyn Fn(A) -> Result<B, Error> + Send + Sync>;
-
-/// A boxed-closure encoder for custom one-directional transforms (keys).
-pub struct TransformEncoder<A, B> {
-    encode_fn: EncodeFn<A, B>,
-}
-
-impl<A, B> TransformEncoder<A, B> {
-    /// Creates a new `TransformEncoder` from a fallible closure.
-    pub fn new<EncodeError>(encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static) -> Self
-    where
-        EncodeError: std::error::Error + Send + Sync + 'static,
-    {
-        Self {
-            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
-        }
-    }
-
-    /// Creates a new `TransformEncoder` from an infallible closure.
-    pub fn infallible(encode_fn: impl Fn(&A) -> B + Send + Sync + 'static) -> Self {
-        Self {
-            encode_fn: Box::new(move |a| Ok(encode_fn(a))),
-        }
-    }
-}
-
-impl<A, B> Encoder<A, B> for TransformEncoder<A, B> {
-    fn encode(&self, value: &A) -> Result<B, Error> {
-        (self.encode_fn)(value)
-    }
-}
-
-impl<A, B> Debug for TransformEncoder<A, B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TransformEncoder")
-            .field("A", &std::any::type_name::<A>())
-            .field("B", &std::any::type_name::<B>())
-            .finish()
-    }
-}
-
-/// A boxed-closure codec for custom bidirectional transforms (values).
-pub struct TransformCodec<A, B> {
-    encode_fn: EncodeFn<A, B>,
-    decode_fn: DecodeFn<B, A>,
-}
-
-impl<A, B> TransformCodec<A, B> {
-    /// Creates a new `TransformCodec` from a pair of fallible closures.
-    pub fn new<EncodeError, DecodeError>(
-        encode_fn: impl Fn(&A) -> Result<B, EncodeError> + Send + Sync + 'static,
-        decode_fn: impl Fn(B) -> Result<A, DecodeError> + Send + Sync + 'static,
-    ) -> Self
-    where
-        EncodeError: std::error::Error + Send + Sync + 'static,
-        DecodeError: std::error::Error + Send + Sync + 'static,
-    {
-        Self {
-            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
-            decode_fn: Box::new(move |b| decode_fn(b).map_err(|e| Error::from_source(e))),
-        }
-    }
-}
-
-impl<A, B> Encoder<A, B> for TransformCodec<A, B> {
-    fn encode(&self, value: &A) -> Result<B, Error> {
-        (self.encode_fn)(value)
-    }
-}
-
-impl<A, B> Codec<A, B> for TransformCodec<A, B> {
-    fn decode(&self, value: B) -> Result<A, Error> {
-        (self.decode_fn)(value)
-    }
-}
-
-impl<A, B> Debug for TransformCodec<A, B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TransformCodec")
-            .field("A", &std::any::type_name::<A>())
-            .field("B", &std::any::type_name::<B>())
-            .finish()
-    }
-}
+use crate::{CacheEntry, CacheTier, Codec, Encoder, Error};
 
 /// Adapter that transforms keys and values between user types and storage types.
 ///
@@ -134,7 +48,19 @@ where
         let mapped_key = self.key_encoder.encode(key)?;
         let entry_option = self.inner.get(&mapped_key).await?;
         if let Some(entry) = entry_option {
-            entry.try_map_value(|v| self.value_codec.decode(v)).map(Some)
+            let ttl = entry.ttl();
+            let cached_at = entry.cached_at();
+            let decoded = self.value_codec.decode(entry.into_value())?;
+            Ok(decoded.map(|v| {
+                let mut e = CacheEntry::new(v);
+                if let Some(ttl) = ttl {
+                    e.set_ttl(ttl);
+                }
+                if let Some(t) = cached_at {
+                    e.ensure_cached_at(t);
+                }
+                e
+            }))
         } else {
             Ok(None)
         }
@@ -178,7 +104,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transform::codec::infallible_owned;
+    use crate::transform::codec::{TransformCodec, TransformEncoder, infallible_owned};
     use cachet_tier::MockCache;
 
     #[test]
@@ -189,7 +115,7 @@ mod tests {
         );
         // Exercise both directions so closure bodies are covered.
         assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
-        assert_eq!(codec.decode(42).unwrap(), "42");
+        assert_eq!(codec.decode(42).unwrap(), Some("42".to_string()));
 
         let key_encoder = TransformEncoder::new(|k: &String| k.parse::<i32>());
         // Exercise the encoder so the wrapping closure is covered.

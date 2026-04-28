@@ -8,9 +8,10 @@ use cachet_tier::CacheTier;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder,
-    transform::{PostcardCodec, PostcardEncoder},
+    CacheBuilder, CacheTierBuilder, FallbackBuilder,
+    serialize::codec::{PostcardCodec, PostcardEncoder},
 };
+use super::transform::TransformBuilder;
 
 impl<K, V, CT> CacheBuilder<K, V, CT>
 where
@@ -44,7 +45,7 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(PostcardEncoder::new(), PostcardCodec::new())
+        self.transform(PostcardEncoder, PostcardCodec)
     }
 }
 
@@ -62,6 +63,6 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(PostcardEncoder::new(), PostcardCodec::new())
+        self.transform(PostcardEncoder, PostcardCodec)
     }
 }

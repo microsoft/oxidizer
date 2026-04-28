@@ -44,6 +44,7 @@ memory = ["dep:cachet_memory"]
 metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
+telemetry = []
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }

@@ -43,8 +43,11 @@ async fn serialize_encode_decode_returns_correct_output() {
     // Verify the post-transform cache received serialized operations.
     let after_ops = mock_cache_after.operations();
     assert_eq!(after_ops.len(), 2);
-    let serialized_key = postcard::to_allocvec(&expected_key).expect("postcard serialization should not fail");
-    let serialized_value = postcard::to_allocvec(&expected_value).expect("postcard serialization should not fail");
+    // Our encoder prepends a FORMAT_VERSION byte (0x01) before the postcard payload.
+    let mut serialized_key = vec![1u8];
+    serialized_key.extend_from_slice(&postcard::to_allocvec(&expected_key).expect("postcard serialization should not fail"));
+    let mut serialized_value = vec![1u8];
+    serialized_value.extend_from_slice(&postcard::to_allocvec(&expected_value).expect("postcard serialization should not fail"));
     assert!(
         matches!(&after_ops[0], CacheOp::Insert { key, entry } if *key == serialized_key.as_slice() && *entry.value() == serialized_value.as_slice())
     );
@@ -118,8 +121,11 @@ async fn concurrent_serialize_from_multiple_tasks() {
     for i in 0..20 {
         let expected_key = format!("key-{i}");
         let expected_value = format!("value-{i}");
-        let serialized_key = postcard::to_allocvec(&expected_key).expect("postcard serialization should not fail");
-        let serialized_value = postcard::to_allocvec(&expected_value).expect("postcard serialization should not fail");
+        // Our encoder prepends a FORMAT_VERSION byte (0x01) before the postcard payload.
+        let mut serialized_key = vec![1u8];
+        serialized_key.extend_from_slice(&postcard::to_allocvec(&expected_key).expect("postcard serialization should not fail"));
+        let mut serialized_value = vec![1u8];
+        serialized_value.extend_from_slice(&postcard::to_allocvec(&expected_value).expect("postcard serialization should not fail"));
         assert!(
             after_ops.iter().any(|op| matches!(op, CacheOp::Insert { key, entry } if *key == serialized_key.as_slice() && *entry.value() == serialized_value.as_slice())),
             "missing serialized insert for {expected_key}={expected_value}"
