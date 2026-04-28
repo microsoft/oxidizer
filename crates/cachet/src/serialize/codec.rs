@@ -176,3 +176,101 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
         Cow::Owned(buf)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A type whose Serialize impl always fails, used to test the encode error path.
+    struct FailSerialize;
+
+    impl Serialize for FailSerialize {
+        fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("intentional failure"))
+        }
+    }
+
+    // SAFETY: FailSerialize has no fields.
+    unsafe impl Send for FailSerialize {}
+    unsafe impl Sync for FailSerialize {}
+
+    #[test]
+    fn encode_serialization_failure_returns_err() {
+        let result = encode(&FailSerialize);
+        assert!(result.is_err(), "encode should propagate serialization errors");
+    }
+
+    #[test]
+    fn decode_empty_payload_returns_none() {
+        let codec = PostcardCodec;
+        let empty = BytesView::from(Vec::<u8>::new());
+        let result: Result<Option<String>, Error> = codec.decode(empty);
+        assert!(result.unwrap().is_none(), "empty payload should return Ok(None)");
+    }
+
+    #[test]
+    fn decode_wrong_format_version_returns_none() {
+        let codec = PostcardCodec;
+        // Version 0xFF followed by valid postcard bytes for the string "hello"
+        let mut data = vec![0xFF];
+        data.extend_from_slice(&postcard::to_allocvec(&"hello".to_string()).unwrap());
+        let view = BytesView::from(data);
+        let result: Result<Option<String>, Error> = codec.decode(view);
+        assert!(result.unwrap().is_none(), "wrong version should return Ok(None)");
+    }
+
+    #[test]
+    fn decode_corrupt_payload_returns_none() {
+        let codec = PostcardCodec;
+        // Correct version byte followed by garbage
+        let data = vec![FORMAT_VERSION, 0xFF, 0xFE, 0xFD];
+        let view = BytesView::from(data);
+        let result: Result<Option<String>, Error> = codec.decode(view);
+        assert!(result.unwrap().is_none(), "corrupt payload should return Ok(None)");
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        let codec = PostcardCodec;
+        let original = "hello, world!".to_string();
+        let encoded = codec.encode(&original).expect("encode should succeed");
+        let decoded: Option<String> = codec.decode(encoded).expect("decode should succeed");
+        assert_eq!(decoded.unwrap(), original);
+    }
+
+    #[test]
+    fn encoder_encode_produces_valid_output() {
+        let encoder = PostcardEncoder;
+        let value = 42u32;
+        let encoded = encoder.encode(&value).expect("encode should succeed");
+        let bytes = to_contiguous(&encoded);
+        assert_eq!(bytes[0], FORMAT_VERSION, "first byte should be format version");
+        let decoded: u32 = postcard::from_bytes(&bytes[1..]).expect("postcard decode should succeed");
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn decode_multi_span_view() {
+        let codec = PostcardCodec;
+        let original = "multi-span test".to_string();
+        let encoded = codec.encode(&original).expect("encode should succeed");
+
+        // Split the encoded bytes into two separate views and append them
+        // to create a multi-span BytesView.
+        let bytes = to_contiguous(&encoded);
+        let mid = bytes.len() / 2;
+        let mut first_half = BytesView::from(bytes[..mid].to_vec());
+        let second_half = BytesView::from(bytes[mid..].to_vec());
+        first_half.append(second_half);
+
+        // Verify it's actually multi-span
+        assert_ne!(
+            first_half.first_slice().len(),
+            first_half.len(),
+            "should be multi-span"
+        );
+
+        let decoded: Option<String> = codec.decode(first_half).expect("decode should succeed");
+        assert_eq!(decoded.unwrap(), original);
+    }
+}
