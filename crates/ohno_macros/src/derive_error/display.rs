@@ -9,7 +9,6 @@ use crate::utils::bail;
 
 /// Parse display template to support field references like `{field_name}`
 /// or format!-style with separate arguments
-#[cfg_attr(test, mutants::skip)] // Baselined - we lack full test coverage of the {} escaping logic.
 pub fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let mut result = String::new();
     let mut chars = display_attr.template.chars().peekable();
@@ -51,11 +50,10 @@ pub fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInp
                     }
                 }
             }
-            '}' if chars.peek() == Some(&'}') => {
-                // Escaped closing brace: }}
-                chars.next();
-                result.push_str("}}");
-            }
+            // Note: `}}` does not need a dedicated arm. The `_` arm pushes each `}`
+            // verbatim, producing the same `}}` sequence in the result format string,
+            // which `format!` then interprets as a literal `}`. A dedicated arm would
+            // be functionally equivalent and create an untestable mutation gap.
             _ => result.push(ch),
         }
     }
