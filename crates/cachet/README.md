@@ -166,7 +166,7 @@ most commonly used types from all of them.
 |`metrics`|❌|Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`).|
 |`logs`|❌|Enables structured `tracing` log events for every cache activity.|
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
-|`serialize`|❌|Enables `.serialize()` on builders for automatic bincode serialization of keys and values to `BytesView`.|
+|`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
 
 ## Examples
@@ -266,7 +266,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3zDp5XYpLdWG4XB9-PuFwwFG3uOCUdR-GraGwWmKvWpBv90YWSHgmhieXRlc2J1ZmUwLjQuMYJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzvIllTWh1feG7anF_nW9EdpG0HGdEmuJSE4G0dZmB_lIBHTYWSHgmhieXRlc2J1ZmUwLjQuMYJmY2FjaGV0ZTAuMS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4yLjGCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/cachet/0.1.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

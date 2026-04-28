@@ -156,7 +156,7 @@
 //! | `metrics` | ❌ | Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`). |
 //! | `logs` | ❌ | Enables structured `tracing` log events for every cache activity. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
-//! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic bincode serialization of keys and values to `BytesView`. |
+//! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
