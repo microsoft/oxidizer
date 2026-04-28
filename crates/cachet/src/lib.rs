@@ -232,6 +232,7 @@
 mod builder;
 mod cache;
 mod fallback;
+mod policy;
 mod refresh;
 mod telemetry;
 mod transform;
@@ -255,7 +256,7 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 #[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
-pub use fallback::FallbackPromotionPolicy;
+pub use policy::InsertPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]

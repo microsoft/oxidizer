@@ -72,16 +72,17 @@ impl CacheOperation {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CacheActivity {
     Hit,
+    Error,
     Expired,
-    Miss,
-    RefreshHit,
-    RefreshMiss,
-    Inserted,
-    Invalidated,
-    Ok,
     Fallback,
     FallbackPromotion,
-    Error,
+    Inserted,
+    Invalidated,
+    Miss,
+    Ok,
+    RefreshHit,
+    RefreshMiss,
+    Rejected,
 }
 
 #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -89,16 +90,17 @@ impl CacheActivity {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Hit => "cache.hit",
+            Self::Error => "cache.error",
             Self::Expired => "cache.expired",
-            Self::Miss => "cache.miss",
-            Self::RefreshHit => "cache.refresh_hit",
-            Self::RefreshMiss => "cache.refresh_miss",
-            Self::Inserted => "cache.inserted",
-            Self::Invalidated => "cache.invalidated",
-            Self::Ok => "cache.ok",
             Self::Fallback => "cache.fallback",
             Self::FallbackPromotion => "cache.fallback_promotion",
-            Self::Error => "cache.error",
+            Self::Inserted => "cache.inserted",
+            Self::Invalidated => "cache.invalidated",
+            Self::Miss => "cache.miss",
+            Self::Ok => "cache.ok",
+            Self::RefreshHit => "cache.refresh_hit",
+            Self::RefreshMiss => "cache.refresh_miss",
+            Self::Rejected => "cache.rejected",
         }
     }
 }

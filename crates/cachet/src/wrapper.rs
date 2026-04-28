@@ -16,7 +16,7 @@ use tick::Clock;
 use crate::cache::CacheName;
 use crate::telemetry::ext::ClockExt;
 use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
-use crate::{CacheEntry, Error};
+use crate::{CacheEntry, Error, InsertPolicy};
 
 /// Wraps a cache tier with telemetry and TTL expiration.
 ///
@@ -48,6 +48,7 @@ pub struct CacheWrapper<K, V, CT> {
     pub(crate) name: CacheName,
     pub(crate) inner: CT,
     pub(crate) clock: Clock,
+    pub(crate) policy: InsertPolicy<V>,
     pub(crate) ttl: Option<Duration>,
     pub(crate) telemetry: CacheTelemetry,
     _phantom: PhantomData<(K, V)>,
@@ -137,6 +138,12 @@ where
 
     async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
+        if !self.policy.should_insert(&entry) {
+            self.telemetry
+                .record(self.name, CacheOperation::Insert, CacheActivity::Rejected, Duration::default());
+            return Ok(());
+        }
+
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
