@@ -69,7 +69,6 @@ uniflight = { workspace = true }
 alloc_tracker = { workspace = true }
 bytesbuf = { workspace = true }
 cachet_memory = { workspace = true }
-postcard = { workspace = true }
 cachet_tier = { workspace = true, features = ["test-util"] }
 criterion = { workspace = true }
 dynosaur = { workspace = true }
@@ -78,6 +77,7 @@ opentelemetry = { workspace = true, features = [
     "logs",
 ] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
+postcard = { workspace = true }
 recoverable = { workspace = true }
 seatbelt = { workspace = true, features = ["retry", "tower-service"] }
 serde = { workspace = true, features = ["derive"] }
