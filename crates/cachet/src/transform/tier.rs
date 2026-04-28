@@ -161,7 +161,7 @@ mod tests {
         entry.set_ttl(ttl);
         entry.ensure_cached_at(cached_at);
 
-        let inner = MockCache::with_data([(1, entry)].into_iter().collect());
+        let inner = MockCache::with_data(std::iter::once((1, entry)).collect());
         let adapter = TransformAdapter::from_boxed(
             inner,
             Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
