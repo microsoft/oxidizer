@@ -3,7 +3,7 @@
 
 //! Serialization boundary example.
 //!
-//! Demonstrates `.serialize()` to add a bincode serialization boundary between
+//! Demonstrates `.serialize()` to add a postcard serialization boundary between
 //! a typed L1 cache (`String, String`) and a byte-oriented L2 cache (`BytesView, BytesView`).
 //! Keys and values are automatically serialized/deserialized when crossing the boundary.
 

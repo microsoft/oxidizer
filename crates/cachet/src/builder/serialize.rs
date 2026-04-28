@@ -4,11 +4,10 @@
 //! Builder methods for serialization of cache Key and Value.
 
 use bytesbuf::BytesView;
-use cachet_tier::CacheTier;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    CacheBuilder, CacheTierBuilder, FallbackBuilder,
+    CacheBuilder, CacheTier, CacheTierBuilder, FallbackBuilder,
     serialize::codec::{PostcardCodec, PostcardEncoder},
 };
 use super::transform::TransformBuilder;
