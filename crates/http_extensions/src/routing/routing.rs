@@ -98,12 +98,7 @@ impl Routing {
     /// [`RecoveryKind::Unavailable`]: recoverable::RecoveryKind::Unavailable
     #[must_use]
     pub fn fallback(primary: BaseUri, fallback: BaseUri) -> Self {
-        Self::custom(move |ctx| {
-            let use_fallback = ctx.previous_recovery().is_some_and(|info| info.kind() == RecoveryKind::Unavailable)
-                || (ctx.attempt() > 0 && ctx.is_last_attempt());
-
-            Some(if use_fallback { fallback.clone() } else { primary.clone() })
-        })
+        Self::custom(move |ctx| Some(if use_fallback(ctx) { fallback.clone() } else { primary.clone() }))
     }
 
     /// Creates a [`Routing`] that delegates resolution to the given closure.
@@ -249,6 +244,22 @@ impl std::fmt::Debug for Resolver {
             Self::Custom(_) => f.write_str("Custom"),
         }
     }
+}
+
+fn use_fallback(ctx: &RoutingContext) -> bool {
+    // first attempt never uses fallback
+    if ctx.attempt() == 0 {
+        return false;
+    }
+
+    // best effort, for last attempt always try the fallback
+    if ctx.is_last_attempt() {
+        return true;
+    }
+
+    // use fallback if previous recovery was unavailable, this means that
+    // last attempt that used primary endpoint reached unavailable endpoint
+    ctx.previous_recovery().is_some_and(|info| info.kind() == RecoveryKind::Unavailable)
 }
 
 #[cfg(test)]
