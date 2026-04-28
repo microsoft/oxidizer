@@ -202,11 +202,11 @@
 //! ## Serialization Boundary
 //!
 //! When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
-//! to add a bincode serialization boundary. Keys and values are automatically serialized
+//! to add a postcard serialization boundary. Keys and values are automatically serialized
 //! to [`BytesView`](bytesbuf::BytesView) before reaching the fallback tier, and
 //! deserialized on the way back.
 //!
-//! ```no_run
+//! ```ignore
 //! use cachet::{Cache, FallbackPromotionPolicy};
 //! use tick::Clock;
 //! # async {
