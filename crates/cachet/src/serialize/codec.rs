@@ -190,10 +190,6 @@ mod tests {
         }
     }
 
-    // SAFETY: FailSerialize has no fields.
-    unsafe impl Send for FailSerialize {}
-    unsafe impl Sync for FailSerialize {}
-
     #[test]
     fn encode_serialization_failure_returns_err() {
         let result = encode(&FailSerialize);
@@ -240,9 +236,8 @@ mod tests {
 
     #[test]
     fn encoder_encode_produces_valid_output() {
-        let encoder = PostcardEncoder;
         let value = 42u32;
-        let encoded = encoder.encode(&value).expect("encode should succeed");
+        let encoded = PostcardEncoder.encode(&value).expect("encode should succeed");
         let bytes = to_contiguous(&encoded);
         assert_eq!(bytes[0], FORMAT_VERSION, "first byte should be format version");
         let decoded: u32 = postcard::from_bytes(&bytes[1..]).expect("postcard decode should succeed");
@@ -264,11 +259,7 @@ mod tests {
         first_half.append(second_half);
 
         // Verify it's actually multi-span
-        assert_ne!(
-            first_half.first_slice().len(),
-            first_half.len(),
-            "should be multi-span"
-        );
+        assert_ne!(first_half.first_slice().len(), first_half.len(), "should be multi-span");
 
         let decoded: Option<String> = codec.decode(first_half).expect("decode should succeed");
         assert_eq!(decoded.unwrap(), original);
