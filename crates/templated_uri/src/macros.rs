@@ -22,7 +22,7 @@
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
 pub use templated_uri_macros::Escape;
-/// Derives [`RawDisplay`](crate::RawDisplay) for a newtype, delegating to the inner
+/// Derives [`Raw`](crate::Raw) for a newtype, delegating to the inner
 /// field's [`Display`](std::fmt::Display) impl.
 ///
 /// Use this for types meant to fill RFC 6570 reserved-expansion placeholders (`{+param}`),
@@ -37,12 +37,12 @@ pub use templated_uri_macros::Escape;
 /// # Examples
 ///
 /// ```
-/// use templated_uri::RawDisplay;
+/// use templated_uri::Raw;
 ///
-/// #[derive(RawDisplay)]
+/// #[derive(Raw)]
 /// struct PathSegment(String);
 /// ```
-pub use templated_uri_macros::RawDisplay;
+pub use templated_uri_macros::Raw;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:

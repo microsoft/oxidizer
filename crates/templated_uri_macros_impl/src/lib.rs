@@ -25,7 +25,7 @@ use syn::{Attribute, DeriveInput, Field, parse_quote, parse2};
 
 use crate::enum_template::enum_template;
 use crate::struct_template::struct_template;
-use crate::uri_param::{raw_display_impl, uri_param_impl};
+use crate::uri_param::{raw_impl, uri_param_impl};
 
 macro_rules! bail {
     ($span:ident, $msg:expr) => {
@@ -184,13 +184,13 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 }
 
 #[must_use]
-pub fn raw_display_derive_impl(input: TokenStream) -> TokenStream {
+pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
         Err(err) => return err.to_compile_error(),
     };
 
-    raw_display_impl(input)
+    raw_impl(input)
 }
 
 #[cfg(not(miri))] // Insta can't work with Miri
@@ -207,8 +207,8 @@ mod tests {
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
-    fn pretty_parse_raw_display(input: TokenStream) -> String {
-        let output = raw_display_derive_impl(input);
+    fn pretty_parse_raw(input: TokenStream) -> String {
+        let output = raw_derive_impl(input);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
@@ -249,7 +249,7 @@ mod tests {
             }
             fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::RawDisplay::raw_display(&self.param2);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -338,7 +338,7 @@ mod tests {
             }
             fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::RawDisplay::raw_display(&self.param2);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -421,7 +421,7 @@ mod tests {
             }
             fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::RawDisplay::raw_display(&self.param2);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -504,7 +504,7 @@ mod tests {
             }
             fn render(&self) -> ::std::string::String {
                 let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::RawDisplay::raw_display(&self.param2);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
                 let param3 = ::templated_uri::Escape::escape(&self.param3);
                 let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
@@ -873,15 +873,15 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_display_impl() {
+    fn test_raw_impl() {
         let input = quote! {
             struct MyFragment(String);
         };
 
-        let output_pretty = pretty_parse_raw_display(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::RawDisplay for MyFragment {
-            fn raw_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::Raw for MyFragment {
+            fn raw(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }
@@ -889,15 +889,15 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_display_with_custom_type() {
+    fn test_raw_with_custom_type() {
         let input = quote! {
             struct CustomFragment(EscapedString);
         };
 
-        let output_pretty = pretty_parse_raw_display(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::RawDisplay for CustomFragment {
-            fn raw_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::Raw for CustomFragment {
+            fn raw(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }
@@ -905,63 +905,63 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_display_named_fields_error() {
+    fn test_raw_named_fields_error() {
         let input = quote! {
             struct InvalidFragment {
                 value: String
             }
         };
 
-        let output_pretty = pretty_parse_raw_display(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "RawDisplay can only be derived for tuple structs (newtype pattern)"
+            "Raw can only be derived for tuple structs (newtype pattern)"
         }
         "#);
     }
 
     #[test]
-    fn test_raw_display_multiple_fields_error() {
+    fn test_raw_multiple_fields_error() {
         let input = quote! {
             struct TooManyFields(String, String);
         };
 
-        let output_pretty = pretty_parse_raw_display(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "RawDisplay requires exactly one field, found 2"
+            "Raw requires exactly one field, found 2"
         }
         "#);
     }
 
     #[test]
-    fn test_raw_display_enum_error() {
+    fn test_raw_enum_error() {
         let input = quote! {
             enum FragmentEnum {
                 Variant(String)
             }
         };
 
-        let output_pretty = pretty_parse_raw_display(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "RawDisplay cannot be derived for enums"
+            "Raw cannot be derived for enums"
         }
         "#);
     }
 
     #[test]
-    fn test_raw_display_union_error() {
+    fn test_raw_union_error() {
         let input = quote! {
             union UnsafeFragmentUnion {
                 value: u32
             }
         };
 
-        let output_pretty = pretty_parse_raw_display(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "RawDisplay cannot be derived for unions"
+            "Raw cannot be derived for unions"
         }
         "#);
     }
@@ -1150,14 +1150,14 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_display_derive_impl_parse_error() {
+    fn test_raw_derive_impl_parse_error() {
         // Test error handling when input cannot be parsed as DeriveInput
         // Pass invalid tokens that cannot be parsed as a struct/enum/union
         let input = quote! {
             fn not_a_struct() {}
         };
 
-        let output = raw_display_derive_impl(input);
+        let output = raw_derive_impl(input);
         let output_str = output.to_string();
 
         // Should produce a compile error
@@ -1258,12 +1258,9 @@ mod tests {
             struct Wrapper<T>(T);
         };
 
-        let output = raw_display_derive_impl(input);
+        let output = raw_derive_impl(input);
         let output_str = output.to_string();
-        assert!(
-            output_str.contains("compile_error"),
-            "Should reject generic RawDisplay: {output_str}"
-        );
+        assert!(output_str.contains("compile_error"), "Should reject generic Raw: {output_str}");
     }
 
     #[test]

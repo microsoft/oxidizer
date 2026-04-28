@@ -144,7 +144,7 @@
 //! fragments are stripped by the `http` crate and ignored by HTTP clients.
 //!
 //! Template variables must implement [`Escape`] (except for reserved expansions,
-//! which use [`RawDisplay`]) to ensure the resulting URI is valid.
+//! which use [`Raw`]) to ensure the resulting URI is valid.
 //!
 //! # Integration with HTTP Ecosystem
 //!
@@ -169,9 +169,9 @@ mod uri;
 pub use base_path::BasePath;
 pub use base_uri::BaseUri;
 pub use error::UriError;
-pub use escape::{Escape, RawDisplay};
+pub use escape::{Escape, Raw};
 pub use escaped::{EscapeError, Escaped, EscapedString};
-pub use macros::{Escape, RawDisplay, templated};
+pub use macros::{Escape, Raw, templated};
 pub use origin::Origin;
 pub use path_and_query::PathAndQuery;
 pub use path_and_query_template::PathAndQueryTemplate;
