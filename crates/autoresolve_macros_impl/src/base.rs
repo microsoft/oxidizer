@@ -709,6 +709,7 @@ pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     let type_alias: syn::ItemType = syn::parse2(item)?;
     let struct_name = &type_alias.ident;
     let vis = &type_alias.vis;
+    let attrs = &type_alias.attrs;
 
     // Extract the original type path from the alias.
     let original_path = match type_alias.ty.as_ref() {
@@ -732,6 +733,7 @@ pub fn reexport_base(attr: TokenStream, item: TokenStream) -> syn::Result<TokenS
     let mangled_macro_name = mangled_name("__autoresolve", &new_helper_path);
 
     Ok(quote! {
+        #(#attrs)*
         #vis type #struct_name = #original_path;
 
         #[doc(hidden)]

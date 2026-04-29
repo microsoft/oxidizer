@@ -7,8 +7,6 @@
 //! - `RequestBase` scoped on `AppBase` (this crate)
 //! - `TaskBase` scoped on `RequestBase` (this crate)
 
-#![allow(missing_docs, missing_debug_implementations)]
-
 pub mod app_base;
 pub mod app_context;
 pub mod app_service;
