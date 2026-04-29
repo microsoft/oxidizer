@@ -311,10 +311,8 @@ impl<K, T, S> ThreadAware for Merger<K, T, S>
 where
     S: Strategy,
 {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        Self {
-            inner: self.inner.relocated(source, destination),
-        }
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.inner.relocated(source, destination);
     }
 }
 
@@ -502,11 +500,11 @@ mod tests {
         let source = affinities[0].into();
         let destination = affinities[1];
 
-        let merger: Merger<String, String> = Merger::new();
-        let relocated = merger.relocated(source, destination);
+        let mut merger: Merger<String, String> = Merger::new();
+        merger.relocated(source, destination);
 
         // Verify the relocated merger still works
-        assert!(relocated.is_empty());
+        assert!(merger.is_empty());
     }
 
     #[test]

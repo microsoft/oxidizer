@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use layered::Layer;
 
+use crate::fallback::*;
 use crate::typestates::{NotSet, Set};
 use crate::utils::{EnableIf, TelemetryHelper};
-use crate::{ResilienceContext, TelemetryString, fallback::*};
+use crate::{ResilienceContext, TelemetryString};
 
 /// Builder for configuring fallback resilience middleware.
 ///

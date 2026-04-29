@@ -60,7 +60,10 @@ use crate::{BasePath, Origin, UriError};
 ///
 /// // From a URI string with a path prefix
 /// let base_uri3: BaseUri = "https://auth.example.com/path/prefix/".parse()?;
-/// assert_eq!(base_uri3.to_string(), "https://auth.example.com/path/prefix/");
+/// assert_eq!(
+///     base_uri3.to_string(),
+///     "https://auth.example.com/path/prefix/"
+/// );
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -70,7 +73,10 @@ use crate::{BasePath, Origin, UriError};
 /// # use templated_uri::BaseUri;
 /// let base_uri = BaseUri::from_static("https://api.example.com");
 /// let uri = base_uri.build_http_uri("/users/123?active=true")?;
-/// assert_eq!(uri.to_string(), "https://api.example.com/users/123?active=true");
+/// assert_eq!(
+///     uri.to_string(),
+///     "https://api.example.com/users/123?active=true"
+/// );
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -94,8 +100,8 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::{BaseUri, BasePath};
-    /// let base_uri = BaseUri::from_static("https://example.com")
-    ///     .with_path(BasePath::from_static("/api/v1/"));
+    /// let base_uri =
+    ///     BaseUri::from_static("https://example.com").with_path(BasePath::from_static("/api/v1/"));
     ///
     /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
     /// ```
@@ -114,8 +120,7 @@ impl BaseUri {
     ///
     /// ```
     /// # use templated_uri::BaseUri;
-    /// let base_uri = BaseUri::from_static("https://example.com")
-    ///     .try_with_path("/api/v1/")?;
+    /// let base_uri = BaseUri::from_static("https://example.com").try_with_path("/api/v1/")?;
     ///
     /// assert_eq!(base_uri.to_string(), "https://example.com/api/v1/");
     /// # Ok::<_, Box<dyn std::error::Error>>(())

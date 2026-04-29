@@ -9,8 +9,7 @@ use std::sync::Arc;
 use thread_aware::{PerCore, ThreadAware};
 
 use crate::custom::{BoxedFuture, CustomSpawner};
-use crate::handle::JoinHandle;
-use crate::handle::JoinHandleInner;
+use crate::handle::{JoinHandle, JoinHandleInner};
 
 /// Runtime-agnostic task spawner.
 ///
@@ -34,6 +33,7 @@ use crate::handle::JoinHandleInner;
 ///     println!("Task running!");
 /// });
 /// handle.await; // Wait for task to complete
+///
 /// # }
 /// # #[cfg(not(feature = "tokio"))]
 /// # fn main() {}
@@ -238,8 +238,8 @@ impl Spawner {
     /// # struct Scheduler(Option<usize>);
     /// # impl Scheduler { fn name(&self) -> String { format!("core-{}", self.0.unwrap_or(0)) } }
     /// # impl ThreadAware for Scheduler {
-    /// #     fn relocated(self, _: MemoryAffinity, dest: PinnedAffinity) -> Self {
-    /// #         Self(Some(dest.processor_index()))
+    /// #     fn relocated(&mut self, _: MemoryAffinity, dest: PinnedAffinity) {
+    /// #         self.0 = Some(dest.processor_index());
     /// #     }
     /// # }
     ///
@@ -247,15 +247,12 @@ impl Spawner {
     ///
     /// // Each core gets its own Spawner whose Scheduler carries the
     /// // destination core's processor index after relocation.
-    /// let spawner = Spawner::new_thread_aware(
-    ///     scheduler,
-    ///     |scheduler| {
-    ///         Spawner::new_custom("per-core-tokio", move |fut| {
-    ///             println!("{}: spawning", scheduler.name());
-    ///             tokio::spawn(fut);
-    ///         })
-    ///     },
-    /// );
+    /// let spawner = Spawner::new_thread_aware(scheduler, |scheduler| {
+    ///     Spawner::new_custom("per-core-tokio", move |fut| {
+    ///         println!("{}: spawning", scheduler.name());
+    ///         tokio::spawn(fut);
+    ///     })
+    /// });
     ///
     /// let result = spawner.spawn(async { 1 + 1 }).await;
     /// assert_eq!(result, 2);

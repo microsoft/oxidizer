@@ -195,11 +195,9 @@ impl std::fmt::Debug for Clock {
 }
 
 impl ThreadAware for Clock {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        Self {
-            state: self.state.relocated(source, destination),
-            affinity: Some(destination),
-        }
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.state.relocated(source, destination);
+        self.affinity = Some(destination);
     }
 }
 
@@ -590,7 +588,9 @@ mod tests {
         // Relocation must be a no-op for Tokio clocks: the background driver task drives a
         // shared timer set, so a relocated clone must still observe timers being advanced.
         let affinities = pinned_affinities(&[2]);
-        let clock = Clock::new_tokio().relocated(affinities[0].into(), affinities[1]);
+        let clock = Clock::new_tokio();
+        let mut clock = clock;
+        clock.relocated(affinities[0].into(), affinities[1]);
         clock.delay(Duration::from_millis(15)).await;
     }
 
@@ -688,8 +688,10 @@ mod tests {
         // root clock
         let root = InactiveClock::default();
 
-        let inactive_1 = root.clone().relocated(source, pinned_1);
-        let inactive_2 = root.relocated(source, pinned_2);
+        let mut inactive_1 = root.clone();
+        inactive_1.relocated(source, pinned_1);
+        let mut inactive_2 = root;
+        inactive_2.relocated(source, pinned_2);
 
         let (clock_1, mut driver_1) = inactive_1.activate();
         let (clock_2, mut driver_2) = inactive_2.activate();
@@ -701,7 +703,11 @@ mod tests {
         assert_eq!(clock_2.state.timers_len(), 0);
         assert_eq!(driver_1.state.timers_len(), 1);
         assert_eq!(driver_2.state.timers_len(), 0);
-        assert_eq!(clock_1.clone().relocated(source, pinned_2).state.timers_len(), 0);
+        {
+            let mut relocated_clock = clock_1.clone();
+            relocated_clock.relocated(source, pinned_2);
+            assert_eq!(relocated_clock.state.timers_len(), 0);
+        }
 
         // register the timer on clock 2
         let mut fut_2 = Box::pin(clock_2.delay(Duration::from_secs(100)));
@@ -739,8 +745,10 @@ mod tests {
         // root clock
         let root: InactiveClock = ClockControl::default().into();
 
-        let inactive_1 = root.clone().relocated(source, pinned_1);
-        let inactive_2 = root.relocated(source, pinned_2);
+        let mut inactive_1 = root.clone();
+        inactive_1.relocated(source, pinned_1);
+        let mut inactive_2 = root;
+        inactive_2.relocated(source, pinned_2);
 
         let (clock_1, driver_1) = inactive_1.activate();
         let (clock_2, driver_2) = inactive_2.activate();
@@ -777,7 +785,8 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     async fn debug_alive_system_clock_relocated() {
         let affinites = pinned_affinities(&[2]);
-        let clock = Clock::new_system_frozen().relocated(affinites[0].into(), affinites[1]);
+        let mut clock = Clock::new_system_frozen();
+        clock.relocated(affinites[0].into(), affinites[1]);
 
         insta::assert_debug_snapshot!(clock);
     }

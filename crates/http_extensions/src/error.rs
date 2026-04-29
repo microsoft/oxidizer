@@ -124,9 +124,8 @@ pub struct HttpError {
 }
 
 impl ThreadAware for HttpError {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-        // move as is
-        self
+    fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+        // no thread-local state to relocate
     }
 }
 
@@ -200,8 +199,8 @@ impl HttpError {
     /// let mut error = HttpError::unavailable("service is down").with_request(http_request);
     /// // later you can try to extract the request
     /// if let Some(request) = error.take_request() {
-    ///    // execute the retry
-    ///    execute_retry(request);
+    ///     // execute the retry
+    ///     execute_retry(request);
     /// }
     /// # fn execute_retry(http_request: HttpRequest) {}
     /// ```
@@ -479,12 +478,12 @@ mod tests {
     #[test]
     fn relocated_preserves_error() {
         let affinity = pinned_affinities(&[1])[0];
-        let error = HttpError::validation("relocated test");
+        let mut error = HttpError::validation("relocated test");
 
-        let relocated = error.relocated(MemoryAffinity::Unknown, affinity);
+        error.relocated(MemoryAffinity::Unknown, affinity);
 
-        assert_eq!(relocated.message(), "relocated test");
-        assert_eq!(relocated.label(), "validation");
+        assert_eq!(error.message(), "relocated test");
+        assert_eq!(error.label(), "validation");
     }
 
     #[test]

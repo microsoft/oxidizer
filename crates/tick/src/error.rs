@@ -166,7 +166,8 @@ mod tests {
         let error = Error::other(std::io::Error::other("dummy"));
         let affinities = pinned_affinities(&[2]);
 
-        let error = error.relocated(affinities[0].into(), affinities[0]);
+        let mut error = error;
+        error.relocated(affinities[0].into(), affinities[0]);
 
         assert!(matches!(error.kind(), ErrorKind::Other(_)));
     }

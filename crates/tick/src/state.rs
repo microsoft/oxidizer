@@ -17,11 +17,11 @@ pub(crate) enum ClockState {
 }
 
 impl ThreadAware for ClockState {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
         match self {
-            Self::System(synchronized_timers) => Self::System(synchronized_timers.relocated(source, destination)),
+            Self::System(synchronized_timers) => synchronized_timers.relocated(source, destination),
             #[cfg(any(feature = "test-util", test))]
-            Self::ClockControl(clock_control) => Self::ClockControl(clock_control.relocated(source, destination)),
+            Self::ClockControl(clock_control) => clock_control.relocated(source, destination),
         }
     }
 }
@@ -90,11 +90,11 @@ pub(crate) enum SynchronizedTimers {
 }
 
 impl ThreadAware for SynchronizedTimers {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
         match self {
             #[cfg(any(feature = "rt-shared", test))]
-            Self::Shared(_) => self,
-            Self::Isolated(timers) => Self::Isolated(timers.relocated(source, destination)),
+            Self::Shared(_) => {}
+            Self::Isolated(timers) => timers.relocated(source, destination),
         }
     }
 }

@@ -33,7 +33,8 @@ fn per_process_relocation_preserves_spawn_function() {
 
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
-    let relocated = spawner.relocated(affinities[0].into(), affinities[1]);
+    let mut relocated = spawner;
+    relocated.relocated(affinities[0].into(), affinities[1]);
 
     let r1 = futures::executor::block_on(original.spawn(async { 1 }));
     let r2 = futures::executor::block_on(relocated.spawn(async { 2 }));
@@ -65,7 +66,8 @@ fn thread_aware_relocation_invokes_factory_for_new_core() {
 
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
-    let relocated = spawner.relocated(affinities[0].into(), affinities[1]);
+    let mut relocated = spawner;
+    relocated.relocated(affinities[0].into(), affinities[1]);
 
     assert_eq!(
         FACTORY_CALLS.load(Ordering::SeqCst),
@@ -103,7 +105,8 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
-    let relocated = spawner.relocated(affinities[0].into(), affinities[1]);
+    let mut relocated = spawner;
+    relocated.relocated(affinities[0].into(), affinities[1]);
 
     futures::executor::block_on(original.spawn(async {}));
     futures::executor::block_on(relocated.spawn(async {}));

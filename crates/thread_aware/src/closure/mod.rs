@@ -86,9 +86,8 @@ impl<T, D> ThreadAware for Closure<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        let data = self.data.relocated(source, destination);
-        Self { data, f: self.f }
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.data.relocated(source, destination);
     }
 }
 
@@ -126,9 +125,8 @@ impl<T, D> ThreadAware for ClosureOnce<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        let data = self.data.relocated(source, destination);
-        Self { data, f: self.f }
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.data.relocated(source, destination);
     }
 }
 
@@ -175,9 +173,8 @@ impl<T, D> ThreadAware for ClosureMut<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        let data = self.data.relocated(source, destination);
-        Self { data, f: self.f }
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.data.relocated(source, destination);
     }
 }
 
@@ -218,9 +215,7 @@ where
 /// struct Transferable;
 /// impl ThreadAware for Transferable {
 ///     // ...
-///     # fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-///     #    Self {}
-///     # }
+///     # fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
 /// }
 ///
 /// let closure = relocate_once(Transferable, |transferable| {
@@ -321,20 +316,19 @@ mod tests {
         let affinities = pinned_affinities(&[2, 2]);
 
         // Test with i32
-        let closure = relocate(42_i32, |x| x + 1);
-        let relocated = closure.relocated(affinities[0].into(), affinities[1]);
-        assert_eq!(relocated.call(), 43);
+        let mut closure = relocate(42_i32, |x| x + 1);
+        closure.relocated(affinities[0].into(), affinities[1]);
+        assert_eq!(closure.call(), 43);
 
         // Test with Vec
-        let closure = relocate(vec![10, 20, 30], |v| v.iter().sum::<i32>());
-        let relocated = closure.relocated(affinities[0].into(), affinities[2]);
-        assert_eq!(relocated.call(), 60);
+        let mut closure = relocate(vec![10, 20, 30], |v| v.iter().sum::<i32>());
+        closure.relocated(affinities[0].into(), affinities[2]);
+        assert_eq!(closure.call(), 60);
 
         // Test with same affinity (String)
-        let closure = relocate(String::from("hello"), |s| s.to_uppercase());
-
-        let relocated = closure.relocated(affinities[0].into(), affinities[0]);
-        assert_eq!(relocated.call(), "HELLO");
+        let mut closure = relocate(String::from("hello"), |s| s.to_uppercase());
+        closure.relocated(affinities[0].into(), affinities[0]);
+        assert_eq!(closure.call(), "HELLO");
     }
 
     #[test]
@@ -378,20 +372,20 @@ mod tests {
         let affinities = pinned_affinities(&[2, 3]);
 
         // Test with String
-        let closure = relocate_once(String::from("world"), |s| format!("Hello, {s}!"));
-        let relocated = closure.relocated(affinities[0].into(), affinities[1]);
-        assert_eq!(relocated.call_once(), "Hello, world!");
+        let mut closure = relocate_once(String::from("world"), |s| format!("Hello, {s}!"));
+        closure.relocated(affinities[0].into(), affinities[1]);
+        assert_eq!(closure.call_once(), "Hello, world!");
 
         // Test with complex data (tuple of Vecs)
         let data = (vec![1, 2, 3], vec![4, 5, 6]);
-        let closure = relocate_once(data, |(a, b)| a.len() + b.len());
-        let relocated = closure.relocated(affinities[1].into(), affinities[3]);
-        assert_eq!(relocated.call_once(), 6);
+        let mut closure = relocate_once(data, |(a, b)| a.len() + b.len());
+        closure.relocated(affinities[1].into(), affinities[3]);
+        assert_eq!(closure.call_once(), 6);
 
         // Test cross-NUMA transfer
-        let closure = relocate_once(42_i32, |x| x + 100);
-        let relocated = closure.relocated(affinities[0].into(), affinities[2]);
-        assert_eq!(relocated.call_once(), 142);
+        let mut closure = relocate_once(42_i32, |x| x + 100);
+        closure.relocated(affinities[0].into(), affinities[2]);
+        assert_eq!(closure.call_once(), 142);
     }
 
     // Tests for ClosureMut<T, D>
@@ -431,26 +425,24 @@ mod tests {
         let affinities = pinned_affinities(&[2, 3]);
 
         // Test with i32 - mutating state across relocations
-        let closure = relocate_mut(0_i32, |x| {
+        let mut closure = relocate_mut(0_i32, |x| {
             *x += 1;
             *x
         });
-        let relocated = closure.relocated(affinities[0].into(), affinities[2]);
-        let mut r = relocated;
-        assert_eq!(r.call_mut(), 1);
-        assert_eq!(r.call_mut(), 2);
+        closure.relocated(affinities[0].into(), affinities[2]);
+        assert_eq!(closure.call_mut(), 1);
+        assert_eq!(closure.call_mut(), 2);
 
         // Test with String - mutating string state
-        let closure = relocate_mut(String::new(), |s| {
+        let mut closure = relocate_mut(String::new(), |s| {
             s.push('x');
             s.len()
         });
 
-        let relocated = closure.relocated(affinities[0].into(), affinities[2]);
-        let mut r = relocated;
-        assert_eq!(r.call_mut(), 1);
-        assert_eq!(r.call_mut(), 2);
-        assert_eq!(r.call_mut(), 3);
+        closure.relocated(affinities[0].into(), affinities[2]);
+        assert_eq!(closure.call_mut(), 1);
+        assert_eq!(closure.call_mut(), 2);
+        assert_eq!(closure.call_mut(), 3);
     }
 
     #[test]
@@ -503,11 +495,11 @@ mod tests {
         let cloned = closure;
 
         // Test ThreadAware
-        let relocated = cloned.relocated(affinities[0].into(), affinities[1]);
+        let mut relocated = cloned;
+        relocated.relocated(affinities[0].into(), affinities[1]);
 
         // Test RelocateFnMut
-        let mut r = relocated;
-        assert_eq!(r.call_mut(), 3);
+        assert_eq!(relocated.call_mut(), 3);
     }
 
     #[test]
@@ -522,12 +514,12 @@ mod tests {
         let cloned = closure;
 
         // Test ThreadAware across NUMA nodes
-        let relocated = cloned.relocated(affinities[0].into(), affinities[3]);
+        let mut relocated = cloned;
+        relocated.relocated(affinities[0].into(), affinities[3]);
 
         // Test RelocateFnMut
-        let mut r = relocated;
-        assert_eq!(r.call_mut(), 101);
-        assert_eq!(r.call_mut(), 102);
+        assert_eq!(relocated.call_mut(), 101);
+        assert_eq!(relocated.call_mut(), 102);
     }
 
     #[test]
@@ -539,7 +531,8 @@ mod tests {
         let cloned = closure;
 
         // Test ThreadAware
-        let relocated = cloned.relocated(affinities[0].into(), affinities[1]);
+        let mut relocated = cloned;
+        relocated.relocated(affinities[0].into(), affinities[1]);
 
         // Call once
         assert_eq!(relocated.call_once(), 6);

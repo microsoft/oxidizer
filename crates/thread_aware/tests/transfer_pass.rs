@@ -3,6 +3,7 @@
 
 #![expect(missing_docs, reason = "This is a test module")]
 
+use thread_aware::ThreadAware;
 use thread_aware::affinity::pinned_affinities;
 use thread_aware_macros::ThreadAware;
 
@@ -34,19 +35,19 @@ fn derive_compiles_and_runs() {
     let d0 = affinities[0].into();
     let d1 = affinities[1];
 
-    let s = Simple {
+    let mut s = Simple {
         a: 10,
         b: Some("x".to_string()),
     };
-    let _ = thread_aware::ThreadAware::relocated(s, d0, d1);
+    thread_aware::ThreadAware::relocated(&mut s, d0, d1);
 
-    let t = Tuple(5, 6);
-    let t2 = thread_aware::ThreadAware::relocated(t, d0, d1);
-    assert_eq!(t2.0, 5);
-    assert_eq!(t2.1, 6);
+    let mut t = Tuple(5, 6);
+    thread_aware::ThreadAware::relocated(&mut t, d0, d1);
+    assert_eq!(t.0, 5);
+    assert_eq!(t.1, 6);
 
-    let e = E::C { x: 1, y: 2 };
-    let _ = thread_aware::ThreadAware::relocated(e, d0, d1);
+    let mut e = E::C { x: 1, y: 2 };
+    thread_aware::ThreadAware::relocated(&mut e, d0, d1);
 
     // removed adapter test; basic derive coverage above is sufficient
 }

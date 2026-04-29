@@ -87,9 +87,9 @@ impl From<ErrorKind> for RecoveryInfo {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
-
     use testing_aids::ALL_ERROR_KINDS;
+
+    use super::*;
 
     #[cfg_attr(miri, ignore)]
     #[test]

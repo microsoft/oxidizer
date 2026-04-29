@@ -31,7 +31,7 @@ pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldA
 mod struct_gen;
 
 use enum_gen::build_enum_body;
-use field_attrs::{FieldAttrCfg, is_phantom_data};
+use field_attrs::is_phantom_data;
 use struct_gen::build_struct_body;
 
 /// Core implementation used by both `thread_aware_macros` and `oxidizer_macros`.
@@ -75,22 +75,11 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
 
     Ok(quote! {
         impl #impl_generics #thread_aware_path for #name #ty_generics #where_clause {
-            #[allow(clippy::redundant_clone, reason = "macro generated pattern moves each field once")]
-            fn relocated(self, source: #affinity_path, destination: #pinned_affinity_path) -> Self {
+            fn relocated(&mut self, source: #affinity_path, destination: #pinned_affinity_path) {
                 #body
             }
         }
     })
-}
-
-pub(crate) fn transfer_expr(ident: &syn::Ident, cfg: &FieldAttrCfg, root_path: &Path) -> TokenStream2 {
-    if cfg.skip {
-        quote! { #ident }
-    } else {
-        let mut path = root_path.clone();
-        path.segments.push(parse_quote!(ThreadAware));
-        quote! { #path::relocated(#ident, source, destination) }
-    }
 }
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {

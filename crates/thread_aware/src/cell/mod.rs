@@ -60,27 +60,26 @@ use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
 /// # }
 /// #
 /// # impl ThreadAware for Counter {
-/// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-/// #         Self {
-/// #             // Initialize a new value in the destination affinity independent
-/// #             // of the source affinity.
-/// #             value: std::sync::Arc::new(AtomicI32::new(0)),
-/// #         }
+/// #     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+/// #         // Initialize a new value in the destination affinity independent
+/// #         // of the source affinity.
+/// #         self.value = std::sync::Arc::new(AtomicI32::new(0));
 /// #     }
 /// # }
 ///
-/// let arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
+/// let mut arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
 /// let arc_affinity1_clone = arc_affinity1.clone();
 ///
 /// arc_affinity1.increment_by(42);
 /// assert_eq!(arc_affinity1.value(), 42);
 ///
-/// let arc_affinity2 = arc_affinity1.relocated(affinity1, affinity2);
-/// assert_eq!(arc_affinity2.value(), 0);
+/// arc_affinity1.relocated(affinity1, affinity2);
+/// assert_eq!(arc_affinity1.value(), 0);
 /// assert_eq!(arc_affinity1_clone.value(), 42);
 ///
-/// arc_affinity2.increment_by(11);
-/// let arc_affinity2_clone = arc_affinity1_clone.relocated(affinity1, affinity2);
+/// arc_affinity1.increment_by(11);
+/// let mut arc_affinity2_clone = arc_affinity1_clone;
+/// arc_affinity2_clone.relocated(affinity1, affinity2);
 /// assert_eq!(arc_affinity2_clone.value(), 11);
 /// ```
 #[derive(Debug)]
@@ -186,12 +185,10 @@ where
     /// #     }
     /// # }
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-    /// #         Self {
-    /// #             // Initialize a new value in the destination affinity independent
-    /// #             // of the source affinity.
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
+    /// #     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+    /// #         // Initialize a new value in the destination affinity independent
+    /// #         // of the source affinity.
+    /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
     ///
@@ -215,9 +212,7 @@ where
         }
 
         impl<T> ThreadAware for Ctor<T> {
-            fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-                self
-            }
+            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
         }
 
         impl<T> RelocateFnOnce<T> for Ctor<T> {
@@ -293,12 +288,10 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-    /// #         Self {
-    /// #             // Initialize a new value in the destination affinity independent
-    /// #             // of the source affinity.
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
+    /// #     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+    /// #         // Initialize a new value in the destination affinity independent
+    /// #         // of the source affinity.
+    /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
     ///
@@ -341,8 +334,9 @@ where
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
             factory: Factory::Data(|data: &T, source, destination| {
-                let data = data.clone();
-                data.relocated(source, destination)
+                let mut data = data.clone();
+                data.relocated(source, destination);
+                data
             }),
         }
     }
@@ -487,65 +481,60 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T, S: Strategy> ThreadAware for Arc<T, S> {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
         let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
-        let (value, new_factory) = if let Some(value) = guard.get_clone(destination) {
-            (value, self.factory)
+        if let Some(value) = guard.get_clone(destination) {
+            self.value = value;
         } else {
             // We need to transfer or recreate the data
-            let (data, factory) = match &self.factory {
+            let (data, new_factory) = match &self.factory {
                 // We can use the closure to create new data
                 Factory::Closure(factory, factory_source_affinity) => {
-                    let factory_clone = (**factory).clone();
+                    let mut factory_clone = (**factory).clone();
 
                     // In case factory source is stored in factory, use that - it means we already transferred the factory
                     // once, so we know the original source affinity. Otherwise, use source as that means this is the first
                     // time we're transferring the Arc, so source is the source affinity of the factory as well.
                     let factory_source = factory_source_affinity.unwrap_or(source);
 
+                    factory_clone.relocated(factory_source, destination);
                     (
-                        sync::Arc::new(factory_clone.relocated(factory_source, destination).call_once()),
+                        sync::Arc::new(factory_clone.call_once()),
                         Factory::Closure(sync::Arc::clone(factory), Some(factory_source)),
                     )
                 }
 
                 // We can clone and transfer the data
-                Factory::Data(factory) => (sync::Arc::new(factory(&self.value, source, destination)), self.factory),
+                Factory::Data(factory) => (sync::Arc::new(factory(&self.value, source, destination)), self.factory.clone()),
 
                 Factory::Manual => {
                     // If we are in manual mode, we just clone the data
                     // This effectively makes it behave like `sync::Arc<T>`
-                    (sync::Arc::clone(&self.value), self.factory)
+                    (sync::Arc::clone(&self.value), self.factory.clone())
                 }
             };
 
-            let value = data;
+            let old_value = std::mem::replace(&mut self.value, data);
 
-            let old_data = guard.replace(destination, sync::Arc::<T>::clone(&value));
+            let old_data = guard.replace(destination, sync::Arc::<T>::clone(&self.value));
             assert!(
                 old_data.is_none(),
                 "Data already exists for the destination affinity. This should be unreachable due to the the early write lock."
             );
 
-            (value, factory)
+            if let MemoryAffinity::Pinned(source) = source {
+                // Only restore the value to the source slot when source and destination differ.
+                // If they are the same slot, the replacement above already stored the new value
+                // there; overwriting it here would corrupt storage with the stale pre-relocation value.
+                if source != destination {
+                    guard.replace(source, old_value);
+                }
+            }
+
+            self.factory = new_factory;
         };
 
-        if let MemoryAffinity::Pinned(source) = source {
-            // Only restore the value to the source slot when source and destination differ.
-            // If they are the same slot, the replacement above already stored the new value
-            // there; overwriting it here would corrupt storage with the stale pre-relocation value.
-            if source != destination {
-                guard.replace(source, self.value);
-            }
-        }
-
         drop(guard);
-
-        Self {
-            storage: self.storage,
-            value,
-            factory: new_factory,
-        }
     }
 }

@@ -91,11 +91,8 @@ impl Default for InactiveClock<Isolated> {
 }
 
 impl ThreadAware for InactiveClock<Isolated> {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        Self {
-            state: self.state.relocated(source, destination),
-            _marker: PhantomData,
-        }
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.state.relocated(source, destination);
     }
 }
 

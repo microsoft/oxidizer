@@ -31,8 +31,10 @@
 //! let root = InactiveClock::default();
 //!
 //! // Clone and relocate to each thread's affinity
-//! let inactive_1 = root.clone().relocated(affinities[0].into(), affinities[0]);
-//! let inactive_2 = root.relocated(affinities[1].into(), affinities[1]);
+//! let mut inactive_1 = root.clone();
+//! inactive_1.relocated(affinities[0].into(), affinities[0]);
+//! let mut inactive_2 = root;
+//! inactive_2.relocated(affinities[1].into(), affinities[1]);
 //!
 //! // On thread 1: activate and drive timers independently
 //! let (clock_1, driver_1) = inactive_1.activate();

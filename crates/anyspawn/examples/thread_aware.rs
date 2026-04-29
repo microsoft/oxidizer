@@ -37,17 +37,13 @@ async fn main() {
     // `Scheduler` whose processor index matches the destination core.
     let affinities = pinned_affinities(&[1, 1]);
 
-    let _relocated0 = spawner
-        .clone()
-        .relocated(MemoryAffinity::Unknown, affinities[0])
-        .spawn(async { 1 + 1 })
-        .await;
+    let mut relocated0 = spawner.clone();
+    relocated0.relocated(MemoryAffinity::Unknown, affinities[0]);
+    let _relocated0 = relocated0.spawn(async { 1 + 1 }).await;
 
-    let _relocated1 = spawner
-        .clone()
-        .relocated(MemoryAffinity::Unknown, affinities[1])
-        .spawn(async { 1 + 1 })
-        .await;
+    let mut relocated1 = spawner.clone();
+    relocated1.relocated(MemoryAffinity::Unknown, affinities[1]);
+    let _relocated1 = relocated1.spawn(async { 1 + 1 }).await;
 }
 
 /// Per-core scheduler data relocated by the [`ThreadAware`] system.
@@ -67,7 +63,7 @@ impl Scheduler {
 }
 
 impl ThreadAware for Scheduler {
-    fn relocated(self, _source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        Self(Some(destination.processor_index()))
+    fn relocated(&mut self, _source: MemoryAffinity, destination: PinnedAffinity) {
+        self.0 = Some(destination.processor_index());
     }
 }

@@ -52,9 +52,7 @@ impl<T> DerefMut for Unaware<T> {
 }
 
 impl<T> ThreadAware for Unaware<T> {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-        self
-    }
+    fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
 }
 
 impl<T> Unaware<T> {
@@ -179,23 +177,23 @@ mod tests {
         let destination = affinities[1];
 
         // Test with simple type
-        let value = Unaware(42);
-        let relocated = value.relocated(source, destination);
-        assert_eq!(relocated.0, 42);
+        let mut value = Unaware(42);
+        value.relocated(source, destination);
+        assert_eq!(value.0, 42);
 
         // Test with String
-        let value = Unaware("test string".to_string());
-        let relocated = value.relocated(source, destination);
-        assert_eq!(relocated.0, "test string");
+        let mut value = Unaware("test string".to_string());
+        value.relocated(source, destination);
+        assert_eq!(value.0, "test string");
 
         // Test with complex type (HashMap)
         let mut map = HashMap::new();
         map.insert("key1", 100);
         map.insert("key2", 200);
-        let value = Unaware(map);
-        let relocated = value.relocated(source, destination);
-        assert_eq!(relocated.0.get("key1"), Some(&100));
-        assert_eq!(relocated.0.get("key2"), Some(&200));
+        let mut value = Unaware(map);
+        value.relocated(source, destination);
+        assert_eq!(value.0.get("key1"), Some(&100));
+        assert_eq!(value.0.get("key2"), Some(&200));
     }
 
     #[test]
@@ -247,7 +245,8 @@ mod tests {
         let source = affinities[0].into();
         let destination = affinities[1];
 
-        let relocated = unaware_wrapper.relocated(source, destination);
+        let mut relocated = unaware_wrapper;
+        relocated.relocated(source, destination);
 
         // Both should still point to the same underlying data
         // Original + clone in wrapper = 2, relocated is a copy (since Unaware<Arc<_>> implements Copy)
@@ -294,7 +293,8 @@ mod tests {
         let source = affinities[0].into();
         let destination = affinities[1];
 
-        let relocated = unaware_complex.relocated(source, destination);
+        let mut relocated = unaware_complex;
+        relocated.relocated(source, destination);
         assert_eq!(relocated.0.id, 1);
         assert_eq!(relocated.0.name, "test");
     }

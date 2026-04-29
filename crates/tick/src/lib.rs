@@ -271,9 +271,7 @@ macro_rules! thread_aware_move {
     ($($t:ty),+ $(,)?) => {
         $(
             impl thread_aware::ThreadAware for $t {
-                fn relocated(self, _source: thread_aware::affinity::MemoryAffinity, _destination: thread_aware::affinity::PinnedAffinity) -> Self {
-                    self
-                }
+                fn relocated(&mut self, _source: thread_aware::affinity::MemoryAffinity, _destination: thread_aware::affinity::PinnedAffinity) {}
             }
         )+
     };
