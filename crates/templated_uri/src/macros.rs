@@ -1,57 +1,55 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-/// Derives the `UriParam` trait for newtype wrappers around URI-safe types.
+/// Derives the `Escape` trait for newtype wrappers around URI-escaped types.
 ///
-/// This derive macro implements `UriParam` for tuple structs with exactly one field.
-/// The implementation calls `as_uri_safe()` on the inner type, making it suitable for
+/// This derive macro implements `Escape` for tuple structs with exactly one field.
+/// The implementation calls `escape()` on the inner type, making it suitable for
 /// use in URI templates with standard `{param}` (percent-encoded) placeholders.
 ///
 /// # Requirements
 ///
 /// - Must be a tuple struct (newtype pattern) with exactly one field
-/// - The inner type must implement [`UriParam`]
+/// - The inner type must implement [`Escape`]
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
-/// # use templated_uri::{UriParam, UriSafeString};
-/// #[derive(UriParam)]
-/// struct UserId(UriSafeString);
+/// # use templated_uri::{Escape, EscapedString};
+/// #[derive(Escape)]
+/// struct UserId(EscapedString);
 /// ```
 ///
 /// This allows `UserId` to be used in URI templates where it will be properly encoded.
-pub use templated_uri_macros::UriParam;
-/// Derives the `UriUnsafeParam` trait for newtype wrappers with unrestricted characters.
+pub use templated_uri_macros::Escape;
+/// Derives [`Raw`](crate::Raw) for a newtype, delegating to the inner
+/// field's [`Display`](std::fmt::Display) impl.
 ///
-/// This derive macro implements `UriUnsafeParam` for tuple structs with exactly one field.
-/// The implementation delegates to the inner field's [`Display`](std::fmt::Display) impl, making it suitable for use in
-/// URI templates with unrestricted `{+param}` placeholders that allow reserved characters.
+/// Use this for types meant to fill RFC 6570 reserved-expansion placeholders (`{+param}`),
+/// where reserved characters like `/` must be emitted verbatim rather than percent-encoded.
+/// For ordinary `{param}` placeholders, derive [`Escape`] instead.
 ///
 /// # Requirements
 ///
 /// - Must be a tuple struct (newtype pattern) with exactly one field
 /// - The inner type must implement [`Display`](std::fmt::Display)
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
-/// use templated_uri::UriUnsafeParam;
+/// use templated_uri::Raw;
 ///
-/// #[derive(UriUnsafeParam)]
+/// #[derive(Raw)]
 /// struct PathSegment(String);
 /// ```
-///
-/// This allows `PathSegment` to be used in URI templates with `{+param}` syntax where
-/// reserved characters like `/` should be preserved rather than percent-encoded.
-pub use templated_uri_macros::UriUnsafeParam;
+pub use templated_uri_macros::Raw;
 /// Generates URI templating and data privacy implementations for structs and enums.
 ///
 /// This macro processes RFC 6570 URI templates and generates implementations for:
-/// - `TemplatedPathAndQuery`: Methods for URI template expansion and formatting
+/// - `PathAndQueryTemplate`: Methods for URI template expansion and formatting
 /// - `Debug`: Custom debug representation showing the template
 /// - `RedactedDisplay`: Data privacy-aware display with selective field redaction
-/// - `From<T> for TargetPathAndQuery`: Conversion to target path and query
+/// - `From<T> for PathAndQuery`: Conversion to a URI path
 ///
 /// # Struct Usage
 ///
@@ -68,7 +66,7 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// ## Template Syntax
 ///
 /// Supports RFC 6570 URI template operators:
-/// - `{param}`: URI-safe encoding (percent-encoded)
+/// - `{param}`: URI-escaped (percent-encoded)
 /// - `{+param}`: Unrestricted (allows reserved characters like `/`)
 /// - `{/param1,param2}`: Path segment expansion (`/value1/value2`)
 /// - `{?param1,param2}`: Query parameter expansion (`?param1=value1&param2=value2`)
@@ -80,18 +78,18 @@ pub use templated_uri_macros::UriUnsafeParam;
 /// - `#[unredacted]`: Disable redaction for a specific field
 ///
 /// ```ignore
-/// # use templated_uri::{templated, UriSafeString};
+/// # use templated_uri::{templated, EscapedString};
 /// #[templated(template = "/{org_id}/product/{product_id}")]
 /// struct ProductPath {
 ///     org_id: OrgId,           // Will be redacted
 ///     #[unredacted]
-///     product_id: UriSafeString, // Will NOT be redacted
+///     product_id: EscapedString, // Will NOT be redacted
 /// }
 /// ```
 ///
 /// # Enum Usage
 ///
-/// For enums, each variant must contain exactly one field that implements `TemplatedPathAndQuery`.
+/// For enums, each variant must contain exactly one field that implements `PathAndQueryTemplate`.
 /// The macro generates delegating implementations that forward to the inner type.
 ///
 /// ```ignore

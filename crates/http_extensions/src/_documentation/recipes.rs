@@ -155,7 +155,7 @@
 //! # Use Templated URIs
 //!
 //! Prefer [`templated`] URI types over raw `format!` strings.
-//! Templated URIs are **safer** ([`UriSafeString`] rejects
+//! Templated URIs are **stricter** ([`EscapedString`] rejects
 //! reserved characters), **RFC 6570 compliant**, and **faster** (fewer allocations
 //! than `format!`-based construction). They also **enhance telemetry**: the template string is
 //! automatically attached to every request so logging and metrics handlers can group
@@ -248,6 +248,6 @@
 #[expect(unused_imports, reason = "simplifies the docs")]
 use crate::*;
 #[expect(unused_imports, reason = "simplifies the docs")]
-use http::*;
+use ::http::*;
 #[expect(unused_imports, reason = "simplifies the docs")]
 use templated_uri::*;
