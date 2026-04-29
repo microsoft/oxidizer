@@ -67,12 +67,10 @@ docs:
     cargo +$env:RUST_NIGHTLY doc {{ target_package }} --no-deps --all-features --locked --open
 
 # Run all stand-alone example binaries to ensure they complete with exit code 0.
-[script]
-examples PROFILE='dev':
-    $ErrorActionPreference = "Stop"
-    $PSNativeCommandUseErrorActionPreference = $true
-
-    . ./scripts/run-examples.ps1 -Package "{{ package }}" -CargoProfile "{{ PROFILE }}"
+# Invoked via `pwsh -File` (not [script] dot-sourcing) so the script's `exit N`
+# propagates a non-zero exit code through just on both Windows and Linux.
+examples PROFILE='dev' EXCLUDE='':
+    pwsh -NoLogo -NoProfile -NonInteractive -File ./scripts/run-examples.ps1 -Package "{{ package }}" -CargoProfile "{{ PROFILE }}" -Exclude "{{ EXCLUDE }}"
 
 hack:
     cargo hack {{ target_package }} check --feature-powerset --locked
