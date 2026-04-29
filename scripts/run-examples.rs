@@ -18,12 +18,6 @@ argh = "0.1"
 //! excludes packages using cargo's native `--exclude` syntax via a single
 //! `--exclude "--exclude foo --exclude bar"` argument. Each example runs
 //! with `IS_TESTING=1` and a 30-second timeout.
-//!
-//! This replaces `scripts/run-examples.ps1` with a Rust implementation so
-//! that exit codes propagate cleanly through `just` and CI on every
-//! platform — see AB#7306508 / PR #394 for the original PowerShell-side
-//! issue (dot-sourced scripts overriding `$PSNativeCommandUseError`-prefs
-//! and child `pwsh` processes swallowing non-zero exit codes on Linux).
 
 use std::io::Read;
 use std::process::{Command, ExitCode, Stdio};
@@ -119,7 +113,7 @@ fn run(args: &Args) -> Result<(), AppError> {
             let pkg = packages
                 .iter()
                 .find(|p| p.name == args.package)
-                .ok_or_else(|| app_err!("package '{}' not found in workspace", args.package))?;
+                .into_app_err_with(|| format!("package '{}' not found in workspace", args.package))?;
             (vec![pkg], vec!["--package".to_string(), args.package.clone()])
         };
 
@@ -254,8 +248,8 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, Ap
 
     // Drain stdout/stderr in background threads to avoid pipe-buffer-full
     // deadlocks on long-running examples.
-    let mut stdout_pipe = child.stdout.take().ok_or_else(|| app_err!("child stdout missing"))?;
-    let mut stderr_pipe = child.stderr.take().ok_or_else(|| app_err!("child stderr missing"))?;
+    let mut stdout_pipe = child.stdout.take().into_app_err("child stdout missing")?;
+    let mut stderr_pipe = child.stderr.take().into_app_err("child stderr missing")?;
     let stdout_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
         let mut buf = Vec::new();
         stdout_pipe.read_to_end(&mut buf)?;
@@ -292,11 +286,11 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, Ap
     // we either let it exit naturally or killed it above).
     let stdout = stdout_handle
         .join()
-        .map_err(|_| app_err!("stdout reader thread panicked"))?
+        .into_app_err("stdout reader thread panicked")?
         .into_app_err("failed to read child stdout")?;
     let stderr = stderr_handle
         .join()
-        .map_err(|_| app_err!("stderr reader thread panicked"))?
+        .into_app_err("stderr reader thread panicked")?
         .into_app_err("failed to read child stderr")?;
 
     Ok(RunResult { outcome, stdout, stderr })
@@ -304,17 +298,19 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, Ap
 
 fn print_captured_output(stdout: &[u8], stderr: &[u8]) {
     if !stdout.is_empty() {
-        println!("--- stdout ---");
-        print!("{}", String::from_utf8_lossy(stdout));
+        let mut stdout_lock = stdout().lock();
+        _ = stdout_lock.write_all(b"--- stdout ---\n");
+        _ = stdout_lock.write_all(stdout);
         if !stdout.ends_with(b"\n") {
-            println!();
+            _ = stdout_lock.write_all(b"\n");
         }
     }
     if !stderr.is_empty() {
-        println!("--- stderr ---");
-        print!("{}", String::from_utf8_lossy(stderr));
+        let mut stderr_lock = stderr().lock();
+        _ = stderr_lock.write_all(b"--- stderr ---\n");
+        _ = stderr_lock.write_all(stderr);
         if !stderr.ends_with(b"\n") {
-            println!();
+            _ = stderr_lock.write_all(b"\n");
         }
     }
 }
