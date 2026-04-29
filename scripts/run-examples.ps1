@@ -1,7 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# Runs all stand-alone example binaries in the workspace (or the specified package).
+# Runs all stand-alone example binaries in the workspace, optionally excluding
+# packages that cargo-delta has determined to be unaffected by recent changes.
 # Each example has a 30-second timeout to avoid misbehaving examples causing trouble.
 # Supports both .rs files and subdirectories with main.rs files.
 # Sets IS_TESTING=1 environment variable for each example run, to allow "test mode" differentiation.
@@ -10,13 +11,30 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CargoProfile,
 
+    # Run examples for a single workspace package only. Intended for the local
+    # `just package=foo examples` flow. Mutually exclusive with -Exclude.
     [Parameter(Mandatory = $false)]
-    [string]$Package = ""
+    [string]$Package = "",
+
+    # Raw cargo-style excludes string, e.g. "--exclude foo --exclude bar".
+    # This matches the format produced by `impact -f cargo-excludes` and used
+    # by other workflow steps (cargo build/test/doc), so the YAML can pass
+    # `${{ needs.delta.outputs.exclude_not_affected }}` directly without any
+    # additional reshaping. Using --workspace + --exclude (rather than -p X
+    # -p Y) avoids cargo's ambiguity between workspace members and remote
+    # crates of the same name.
+    [Parameter(Mandatory = $false)]
+    [string]$Exclude = ""
 )
 
 $ErrorActionPreference = "Stop"
 # We disable this because we manually handle exit codes and do not want to fail fast.
 $PSNativeCommandUseErrorActionPreference = $false
+
+if ($Package -ne "" -and $Exclude -ne "") {
+    Write-Host "✗ -Package and -Exclude are mutually exclusive." -ForegroundColor Red
+    exit 1
+}
 
 # We will make the assumption that all the packages are in the "crates" folder
 $packages_root = Join-Path $PSScriptRoot "../crates"
@@ -33,20 +51,50 @@ $total_count = 0
 $success_count = 0
 $timeout_seconds = 30
 
-# Determine which packages to process
-$packages_to_process = @()
-if ($Package -eq "") {
-    # Get all workspace members (assuming here they are just subdirectories).
-    $workspace_members = Get-ChildItem -Path $packages_root -Directory | Where-Object { Test-Path (Join-Path $_.FullName "Cargo.toml") }
-    $packages_to_process = $workspace_members | ForEach-Object { $_.Name }
+# Workspace members live as subdirectories of crates/ with a Cargo.toml.
+$workspace_members = @(Get-ChildItem -Path $packages_root -Directory | Where-Object { Test-Path (Join-Path $_.FullName "Cargo.toml") } | ForEach-Object { $_.Name })
+
+if ($Package -ne "") {
+    # Single-package mode: scope cargo to just this package (unambiguous since
+    # we name a single workspace member).
+    $packages_to_process = @($Package)
+    $excluded_packages = @()
+    $cargo_scope_args = @("--package", $Package)
 }
 else {
-    $packages_to_process = @($Package)
+    # Workspace mode: forward the cargo-excludes string to cargo and compute
+    # the matching local iteration set.
+    $excluded_packages = @($Exclude -split '\s+' | Where-Object { $_ -and $_ -ne '--exclude' })
+    $packages_to_process = @($workspace_members | Where-Object { $excluded_packages -notcontains $_ })
+    $cargo_scope_args = @("--workspace")
+    foreach ($pkg in $excluded_packages) {
+        $cargo_scope_args += @("--exclude", $pkg)
+    }
 }
 
 Write-Host "Running examples for packages: $($packages_to_process -join ', ')"
+if ($excluded_packages.Count -gt 0) {
+    Write-Host "Excluded packages: $($excluded_packages -join ', ')"
+}
 Write-Host "Timeout per example: $timeout_seconds seconds"
 Write-Host "Cargo profile: $CargoProfile"
+Write-Host ""
+
+if ($packages_to_process.Count -eq 0) {
+    Write-Host "No packages to process after applying excludes; nothing to do." -ForegroundColor DarkGray
+    exit 0
+}
+
+# Pre-build all examples for the selected packages so that the per-example
+# timeout below only covers execution (and a fingerprint check), not the
+# compile + link cost. On Windows debug builds the link step alone for the
+# first example in a package can blow past the 30 s timeout.
+Write-Host "Pre-building examples for selected packages..." -ForegroundColor Cyan
+& cargo build --examples --profile $CargoProfile --all-features --locked @cargo_scope_args
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "✗ Pre-build of examples failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
 Write-Host ""
 
 foreach ($pkg in $packages_to_process) {

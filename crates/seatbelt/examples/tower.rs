@@ -39,7 +39,10 @@ async fn main() -> Result<(), ohno::AppError> {
                 .timeout_error(|_args| app_err!("timeout")),
         )
         .service_fn(|request| async move {
-            if fastrand::i16(0..10) > 4 {
+            // Threshold deliberately set so the random check can never fire,
+            // keeping the example deterministic for CI while preserving the
+            // shape of a realistic "occasionally fails" inner service.
+            if fastrand::i16(0..10) > 10 {
                 bail!("random failure")
             }
             Ok(request)

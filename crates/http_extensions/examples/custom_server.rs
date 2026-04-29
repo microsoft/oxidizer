@@ -8,6 +8,7 @@
 //! `layered` to log incoming requests and outgoing responses.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
@@ -20,13 +21,17 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
 use layered::{Execute, Intercept, Stack};
 use ohno::ErrorExt;
-use tick::Clock;
+use tick::{Clock, FutureExt};
 use tokio::net::TcpListener;
+
+const SERVER_LIFETIME: Duration = Duration::from_secs(2);
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
+    let clock = Clock::new_tokio();
+
     // In a real application, the application framework would provide the global memory pool.
-    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio());
+    let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
     let body_builder_clone = body_builder.clone();
 
     // Define an execution stack of middlewares
@@ -46,9 +51,15 @@ async fn main() -> Result<(), ohno::AppError> {
         }),
     );
 
-    serve_with_hyper(stack.into_service(), body_builder_clone).await?;
+    let Ok(res) = serve_with_hyper(stack.into_service(), body_builder_clone)
+        .timeout(&clock, SERVER_LIFETIME)
+        .await
+    else {
+        println!("automatically shutting down the server after {} seconds", SERVER_LIFETIME.as_secs());
+        return Ok(());
+    };
 
-    Ok(())
+    res
 }
 
 /// Maps a hyper [`Incoming`] body to an [`HttpBody`][http_extensions::HttpBody]
