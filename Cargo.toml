@@ -26,7 +26,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.3.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.1.1" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.2.0" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.1.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.1.0" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.1.0" }

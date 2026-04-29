@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, CacheTier, FallbackPromotionPolicy, TimeToRefresh};
+use cachet::{Cache, CacheEntry, CacheTier, InsertPolicy, TimeToRefresh};
 use cachet_tier::MockCache;
 use tick::Clock;
 
@@ -204,11 +204,7 @@ async fn fallback_builder_with_promotion_policy_always() {
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
 
-    let cache = Cache::builder::<String, i32>(clock)
-        .memory()
-        .fallback(fallback)
-        .promotion_policy(FallbackPromotionPolicy::always())
-        .build();
+    let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
     let key = "key".to_string();
     cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
@@ -225,8 +221,8 @@ async fn fallback_builder_with_promotion_policy_never() {
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
+        .insert_policy(InsertPolicy::never())
         .fallback(fallback)
-        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
 
     let key = "key".to_string();
@@ -246,10 +242,8 @@ async fn fallback_builder_with_promotion_policy_when_boxed() {
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
+        .insert_policy(InsertPolicy::when(move |entry: &CacheEntry<i32>| *entry.value() >= threshold))
         .fallback(fallback)
-        .promotion_policy(FallbackPromotionPolicy::when(move |entry: &CacheEntry<i32>| {
-            *entry.value() >= threshold
-        }))
         .build();
 
     let key = "key".to_string();
@@ -269,14 +263,14 @@ async fn nested_fallback_builder() {
     // L2 with its own fallback
     let l2 = Cache::builder::<String, i32>(clock.clone())
         .memory()
-        .fallback(l3)
-        .promotion_policy(FallbackPromotionPolicy::always());
+        .insert_policy(InsertPolicy::always())
+        .fallback(l3);
 
     // L1 with nested fallback
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
+        .insert_policy(InsertPolicy::never())
         .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
 
     let key = "key".to_string();

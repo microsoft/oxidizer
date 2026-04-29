@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
+use cachet::{Cache, CacheEntry, InsertPolicy};
 use cachet_tier::{CacheOp, MockCache};
 use tick::Clock;
 
@@ -128,8 +128,8 @@ fn fallback_builder_promotion_policy() {
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
+        .insert_policy(InsertPolicy::never())
         .fallback(fallback)
-        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
 
     block_on(async {
@@ -150,14 +150,14 @@ fn fallback_builder_nested_fallback() {
     // L2 with its own fallback
     let l2 = Cache::builder::<String, i32>(clock.clone())
         .memory()
-        .fallback(l3)
-        .promotion_policy(FallbackPromotionPolicy::always());
+        .insert_policy(InsertPolicy::always())
+        .fallback(l3);
 
     // L1 with nested fallback
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
+        .insert_policy(InsertPolicy::never())
         .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
 
     block_on(async {

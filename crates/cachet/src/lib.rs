@@ -182,7 +182,7 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
+//! use cachet::Cache;
 //! use tick::Clock;
 //! # async {
 //!
@@ -193,7 +193,6 @@
 //!     .memory()
 //!     .ttl(Duration::from_secs(60))
 //!     .fallback(l2)
-//!     .promotion_policy(FallbackPromotionPolicy::always())
 //!     .build();
 //! # };
 //! ```
@@ -257,6 +256,10 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
 pub use policy::InsertPolicy;
+
+/// Deprecated: Use [`InsertPolicy`] instead.
+#[deprecated(since = "0.2.0", note = "renamed to InsertPolicy")]
+pub type FallbackPromotionPolicy<V> = InsertPolicy<V>;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]

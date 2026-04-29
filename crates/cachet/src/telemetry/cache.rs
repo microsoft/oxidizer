@@ -179,7 +179,8 @@ impl CacheTelemetry {
             | CacheActivity::Inserted
             | CacheActivity::Invalidated
             | CacheActivity::Fallback
-            | CacheActivity::FallbackPromotion => emit_event!(info),
+            | CacheActivity::FallbackPromotion
+            | CacheActivity::Rejected => emit_event!(info),
             CacheActivity::Hit | CacheActivity::Miss | CacheActivity::RefreshHit | CacheActivity::Ok => {
                 emit_event!(debug);
             }
@@ -215,6 +216,7 @@ mod tests {
         assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
         assert_eq!(CacheActivity::FallbackPromotion.as_str(), "cache.fallback_promotion");
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
+        assert_eq!(CacheActivity::Rejected.as_str(), "cache.rejected");
     }
 
     #[cfg_attr(miri, ignore)]

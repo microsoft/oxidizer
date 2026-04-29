@@ -253,8 +253,8 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     ///
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
-    ///     .fallback(l2)
     ///     .insert_policy(InsertPolicy::always())
+    ///     .fallback(l2)
     ///     .build();
     /// ```
     #[must_use]
@@ -425,8 +425,8 @@ mod tests {
         let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .fallback(fb)
             .insert_policy(InsertPolicy::never())
+            .fallback(fb)
             .build();
         assert!(!cache.name().is_empty());
     }

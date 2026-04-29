@@ -50,7 +50,7 @@ impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
 /// ```no_run
 /// use std::time::Duration;
 ///
-/// use cachet::{Cache, FallbackPromotionPolicy};
+/// use cachet::Cache;
 /// use tick::Clock;
 ///
 /// let clock = Clock::new_tokio();
@@ -199,6 +199,7 @@ mod tests {
 
     use super::*;
     use crate::Cache;
+    use crate::InsertPolicy;
     use crate::telemetry::TelemetryConfig;
     use crate::wrapper::CacheWrapper;
 
@@ -208,7 +209,7 @@ mod tests {
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
         let telemetry = TelemetryConfig::new().build();
-        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry)
+        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default())
     }
 
     fn make_fallback_cache() -> TestFallbackCache {
@@ -239,8 +240,8 @@ mod tests {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
+            .insert_policy(InsertPolicy::always())
             .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::always())
             .build();
 
         // Primary should be empty initially
@@ -277,8 +278,8 @@ mod tests {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
+            .insert_policy(InsertPolicy::never())
             .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::never())
             .build();
 
         // Get should find in fallback but NOT promote
@@ -294,7 +295,7 @@ mod tests {
     /// Tests that `FallbackCacheInner` Debug output is correct.
     #[test]
     fn fallback_cachet_inner_debug() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
 
         let debug_str = format!("{cache:?}");
         assert_eq!(debug_str, "FallbackCache { inner: FallbackCacheInner { name: \"fallback\", .. } }");
@@ -328,8 +329,8 @@ mod tests {
 
         let cache = Cache::builder::<String, i32>(clock)
             .storage(primary_storage)
+            .insert_policy(InsertPolicy::when(is_positive))
             .fallback(fallback)
-            .promotion_policy(FallbackPromotionPolicy::when(is_positive))
             .build();
 
         // Get positive value - should be promoted
@@ -352,9 +353,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn policy_type_debug_formatting() {
-        let always = FallbackPromotionPolicy::<i32>::always();
-        let never = FallbackPromotionPolicy::<i32>::never();
-        let when = FallbackPromotionPolicy::<i32>::when(|_| true);
+        let always = InsertPolicy::<i32>::always();
+        let never = InsertPolicy::<i32>::never();
+        let when = InsertPolicy::<i32>::when(|_| true);
 
         let always_str = format!("{always:?}");
         let never_str = format!("{never:?}");
@@ -366,36 +367,36 @@ mod tests {
     }
 
     #[test]
-    fn promotion_policy_always() {
-        let policy = FallbackPromotionPolicy::<i32>::always();
+    fn insert_policy_always() {
+        let policy = InsertPolicy::<i32>::always();
         let entry = CacheEntry::new(42);
-        assert!(policy.should_promote(&entry));
+        assert!(policy.should_insert(&entry));
     }
 
     #[test]
-    fn promotion_policy_never() {
-        let policy = FallbackPromotionPolicy::<i32>::never();
+    fn insert_policy_never() {
+        let policy = InsertPolicy::<i32>::never();
         let entry = CacheEntry::new(42);
-        assert!(!policy.should_promote(&entry));
+        assert!(!policy.should_insert(&entry));
     }
 
     #[test]
-    fn promotion_policy_when() {
-        let policy = FallbackPromotionPolicy::<i32>::when(|e| *e.value() > 10);
-        assert!(policy.should_promote(&CacheEntry::new(42)));
-        assert!(!policy.should_promote(&CacheEntry::new(5)));
+    fn insert_policy_when() {
+        let policy = InsertPolicy::<i32>::when(|e| *e.value() > 10);
+        assert!(policy.should_insert(&CacheEntry::new(42)));
+        assert!(!policy.should_insert(&CacheEntry::new(5)));
     }
 
     #[test]
     fn fallback_cache_new_constructs() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
         assert_eq!(cache.inner.name, "fallback");
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_get_miss_both() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
         let result = cache.get(&"key".to_string()).await.unwrap();
         assert!(result.is_none());
     }
@@ -403,7 +404,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_insert_writes_both() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
         cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         // Both tiers should have the value
         let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
@@ -413,7 +414,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_invalidate() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
         cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         cache.invalidate(&"key".to_string()).await.unwrap();
         assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
@@ -422,7 +423,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_clear() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
         cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         cache.clear().await.unwrap();
         assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
@@ -431,7 +432,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fallback_len() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
         assert_eq!(cache.len().await.expect("len should return Ok"), 0);
         cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         assert_eq!(cache.len().await.expect("len should return Ok"), 1);
@@ -454,16 +455,15 @@ mod tests {
         let telemetry = TelemetryConfig::new().build();
         let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
 
-        let primary = CacheWrapper::new("primary", primary_mock, clock.clone(), None, telemetry.clone());
-        let fc = FallbackCache::new(
-            "test",
-            primary,
-            fallback_mock,
-            FallbackPromotionPolicy::always(),
-            clock,
-            Some(refresh),
-            telemetry,
+        let primary = CacheWrapper::new(
+            "primary",
+            primary_mock,
+            clock.clone(),
+            None,
+            telemetry.clone(),
+            InsertPolicy::default(),
         );
+        let fc = FallbackCache::new("test", primary, fallback_mock, clock, Some(refresh), telemetry);
 
         // Primary hit with stale cached_at should trigger background refresh
         let result = fc.get(&"key".to_string()).await.unwrap();
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn do_refresh_without_time_to_refresh_is_noop() {
-        let cache = make_fallback_cache(FallbackPromotionPolicy::always());
+        let cache = make_fallback_cache();
 
         // Calling do_refresh should silently return (exercise the else branch)
         cache.do_refresh(&"key".to_string());

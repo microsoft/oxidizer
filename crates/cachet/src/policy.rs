@@ -91,10 +91,10 @@ impl<V> InsertPolicy<V> {
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
-    ///     .fallback(l2)
     ///     .insert_policy(InsertPolicy::when(
     ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len,
     ///     ))
+    ///     .fallback(l2)
     ///     .build();
     /// ```
     pub fn when<F>(predicate: F) -> Self
