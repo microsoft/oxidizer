@@ -19,14 +19,13 @@ argh = "0.1"
 //! `--exclude "--exclude foo --exclude bar"` argument. Each example runs
 //! with `IS_TESTING=1` and a 30-second timeout.
 
-use std::io::{Read, Write};
-use std::process::{Command, ExitCode, Stdio};
-use std::sync::mpsc;
-use std::thread;
+use std::io::Write;
+use std::process::{Command, ExitCode};
 use std::time::Duration;
 
 use argh::FromArgs;
-use ohno::{AppError, IntoAppError, app_err, bail};
+use ohno::{AppError, IntoAppError, bail};
+use automation::{Outcome, run_with_timeout};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -55,19 +54,6 @@ struct Args {
     /// Empty string means "no excludes".
     #[argh(option, default = "String::new()")]
     exclude: String,
-}
-
-#[derive(Debug)]
-enum Outcome {
-    Success,
-    Failed(Option<i32>),
-    TimedOut,
-}
-
-struct RunResult {
-    outcome: Outcome,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
 }
 
 fn main() -> ExitCode {
@@ -236,95 +222,6 @@ fn run(args: &Args) -> Result<(), AppError> {
     }
 
     Ok(())
-}
-
-/// Spawns `cmd` with stdout/stderr captured, blocks until the child exits or
-/// the timeout elapses, and kills the child on timeout. A dedicated wait thread
-/// blocks on `child.wait()` and forwards the result via a channel so the caller
-/// uses `recv_timeout` instead of polling with short sleeps. Captured output is
-/// returned alongside the outcome so callers can print it on failure/timeout
-/// only — keeping the CI log readable on the happy path while still surfacing
-/// diagnostics when something goes wrong.
-fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, AppError> {
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().into_app_err("failed to spawn child process")?;
-
-    // Drain stdout/stderr in background threads to avoid pipe-buffer-full
-    // deadlocks on long-running examples.
-    let mut stdout_pipe = child.stdout.take().into_app_err("child stdout missing")?;
-    let mut stderr_pipe = child.stderr.take().into_app_err("child stderr missing")?;
-    let stdout_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
-        let mut buf = Vec::new();
-        stdout_pipe.read_to_end(&mut buf)?;
-        Ok(buf)
-    });
-    let stderr_handle = thread::spawn(move || -> std::io::Result<Vec<u8>> {
-        let mut buf = Vec::new();
-        stderr_pipe.read_to_end(&mut buf)?;
-        Ok(buf)
-    });
-
-    // Save the PID before moving `child` into the wait thread so we can send
-    // a kill signal on timeout without needing ownership of `child`.
-    let pid = child.id();
-
-    // Spawn a thread that blocks on child.wait() and forwards the exit status
-    // via a channel. The calling thread then uses recv_timeout as the timer,
-    // eliminating polling with short sleeps entirely.
-    let (tx, rx) = mpsc::channel();
-    let wait_handle = thread::spawn(move || {
-        let _ = tx.send(child.wait());
-    });
-
-    let outcome = match rx.recv_timeout(timeout) {
-        Ok(Ok(status)) => {
-            if status.success() {
-                Outcome::Success
-            } else {
-                Outcome::Failed(status.code())
-            }
-        }
-        Ok(Err(e)) => return Err(e).into_app_err("failed to wait for child process"),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            // Timer fired: kill the child and wait for the wait thread to observe
-            // it die so all resources are cleaned up before we return.
-            kill_by_pid(pid);
-            let _ = wait_handle.join();
-            Outcome::TimedOut
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            bail!("wait thread exited unexpectedly without sending a result");
-        }
-    };
-
-    // Reader threads finish once the child closes its pipes (always true after
-    // natural exit or after the kill above).
-    let stdout = stdout_handle
-        .join()
-        .map_err(|_| app_err!("stdout reader thread panicked"))?
-        .into_app_err("failed to read child stdout")?;
-    let stderr = stderr_handle
-        .join()
-        .map_err(|_| app_err!("stderr reader thread panicked"))?
-        .into_app_err("failed to read child stderr")?;
-
-    Ok(RunResult { outcome, stdout, stderr })
-}
-
-/// Kills a process by its PID without requiring ownership of the
-/// [`std::process::Child`] handle. Used to terminate a child whose `Child`
-/// value has been moved into a wait thread.
-fn kill_by_pid(pid: u32) {
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
-    }
-    #[cfg(windows)]
-    {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
-            .status();
-    }
 }
 
 fn print_captured_output(stdout: &[u8], stderr: &[u8]) {
