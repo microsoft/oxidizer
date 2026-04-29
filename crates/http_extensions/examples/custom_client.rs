@@ -18,7 +18,7 @@ use tick::Clock;
 async fn main() -> Result<(), ohno::AppError> {
     // Create a custom client that implements the Service trait, configured with a base URI.
     // The client uses the `Routing` feature internally to attach the base URI to requests.
-    let client = CustomClient::new(BaseUri::from_uri_static("http://localhost:8080"));
+    let client = CustomClient::new(BaseUri::from_static("http://localhost:8080"));
 
     // Use the client to send a request, providing only the relative path: the base URI is
     // attached by the client's routing.
