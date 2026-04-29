@@ -1,0 +1,9 @@
+[package]
+name = "xc_request_handling_framework"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+autoresolve = { workspace = true, features = ["macros"] }
+xc_runtime = { path = "../runtime" }

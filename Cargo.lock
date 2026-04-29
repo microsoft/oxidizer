@@ -2520,6 +2520,66 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
+name = "xc_basic_app"
+version = "0.0.0"
+dependencies = [
+ "autoresolve",
+ "xc_http",
+ "xc_io_driver",
+ "xc_runtime",
+ "xc_scheduler",
+]
+
+[[package]]
+name = "xc_http"
+version = "0.0.0"
+dependencies = [
+ "autoresolve",
+ "xc_io_driver",
+ "xc_scheduler",
+]
+
+[[package]]
+name = "xc_io_driver"
+version = "0.0.0"
+
+[[package]]
+name = "xc_request_handling_app"
+version = "0.0.0"
+dependencies = [
+ "autoresolve",
+ "xc_http",
+ "xc_io_driver",
+ "xc_request_handling_framework",
+ "xc_runtime",
+ "xc_scheduler",
+]
+
+[[package]]
+name = "xc_request_handling_framework"
+version = "0.0.0"
+dependencies = [
+ "autoresolve",
+ "xc_runtime",
+]
+
+[[package]]
+name = "xc_runtime"
+version = "0.0.0"
+dependencies = [
+ "autoresolve",
+ "xc_scheduler",
+]
+
+[[package]]
+name = "xc_scheduler"
+version = "0.0.0"
+dependencies = [
+ "autoresolve",
+ "xc_io_driver",
+]
+
+[[package]]
 name = "xxhash-rust"
 version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"

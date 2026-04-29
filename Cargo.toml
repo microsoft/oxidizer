@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "crates/autoresolve/tests/cross_crate/*"]
 
 [workspace.package]
 edition = "2024"
@@ -24,6 +24,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 
 # local dependencies
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.1.0" }
+autoresolve = { path = "crates/autoresolve", default-features = false, version = "0.1.0" }
 autoresolve_macros = { path = "crates/autoresolve_macros", default-features = false, version = "0.1.0" }
 autoresolve_macros_impl = { path = "crates/autoresolve_macros_impl", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.0" }
