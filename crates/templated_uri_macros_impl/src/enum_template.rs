@@ -39,16 +39,16 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         .collect();
 
     quote! {
-        impl ::templated_uri::TemplatedPathAndQuery for #ident {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
-                match self {
-                    #(#variant_matches => template_variant.rfc_6570_template()),*
-                }
-            }
-
+        impl ::templated_uri::PathAndQueryTemplate for #ident {
             fn template(&self) -> &'static core::primitive::str {
                 match self {
                     #(#variant_matches => template_variant.template()),*
+                }
+            }
+
+            fn format_template(&self) -> &'static core::primitive::str {
+                match self {
+                    #(#variant_matches => template_variant.format_template()),*
                 }
             }
 
@@ -58,15 +58,15 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
                 match self {
-                    #(#variant_matches => template_variant.to_uri_string()),*
+                    #(#variant_matches => template_variant.to_path_and_query()),*
                 }
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::uri::PathAndQuery, ::templated_uri::ValidationError> {
+            fn render(&self) -> ::std::string::String {
                 match self {
-                    #(#variant_matches => template_variant.to_path_and_query()),*
+                    #(#variant_matches => template_variant.render()),*
                 }
             }
         }
@@ -82,7 +82,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         impl ::data_privacy::RedactedDisplay for #ident {
             fn fmt(&self, engine: &::data_privacy::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 match self {
-                    #(#variant_matches => template_variant.fmt(engine, f)?),*
+                    #(#variant_matches => ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?),*
                 }
                 Ok(())
             }
@@ -96,9 +96,9 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
             }
         )*
 
-        impl From<#ident> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<#ident> for ::templated_uri::PathAndQuery {
             fn from(value: #ident) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(::std::sync::Arc::new(value))
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
     }

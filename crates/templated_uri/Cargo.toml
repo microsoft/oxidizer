@@ -3,7 +3,7 @@
 
 [package]
 name = "templated_uri"
-description = "Standards-compliant URI handling with templating, safety validation, and data classification"
+description = "Standards-compliant URI handling with templating, validation, and data classification"
 version = "0.1.2"
 readme = "README.md"
 keywords = ["oxidizer", "url", "parsing", "templates", "uri"]
@@ -32,8 +32,8 @@ allowed_external_types = [
     "http::uri::scheme::Scheme",
     "http::uri::Uri",
     "templated_uri_macros::templated",
-    "templated_uri_macros::UriParam",
-    "templated_uri_macros::UriUnsafeParam",
+    "templated_uri_macros::Escape",
+    "templated_uri_macros::Raw",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
     "ohno::error_label::ErrorLabel",

@@ -5,6 +5,9 @@
 - ✨ Features
 
   - add `routing` module with `Routing`, `RoutingContext`, and `BaseUriConflict` for resolving the target `BaseUri` of outgoing requests
+- ⚠️ Breaking
+
+  - Rename `UrlTemplateLabel` to `UriTemplateLabel` and `RequestExt::url_template_label()` / `ExtensionsExt::url_template_label()` to `uri_template_label()`.
 
 ## [0.3.2] - 2026-04-22
 

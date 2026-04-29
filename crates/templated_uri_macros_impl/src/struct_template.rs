@@ -121,7 +121,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         crate::bail!(ident, "Excess values in struct: {excess_values:?}")
     }
 
-    // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `UriSafe`).
+    // Determine which parameters are unrestricted (Can contain any value) and which are restricted (Must be `Escaped`).
     let unrestricted_params: HashSet<String> = template_params
         .iter()
         .filter(|p| p.is_unrestricted)
@@ -137,11 +137,11 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             let is_restricted = is_restricted(ident);
             let ty_span = f.ty.span();
 
-            // Restricted fields use .as_uri_safe(), unrestricted use .as_display()
+            // Restricted fields use .escape(), unrestricted use .raw()
             if is_restricted {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::UriParam::as_uri_safe(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::Escape::escape(&self.#ident); }
             } else {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::UriUnsafeParam::as_display(&self.#ident); }
+                quote_spanned! { ty_span => let #ident = ::templated_uri::Raw::raw(&self.#ident); }
             }
         })
         .collect();
@@ -154,12 +154,12 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     );
 
     quote! {
-        impl ::templated_uri::TemplatedPathAndQuery for #ident {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+        impl ::templated_uri::PathAndQueryTemplate for #ident {
+            fn template(&self) -> &'static core::primitive::str {
                 #input_template
             }
 
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 #format_template
             }
 
@@ -167,15 +167,14 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
                 #label_impl
             }
 
-            fn to_uri_string(&self) -> ::std::string::String {
+            fn render(&self) -> ::std::string::String {
                 #(#collect_params)*
 
                 ::std::format!(#format_template)
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::uri::PathAndQuery, ::templated_uri::ValidationError> {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
+                Ok(::templated_uri::http::uri::PathAndQuery::try_from(::templated_uri::PathAndQueryTemplate::render(self))?)
             }
         }
 
@@ -193,9 +192,9 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
         }
 
-        impl From<#ident> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<#ident> for ::templated_uri::PathAndQuery {
             fn from(value: #ident) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(::std::sync::Arc::new(value))
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
     }

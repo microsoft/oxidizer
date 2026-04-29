@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use http::uri::PathAndQuery;
 
-use crate::ValidationError;
+use crate::UriError;
 
 /// The base of a Uri, like `/foo`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,13 +20,35 @@ impl BasePath {
         self.inner.as_str()
     }
 
-    fn validate_path_format(&self) -> Result<(), ValidationError> {
+    /// Creates a new `BasePath` by parsing a static string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the string is not a valid base path (must start and end with `/` and
+    /// must not contain a query string). Intended for use with compile-time-known
+    /// constants; use [`BasePath::from_str`](std::str::FromStr::from_str) or the
+    /// `TryFrom<&str>` impl for fallible parsing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::BasePath;
+    /// let path = BasePath::from_static("/api/v1/");
+    /// assert_eq!(path.as_str(), "/api/v1/");
+    /// ```
+    #[must_use]
+    #[expect(clippy::expect_used, reason = "from_static is documented to panic on invalid input")]
+    pub fn from_static(s: &'static str) -> Self {
+        Self::new(PathAndQuery::from_static(s)).expect("invalid base path passed to BasePath::from_static")
+    }
+
+    fn validate_path_format(&self) -> Result<(), UriError> {
         let path_str = self.inner.as_str();
         if self.inner.query().is_some() {
-            return Err(ValidationError::invalid_uri("the path must not contain a query string"));
+            return Err(UriError::invalid_uri("the path must not contain a query string"));
         }
         if !(path_str.starts_with('/') && path_str.ends_with('/')) {
-            return Err(ValidationError::invalid_uri("the path must start and end with a slash"));
+            return Err(UriError::invalid_uri("the path must start and end with a slash"));
         }
 
         Ok(())
@@ -34,14 +56,13 @@ impl BasePath {
 
     /// Creates a new `Path` from a `PathAndQuery`, validating its format.
     /// The path must start and end with a slash (`/`) and must not contain a query string.
-    fn new(p: PathAndQuery) -> Result<Self, ValidationError> {
+    fn new(p: PathAndQuery) -> Result<Self, UriError> {
         let path = Self { inner: p };
         path.validate_path_format()?;
         Ok(path)
     }
 
-    pub(crate) fn join(&self, other: impl TryInto<PathAndQuery, Error: Into<http::Error>>) -> Result<PathAndQuery, ValidationError> {
-        let other: PathAndQuery = other.try_into().map_err(Into::into)?;
+    pub(crate) fn join_path_and_query(&self, other: &PathAndQuery) -> Result<PathAndQuery, UriError> {
         let path_str = other.as_str().trim_start_matches('/');
         if path_str.is_empty() {
             return Ok(self.inner.clone());
@@ -60,8 +81,14 @@ impl Default for BasePath {
 }
 
 impl FromStr for BasePath {
-    type Err = ValidationError;
+    type Err = UriError;
 
+    /// Parses a [`BasePath`] from a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string is not a valid path-and-query, contains a query string,
+    /// or does not start and end with a slash (`/`).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let p: PathAndQuery = s.try_into()?;
         Self::new(p)
@@ -69,16 +96,26 @@ impl FromStr for BasePath {
 }
 
 impl TryFrom<&str> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
+    /// Parses a [`BasePath`] from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// See [`BasePath::from_str`].
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::from_str(value)
     }
 }
 
 impl TryFrom<String> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
+    /// Parses a [`BasePath`] from an owned `String`, reusing the allocation when possible.
+    ///
+    /// # Errors
+    ///
+    /// See [`BasePath::from_str`].
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let p = PathAndQuery::try_from(value)?;
         Self::new(p)
@@ -86,16 +123,22 @@ impl TryFrom<String> for BasePath {
 }
 
 impl TryFrom<PathAndQuery> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
+    /// Validates the given [`PathAndQuery`] as a [`BasePath`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the value contains a query string or does not start and end with a slash (`/`).
     fn try_from(paq: PathAndQuery) -> Result<Self, Self::Error> {
         Self::new(paq)
     }
 }
 
 impl TryFrom<&PathAndQuery> for BasePath {
-    type Error = ValidationError;
+    type Error = UriError;
 
+    /// Validates a borrowed [`PathAndQuery`] as a [`BasePath`].
     fn try_from(paq: &PathAndQuery) -> Result<Self, Self::Error> {
         paq.clone().try_into()
     }
@@ -129,7 +172,7 @@ impl<'de> serde::Deserialize<'de> for BasePath {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use ohno::ErrorExt;
 
     use super::*;
@@ -160,15 +203,19 @@ mod test {
 
     #[test]
     fn path_join() {
-        let base_path = BasePath::try_from(PathAndQuery::from_static("/base/path/")).unwrap();
-        let joined = base_path.join("/additional/resource?param=value").unwrap();
+        let base_path = BasePath::from_static("/base/path/");
+        let joined = base_path
+            .join_path_and_query(&"/additional/resource?param=value".parse().unwrap())
+            .unwrap();
         assert_eq!(
             joined.as_str(),
             "/base/path/additional/resource?param=value",
             "Path join with slash prefixed uri string should result in correct concatenation"
         );
 
-        let joined = base_path.join("additional/resource?param=value").unwrap();
+        let joined = base_path
+            .join_path_and_query(&"additional/resource?param=value".parse().unwrap())
+            .unwrap();
         assert_eq!(
             joined.as_str(),
             "/base/path/additional/resource?param=value",
@@ -177,14 +224,14 @@ mod test {
     }
 
     #[test]
-    fn try_from_path_and_query_ref() {
+    fn try_from_path_ref() {
         let paq = PathAndQuery::from_static("/ref/path/");
         let path = BasePath::try_from(&paq).unwrap();
         assert_eq!(path.as_str(), "/ref/path/");
     }
 
     #[test]
-    fn try_from_path_and_query_ref_invalid() {
+    fn try_from_path_ref_invalid() {
         let paq: PathAndQuery = "/no-trailing-slash".parse().unwrap();
         let err = BasePath::try_from(&paq).unwrap_err();
         assert!(err.to_string().contains("the path must start and end with a slash"));
@@ -198,6 +245,18 @@ mod test {
         assert_eq!(path.as_str(), "/string/path/");
         let p2 = path.as_str().as_ptr();
         assert_eq!(p, p2, "The string data should not be copied");
+    }
+
+    #[test]
+    fn from_static_valid() {
+        let path = BasePath::from_static("/api/v1/");
+        assert_eq!(path.as_str(), "/api/v1/");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid base path passed to BasePath::from_static")]
+    fn from_static_invalid() {
+        let _ = BasePath::from_static("/no-trailing-slash");
     }
 
     #[cfg(feature = "serde")]
