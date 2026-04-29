@@ -69,11 +69,8 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// }
 /// ```
 ///
-/// Note that this trait is independent of the [`Send`] trait as there can be usages of isolated
-/// affinities with multiple affinities on a single thread. However, that
-/// is a fairly specific use case, so types that implement [`ThreadAware`] should generally also implement
-/// [`Send`].
-pub trait ThreadAware {
+/// Note that this trait requires [`Send`] because relocation inherently moves data across threads.
+pub trait ThreadAware: Send {
     /// Relocate this value in place to the destination affinity.
     ///
     /// When implementing this function, you can assume self belongs to the source affinity, but it's

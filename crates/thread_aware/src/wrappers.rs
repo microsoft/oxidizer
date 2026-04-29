@@ -4,8 +4,8 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::ThreadAware;
 
 /// Allows transferring a value that doesn't implement [`ThreadAware`].
 ///
@@ -51,7 +51,7 @@ impl<T> DerefMut for Unaware<T> {
     }
 }
 
-impl<T> ThreadAware for Unaware<T> {
+impl<T: Send> ThreadAware for Unaware<T> {
     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
 }
 

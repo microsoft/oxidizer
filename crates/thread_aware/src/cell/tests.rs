@@ -4,8 +4,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{self};
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity, pinned_affinities};
-use crate::closure::relocate;
+use crate::affinity::{pinned_affinities, MemoryAffinity, PinnedAffinity};
 use crate::{ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
@@ -135,7 +134,7 @@ fn test_trc_clone() {
 
 #[test]
 fn test_into_arc() {
-    let trc = PerCore::with_closure(relocate((), |()| 42));
+    let trc = PerCore::new(|| 42);
     let _arc = trc.into_arc();
 
     let trc = PerCore::with_value(42);
@@ -147,7 +146,7 @@ fn test_into_arc() {
 
 #[test]
 fn test_from() {
-    let trc = PerCore::with_closure(relocate((), |()| 42));
+    let trc = PerCore::new(|| 42);
     let _arc = trc.into_arc();
 
     let trc = PerCore::with_value(42);
@@ -256,7 +255,7 @@ fn test_factory_clone_with_data() {
 }
 
 #[test]
-fn test_factory_clone_with_closure() {
+fn test_factory_clone_with_closure_boxed() {
     // This test covers line 141: Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), *closure_source)
     // We create a Trc with Factory::Closure via with_closure, clone it, and verify the factory is properly cloned
     let affinities = pinned_affinities(&[2]);
@@ -264,7 +263,7 @@ fn test_factory_clone_with_closure() {
     let affinity2 = affinities[1];
 
     // Create a Trc with a closure that uses Factory::Closure
-    let trc1 = PerCore::with_closure(relocate((), |()| 100));
+    let trc1 = PerCore::new(|| 100);
 
     // Clone the Trc - this should exercise line 141 in the Factory::clone method
     let trc2 = trc1.clone();
@@ -501,4 +500,25 @@ fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
         0,
         "subsequent relocation must not see stale pre-relocation value from storage"
     );
+}
+
+#[test]
+fn with_clone_fn_relocates_clone() {
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0].into();
+    let destination = affinities[1];
+
+    // Counter::relocated resets value to 0, so we can detect if it was called.
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| {
+        Box::new(c.clone())
+    });
+
+    arc.increment_by(42);
+    assert_eq!(arc.value(), 42);
+
+    // Relocating should clone the Counter and call relocated() on the clone,
+    // which resets the value to 0.
+    let mut relocated = arc;
+    relocated.relocated(source, destination);
+    assert_eq!(relocated.value(), 0, "relocated() must be called on the clone");
 }

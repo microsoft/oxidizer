@@ -227,7 +227,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzMlfWB9hdkfGwdyjWN2zh_xG4wVy-B70uSjG_8Zj381ny-7YWSCgmx0aHJlYWRfYXdhcmVlMC42LjKCZHRpY2tlMC4yLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzMlfWB9hdkfGwdyjWN2zh_xG4wVy-B70uSjG_8Zj381ny-7YWSCgmx0aHJlYWRfYXdhcmVlMC43LjCCZHRpY2tlMC4yLjI
  [__link0]: https://docs.rs/tick/0.2.2/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.2.2/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.2.2/tick/?search=FutureExt
@@ -236,9 +236,9 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link13]: https://crates.io/crates/jiff
  [__link14]: https://crates.io/crates/chrono
  [__link15]: https://crates.io/crates/time
- [__link16]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware
+ [__link16]: https://docs.rs/thread_aware/0.7.0/thread_aware/?search=ThreadAware
  [__link17]: https://docs.rs/tick/0.2.2/tick/?search=runtime::InactiveClock
- [__link18]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware::relocated
+ [__link18]: https://docs.rs/thread_aware/0.7.0/thread_aware/?search=ThreadAware::relocated
  [__link19]: https://docs.rs/tick/0.2.2/tick/?search=Clock
  [__link2]: https://docs.rs/tick/0.2.2/tick/?search=Clock
  [__link20]: https://docs.rs/tick/0.2.2/tick/?search=runtime::ClockDriver

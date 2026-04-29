@@ -3,9 +3,8 @@
 
 #![expect(missing_docs, reason = "This is a test module")]
 
-use thread_aware::ThreadAware;
 use thread_aware::affinity::pinned_affinities;
-use thread_aware_macros::ThreadAware;
+use thread_aware::ThreadAware;
 
 #[derive(ThreadAware)]
 struct Simple {

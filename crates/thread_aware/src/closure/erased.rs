@@ -6,12 +6,12 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::closure::RelocateFnOnce;
 
 /// A closure with erased bounds.
-pub struct ErasedClosureOnce<T> {
+pub struct ErasedClosureOnce<T: ?Sized> {
     inner: Box<dyn Erased<T>>,
 }
 
 //TODO Refactor and call debug on the inner closure
-impl<T> std::fmt::Debug for ErasedClosureOnce<T> {
+impl<T: ?Sized> std::fmt::Debug for ErasedClosureOnce<T> {
     #[cfg_attr(test, mutants::skip)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ErasedClosure")

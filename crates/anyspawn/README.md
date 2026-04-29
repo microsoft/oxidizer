@@ -68,9 +68,9 @@ details and examples.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9pMzxUlg8D9GxZnrkpQT5jmGyYaBtuYnUetGw3uMQ2o2j_5YWSCgmhhbnlzcGF3bmUwLjMuMIJsdGhyZWFkX2F3YXJlZTAuNi4y
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9pMzxUlg8D9GxZnrkpQT5jmGyYaBtuYnUetGw3uMQ2o2j_5YWSCgmhhbnlzcGF3bmUwLjMuMIJsdGhyZWFkX2F3YXJlZTAuNy4w
  [__link0]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware
+ [__link1]: https://docs.rs/thread_aware/0.7.0/thread_aware/?search=ThreadAware
  [__link2]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner::new_thread_aware
  [__link3]: Spawner#thread-aware-support
  [__link4]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner::new_tokio

@@ -198,10 +198,9 @@ pub use core::ThreadAware;
 ///     raw_len: usize,
 /// }
 ///
-/// fn demo(mut a1: MemoryAffinity, mut a2: PinnedAffinity, w: Wrapper) -> Wrapper {
+/// fn demo(mut a1: MemoryAffinity, mut a2: PinnedAffinity, mut w: Wrapper) {
 ///     // Move the wrapper from a1 to a2.
-///     let moved = w.relocated(a1.clone(), a2.clone().into());
-///     moved
+///     w.relocated(a1.clone(), a2.clone().into());
 /// }
 /// ```
 #[cfg(feature = "derive")]

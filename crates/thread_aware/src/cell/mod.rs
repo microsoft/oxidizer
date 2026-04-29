@@ -17,10 +17,31 @@ use std::sync::{self, RwLock};
 pub use builtin::{PerCore, PerNuma, PerProcess};
 pub use storage::{Storage, Strategy};
 
-use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::cell::factory::Factory;
-use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
+use crate::closure::{relocate_once, ErasedClosureOnce, RelocateFnOnce};
+use crate::ThreadAware;
+
+/// Adapter that wraps a `RelocateFnOnce<T>` to produce `Box<T>` instead.
+struct BoxedRelocate<F>(F);
+
+impl<F: Clone> Clone for BoxedRelocate<F> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<F: ThreadAware> ThreadAware for BoxedRelocate<F> {
+    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+        self.0.relocated(source, destination);
+    }
+}
+
+impl<T, F: RelocateFnOnce<T>> RelocateFnOnce<Box<T>> for BoxedRelocate<F> {
+    fn call_once(self) -> Box<T> {
+        Box::new(self.0.call_once())
+    }
+}
 
 /// Transferable reference counted type.
 ///
@@ -83,7 +104,7 @@ use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
 /// assert_eq!(arc_affinity2_clone.value(), 11);
 /// ```
 #[derive(Debug)]
-pub struct Arc<T, S: Strategy> {
+pub struct Arc<T: ?Sized, S: Strategy> {
     storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>,
     value: sync::Arc<T>,
     factory: Factory<T>,
@@ -97,7 +118,7 @@ impl<T: PartialEq, S: Strategy> PartialEq for Arc<T, S> {
 
 impl<T: Eq, S: Strategy> Eq for Arc<T, S> {}
 
-impl<T: std::hash::Hash, S: Strategy> std::hash::Hash for Arc<T, S> {
+impl<T: std::hash::Hash + ?Sized, S: Strategy> std::hash::Hash for Arc<T, S> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
     }
@@ -115,7 +136,7 @@ impl<T: PartialOrd, S: Strategy> PartialOrd for Arc<T, S> {
     }
 }
 
-impl<T, S: Strategy> Clone for Arc<T, S> {
+impl<T: ?Sized, S: Strategy> Clone for Arc<T, S> {
     fn clone(&self) -> Self {
         Self {
             storage: sync::Arc::clone(&self.storage),
@@ -125,7 +146,7 @@ impl<T, S: Strategy> Clone for Arc<T, S> {
     }
 }
 
-impl<T, S: Strategy> Deref for Arc<T, S> {
+impl<T: ?Sized, S: Strategy> Deref for Arc<T, S> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -215,14 +236,54 @@ where
             fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
         }
 
-        impl<T> RelocateFnOnce<T> for Ctor<T> {
-            fn call_once(self) -> T {
+        impl<T> RelocateFnOnce<Box<T>> for Ctor<T> {
+            fn call_once(self) -> Box<T> {
+                Box::new((self.f)())
+            }
+        }
+
+        // Use Self::with_closure_boxed to ensure Factory::Closure path.
+        Self::with_closure_boxed(Ctor { f: ctor })
+    }
+}
+
+impl<T, S> Arc<T, S>
+where
+    T: Send + 'static + ?Sized,
+    S: Strategy,
+{
+    /// Creates a new `Arc` with a constructor that returns `Box<T>`.
+    ///
+    /// This is the `?Sized`-compatible version of [`new`](Self::new). Use this when `T` is a
+    /// trait object (e.g., `dyn Trait`) or other unsized type. The constructor produces a
+    /// `Box<T>` which is then stored behind a [`sync::Arc`].
+    ///
+    /// ```rust
+    /// # use thread_aware::{Arc, ThreadAware, PerCore};
+    /// let arc = Arc::<dyn ThreadAware, PerCore>::new_boxed(|| Box::new(42u32));
+    /// ```
+    pub fn new_boxed(ctor: fn() -> Box<T>) -> Self {
+        struct Ctor<T: ?Sized> {
+            f: fn() -> Box<T>,
+        }
+
+        impl<T: ?Sized> Clone for Ctor<T> {
+            fn clone(&self) -> Self {
+                Self { f: self.f }
+            }
+        }
+
+        impl<T: ?Sized> ThreadAware for Ctor<T> {
+            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+        }
+
+        impl<T: ?Sized> RelocateFnOnce<Box<T>> for Ctor<T> {
+            fn call_once(self) -> Box<T> {
                 (self.f)()
             }
         }
 
-        // Use Self::with_closure to ensure Factory::Closure path.
-        Self::with_closure(Ctor { f: ctor })
+        Self::with_closure_boxed(Ctor { f: ctor })
     }
 }
 
@@ -310,7 +371,7 @@ where
     where
         D: ThreadAware + Send + Sync + Clone + 'static,
     {
-        Self::with_closure(relocate_once(data, f))
+        Self::with_closure_boxed(BoxedRelocate(relocate_once(data, f)))
     }
 }
 
@@ -336,7 +397,7 @@ where
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
                 data.relocated(source, destination);
-                data
+                Box::new(data)
             }),
         }
     }
@@ -395,30 +456,66 @@ where
         Self {
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
-            factory: Factory::Data(|data: &T, _source, _destination| data.clone()),
+            factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
     }
 }
 
 impl<T, S: Strategy> Arc<T, S>
 where
-    T: 'static,
+    T: ThreadAware + 'static + ?Sized,
 {
-    /// Creates a new `Arc` with a closure that will be called once per-affinity to create the inner value.
+    /// Creates a new `Arc` from a value and a clone function, supporting trait objects.
     ///
-    /// The closure only gets called once for each affinity, and it's called only when an `Arc` is actually transferred
-    /// to another affinity. The closure is a [`RelocateFnOnce`] to ensure it captures only values that are safe to
-    /// transfer themselves.
-    pub(crate) fn with_closure<F>(closure: F) -> Self
-    where
-        F: RelocateFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
-    {
-        let value = sync::Arc::new(closure.clone().call_once());
+    /// The `clone_fn` receives `&V` (the concrete type) and returns `Box<T>`, enabling
+    /// use with `dyn Trait` where `Clone` is not object-safe. Each clone is
+    /// [`relocated`](ThreadAware::relocated) to its target affinity.
+    ///
+    /// ```rust
+    /// # use thread_aware::{Arc, PerCore, ThreadAware};
+    /// # #[derive(Clone)]
+    /// # struct Foo(u32);
+    /// # impl ThreadAware for Foo {
+    /// #     fn relocated(&mut self, _: thread_aware::affinity::MemoryAffinity, _: thread_aware::affinity::PinnedAffinity) {}
+    /// # }
+    /// trait MyPlugin: ThreadAware {}
+    /// impl MyPlugin for Foo {}
+    ///
+    /// let arc = Arc::<dyn MyPlugin, PerCore>::with_clone_fn(Foo(42), |v: &Foo| Box::new(v.clone()));
+    /// ```
+    pub fn with_clone_fn<V: Send + 'static>(value: V, clone_fn: fn(&V) -> Box<T>) -> Self {
+        let initial = clone_fn(&value);
+        drop(value);
+        let value = sync::Arc::from(initial);
 
         Self {
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
-            factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None), // We don't know the source affinity at this point
+            factory: Factory::new_erased_clone_fn(clone_fn),
+        }
+    }
+}
+
+
+impl<T, S: Strategy> Arc<T, S>
+where
+    T: 'static + ?Sized,
+{
+    /// Creates a new `Arc` with a closure that produces `Box<T>`, called once per-affinity to create the inner value.
+    ///
+    /// The closure only gets called once for each affinity, and it's called only when an `Arc` is actually transferred
+    /// to another affinity. The closure is a [`RelocateFnOnce`] to ensure it captures only values that are safe to
+    /// transfer themselves.
+    pub(crate) fn with_closure_boxed<F>(closure: F) -> Self
+    where
+        F: RelocateFnOnce<Box<T>> + Clone + ThreadAware + 'static + Send + Sync,
+    {
+        let value = sync::Arc::from(closure.clone().call_once());
+
+        Self {
+            storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
+            value,
+            factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
     }
 
@@ -465,7 +562,10 @@ impl<T, S: Strategy> Arc<T, S> {
     /// assert_eq!(Arc::strong_count(&arc2), 2);
     /// ```
     #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "this code only panics when the lock is poisoned")]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "this code only panics when the lock is poisoned"
+    )]
     pub fn strong_count(this: &Self) -> usize {
         let raw = sync::Arc::strong_count(&this.value);
         let guard = this.storage.read().expect("Failed to acquire read lock");
@@ -480,7 +580,7 @@ impl<T, S: Strategy> Arc<T, S> {
     }
 }
 
-impl<T, S: Strategy> ThreadAware for Arc<T, S> {
+impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
         let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
@@ -500,13 +600,19 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
 
                     factory_clone.relocated(factory_source, destination);
                     (
-                        sync::Arc::new(factory_clone.call_once()),
+                        sync::Arc::from(factory_clone.call_once()),
                         Factory::Closure(sync::Arc::clone(factory), Some(factory_source)),
                     )
                 }
 
                 // We can clone and transfer the data
-                Factory::Data(factory) => (sync::Arc::new(factory(&self.value, source, destination)), self.factory.clone()),
+                Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
+
+                // We can clone the data and relocate it
+                Factory::ErasedCloneFn(erased) => {
+                    let cloned = erased.clone_and_relocate(&self.value, source, destination);
+                    (sync::Arc::from(cloned), self.factory.clone())
+                }
 
                 Factory::Manual => {
                     // If we are in manual mode, we just clone the data

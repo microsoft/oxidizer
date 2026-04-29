@@ -309,7 +309,9 @@ where
 
 impl<K, T, S> ThreadAware for Merger<K, T, S>
 where
-    S: Strategy,
+    K: Send + Sync,
+    T: Send + Sync,
+    S: Strategy + Send + Sync,
 {
     fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
         self.inner.relocated(source, destination);
