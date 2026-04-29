@@ -2,7 +2,4 @@
 
 #![allow(missing_docs, missing_debug_implementations)]
 
-pub mod driver {
-    #[derive(Clone)]
-    pub struct IoDriver;
-}
+pub mod driver;
