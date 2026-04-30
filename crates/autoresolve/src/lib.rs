@@ -38,6 +38,7 @@
 //!     let mut resolver = Resolver::new(builtins);
 //!     let _client = resolver.get::<Client>();
 //! }
+//! # fn main() {}
 //! ```
 //!
 //! # Why
@@ -65,8 +66,10 @@
 //! ```
 //! use autoresolve::resolvable;
 //!
-//! #[derive(Clone)] pub struct Validator;
-//! #[derive(Clone)] pub struct Clock;
+//! #[derive(Clone)] 
+//! pub struct Validator;
+//! #[derive(Clone)] 
+//! pub struct Clock;
 //!
 //! pub struct Client {
 //!     validator: Validator,
@@ -78,8 +81,8 @@
 //!     fn new(validator: &Validator, clock: &Clock) -> Self {
 //!         Self { validator: validator.clone(), clock: clock.clone() }
 //!     }
-//!
-//!     // Other inherent methods are preserved unchanged.
+//! 
+//!     // Other methods don't impact resolution.
 //!     pub fn number(&self) -> i32 { 0 }
 //! }
 //! ```
@@ -92,34 +95,120 @@
 //! # Using in applications
 //!
 //! Construct a [`Resolver`] from a base value (usually provided by the framework
-//! you're using), then call [`get::<T>()`](Resolver::get) for any service:
-//!
+//! you're using - Builtins in the example below), then call
+//! [`get::<T>()`](Resolver::get) for any service:
+//! 
 //! ```
+//! # pub mod my_runtime {
+//! #     pub struct Scheduler;
+//! #     pub struct Clock;
+//! #     #[autoresolve::base(helper_module_exported_as = crate::my_runtime::builtins_helper)]
+//! #     pub struct Builtins {
+//! #         pub scheduler: Scheduler,
+//! #         pub clock: Clock,
+//! #     }
+//! # }
 //! use autoresolve::{Resolver, base, resolvable};
+//! use my_runtime::{Scheduler, Clock, Builtins};
 //!
-//! pub struct Scheduler;
+//! pub struct Validator;
 //!
-//! #[base(helper_module_exported_as = crate::app_base_helper)]
-//! pub struct AppBase {
-//!     pub scheduler: Scheduler,
+//! #[resolvable]
+//! impl Validator {
+//!     fn new(_scheduler: &Scheduler) -> Self { Self }
 //! }
 //!
 //! pub struct Client;
 //!
 //! #[resolvable]
 //! impl Client {
-//!     fn new(_scheduler: &Scheduler) -> Self { Self }
+//!     fn new(_validator: &Validator, _scheduler: &Scheduler, _clock: &Clock) -> Self {
+//!         Self
+//!     }
 //! }
 //!
-//! fn main() {
-//!     let mut resolver = Resolver::new(AppBase { scheduler: Scheduler });
+//! fn my_main(builtins: Builtins) {
+//!     let mut resolver = Resolver::new(builtins);
 //!     let _client = resolver.get::<Client>();
+//!     let _validator = resolver.get::<Validator>(); // Same validator as client's, cached by type
 //! }
+//! # fn main() {}
 //! ```
 //!
-//! Values are cached by type (with some caveats around overrides), so the
+//! In this case, both `Validator` and `Client` depend on contents of `Builtins`, so they can
+//! be constructed from the resolver. Note that the dependencies don't need to be direct - as
+//! long as there is a path from the base to the service through the dependency graph, it can be 
+//! resolved. Services are cached by type (with some caveats around overrides, see below), so the
 //! same service is only constructed once per resolver and shared by all
 //! consumers that depend on it.
+//! 
+//! ## Compile-time safety
+//!
+//! Because the dependency graph is encoded in the type system, mistakes are
+//! caught by the compiler rather than surfacing as runtime panics.
+//!
+//! **Missing dependency.** A service whose dependencies cannot be supplied
+//! by the base fails to compile when you try to resolve it:
+//!
+//! ```compile_fail
+//! # pub mod my_runtime {
+//! #     pub struct Scheduler;
+//! #     #[autoresolve::base(helper_module_exported_as = crate::my_runtime::builtins_helper)]
+//! #     pub struct Builtins { pub scheduler: Scheduler }
+//! # }
+//! use autoresolve::{Resolver, resolvable};
+//! use my_runtime::{Scheduler, Builtins};
+//!
+//! pub struct Database; // Not in `Builtins`, not `#[resolvable]`.
+//!
+//! pub struct Repository;
+//!
+//! #[resolvable]
+//! impl Repository {
+//!     fn new(_db: &Database) -> Self { Self }
+//! }
+//!
+//! fn my_main(builtins: Builtins) {
+//!     let mut resolver = Resolver::new(builtins);
+//!     // error[E0277]: the trait bound `Database: ResolveFrom<Builtins>` is not satisfied
+//!     let _repo = resolver.get::<Repository>();
+//! }
+//! # fn main() {}
+//! ```
+//!
+//! **Dependency cycle.** A cycle in the dependency graph also fails to
+//! compile, surfacing as a trait-solver overflow rather than a stack
+//! overflow at runtime:
+//!
+//! ```compile_fail
+//! # pub mod my_runtime {
+//! #     pub struct Scheduler;
+//! #     #[autoresolve::base(helper_module_exported_as = crate::my_runtime::builtins_helper)]
+//! #     pub struct Builtins { pub scheduler: Scheduler }
+//! # }
+//! use autoresolve::{Resolver, resolvable};
+//! use my_runtime::{Scheduler, Builtins};
+//!
+//! pub struct A;
+//! pub struct B;
+//!
+//! #[resolvable]
+//! impl A {
+//!     fn new(_b: &B) -> Self { Self }
+//! }
+//!
+//! #[resolvable]
+//! impl B {
+//!     fn new(_a: &A) -> Self { Self }
+//! }
+//!
+//! fn my_main(builtins: Builtins) {
+//!     let mut resolver = Resolver::new(builtins);
+//!     // error[E0275]: overflow evaluating the requirement `A: ResolveFrom<Builtins>`
+//!     let _a = resolver.get::<A>();
+//! }
+//! # fn main() {}
+//! ```
 //!
 //! # Custom Bases
 //!
@@ -202,8 +291,8 @@
 //!
 //! # Scoped Bases
 //!
-//! Consider an HTTP server: long-lived services like the scheduler, HTTP
-//! clients, and configuration live for the lifetime of the process, but each
+//! Bases can be "scoped" - consider an HTTP server: long-lived services like the HTTP
+//! clients and configuration live for the lifetime of the process, but each
 //! incoming request also brings request-scoped values — the parsed
 //! `Request`, per-request state — that some services
 //! need to depend on. A scoped base lets a per-request resolver inherit
@@ -211,15 +300,13 @@
 //! root values:
 //!
 //! ```
+//! # pub mod my_runtime {
+//! #     pub struct Scheduler;
+//! #     #[autoresolve::base(helper_module_exported_as = crate::my_runtime::builtins_helper)]
+//! #     pub struct Builtins { pub scheduler: Scheduler }
+//! # }
+//! use my_runtime::{Scheduler, Builtins};
 //! use autoresolve::{Resolver, base, resolvable};
-//!
-//! #[derive(Clone)] pub struct Scheduler;
-//! #[derive(Clone)] pub struct Request;
-//!
-//! #[base(helper_module_exported_as = crate::app_base_helper)]
-//! pub struct AppBase {
-//!     pub scheduler: Scheduler,
-//! }
 //!
 //! pub struct Client;
 //! #[resolvable]
@@ -227,6 +314,7 @@
 //!     fn new(_scheduler: &Scheduler) -> Self { Self }
 //! }
 //!
+//! #[derive(Clone)] pub struct Request;
 //! #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
 //! pub struct RequestBase {
 //!     pub request: Request,
@@ -240,8 +328,8 @@
 //!     fn new(_client: &Client, _request: &Request) -> Self { Self }
 //! }
 //!
-//! fn main() {
-//!     let app: Resolver<AppBase> = Resolver::new(AppBase { scheduler: Scheduler });
+//! fn my_main(builtins: Builtins) {
+//!     let app = Resolver::new(builtins);
 //!
 //!     // For each incoming request:
 //!     let mut req: Resolver<RequestBase> = app.scoped(RequestBase { request: Request });
@@ -317,11 +405,6 @@
 //!     fn new(beta: &Beta) -> Self { Self { beta_gamma_tag: beta.gamma_tag } }
 //! }
 //!
-//! pub struct Marker;
-//! #[base(helper_module_exported_as = crate::app_base_helper)]
-//! pub struct AppBase { pub marker: Marker }
-//!
-//! fn make() -> Resolver<AppBase> { Resolver::new(AppBase { marker: Marker }) }
 //! # fn main() { let _ = make(); }
 //! ```
 //!
@@ -340,9 +423,10 @@
 //! # pub struct Sibling { pub gamma_tag: &'static str }
 //! # #[resolvable] impl Sibling { fn new(gamma: &Gamma) -> Self { Self { gamma_tag: gamma.tag } } }
 //! # pub struct Marker;
-//! # #[base(helper_module_exported_as = crate::app_base_helper)] pub struct AppBase { pub marker: Marker }
+//! # #[base(helper_module_exported_as = crate::app_base_helper)] pub struct Builtins { pub marker: Marker }
 //! # fn main() {
-//! let mut resolver: Resolver<AppBase> = Resolver::new(AppBase { marker: Marker });
+//! # let builtins = Builtins { marker: Marker };
+//! let mut resolver: Resolver<Builtins> = Resolver::new(builtins);
 //!
 //! resolver.provide(Gamma { tag: "custom" });
 //! let alpha = resolver.get::<Alpha>();
@@ -368,9 +452,10 @@
 //! # pub struct Sibling { pub gamma_tag: &'static str }
 //! # #[resolvable] impl Sibling { fn new(gamma: &Gamma) -> Self { Self { gamma_tag: gamma.tag } } }
 //! # pub struct Marker;
-//! # #[base(helper_module_exported_as = crate::app_base_helper)] pub struct AppBase { pub marker: Marker }
+//! # #[base(helper_module_exported_as = crate::app_base_helper)] pub struct Builtins { pub marker: Marker }
 //! # fn main() {
-//! let mut resolver: Resolver<AppBase> = Resolver::new(AppBase { marker: Marker });
+//! # let builtins = Builtins { marker: Marker };
+//! let mut resolver: Resolver<Builtins> = Resolver::new(builtins);
 //!
 //! resolver.provide(Gamma { tag: "custom" })
 //!         .when_injected_in::<Beta>();
@@ -406,9 +491,10 @@
 //! # pub struct Top2 { pub beta_gamma_tag: &'static str }
 //! # #[resolvable] impl Top2 { fn new(beta: &Beta) -> Self { Self { beta_gamma_tag: beta.gamma_tag } } }
 //! # pub struct Marker;
-//! # #[base(helper_module_exported_as = crate::app_base_helper)] pub struct AppBase { pub marker: Marker }
+//! # #[base(helper_module_exported_as = crate::app_base_helper)] pub struct Builtins { pub marker: Marker }
 //! # fn main() {
-//! let mut resolver: Resolver<AppBase> = Resolver::new(AppBase { marker: Marker });
+//! # let builtins = Builtins { marker: Marker };
+//! let mut resolver: Resolver<Builtins> = Resolver::new(builtins);
 //!
 //! resolver.provide(Gamma { tag: "custom" })
 //!         .when_injected_in::<Beta>()
