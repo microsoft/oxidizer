@@ -104,7 +104,7 @@ impl<V> InsertPolicy<V> {
         Self(PolicyType::When(Arc::new(predicate)))
     }
 
-    /// Returns true if the response should be insertd to primary.
+    /// Returns true if the response should be inserted to primary.
     #[inline]
     pub(crate) fn should_insert(&self, response: &CacheEntry<V>) -> bool {
         match &self.0 {

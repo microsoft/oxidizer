@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, InsertPolicy};
+use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
 #[tokio::main]
