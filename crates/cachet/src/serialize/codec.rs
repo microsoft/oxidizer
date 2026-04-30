@@ -13,8 +13,8 @@ use std::io::Write;
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
-use crate::{Codec, Encoder, Error};
 use crate::transform::DecodeOutcome;
+use crate::{Codec, Encoder, Error};
 
 use serde::{Serialize, de::DeserializeOwned};
 
