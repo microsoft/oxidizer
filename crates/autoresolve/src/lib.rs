@@ -18,17 +18,19 @@
 //! use autoresolve::{Resolver, base, resolvable};
 //! use my_runtime::{Scheduler, Clock, Builtins};
 //!
+//! // Define a service
 //! pub struct Validator;
-//!
 //! #[resolvable]
 //! impl Validator {
+//!     // Declare a dependency
 //!     fn new(_scheduler: &Scheduler) -> Self { Self }
 //! }
 //!
+//! // Define another service
 //! pub struct Client;
-//!
 //! #[resolvable]
 //! impl Client {
+//!     // Declare several dependencies, including one on another service (Validator)
 //!     fn new(_validator: &Validator, _scheduler: &Scheduler, _clock: &Clock) -> Self {
 //!         Self
 //!     }
@@ -36,6 +38,7 @@
 //!
 //! fn my_main(builtins: Builtins) {
 //!     let mut resolver = Resolver::new(builtins);
+//!     // Obtain a service with all dependencies resolved
 //!     let _client = resolver.get::<Client>();
 //! }
 //! # fn main() {}
@@ -48,7 +51,7 @@
 //! - **Optimized for the common case.** Most DI frameworks center on
 //!   flexibility — separating interfaces from implementations so any
 //!   implementation can be swapped in. In practice almost every service has
-//!   one production implementation plus a few test seams. `autoresolve`
+//!   one production implementation plus a few test ones. `autoresolve`
 //!   optimizes for that: the default wiring needs no annotation beyond
 //!   declaring dependencies, while overrides for tests and special cases are
 //!   explicit (see [Override functionality](#override-functionality)).
@@ -64,12 +67,11 @@
 //! `Self`:
 //!
 //! ```
+//! # #[derive(Clone)] 
+//! # pub struct Validator;
+//! # #[derive(Clone)] 
+//! # pub struct Clock;
 //! use autoresolve::resolvable;
-//!
-//! #[derive(Clone)] 
-//! pub struct Validator;
-//! #[derive(Clone)] 
-//! pub struct Clock;
 //!
 //! pub struct Client {
 //!     validator: Validator,
@@ -92,7 +94,7 @@
 //! can also implement `ResolveFrom` manually, but pay attention to its
 //! contract to avoid runtime failures.
 //!
-//! # Using in applications
+//! # Pulling services together
 //!
 //! Construct a [`Resolver`] from a base value (usually provided by the framework
 //! you're using - Builtins in the example below), then call
@@ -112,14 +114,12 @@
 //! use my_runtime::{Scheduler, Clock, Builtins};
 //!
 //! pub struct Validator;
-//!
 //! #[resolvable]
 //! impl Validator {
 //!     fn new(_scheduler: &Scheduler) -> Self { Self }
 //! }
 //!
 //! pub struct Client;
-//!
 //! #[resolvable]
 //! impl Client {
 //!     fn new(_validator: &Validator, _scheduler: &Scheduler, _clock: &Clock) -> Self {
@@ -288,6 +288,9 @@
 //!
 //! After spreading, both `Scheduler` and `Clock` (the fields of `Builtins`)
 //! are available as root values, alongside `AppContext`.
+//! 
+//! Note that there are limitations around how the spread base is imported - see
+//! the documentation for [`base`] for more information.
 //!
 //! # Scoped Bases
 //!
@@ -305,7 +308,7 @@
 //! #     #[autoresolve::base(helper_module_exported_as = crate::my_runtime::builtins_helper)]
 //! #     pub struct Builtins { pub scheduler: Scheduler }
 //! # }
-//! use my_runtime::{Scheduler, Builtins};
+//! use my_runtime::{Scheduler};
 //! use autoresolve::{Resolver, base, resolvable};
 //!
 //! pub struct Client;
@@ -315,7 +318,7 @@
 //! }
 //!
 //! #[derive(Clone)] pub struct Request;
-//! #[base(scoped(AppBase), helper_module_exported_as = crate::request_base_helper)]
+//! #[base(scoped(my_runtime::Builtins), helper_module_exported_as = crate::request_base_helper)]
 //! pub struct RequestBase {
 //!     pub request: Request,
 //! }
@@ -328,13 +331,14 @@
 //!     fn new(_client: &Client, _request: &Request) -> Self { Self }
 //! }
 //!
-//! fn my_main(builtins: Builtins) {
+//! fn my_main(builtins: my_runtime::Builtins) {
 //!     let app = Resolver::new(builtins);
 //!
 //!     // For each incoming request:
 //!     let mut req: Resolver<RequestBase> = app.scoped(RequestBase { request: Request });
 //!     let _handler = req.get::<RequestHandler>();
 //! }
+//! # fn main() {}
 //! ```
 //!
 //! In short: declare the scoped base with `#[base(scoped(ParentBase))]` and
@@ -349,6 +353,9 @@
 //! constructed instance. A service that depends on a request-scoped value
 //! stays in the request-tier cache and is dropped when the request resolver
 //! is dropped.
+//! 
+//! Note that there are limitations around how the parent base is imported - see
+//! the documentation for [`base`] for more information.
 //!
 //! # Override functionality
 //!
@@ -405,7 +412,7 @@
 //!     fn new(beta: &Beta) -> Self { Self { beta_gamma_tag: beta.gamma_tag } }
 //! }
 //!
-//! # fn main() { let _ = make(); }
+//! # fn main() {}
 //! ```
 //!
 //! ## Basic override (by type)
@@ -525,6 +532,7 @@
 //!   a reference directly.
 //! - Thread awareness
 //! - Integration of ohno
+//! - Perf needs some work
 
 mod base_type;
 mod dependency_of;
