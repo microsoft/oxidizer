@@ -31,13 +31,7 @@ pub struct RunResult {
     pub stderr: Vec<u8>,
 }
 
-/// Spawns `cmd` with stdout/stderr captured, blocks until the child exits or
-/// the timeout elapses, and kills the child on timeout. A dedicated wait thread
-/// blocks on `child.wait()` and forwards the result via a channel so the caller
-/// uses `recv_timeout` instead of polling with short sleeps. Captured output is
-/// returned alongside the outcome so callers can print it on failure/timeout
-/// only — keeping the CI log readable on the happy path while still surfacing
-/// diagnostics when something goes wrong.
+/// Spawns `cmd` with stdout/stderr captured, blocks until the child exits or the timeout elapses.
 pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult, AppError> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().into_app_err("failed to spawn child process")?;
@@ -57,8 +51,6 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
         Ok(buf)
     });
 
-    // Save the PID before moving `child` into the wait thread so we can send
-    // a kill signal on timeout without needing ownership of `child`.
     let pid = child.id();
 
     // Spawn a thread that blocks on child.wait() and forwards the exit status
@@ -79,8 +71,6 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
         }
         Ok(Err(e)) => return Err(e).into_app_err("failed to wait for child process"),
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            // Timer fired: kill the child and wait for the wait thread to observe
-            // it die so all resources are cleaned up before we return.
             kill_by_pid(pid);
             let _ = wait_handle.join();
             Outcome::TimedOut
@@ -94,11 +84,11 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<RunResult
     // natural exit or after the kill above).
     let stdout = stdout_handle
         .join()
-        .map_err(|_| ohno::app_err!("stdout reader thread panicked"))?
+        .map_err(|e| ohno::app_err!("stdout reader thread panicked: {e:?}"))?
         .into_app_err("failed to read child stdout")?;
     let stderr = stderr_handle
         .join()
-        .map_err(|_| ohno::app_err!("stderr reader thread panicked"))?
+        .map_err(|e| ohno::app_err!("stderr reader thread panicked: {e:?}"))?
         .into_app_err("failed to read child stderr")?;
 
     Ok(RunResult { outcome, stdout, stderr })
@@ -114,8 +104,6 @@ fn kill_by_pid(pid: u32) {
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
-            .status();
+        let _ = Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).status();
     }
 }
