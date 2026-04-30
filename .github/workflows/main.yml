@@ -125,7 +125,7 @@ jobs:
         run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
       - name: Examples
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript ./scripts/run-examples.rs --cargo-profile dev --exclude "${{ needs.delta.outputs.exclude_not_affected }}"
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript ./scripts/run-examples.rs --cargo-profile dev ${{ needs.delta.outputs.exclude_not_affected }}
 
   static-analysis:
     needs: [delta]

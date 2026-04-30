@@ -69,8 +69,28 @@ docs:
 # Run all stand-alone example binaries to ensure they complete with exit code 0.
 # Implemented in Rust (via cargo-script) so that exit codes propagate cleanly
 # through `just` and CI on every platform — see AB#7306508.
+[script]
 examples PROFILE='dev' EXCLUDE='':
-    cargo +nightly -Zscript ./scripts/run-examples.rs --cargo-profile {{ PROFILE }} --package "{{ package }}" --exclude "{{ EXCLUDE }}"
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    $args = @(
+        "+nightly",
+        "-Zscript",
+        "./scripts/run-examples.rs",
+        "--cargo-profile",
+        "{{ PROFILE }}"
+    )
+
+    if ("{{ package }}" -ne "") {
+        $args += @("--package", "{{ package }}")
+    }
+
+    if ("{{ EXCLUDE }}" -ne "") {
+        $args += "{{ EXCLUDE }}".Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)
+    }
+
+    cargo @args
 
 hack:
     cargo hack {{ target_package }} check --feature-powerset --locked
