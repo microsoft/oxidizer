@@ -741,28 +741,31 @@ pub use autoresolve_macros::reexport_base;
 /// # Example
 ///
 /// ```
+/// # #[derive(Clone)]
+/// # pub struct Validator;
+/// # #[derive(Clone)]
+/// # pub struct Clock;
 /// use autoresolve::resolvable;
-///
-/// #[derive(Clone)] pub struct Validator;
-/// #[derive(Clone)] pub struct Config;
 ///
 /// pub struct Client {
 ///     validator: Validator,
-///     config: Config,
+///     clock: Clock,
 /// }
 ///
 /// #[resolvable]
 /// impl Client {
-///     fn new(validator: &Validator, config: &Config) -> Self {
-///         Self { validator: validator.clone(), config: config.clone() }
+///     fn new(validator: &Validator, clock: &Clock) -> Self {
+///         Self { validator: validator.clone(), clock: clock.clone() }
 ///     }
 ///
+///     // Other methods don't impact resolution.
 ///     pub fn number(&self) -> i32 { 0 }
 /// }
+/// # fn main() {}
 /// ```
 ///
 /// Once annotated, `Client` can be obtained from any [`Resolver<B>`] whose
-/// base `B` transitively supplies `Validator` and `Config` (via
+/// base `B` transitively supplies `Validator` and `Clock` (via
 /// [`resolver.get::<Client>()`](Resolver::get)).
 ///
 /// # Generated code
@@ -777,11 +780,11 @@ pub use autoresolve_macros::reexport_base;
 /// where
 ///     B: Send + Sync + 'static,
 ///     Validator: ::autoresolve::ResolveFrom<B>,
-///     Config: ::autoresolve::ResolveFrom<B>,
+///     Clock: ::autoresolve::ResolveFrom<B>,
 /// {
 ///     type Inputs = ::autoresolve::ResolutionDepsNode<
 ///         Validator,
-///         ::autoresolve::ResolutionDepsNode<Config, ::autoresolve::ResolutionDepsEnd>,
+///         ::autoresolve::ResolutionDepsNode<Clock, ::autoresolve::ResolutionDepsEnd>,
 ///     >;
 ///     fn new(inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<B>>::Resolved) -> Self {
 ///         /* destructure the heterogeneous list and forward to Client::new(...) */

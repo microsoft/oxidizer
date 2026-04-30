@@ -15,11 +15,11 @@ use crate::dependency_of::DependencyOf;
 use crate::path_cache::PathCache;
 use crate::provide_path::{Scoped, Unscoped};
 
-/// Type-only builder passed into [`ProvideBuilder::either`] and
-/// [`Branched::or`] closures.
+/// Type-only builder passed into [`ProvideBuilder::either`](super::ProvideBuilder::either)
+/// and [`Branched::or`] closures.
 ///
 /// Carries the type-level injection chain forward exactly like
-/// [`ProvideBuilder`], but holds no value and never commits — its purpose is
+/// [`ProvideBuilder`](super::ProvideBuilder), but holds no value and never commits — its purpose is
 /// to materialize a single branch's leaf path at the type level. The
 /// outer [`Branched`] aggregator collects every branch's leaf and commits
 /// them together on drop.
@@ -54,7 +54,7 @@ impl<Initial: 'static, Path> BranchBuilder<Initial, Path> {
     }
 }
 
-/// Aggregator returned by [`ProvideBuilder::either`].
+/// Aggregator returned by [`ProvideBuilder::either`](super::ProvideBuilder::either).
 ///
 /// Holds the value plus one leaf path per branch. On drop, every branch's
 /// prefix slots are pre-allocated and every leaf slot is filled with the same
