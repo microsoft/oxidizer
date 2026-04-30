@@ -15,8 +15,7 @@ argh = "0.1"
 //! Run all stand-alone example binaries in the workspace.
 //!
 //! Optionally restricts to a single workspace package (`--package`) or
-//! excludes packages using cargo's native `--exclude` syntax via a single
-//! `--exclude "--exclude foo --exclude bar"` argument. Each example runs
+//! excludes packages using repeated `--exclude <package>` options. Each example runs
 //! with `IS_TESTING=1` and a 30-second timeout.
 
 use std::io::Write;
@@ -44,16 +43,14 @@ struct Args {
     cargo_profile: String,
 
     /// run examples for a single workspace package only. Mutually exclusive
-    /// with `--exclude`. Empty string means "all packages".
-    #[argh(option, default = "String::new()")]
-    package: String,
+    /// with `--exclude`.
+    #[argh(option)]
+    package: Option<String>,
 
-    /// raw cargo-style excludes string, e.g. `"--exclude foo --exclude bar"`.
-    /// Matches the format produced by `impact -f cargo-excludes` and used by
-    /// other CI workflow steps so the YAML can pass it through unchanged.
-    /// Empty string means "no excludes".
-    #[argh(option, default = "String::new()")]
-    exclude: String,
+    /// package name to exclude; repeat this option to exclude multiple
+    /// packages (`--exclude foo --exclude bar`).
+    #[argh(option)]
+    exclude: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -68,24 +65,19 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &Args) -> Result<(), AppError> {
-    if !args.package.is_empty() && !args.exclude.is_empty() {
+    if args.package.is_some() && !args.exclude.is_empty() {
         bail!("--package and --exclude are mutually exclusive");
     }
 
     // Discover workspace packages and their example targets via cargo metadata.
     let packages = automation::list_packages(".")?;
 
-    // Excluded package names parsed out of the cargo-excludes string.
-    let excluded_packages: Vec<&str> = args
-        .exclude
-        .split_whitespace()
-        .filter(|s| !s.is_empty() && *s != "--exclude")
-        .collect();
+    let excluded_packages: Vec<&str> = args.exclude.iter().map(String::as_str).collect();
 
     // Resolve scope: which packages to iterate locally + cargo args for the
     // workspace pre-build.
     let (packages_to_process, cargo_scope_args): (Vec<&automation::PackageMetadata>, Vec<String>) =
-        if args.package.is_empty() {
+        if args.package.is_none() {
             let to_process: Vec<_> = packages
                 .iter()
                 .filter(|p| !excluded_packages.contains(&p.name.as_str()))
@@ -97,11 +89,12 @@ fn run(args: &Args) -> Result<(), AppError> {
             }
             (to_process, scope)
         } else {
+            let package = args.package.as_deref().unwrap();
             let pkg = packages
                 .iter()
-                .find(|p| p.name == args.package)
-                .into_app_err_with(|| format!("package '{}' not found in workspace", args.package))?;
-            (vec![pkg], vec!["--package".to_string(), args.package.clone()])
+                .find(|p| p.name == package)
+                .into_app_err_with(|| format!("package '{package}' not found in workspace"))?;
+            (vec![pkg], vec!["--package".to_string(), package.to_string()])
         };
 
     println!(
