@@ -5,9 +5,8 @@
 /// Marks an `impl` block as participating in the autoresolve dependency injection system.
 ///
 /// The `fn new(...)` method in the block defines the dependency list. Each parameter must be a
-/// shared reference `&Type`. The macro generates a generic `ResolveFrom<B>` impl that allows
-/// this type to be automatically resolved by any `Resolver` whose base types transitively
-/// satisfy all dependencies.
+/// shared reference `&Type`, and the return type must be `Self`. The original `impl` block is
+/// preserved unchanged — other inherent methods are untouched.
 ///
 /// # Example
 ///
@@ -19,6 +18,31 @@
 ///     }
 /// }
 /// ```
+///
+/// # Generated code
+///
+/// For the example above, the macro additionally emits roughly:
+///
+/// ```ignore
+/// impl<B> ::autoresolve::ResolveFrom<B> for Client
+/// where
+///     B: Send + Sync + 'static,
+///     Validator: ::autoresolve::ResolveFrom<B>,
+///     Config: ::autoresolve::ResolveFrom<B>,
+/// {
+///     /* Inputs type-list and `fn new` that destructures resolved deps and
+///        forwards them to the inherent `Client::new(...)`. */
+/// }
+/// ```
+///
+/// The impl is generic over the resolver's base `B` with one `ResolveFrom<B>` where-bound per
+/// dependency. The same service therefore participates in any resolver whose bases can
+/// transitively supply its dependencies, and the compiler's trait solver verifies the full
+/// graph for free — a missing dependency surfaces as a `trait bound not satisfied` error,
+/// and a dependency cycle as an overflow evaluating the requirement.
+///
+/// All paths in the generated code are fully qualified (`::autoresolve::...`), so no imports
+/// are required at the use site.
 #[proc_macro_attribute]
 pub fn resolvable(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     autoresolve_macros_impl::resolvable(attr.into(), item.into())
