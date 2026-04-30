@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 
+use crate::transform::codec::DecodeOutcome;
 use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
 
 /// Adapter that transforms keys and values between user types and storage types.
@@ -51,16 +52,19 @@ where
             let ttl = entry.ttl();
             let cached_at = entry.cached_at();
             let decoded = self.value_codec.decode(entry.into_value())?;
-            Ok(decoded.map(|v| {
-                let mut e = CacheEntry::new(v);
-                if let Some(ttl) = ttl {
-                    e.set_ttl(ttl);
+            match decoded {
+                DecodeOutcome::Value(v) => {
+                    let mut e = CacheEntry::new(v);
+                    if let Some(ttl) = ttl {
+                        e.set_ttl(ttl);
+                    }
+                    if let Some(t) = cached_at {
+                        e.ensure_cached_at(t);
+                    }
+                    Ok(Some(e))
                 }
-                if let Some(t) = cached_at {
-                    e.ensure_cached_at(t);
-                }
-                e
-            }))
+                DecodeOutcome::SoftFailure(_) => Ok(None),
+            }
         } else {
             Ok(None)
         }
@@ -115,7 +119,7 @@ mod tests {
         );
         // Exercise both directions so closure bodies are covered.
         assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
-        assert_eq!(codec.decode(42).unwrap(), Some("42".to_string()));
+        assert!(matches!(codec.decode(42).unwrap(), DecodeOutcome::Value(s) if s == "42"));
 
         let key_encoder = TransformEncoder::new(|k: &String| k.parse::<i32>());
         // Exercise the encoder so the wrapping closure is covered.

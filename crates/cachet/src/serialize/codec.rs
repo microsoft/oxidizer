@@ -14,6 +14,7 @@ use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
 
 use crate::{Codec, Encoder, Error};
+use crate::transform::DecodeOutcome;
 
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -59,108 +60,32 @@ fn encode<T: Serialize + Send + Sync>(value: &T) -> Result<BytesView, Error> {
 
     let mut writer = BytesBuf::new().into_writer(pool);
     writer.write_all(&[FORMAT_VERSION]).map_err(Error::from_source)?;
-    postcard::to_io(value, &mut writer).map_err(|e| {
-        emit_serialize_failed(&e);
-        Error::from_source(e)
-    })?;
-    let view = writer.into_inner().peek();
-    emit_serialize_completed(view.len());
-    Ok(view)
+    postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
+    Ok(writer.into_inner().peek())
 }
 
 impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for PostcardCodec {
     /// Decodes a stored value back to the original type.
     ///
-    /// Returns `Ok(Some(value))` on success, `Ok(None)` if the stored data
-    /// is undecodable and should be treated as a cache miss (e.g., stale
-    /// format version, corrupt bytes), or `Err` for hard failures that should
-    /// propagate to the caller.
-    fn decode(&self, value: BytesView) -> Result<Option<T>, Error> {
+    /// Returns `DecodeOutcome::Value(v)` on success, or
+    /// `DecodeOutcome::SoftFailure(reason)` if the stored data is undecodable
+    /// and should be treated as a cache miss.
+    fn decode(&self, value: BytesView) -> Result<DecodeOutcome<T>, Error> {
         let bytes = to_contiguous(&value);
         let Some((version, payload)) = bytes.split_first() else {
-            emit_deserialize_failed(0, "empty payload");
-            return Ok(None);
+            return Ok(DecodeOutcome::SoftFailure("empty payload"));
         };
 
         if *version != FORMAT_VERSION {
-            emit_deserialize_failed(
-                bytes.len(),
-                &format!("unsupported format version: expected {FORMAT_VERSION}, got {version}"),
-            );
-            return Ok(None);
+            return Ok(DecodeOutcome::SoftFailure("format version mismatch"));
         }
 
         match postcard::from_bytes(payload) {
-            Ok(value) => {
-                emit_deserialize_completed(bytes.len());
-                Ok(Some(value))
-            }
-            Err(e) => {
-                emit_deserialize_failed(bytes.len(), &e.to_string());
-                Ok(None)
-            }
+            Ok(value) => Ok(DecodeOutcome::Value(value)),
+            Err(_) => Ok(DecodeOutcome::SoftFailure("deserialization failed")),
         }
     }
 }
-
-// -- Telemetry helpers (no-ops when `logs` feature is disabled) ---------------
-
-#[cfg(feature = "logs")]
-fn emit_serialize_completed(serialized_bytes: usize) {
-    tracing::debug!(
-        target: "cachet",
-        format = "postcard",
-        version = FORMAT_VERSION,
-        serialized_bytes,
-        "cachet.serialize.completed",
-    );
-}
-
-#[cfg(not(feature = "logs"))]
-fn emit_serialize_completed(_serialized_bytes: usize) {}
-
-#[cfg(feature = "logs")]
-fn emit_serialize_failed(error: &dyn std::fmt::Display) {
-    tracing::error!(
-        target: "cachet",
-        format = "postcard",
-        version = FORMAT_VERSION,
-        error = %error,
-        "cachet.serialize.failed",
-    );
-}
-
-#[cfg(not(feature = "logs"))]
-fn emit_serialize_failed(_error: &dyn std::fmt::Display) {}
-
-#[cfg(feature = "logs")]
-fn emit_deserialize_completed(serialized_bytes: usize) {
-    tracing::debug!(
-        target: "cachet",
-        format = "postcard",
-        version = FORMAT_VERSION,
-        serialized_bytes,
-        "cachet.deserialize.completed",
-    );
-}
-
-#[cfg(not(feature = "logs"))]
-fn emit_deserialize_completed(_serialized_bytes: usize) {}
-
-#[cfg(feature = "logs")]
-fn emit_deserialize_failed(serialized_bytes: usize, error: &str) {
-    tracing::warn!(
-        target: "cachet",
-        format = "postcard",
-        version = FORMAT_VERSION,
-        serialized_bytes,
-        error,
-        "cachet.deserialize.failed",
-    );
-}
-
-#[cfg(not(feature = "logs"))]
-fn emit_deserialize_failed(_serialized_bytes: usize, _error: &str) {}
 
 /// Returns a contiguous byte slice from a [`BytesView`]. Zero-copy for single-span
 /// views (the common case), collects into a Vec only for multi-span views.
@@ -197,32 +122,30 @@ mod tests {
     }
 
     #[test]
-    fn decode_empty_payload_returns_none() {
+    fn decode_empty_payload_returns_soft_failure() {
         let codec = PostcardCodec;
         let empty = BytesView::from(Vec::<u8>::new());
-        let result: Result<Option<String>, Error> = codec.decode(empty);
-        assert!(result.unwrap().is_none(), "empty payload should return Ok(None)");
+        let result: Result<DecodeOutcome<String>, Error> = codec.decode(empty);
+        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("empty payload")));
     }
 
     #[test]
-    fn decode_wrong_format_version_returns_none() {
+    fn decode_wrong_format_version_returns_soft_failure() {
         let codec = PostcardCodec;
-        // Version 0xFF followed by valid postcard bytes for the string "hello"
         let mut data = vec![0xFF];
         data.extend_from_slice(&postcard::to_allocvec(&"hello".to_string()).unwrap());
         let view = BytesView::from(data);
-        let result: Result<Option<String>, Error> = codec.decode(view);
-        assert!(result.unwrap().is_none(), "wrong version should return Ok(None)");
+        let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
+        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("format version mismatch")));
     }
 
     #[test]
-    fn decode_corrupt_payload_returns_none() {
+    fn decode_corrupt_payload_returns_soft_failure() {
         let codec = PostcardCodec;
-        // Correct version byte followed by garbage
         let data = vec![FORMAT_VERSION, 0xFF, 0xFE, 0xFD];
         let view = BytesView::from(data);
-        let result: Result<Option<String>, Error> = codec.decode(view);
-        assert!(result.unwrap().is_none(), "corrupt payload should return Ok(None)");
+        let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
+        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("deserialization failed")));
     }
 
     #[test]
@@ -230,8 +153,11 @@ mod tests {
         let codec = PostcardCodec;
         let original = "hello, world!".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
-        let decoded: Option<String> = codec.decode(encoded).expect("decode should succeed");
-        assert_eq!(decoded.unwrap(), original);
+        let result: DecodeOutcome<String> = codec.decode(encoded).expect("decode should succeed");
+        match result {
+            DecodeOutcome::Value(v) => assert_eq!(v, original),
+            DecodeOutcome::SoftFailure(reason) => panic!("unexpected soft failure: {reason}"),
+        }
     }
 
     #[test]
@@ -250,18 +176,18 @@ mod tests {
         let original = "multi-span test".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
 
-        // Split the encoded bytes into two separate views and append them
-        // to create a multi-span BytesView.
         let bytes = to_contiguous(&encoded);
         let mid = bytes.len() / 2;
         let mut first_half = BytesView::from(bytes[..mid].to_vec());
         let second_half = BytesView::from(bytes[mid..].to_vec());
         first_half.append(second_half);
 
-        // Verify it's actually multi-span
         assert_ne!(first_half.first_slice().len(), first_half.len(), "should be multi-span");
 
-        let decoded: Option<String> = codec.decode(first_half).expect("decode should succeed");
-        assert_eq!(decoded.unwrap(), original);
+        let result: DecodeOutcome<String> = codec.decode(first_half).expect("decode should succeed");
+        match result {
+            DecodeOutcome::Value(v) => assert_eq!(v, original),
+            DecodeOutcome::SoftFailure(reason) => panic!("unexpected soft failure: {reason}"),
+        }
     }
 }

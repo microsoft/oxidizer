@@ -56,6 +56,20 @@ pub trait Encoder<From, To>: Send + Sync {
     fn encode(&self, value: &From) -> Result<To, Error>;
 }
 
+/// The result of a decode operation.
+///
+/// Used by [`Codec::decode`] to distinguish between a successful decode,
+/// a soft failure that should be treated as a cache miss, and a hard error.
+#[derive(Debug)]
+pub enum DecodeOutcome<T> {
+    /// The value was successfully decoded.
+    Value(T),
+    /// The stored data is undecodable and should be treated as a cache miss.
+    ///
+    /// The string describes the reason (e.g., "version mismatch", "empty payload").
+    SoftFailure(&'static str),
+}
+
 /// A bidirectional codec that converts between types `A` and `B`.
 ///
 /// Extends [`Encoder<A, B>`] with a `decode` method for the reverse direction.
@@ -63,17 +77,17 @@ pub trait Encoder<From, To>: Send + Sync {
 pub trait Codec<A, B>: Encoder<A, B> {
     /// Decodes a value from type `B` back to type `A`.
     ///
-    /// # Errors
+    /// # Returns
     ///
-    /// Returns `Ok(Some(value))` on success, `Ok(None)` if the stored data
-    /// is undecodable and should be treated as a cache miss (e.g., stale
-    /// format, corrupt bytes), or `Err` for hard failures that should
-    /// propagate to the caller.
-    fn decode(&self, value: B) -> Result<Option<A>, Error>;
+    /// - `Ok(DecodeOutcome::Value(v))` on success
+    /// - `Ok(DecodeOutcome::SoftFailure(reason))` if the stored data is undecodable
+    ///   and should be treated as a cache miss
+    /// - `Err(e)` for hard failures that should propagate to the caller
+    fn decode(&self, value: B) -> Result<DecodeOutcome<A>, Error>;
 }
 
 type EncodeFn<A, B> = Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>;
-type DecodeFn<A, B> = Box<dyn Fn(A) -> Result<Option<B>, Error> + Send + Sync>;
+type DecodeFn<A, B> = Box<dyn Fn(A) -> Result<DecodeOutcome<B>, Error> + Send + Sync>;
 
 /// A boxed-closure encoder for custom one-directional transforms (keys).
 pub struct TransformEncoder<A, B> {
@@ -132,7 +146,7 @@ impl<A, B> TransformCodec<A, B> {
     {
         Self {
             encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
-            decode_fn: Box::new(move |b| decode_fn(b).map(Some).map_err(|e| Error::from_source(e))),
+            decode_fn: Box::new(move |b| decode_fn(b).map(DecodeOutcome::Value).map_err(|e| Error::from_source(e))),
         }
     }
 }
@@ -144,7 +158,7 @@ impl<A, B> Encoder<A, B> for TransformCodec<A, B> {
 }
 
 impl<A, B> Codec<A, B> for TransformCodec<A, B> {
-    fn decode(&self, value: B) -> Result<Option<A>, Error> {
+    fn decode(&self, value: B) -> Result<DecodeOutcome<A>, Error> {
         (self.decode_fn)(value)
     }
 }
