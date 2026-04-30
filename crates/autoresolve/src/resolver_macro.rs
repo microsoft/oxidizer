@@ -12,16 +12,38 @@
 ///
 /// # Example
 ///
-/// ```ignore
-/// let builtins = Builtins { scheduler: Scheduler, clock: Clock };
-/// let telemetry = Telemetry::new();
+/// ```
+/// use autoresolve::{base, resolvable};
 ///
-/// let mut resolver = autoresolve::resolver!(MyBase,
-///     ..builtins: Builtins,
-///     telemetry: Telemetry,
-/// );
+/// pub struct Scheduler;
+/// pub struct Clock;
 ///
-/// let client = resolver.get::<Client>();
+/// #[base(helper_module_exported_as = crate::builtins_helper)]
+/// pub struct Builtins {
+///     pub scheduler: Scheduler,
+///     pub clock: Clock,
+/// }
+///
+/// pub struct Telemetry;
+/// impl Telemetry { pub fn new() -> Self { Self } }
+///
+/// pub struct Client;
+/// #[resolvable]
+/// impl Client {
+///     fn new(_scheduler: &Scheduler, _telemetry: &Telemetry) -> Self { Self }
+/// }
+///
+/// fn main() {
+///     let builtins = Builtins { scheduler: Scheduler, clock: Clock };
+///     let telemetry = Telemetry::new();
+///
+///     let mut resolver = autoresolve::resolver!(MyBase,
+///         ..builtins: Builtins,
+///         telemetry: Telemetry,
+///     );
+///
+///     let _client = resolver.get::<Client>();
+/// }
 /// ```
 #[macro_export]
 macro_rules! resolver {

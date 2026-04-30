@@ -4,7 +4,10 @@
 /// for each `&Dep` parameter of `Target::new`. For an `impl` block on
 /// `Target` whose `fn new` accepts `&Dep`, the macro generates:
 ///
-/// ```ignore
+/// ```
+/// pub struct Target;
+/// pub struct Dep;
+///
 /// impl ::autoresolve::DependencyOf<Target> for Dep {}
 /// ```
 ///

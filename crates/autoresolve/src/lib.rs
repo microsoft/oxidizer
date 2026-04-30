@@ -648,28 +648,101 @@ mod resolver_macro;
 ///
 /// `scoped(...)` and `#[spread]` can be combined.
 ///
+/// ## Limitations on `#[spread]` and `scoped(...)` references
+///
+/// Both `#[spread]` and `scoped(ParentBase)` cause the macro to *re-export*
+/// the referenced base from the helper module it generates. There are two
+/// supported forms, with different visibility requirements:
+///
+/// - **Qualified path** (e.g. `#[spread] pub builtins: my_runtime::Builtins`,
+///   or `scoped(crate::api::AppBase)`): the original path is used directly
+///   in `pub use my_runtime::Builtins as ...;`. Any base reachable through
+///   its declared `pub` path works — no local import required.
+/// - **Bare identifier** (e.g. `#[spread] pub builtins: Builtins`, or
+///   `scoped(AppBase)`): the macro emits `pub use super::Builtins as ...;`,
+///   so the referenced type must be reachable from `super` *and* visible
+///   enough to be re-exported. In practice this means the base is defined
+///   in the same module or has been brought in via `pub use` at that level.
+///
+/// A `pub use private_mod::Builtins;` followed by `#[spread] pub builtins:
+/// Builtins` will fail with `E0364` ("only public within the crate, and
+/// cannot be re-exported outside") if `Builtins` itself is only `pub(crate)`.
+/// Either tighten visibility or switch to the qualified form.
+///
 /// # Generated code
 ///
-/// For each base, the macro emits:
+/// The macro generates a hidden helper module containing a `macro_rules!`
+/// definition that drives the wiring used by `#[spread]` and
+/// [`#[reexport_base]`](reexport_base). Stripped of that machinery, the
+/// trait impls produced for a primary base of the form
 ///
-/// - A hidden helper module at the path supplied by
-///   `helper_module_exported_as`. The module re-exports each non-spread
-///   field type under a mangled name (`Base_PartN_FieldType`) and defines a
-///   declarative macro with `@impls`, `@insert`, and `@reexport` arms. The
-///   `@impls` arm produces a stub `ResolveFrom<Base>` impl for every root
-///   value (`fn new` is `unreachable!()` — root values are pre-inserted, not
-///   constructed); the `@insert` arm destructures the base struct and
-///   pushes each field into the resolver.
-/// - An invocation of the `@impls` arm that materializes the
-///   `ResolveFrom<Self>` impls.
-/// - A [`BaseType`] impl whose `Parent` associated type is `()` for primary
-///   bases and `ParentBase` for scoped ones, and whose `insert_into` calls
-///   the `@insert` arm.
+/// ```
+/// pub struct Scheduler;
+/// pub struct Clock;
 ///
-/// The mangling and helper-module redirection exist so that `#[spread]`
-/// (and [`#[reexport_base]`](reexport_base)) can refer to a foreign base's
-/// parts purely by macro path, without requiring the downstream crate to
-/// import every individual field type.
+/// #[autoresolve::base(helper_module_exported_as = crate::app_base_helper)]
+/// pub struct AppBase {
+///     pub scheduler: Scheduler,
+///     pub clock: Clock,
+/// }
+/// # fn main() {}
+/// ```
+///
+/// are equivalent to the following hand-written impls:
+///
+/// ```
+/// use autoresolve::{BaseType, ResolveFrom, ResolutionDepsEnd, Resolver};
+///
+/// pub struct Scheduler;
+/// pub struct Clock;
+///
+/// pub struct AppBase {
+///     pub scheduler: Scheduler,
+///     pub clock: Clock,
+/// }
+///
+/// // One `ResolveFrom<AppBase>` impl per root field. `new` is `unreachable!()`
+/// // because root values are pre-inserted by `BaseType::insert_into` rather
+/// // than constructed on demand.
+/// impl ResolveFrom<AppBase> for Scheduler {
+///     type Inputs = ResolutionDepsEnd;
+///     fn new(_: ResolutionDepsEnd) -> Self {
+///         unreachable!("root types are pre-inserted into the resolver")
+///     }
+/// }
+/// impl ResolveFrom<AppBase> for Clock {
+///     type Inputs = ResolutionDepsEnd;
+///     fn new(_: ResolutionDepsEnd) -> Self {
+///         unreachable!("root types are pre-inserted into the resolver")
+///     }
+/// }
+///
+/// // The `BaseType` impl declares the parent (`()` for primary bases,
+/// // `ParentBase` for scoped ones) and seeds the resolver from the struct.
+/// impl BaseType for AppBase {
+///     type Parent = ();
+///     fn insert_into(self, store: &mut Resolver<AppBase>) {
+///         let Self { scheduler, clock } = self;
+///         store.insert(scheduler);
+///         store.insert(clock);
+///     }
+/// }
+/// # fn main() {
+/// #     let _ = Resolver::new(AppBase { scheduler: Scheduler, clock: Clock });
+/// # }
+/// ```
+///
+/// Two pieces are *not* shown above:
+///
+/// - The hidden `app_base_helper` module containing per-field type aliases
+///   (`Base_Part0_Scheduler`, ...) and a `macro_rules!` with `@impls`,
+///   `@insert`, and `@reexport` arms. `#[spread]` invokes `@insert` on the
+///   spread base's macro to pull its fields in; [`#[reexport_base]`](reexport_base)
+///   invokes `@reexport` to republish the helper at a new path.
+/// - For `#[spread]` fields, the `ResolveFrom` and insertion statements
+///   above are produced not directly but by delegating to the spread
+///   base's helper macro, so its fields appear in the generated `BaseType`
+///   impl alongside the local ones.
 pub use autoresolve_macros::base;
 #[cfg(feature = "macros")]
 #[doc(inline)]
@@ -771,25 +844,63 @@ pub use autoresolve_macros::reexport_base;
 /// # Generated code
 ///
 /// The original `impl` block is preserved unchanged. The macro additionally
-/// emits, for each dependency type `D`, a marker
-/// `impl ::autoresolve::DependencyOf<Self> for D {}`, plus a generic
-/// [`ResolveFrom`] impl roughly of the form:
+/// emits one [`DependencyOf`] marker per dependency type, plus a generic
+/// [`ResolveFrom`] impl that destructures the resolved-dependency list and
+/// forwards into the user's `fn new`. For the example above the expansion
+/// is equivalent to:
 ///
-/// ```ignore
-/// impl<B> ::autoresolve::ResolveFrom<B> for Client
+/// ```
+/// # use autoresolve::{
+/// #     base, DependencyOf, ResolutionDeps, ResolutionDepsEnd, ResolutionDepsNode,
+/// #     ResolveFrom, Resolver,
+/// # };
+/// # #[derive(Clone)] pub struct Validator;
+/// # #[derive(Clone)] pub struct Clock;
+/// # pub struct Client {
+/// #     validator: Validator,
+/// #     clock: Clock,
+/// # }
+/// # impl Client {
+/// #     fn new(validator: &Validator, clock: &Clock) -> Self {
+/// #         Self { validator: validator.clone(), clock: clock.clone() }
+/// #     }
+/// # }
+///
+/// // === expansion of `#[resolvable]` ===
+///
+/// // One marker per declared dependency. These are what `Resolver::provide`
+/// // and `when_injected_in::<T>()` chains check against to ensure each
+/// // segment really is a dependency of the next.
+/// impl DependencyOf<Client> for Validator {}
+/// impl DependencyOf<Client> for Clock {}
+///
+/// // Generic over the base: `Client` resolves from any `B` whose dependency
+/// // graph reaches both `Validator` and `Clock`.
+/// impl<B> ResolveFrom<B> for Client
 /// where
 ///     B: Send + Sync + 'static,
-///     Validator: ::autoresolve::ResolveFrom<B>,
-///     Clock: ::autoresolve::ResolveFrom<B>,
+///     Validator: ResolveFrom<B>,
+///     Clock: ResolveFrom<B>,
 /// {
-///     type Inputs = ::autoresolve::ResolutionDepsNode<
+///     // The dependency list, encoded as a heterogeneous cons-list at the
+///     // type level. `ResolutionDeps<B>` walks it to produce a parallel
+///     // tuple of `Arc<Dep>` values — the `Resolved` form passed to `new`.
+///     type Inputs = ResolutionDepsNode<
 ///         Validator,
-///         ::autoresolve::ResolutionDepsNode<Clock, ::autoresolve::ResolutionDepsEnd>,
+///         ResolutionDepsNode<Clock, ResolutionDepsEnd>,
 ///     >;
-///     fn new(inputs: <Self::Inputs as ::autoresolve::ResolutionDeps<B>>::Resolved) -> Self {
-///         /* destructure the heterogeneous list and forward to Client::new(...) */
+///
+///     fn new(inputs: <Self::Inputs as ResolutionDeps<B>>::Resolved) -> Self {
+///         let ResolutionDepsNode(dep_0, ResolutionDepsNode(dep_1, ResolutionDepsEnd)) = inputs;
+///         // `dep_0: Arc<Validator>`, `dep_1: Arc<Clock>` — auto-deref makes
+///         // `&dep_0` valid where the user's `fn new` expects `&Validator`.
+///         Client::new(&dep_0, &dep_1)
 ///     }
 /// }
+/// # fn main() {
+/// #     let mut r = Resolver::new(AppBase { validator: Validator, clock: Clock });
+/// #     let _ = r.get::<Client>();
+/// # }
 /// ```
 ///
 /// Three things follow from this shape:
@@ -802,13 +913,9 @@ pub use autoresolve_macros::reexport_base;
 ///   dependency surfaces as a `trait bound … is not satisfied` error with
 ///   a chain of `required for …` notes; a dependency cycle becomes an
 ///   overflow evaluating the requirement.
-/// - **No imports required at the use site.** All paths in the generated
-///   code are fully qualified (`::autoresolve::…`).
-///
-/// The [`DependencyOf`] markers exist so [`Resolver::provide`] /
-/// `when_injected_in::<T>()` chains can be statically checked: extending
-/// the chain with `T` requires the new head to be a declared dependency
-/// of `T`.
+/// - **No imports required at the use site.** In the real expansion every
+///   path is fully qualified (`::autoresolve::ResolveFrom`, etc.) so the
+///   macro doesn't depend on what the user has in scope.
 pub use autoresolve_macros::resolvable;
 pub use base_type::BaseType;
 pub use dependency_of::DependencyOf;
