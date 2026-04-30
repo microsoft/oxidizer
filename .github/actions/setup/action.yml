@@ -113,4 +113,4 @@ runs:
 
     - name: Install Wild Linker
       if: inputs.enable-wild-linker == 'true'
-      uses: davidlattimore/wild-action@0.7.0
+      uses: wild-linker/action@0.8.0
