@@ -237,10 +237,14 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
         self
     }
 
-    /// Sets the insert policy for this fallback tier.
+    /// Sets the insert policy for this tier.
     ///
-    /// The policy determines when values from the fallback tier should be
-    /// inserted to the primary tier.
+    /// The policy determines when values should be inserted into this tier.
+    /// It applies to all inserts, including direct [`Cache::insert`] calls,
+    /// [`Cache::get_or_insert`], and promotion from a fallback tier.
+    ///
+    /// If the policy rejects an insert, the operation is skipped and a
+    /// `cache.insert.rejected` telemetry event is recorded.
     ///
     /// # Examples
     ///

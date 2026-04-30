@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, InsertPolicy};
+use cachet::{Cache, CacheEntry};
 use cachet_tier::MockCache;
 use tick::Clock;
 

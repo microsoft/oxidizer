@@ -10,7 +10,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, InsertPolicy, TimeToRefresh};
+use cachet::{Cache, CacheEntry, TimeToRefresh};
 use cachet_tier::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
 use tick::Clock;

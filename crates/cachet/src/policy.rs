@@ -8,11 +8,12 @@ use cachet_tier::CacheEntry;
 /// Type alias for insert predicate functions.
 type InsertPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
 
-/// Policy for inserting values from fallback to primary cache.
+/// Policy that determines when values should be inserted into a cache tier.
 ///
-/// When a cache miss occurs in the primary tier and a value is found in the
-/// fallback tier, the insert policy determines whether to copy that value
-/// back to the primary tier for faster future access.
+/// The insert policy applies to all inserts into the tier, including direct
+/// [`Cache::insert`] calls, [`Cache::get_or_insert`], and promotion from a
+/// fallback tier. If the policy rejects an insert, the operation is skipped
+/// and a `cache.insert.rejected` telemetry event is recorded.
 ///
 /// # Examples
 ///

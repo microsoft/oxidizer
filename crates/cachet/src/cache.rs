@@ -90,7 +90,7 @@ impl<K, V> Debug for Mergers<K, V> {
 /// ```no_run
 /// use std::time::Duration;
 ///
-/// use cachet::{Cache, InsertPolicy};
+/// use cachet::Cache;
 /// use tick::Clock;
 /// # async {
 ///
@@ -101,7 +101,6 @@ impl<K, V> Debug for Mergers<K, V> {
 ///     .memory()
 ///     .ttl(Duration::from_secs(60))
 ///     .fallback(l2)
-///
 ///     .build();
 /// # };
 /// ```
