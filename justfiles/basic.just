@@ -75,7 +75,7 @@ examples PROFILE='dev' EXCLUDE='':
     $PSNativeCommandUseErrorActionPreference = $true
 
     $args = @(
-        "+nightly",
+        "+$env:RUST_NIGHTLY",
         "-Zscript",
         "./scripts/run-examples.rs",
         "--cargo-profile",
