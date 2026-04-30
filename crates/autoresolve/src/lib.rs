@@ -92,7 +92,8 @@
 //! The macro generates a [`ResolveFrom`] impl based on the signature of `new`.
 //! See the [`#[resolvable]`](resolvable) macro documentation for details. You
 //! can also implement `ResolveFrom` manually, but pay attention to its
-//! contract to avoid runtime failures.
+//! contract to avoid runtime failures. Note that the original new method remains
+//! intact, so the type remains usable as a standard Rust type.
 //!
 //! # Pulling services together
 //!
@@ -671,15 +672,11 @@ mod resolver_macro;
 ///
 /// # Generated code
 ///
-/// The macro generates a hidden helper module containing a `macro_rules!`
-/// definition that drives the wiring used by `#[spread]` and
-/// [`#[reexport_base]`](reexport_base). Stripped of that machinery, the
-/// trait impls produced for a primary base of the form
+/// Given the following primary base
 ///
 /// ```
-/// pub struct Scheduler;
-/// pub struct Clock;
-///
+/// # pub struct Scheduler;
+/// # pub struct Clock;
 /// #[autoresolve::base(helper_module_exported_as = crate::app_base_helper)]
 /// pub struct AppBase {
 ///     pub scheduler: Scheduler,
@@ -688,37 +685,64 @@ mod resolver_macro;
 /// # fn main() {}
 /// ```
 ///
-/// are equivalent to the following hand-written impls:
+/// the macro emits roughly the following items (the real expansion uses a
+/// `macro_rules!` generator inside the helper module to make the `@impls`,
+/// `@insert`, and `@reexport` arms re-derivable from any `crate::`-rooted
+/// path; that machinery is summarised here as a comment):
 ///
 /// ```
 /// use autoresolve::{BaseType, ResolveFrom, ResolutionDepsEnd, Resolver};
 ///
-/// pub struct Scheduler;
-/// pub struct Clock;
+/// # pub struct Scheduler;
+/// # pub struct Clock;
+/// #
+/// # pub struct AppBase {
+/// #     pub scheduler: Scheduler,
+/// #     pub clock: Clock,
+/// # }
 ///
-/// pub struct AppBase {
-///     pub scheduler: Scheduler,
-///     pub clock: Clock,
+/// // Helper module to support `#[spread]`, `#[base(scoped())]` and `#[reexport_base]`.
+/// pub mod app_base_helper {
+///     use super::*;
+///     // Re-exports of field types to allow `#[spread]`  and `#[reexport_base]` to find them under the new path.
+/// #   #[allow(non_camel_case_types)]
+///     pub type Base_Part0_Scheduler = Scheduler;
+/// #   #[allow(non_camel_case_types)]
+///     pub type Base_Part1_Clock = Clock;
+///     
+///     // A helper macro that is invoked by `#[spread]`, `#[base(scoped())]` and `#[reexport_base]` 
+///     // to re-emit the field-type re-exports and the `ResolveFrom` impls under the new path. The
+///     // macro uses the path provided to helper_module_exported_as to hard-code paths to types
+///     // referred by the generated code.
+///     #[macro_export]
+///     // The macro name is mangled to avoid conflicts with other exported macros. Note that
+///     // the specific mangling approach may change in the future.
+///     macro_rules! __app_base_helper__helper_macro {
+///         // ...
+/// #        () => {}
+///     }
 /// }
+/// 
+/// // Re-export of the helper macro so that it's imported together with the base.
+/// pub use app_base_helper::__app_base_helper__helper_macro;
 ///
-/// // One `ResolveFrom<AppBase>` impl per root field. `new` is `unreachable!()`
-/// // because root values are pre-inserted by `BaseType::insert_into` rather
-/// // than constructed on demand.
-/// impl ResolveFrom<AppBase> for Scheduler {
+/// // ResolveFrom impls for types embedded in the base - this is what makes them available as
+/// // root values.
+/// impl ResolveFrom<AppBase> for app_base_helper::Base_Part0_Scheduler {
 ///     type Inputs = ResolutionDepsEnd;
 ///     fn new(_: ResolutionDepsEnd) -> Self {
 ///         unreachable!("root types are pre-inserted into the resolver")
 ///     }
 /// }
-/// impl ResolveFrom<AppBase> for Clock {
+/// impl ResolveFrom<AppBase> for app_base_helper::Base_Part1_Clock {
 ///     type Inputs = ResolutionDepsEnd;
 ///     fn new(_: ResolutionDepsEnd) -> Self {
 ///         unreachable!("root types are pre-inserted into the resolver")
 ///     }
 /// }
 ///
-/// // The `BaseType` impl declares the parent (`()` for primary bases,
-/// // `ParentBase` for scoped ones) and seeds the resolver from the struct.
+/// // A `BaseType` impl declaring the parent (`()` for primary bases,
+/// // `ParentBase` for scoped ones) and seeding the resolver from the base's fields.
 /// impl BaseType for AppBase {
 ///     type Parent = ();
 ///     fn insert_into(self, store: &mut Resolver<AppBase>) {
@@ -731,21 +755,10 @@ mod resolver_macro;
 /// #     let _ = Resolver::new(AppBase { scheduler: Scheduler, clock: Clock });
 /// # }
 /// ```
-///
-/// Two pieces are *not* shown above:
-///
-/// - The hidden `app_base_helper` module containing per-field type aliases
-///   (`Base_Part0_Scheduler`, ...) and a `macro_rules!` with `@impls`,
-///   `@insert`, and `@reexport` arms. `#[spread]` invokes `@insert` on the
-///   spread base's macro to pull its fields in; [`#[reexport_base]`](reexport_base)
-///   invokes `@reexport` to republish the helper at a new path.
-/// - For `#[spread]` fields, the `ResolveFrom` and insertion statements
-///   above are produced not directly but by delegating to the spread
-///   base's helper macro, so its fields appear in the generated `BaseType`
-///   impl alongside the local ones.
 pub use autoresolve_macros::base;
 #[cfg(feature = "macros")]
 #[doc(inline)]
+
 /// Re-exports a base type defined in another module so that downstream code
 /// can refer to it as if [`#[base]`](base) had been applied locally.
 ///
@@ -856,6 +869,13 @@ pub use autoresolve_macros::reexport_base;
 /// # };
 /// # #[derive(Clone)] pub struct Validator;
 /// # #[derive(Clone)] pub struct Clock;
+/// # // A trivial base supplying both dependencies, just so we can construct
+/// # // a `Resolver` and exercise the expansion below.
+/// # #[base(helper_module_exported_as = crate::app_base_helper)]
+/// # pub struct AppBase {
+/// #     pub validator: Validator,
+/// #     pub clock: Clock,
+/// # }
 /// # pub struct Client {
 /// #     validator: Validator,
 /// #     clock: Clock,
