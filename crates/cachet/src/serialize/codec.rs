@@ -153,10 +153,8 @@ mod tests {
         let codec = PostcardCodec;
         let original = "hello, world!".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
-        let DecodeOutcome::<String>::Value(decoded) = codec.decode(encoded).expect("decode should succeed") else {
-            panic!("expected Value, got SoftFailure");
-        };
-        assert_eq!(decoded, original);
+        let outcome: DecodeOutcome<String> = codec.decode(encoded).expect("decode should succeed");
+        assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
     }
 
     #[test]
@@ -183,9 +181,7 @@ mod tests {
 
         assert_ne!(first_half.first_slice().len(), first_half.len(), "should be multi-span");
 
-        let DecodeOutcome::<String>::Value(decoded) = codec.decode(first_half).expect("decode should succeed") else {
-            panic!("expected Value, got SoftFailure");
-        };
-        assert_eq!(decoded, original);
+        let outcome: DecodeOutcome<String> = codec.decode(first_half).expect("decode should succeed");
+        assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
     }
 }

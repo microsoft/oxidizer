@@ -79,10 +79,7 @@ mod tests {
     fn value_codec_roundtrips() {
         let codec = MockCodec::<i32>::value();
         assert_eq!(codec.encode(&42).unwrap(), 42);
-        let DecodeOutcome::Value(v) = codec.decode(42).unwrap() else {
-            panic!("expected Value");
-        };
-        assert_eq!(v, 42);
+        assert!(matches!(codec.decode(42).unwrap(), DecodeOutcome::Value(42)));
     }
 
     #[test]
