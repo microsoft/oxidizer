@@ -214,7 +214,7 @@
 //!
 //! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
 //! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-//! `cache.fallback`, `cache.fallback_promotion`, `cache.rejected`, `cache.error`, `cache.ok`
+//! `cache.fallback`, `cache.rejected`, `cache.error`, `cache.ok`
 //!
 //! ## Logs (tracing)
 //!
@@ -224,7 +224,7 @@
 //! | Level | Activities |
 //! |-------|-----------|
 //! | ERROR | `cache.error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.fallback_promotion` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.rejected` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok` |
 
 mod builder;

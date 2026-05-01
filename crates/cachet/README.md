@@ -219,7 +219,7 @@ Enable with `metrics` and/or `logs` features. Configure via `.enable_metrics()` 
 
 **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
 `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-`cache.fallback`, `cache.fallback_promotion`, `cache.rejected`, `cache.error`, `cache.ok`
+`cache.fallback`, `cache.rejected`, `cache.error`, `cache.ok`
 
 ### Logs (tracing)
 
@@ -229,7 +229,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 |Level|Activities|
 |-----|----------|
 |ERROR|`cache.error`|
-|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.fallback_promotion`|
+|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.rejected`|
 |DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok`|
 
 
@@ -238,7 +238,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG12Pp2ZnSU6dG41Tr9ZaL_qcG3LaLEOtfXnhG1Xiyeoir8oSYWSGgmZjYWNoZXRlMC4xLjGCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMoJpdW5pZmxpZ2h0ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8FPUL0qKt72Gy-GD_CgRPCCG9SaPObQ7vYiG4uWqBhKhhTAYWSGgmZjYWNoZXRlMC4xLjGCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMoJpdW5pZmxpZ2h0ZTAuMS4w
  [__link0]: https://docs.rs/cachet/0.1.1/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

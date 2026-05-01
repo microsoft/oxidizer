@@ -111,22 +111,10 @@ where
         let fallback_value = timed.result?;
 
         if let Some(ref v) = fallback_value {
-            let timed_insert = self
-                .inner
-                .clock
-                .timed_async(self.inner.primary.insert(key.clone(), v.clone()))
-                .await;
             // Insert errors are intentionally swallowed - a failed promotion should not
             // fail the overall get. The CacheWrapper around the primary tier already
-            // records an Error activity on insert failure.
-            if timed_insert.result.is_ok() {
-                self.inner.telemetry.record(
-                    self.inner.name,
-                    CacheOperation::Insert,
-                    CacheActivity::FallbackPromotion,
-                    timed_insert.duration,
-                );
-            }
+            // records telemetry for the insert (Inserted or Rejected).
+            let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
         }
 
         Ok(fallback_value)

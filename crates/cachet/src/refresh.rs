@@ -162,18 +162,10 @@ where
     }
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
-        let timed = self.clock.timed_async(self.primary.insert(key, value)).await;
-
-        match timed.result {
-            Ok(()) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheActivity::FallbackPromotion, timed.duration);
-            }
-            Err(_) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheActivity::Error, timed.duration);
-            }
-        }
+        // Insert errors are intentionally swallowed - a failed promotion should not
+        // affect the refresh. The CacheWrapper around the primary tier already
+        // records telemetry for the insert (Inserted or Rejected).
+        let _ = self.primary.insert(key, value).await;
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {

@@ -61,19 +61,19 @@ impl<V> std::fmt::Debug for PolicyType<V> {
 }
 
 impl<V> InsertPolicy<V> {
-    /// Creates a policy that always inserts values to the primary cache.
+    /// Creates a policy that always inserts values into the cache tier.
     ///
     /// This is the default behavior and maximizes cache hit rates at the cost
-    /// of additional writes to the primary tier.
+    /// of additional writes to the tier.
     #[must_use]
     pub fn always() -> Self {
         Self(PolicyType::Always)
     }
 
-    /// Creates a policy that never inserts values to the primary cache.
+    /// Creates a policy that never inserts values into the cache tier.
     ///
-    /// Use this when the fallback tier is already fast enough and you want
-    /// to avoid write overhead to the primary tier.
+    /// Use this when reads from another tier are already fast enough and you
+    /// wanti to avoid write overhead to this tier.
     #[must_use]
     pub fn never() -> Self {
         Self(PolicyType::Never)
