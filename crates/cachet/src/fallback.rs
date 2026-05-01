@@ -113,7 +113,7 @@ where
         if let Some(ref v) = fallback_value {
             // Insert errors are intentionally swallowed - a failed promotion should not
             // fail the overall get. The CacheWrapper around the primary tier already
-            // records telemetry for the insert (Inserted or Rejected).
+            // records telemetry for the insert (Inserted, Rejected, or Error).
             let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
         }
 
