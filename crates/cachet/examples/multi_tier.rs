@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy};
+use cachet::{Cache, CacheEntry, CacheTier, Error, InsertPolicy};
 use parking_lot::Mutex;
 use tick::Clock;
 
@@ -65,10 +65,10 @@ async fn main() {
     let cache = Cache::builder::<String, UserData>(clock)
         .memory()
         .ttl(Duration::from_secs(60))
-        .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::when(|e: &CacheEntry<UserData>| {
+        .insert_policy(InsertPolicy::when(|e: &CacheEntry<UserData>| {
             matches!(e.value(), UserData::NotFound)
         }))
+        .fallback(l2)
         .build();
 
     // user:1 exists - NOT cached (policy rejects Found)

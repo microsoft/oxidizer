@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
+use cachet::{Cache, CacheEntry};
 use cachet_tier::MockCache;
 use tick::Clock;
 
@@ -27,7 +27,6 @@ async fn main() {
         .memory()
         .ttl(Duration::from_secs(60))
         .fallback(l2)
-        .promotion_policy(FallbackPromotionPolicy::always())
         .build();
 
     cache
