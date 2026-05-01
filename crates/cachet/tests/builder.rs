@@ -121,7 +121,7 @@ fn fallback_builder_basic() {
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn fallback_builder_promotion_policy() {
+fn fallback_builder_insert_policy() {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();

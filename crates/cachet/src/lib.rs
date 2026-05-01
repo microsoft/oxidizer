@@ -93,7 +93,7 @@
 //! | Type | Description |
 //! |---|---|
 //! | [`Cache`] | The user-facing cache. Wraps any `CacheTier` with `get`, `insert`, `invalidate`, `clear`, `get_or_insert`, `try_get_or_insert`, and `optionally_get_or_insert`. |
-//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, promotion policy, stampede protection, and background refresh. |
+//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, insert policy, stampede protection, and background refresh. |
 //! | [`CacheEntry<V>`] | A value together with an optional cached-at timestamp and TTL. Returned by all `get` operations. |
 //! | [`CacheTier`] | The core trait for storage backends. Implement this to add your own storage. |
 //! | [`InsertPolicy`] | Decides whether a value should be inserted into a tier. |

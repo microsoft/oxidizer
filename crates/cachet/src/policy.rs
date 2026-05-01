@@ -13,7 +13,7 @@ type InsertPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
 /// The insert policy applies to all inserts into the tier, including direct
 /// [`Cache::insert`](crate::Cache::insert) calls, [`Cache::get_or_insert`](crate::Cache::get_or_insert), and promotion from a
 /// fallback tier. If the policy rejects an insert, the operation is skipped
-/// and a `cache.insert.rejected` telemetry event is recorded.
+/// and a `cache.rejected` telemetry event is recorded, with the operation recorded as `cache.insert`.
 ///
 /// # Examples
 ///
@@ -26,18 +26,18 @@ type InsertPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
 /// // Never insert
 /// let policy = InsertPolicy::<String>::never();
 ///
-/// // Promote based on a condition
+/// // Insert based on a condition
 /// let policy = InsertPolicy::<String>::when(|entry| entry.value().len() >= 5);
 /// ```
 #[derive(Debug)]
 pub struct InsertPolicy<V>(PolicyType<V>);
 
 enum PolicyType<V> {
-    /// Always insert values to primary cache.
+    /// Always insert values into the cache tier.
     Always,
-    /// Never insert values to primary cache.
+    /// Never insert values into the cache tier.
     Never,
-    /// Promote based on a boxed predicate that can capture state.
+    /// Insert based on a boxed predicate that can capture state.
     ///
     /// Use this when you need to capture external state in the predicate.
     /// Has slight overhead from dynamic dispatch.
@@ -105,7 +105,7 @@ impl<V> InsertPolicy<V> {
         Self(PolicyType::When(Arc::new(predicate)))
     }
 
-    /// Returns true if the response should be inserted to primary.
+    /// Returns true if the response should be inserted into the tier.
     #[inline]
     pub(crate) fn should_insert(&self, response: &CacheEntry<V>) -> bool {
         match &self.0 {

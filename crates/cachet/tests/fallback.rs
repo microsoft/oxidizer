@@ -199,7 +199,7 @@ async fn fallback_cache_get_falls_back_on_primary_error() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn fallback_builder_with_promotion_policy_always() {
+async fn fallback_builder_with_insert_policy_always() {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
@@ -214,7 +214,7 @@ async fn fallback_builder_with_promotion_policy_always() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn fallback_builder_with_promotion_policy_never() {
+async fn fallback_builder_with_insert_policy_never() {
     let clock = Clock::new_frozen();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
@@ -233,7 +233,7 @@ async fn fallback_builder_with_promotion_policy_never() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn fallback_builder_with_promotion_policy_when_boxed() {
+async fn fallback_builder_with_insert_policy_when() {
     let threshold = 10;
 
     let clock = Clock::new_frozen();
