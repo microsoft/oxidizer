@@ -215,6 +215,8 @@ pub use uri_template_label::UriTemplateLabel;
 
 pub mod timeout;
 
+pub mod routing;
+
 mod http_response_builder;
 pub use http_response_builder::HttpResponseBuilder;
 
