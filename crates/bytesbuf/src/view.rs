@@ -1732,4 +1732,55 @@ mod tests {
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
         assert_eq!(size_of::<BytesView>(), 272);
     }
+
+    #[test]
+    fn hash_equal_views_produce_same_hash() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let a = BytesView::from(vec![1, 2, 3, 4, 5]);
+        let b = BytesView::from(vec![1, 2, 3, 4, 5]);
+
+        let hash_of = |v: &BytesView| {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_eq!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn hash_multi_span_matches_single_span() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let single = BytesView::from(vec![1, 2, 3, 4, 5, 6]);
+
+        let mut multi = BytesView::from(vec![1, 2, 3]);
+        multi.append(BytesView::from(vec![4, 5, 6]));
+
+        let hash_of = |v: &BytesView| {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_eq!(single, multi);
+        assert_eq!(hash_of(&single), hash_of(&multi));
+    }
+
+    #[test]
+    fn hash_different_views_produce_different_hash() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let a = BytesView::from(vec![1, 2, 3]);
+        let b = BytesView::from(vec![4, 5, 6]);
+
+        let hash_of = |v: &BytesView| {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_ne!(hash_of(&a), hash_of(&b));
+    }
 }

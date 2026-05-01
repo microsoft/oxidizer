@@ -82,7 +82,10 @@ pub trait Codec<A, B>: Encoder<A, B> {
     /// - `Ok(DecodeOutcome::Value(v))` on success
     /// - `Ok(DecodeOutcome::SoftFailure(reason))` if the stored data is undecodable
     ///   and should be treated as a cache miss
-    /// - `Err(e)` for hard failures that should propagate to the caller
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` for hard failures that should propagate to the caller.
     fn decode(&self, value: B) -> Result<DecodeOutcome<A>, Error>;
 }
 
