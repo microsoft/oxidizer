@@ -181,8 +181,6 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn get_returns_none_on_soft_failure() {
-        use crate::Encoder as _;
-
         /// A codec that always returns SoftFailure on decode.
         struct FailCodec;
 
