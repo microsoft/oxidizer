@@ -18,8 +18,8 @@
 //!
 //! [`Codec::decode`] returns [`DecodeOutcome<T>`] rather than a plain value:
 //!
-//! - [`DecodeOutcome::Value(v)`](DecodeOutcome::Value) — decoded successfully.
-//! - [`DecodeOutcome::SoftFailure(reason)`](DecodeOutcome::SoftFailure) — the stored data is
+//! - [`DecodeOutcome::Value(v)`](DecodeOutcome::Value) - decoded successfully.
+//! - [`DecodeOutcome::SoftFailure(reason)`](DecodeOutcome::SoftFailure) - the stored data is
 //!   undecodable (e.g., format version mismatch, corrupt bytes) and should be treated as a
 //!   cache miss rather than a hard error.
 //!
@@ -36,9 +36,9 @@
 //! they can be used where a fallible closure is expected.
 
 mod codec;
-mod tier;
 #[cfg(any(feature = "test-util", test))]
 pub mod testing;
+mod tier;
 
 pub use codec::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
 pub(crate) use tier::TransformAdapter;

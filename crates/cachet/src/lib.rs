@@ -285,12 +285,12 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 #[cfg(any(feature = "test-util", test))]
 #[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};
-#[cfg(any(feature = "test-util", test))]
-#[doc(inline)]
-pub use transform::testing::MockCodec;
 #[doc(inline)]
 pub use fallback::FallbackPromotionPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+#[cfg(any(feature = "test-util", test))]
+#[doc(inline)]
+pub use transform::testing::MockCodec;
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

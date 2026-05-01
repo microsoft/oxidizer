@@ -67,9 +67,7 @@ impl<T: Clone + Send + Sync> Codec<T, T> for MockCodec<T> {
 
 impl<T> Debug for MockCodec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockCodec")
-            .field("soft_failure", &self.soft_failure)
-            .finish()
+        f.debug_struct("MockCodec").field("soft_failure", &self.soft_failure).finish()
     }
 }
 
@@ -90,10 +88,7 @@ mod tests {
     #[test]
     fn soft_failure_codec_decodes_to_soft_failure() {
         let codec = MockCodec::<i32>::soft_failure("bad data");
-        assert!(matches!(
-            codec.decode(42).unwrap(),
-            DecodeOutcome::SoftFailure("bad data")
-        ));
+        assert!(matches!(codec.decode(42).unwrap(), DecodeOutcome::SoftFailure("bad data")));
     }
 
     #[test]
