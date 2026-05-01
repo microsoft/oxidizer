@@ -31,6 +31,7 @@ Barbosa
 Base64-encoded
 bitflag
 bitwise
+bincode
 bool
 branch_name
 btree_map
@@ -326,6 +327,7 @@ uncategorized
 unconfigured
 Multithreaded
 uncontended
+undecodable
 unhandleable
 unicode
 uniflight

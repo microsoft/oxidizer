@@ -15,6 +15,7 @@ use super::cache::CacheBuilder;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::fallback::FallbackPromotionPolicy;
+use crate::refresh::TimeToRefresh;
 use crate::telemetry::{CacheTelemetry, TelemetryConfig};
 use crate::transform::TransformAdapter;
 use crate::{CacheTier, Codec, Encoder};
@@ -31,6 +32,8 @@ pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
     post: Post,
     key_encoder: Box<dyn Encoder<K, KT>>,
     value_codec: Box<dyn Codec<V, VT>>,
+    policy: FallbackPromotionPolicy<V>,
+    refresh: Option<TimeToRefresh<K>>,
     clock: Clock,
     telemetry: TelemetryConfig,
     stampede_protection: bool,
@@ -50,12 +53,10 @@ impl<K, V, KT, VT, Pre: Debug, Post: Debug> Debug for TransformBuilder<K, V, KT,
     }
 }
 
-// ── .transform() on CacheBuilder ──
-
 impl<K, V, CT> CacheBuilder<K, V, CT>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Applies a generic type transform boundary.
@@ -72,8 +73,8 @@ where
         value_codec: impl Codec<V, VT> + 'static,
     ) -> TransformBuilder<K, V, KT, VT, Self>
     where
-        KT: Clone + Hash + Eq + Send + Sync + 'static,
-        VT: Clone + Send + Sync + 'static,
+        KT: Send + Sync + 'static,
+        VT: Send + Sync + 'static,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
@@ -83,6 +84,8 @@ where
             post: (),
             key_encoder: Box::new(key_encoder),
             value_codec: Box::new(value_codec),
+            policy: FallbackPromotionPolicy::always(),
+            refresh: None,
             clock,
             telemetry,
             stampede_protection,
@@ -91,12 +94,10 @@ where
     }
 }
 
-// ── .transform() on FallbackBuilder ──
-
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
@@ -108,8 +109,8 @@ where
         value_codec: impl Codec<V, VT> + 'static,
     ) -> TransformBuilder<K, V, KT, VT, Self>
     where
-        KT: Clone + Hash + Eq + Send + Sync + 'static,
-        VT: Clone + Send + Sync + 'static,
+        KT: Send + Sync + 'static,
+        VT: Send + Sync + 'static,
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
@@ -119,6 +120,8 @@ where
             post: (),
             key_encoder: Box::new(key_encoder),
             value_codec: Box::new(value_codec),
+            policy: FallbackPromotionPolicy::always(),
+            refresh: None,
             clock,
             telemetry,
             stampede_protection,
@@ -127,12 +130,10 @@ where
     }
 }
 
-// ── .fallback() on TransformBuilder ──
-
 impl<K, V, KT, VT, Pre> TransformBuilder<K, V, KT, VT, Pre, ()>
 where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
 {
     /// Sets the first post-transform storage tier (speaks `KT, VT`).
     pub fn fallback<FB>(self, fallback: FB) -> TransformBuilder<K, V, KT, VT, Pre, FB>
@@ -144,6 +145,8 @@ where
             post: fallback,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
+            policy: self.policy,
+            refresh: self.refresh,
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -154,8 +157,8 @@ where
 
 impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
 where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
     Post: CacheTierBuilder<KT, VT>,
 {
     /// Adds another post-transform fallback tier (speaks `KT, VT`).
@@ -184,6 +187,8 @@ where
             post: post_chain,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
+            policy: self.policy,
+            refresh: self.refresh,
             clock,
             telemetry,
             stampede_protection,
@@ -192,34 +197,54 @@ where
     }
 }
 
-// ── Sealed + CacheTierBuilder ──
+// TODO - Dedupe Transform/Fallback builders
+
+impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post> {
+    /// Sets the promotion policy for the transform fallback boundary.
+    ///
+    /// The policy determines when values from the post-transform tier should be
+    /// promoted to the pre-transform tier.
+    #[must_use]
+    pub fn promotion_policy(mut self, policy: FallbackPromotionPolicy<V>) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Configures background refresh for the transform fallback boundary.
+    ///
+    /// When entries in the pre-transform tier exceed the refresh duration,
+    /// they will be asynchronously refreshed from the post-transform tier.
+    #[must_use]
+    pub fn time_to_refresh(mut self, refresh: TimeToRefresh<K>) -> Self {
+        self.refresh = Some(refresh);
+        self
+    }
+}
 
 impl<K, V, KT, VT, Pre, Post> Sealed for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
 {
 }
 
 impl<K, V, KT, VT, Pre, Post> CacheTierBuilder<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
+    K: Send + Sync + 'static,
+    V: Send + Sync + 'static,
+    KT: Send + Sync + 'static,
+    VT: Send + Sync + 'static,
 {
 }
-
-// ── .build() ──
 
 #[expect(private_bounds, reason = "Buildable is an internal trait")]
 impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    KT: Clone + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
     Pre: Buildable<K, V>,
     Post: Buildable<KT, VT>,
@@ -230,13 +255,11 @@ where
     }
 }
 
-// ── Buildable ──
-
 impl<K, V, KT, VT, Pre, Post> Buildable<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
+    KT: Clone + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
     Pre: Buildable<K, V>,
     Post: Buildable<KT, VT>,
@@ -271,9 +294,9 @@ where
             type_name::<Self::TierOutput>(None),
             pre_tier,
             adapted,
-            FallbackPromotionPolicy::always(),
+            self.policy,
             clock,
-            None,
+            self.refresh,
             telemetry,
         );
 

@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, MockCache, TransformCodec, TransformEncoder, infallible};
+use cachet::{Cache, CacheEntry, MockCache, TransformCodec, TransformEncoder, infallible, infallible_owned};
 use tick::Clock;
 
 /// A composite cache key with tenant and resource ID.
@@ -52,7 +52,7 @@ async fn main() {
             // Key: CacheKey → String (flatten composite key)
             TransformEncoder::infallible(|k: &CacheKey| k.to_flat_key()),
             // Value: String ↔ String (identity — no value mapping needed)
-            TransformCodec::new(infallible(|v: &String| v.clone()), infallible(|v: &String| v.clone())),
+            TransformCodec::new(infallible(|v: &String| v.clone()), infallible_owned(|v: String| v)),
         )
         .fallback(l2)
         .build();

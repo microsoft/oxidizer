@@ -21,6 +21,7 @@ all-features = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "bytesbuf::view::BytesView",
     "ohno::enrichable::Enrichable",
     "ohno::error_ext::ErrorExt",
     "recoverable::Recovery",

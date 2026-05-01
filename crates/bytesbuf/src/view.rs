@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::hash::{Hash, Hasher};
 use std::iter;
 use std::num::NonZero;
 use std::ops::{Bound, RangeBounds};
@@ -864,6 +865,24 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
 
 impl Eq for BytesView {}
 
+impl Hash for BytesView {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash all bytes in logical order, consistent with PartialEq.
+        // We also hash the cached length as an additional input, but equality and hashing are
+        // both defined by the logical byte sequence rather than how it is segmented into spans.
+        //
+        // We iterate over spans_reversed using an index to avoid cloning the view,
+        // which would increment atomic reference counts for every span.
+        self.len.hash(state);
+        let mut span_idx = self.spans_reversed.len();
+        while span_idx > 0 {
+            span_idx -= 1;
+            let span: &[u8] = &self.spans_reversed[span_idx];
+            state.write(span);
+        }
+    }
+}
+
 /// Iterator over the slices of a [`BytesView`] and their metadata.
 ///
 /// Returned by [`BytesView::slices()`] and provides each slice together with its
@@ -1712,5 +1731,56 @@ mod tests {
         // us to easily detect when the size changes and (if we choose to) bless the change.
         // We assume 64-bit pointers - any support for 32-bit is problem for the future.
         assert_eq!(size_of::<BytesView>(), 272);
+    }
+
+    #[test]
+    fn hash_equal_views_produce_same_hash() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let a = BytesView::from(vec![1, 2, 3, 4, 5]);
+        let b = BytesView::from(vec![1, 2, 3, 4, 5]);
+
+        let hash_of = |v: &BytesView| {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_eq!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn hash_multi_span_matches_single_span() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let single = BytesView::from(vec![1, 2, 3, 4, 5, 6]);
+
+        let mut multi = BytesView::from(vec![1, 2, 3]);
+        multi.append(BytesView::from(vec![4, 5, 6]));
+
+        let hash_of = |v: &BytesView| {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_eq!(single, multi);
+        assert_eq!(hash_of(&single), hash_of(&multi));
+    }
+
+    #[test]
+    fn hash_different_views_produce_different_hash() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let a = BytesView::from(vec![1, 2, 3]);
+        let b = BytesView::from(vec![4, 5, 6]);
+
+        let hash_of = |v: &BytesView| {
+            let mut h = DefaultHasher::new();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_ne!(hash_of(&a), hash_of(&b));
     }
 }
