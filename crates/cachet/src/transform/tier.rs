@@ -181,12 +181,12 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn get_returns_none_on_soft_failure() {
-        /// A codec that always returns SoftFailure on decode.
+        /// A codec that always returns `SoftFailure` on decode.
         struct FailCodec;
 
         impl crate::Encoder<i32, i32> for FailCodec {
-            fn encode(&self, value: &i32) -> Result<i32, crate::Error> {
-                Ok(*value)
+            fn encode(&self, _value: &i32) -> Result<i32, crate::Error> {
+                unreachable!("encode should not be called in this test")
             }
         }
 
@@ -198,7 +198,7 @@ mod tests {
 
         impl std::fmt::Debug for FailCodec {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("FailCodec")
+                f.debug_struct("FailCodec").finish()
             }
         }
 
