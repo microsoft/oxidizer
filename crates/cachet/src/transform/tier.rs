@@ -181,32 +181,11 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn get_returns_none_on_soft_failure() {
-        /// A codec that always returns `SoftFailure` on decode.
-        struct FailCodec;
-
-        impl crate::Encoder<i32, i32> for FailCodec {
-            fn encode(&self, _value: &i32) -> Result<i32, crate::Error> {
-                unreachable!("encode should not be called in this test")
-            }
-        }
-
-        impl crate::Codec<i32, i32> for FailCodec {
-            fn decode(&self, _value: i32) -> Result<DecodeOutcome<i32>, crate::Error> {
-                Ok(DecodeOutcome::SoftFailure("test failure"))
-            }
-        }
-
-        impl std::fmt::Debug for FailCodec {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_struct("FailCodec").finish()
-            }
-        }
-
         let inner = MockCache::with_data(std::iter::once((1, CacheEntry::new(42))).collect());
         let adapter = TransformAdapter::from_boxed(
             inner,
             Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
-            Box::new(FailCodec),
+            Box::new(crate::MockCodec::<i32>::soft_failure("test failure")),
         );
 
         let result = adapter.get(&1).await.unwrap();
