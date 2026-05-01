@@ -177,4 +177,41 @@ mod tests {
         assert_eq!(result.ttl(), Some(ttl));
         assert_eq!(result.cached_at(), Some(cached_at));
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn get_returns_none_on_soft_failure() {
+        use crate::Encoder as _;
+
+        /// A codec that always returns SoftFailure on decode.
+        struct FailCodec;
+
+        impl crate::Encoder<i32, i32> for FailCodec {
+            fn encode(&self, value: &i32) -> Result<i32, crate::Error> {
+                Ok(*value)
+            }
+        }
+
+        impl crate::Codec<i32, i32> for FailCodec {
+            fn decode(&self, _value: i32) -> Result<DecodeOutcome<i32>, crate::Error> {
+                Ok(DecodeOutcome::SoftFailure("test failure"))
+            }
+        }
+
+        impl std::fmt::Debug for FailCodec {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("FailCodec")
+            }
+        }
+
+        let inner = MockCache::with_data(std::iter::once((1, CacheEntry::new(42))).collect());
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
+            Box::new(FailCodec),
+        );
+
+        let result = adapter.get(&1).await.unwrap();
+        assert!(result.is_none(), "soft failure should return None");
+    }
 }
