@@ -107,7 +107,7 @@ impl<In, Out, S1, S2> FallbackLayer<In, Out, S1, S2> {
     }
 }
 
-impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
+impl<In, Out: Send, S1, S2> FallbackLayer<In, Out, S1, S2> {
     /// Sets a synchronous fallback action.
     ///
     /// The `action` receives the original (invalid) output and [`FallbackActionArgs`]
@@ -129,11 +129,13 @@ impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
     #[must_use]
     pub fn fallback_output(self, value: Out) -> FallbackLayer<In, Out, S1, Set>
     where
-        Out: Clone + Sync,
+        Out: Clone + Sync + 'static,
     {
         self.fallback(move |_, _| value.clone())
     }
+}
 
+impl<In, Out: Send + 'static, S1, S2> FallbackLayer<In, Out, S1, S2> {
     /// Sets an asynchronous fallback action.
     ///
     /// The `action` receives the original (invalid) output and [`FallbackActionArgs`]

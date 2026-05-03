@@ -108,8 +108,8 @@ impl<In, Out> Latency<In, Out, ()> {
 // body MUST be mirrored in the `call` body, and vice versa. See crate-level AGENTS.md.
 impl<In, Out, S> Service<In> for Latency<In, Out, S>
 where
-    In: Send + 'static,
-    Out: Send + 'static,
+    In: Send,
+    Out: Send,
     S: Service<In, Out = Out>,
 {
     type Out = Out;
@@ -199,7 +199,7 @@ where
     }
 }
 
-impl<In: Send + 'static, Out: Send + 'static> LatencyShared<In, Out> {
+impl<In: Send, Out: Send> LatencyShared<In, Out> {
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
     fn should_inject(&self, input: &In) -> bool {
         let rate = self.rate.call(input, LatencyRateArgs {}).clamp(0.0, 1.0);

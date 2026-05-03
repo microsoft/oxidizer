@@ -374,7 +374,7 @@ impl<In, Out, S> crate::Layer<S> for InterceptLayer<In, Out> {
     }
 }
 
-struct OnInput<In>(Arc<dyn Fn(&In) + Send + Sync>);
+struct OnInput<In>(Arc<dyn for<'a> Fn(&'a In) + Send + Sync>);
 
 impl<In> Clone for OnInput<In> {
     fn clone(&self) -> Self {
@@ -382,7 +382,7 @@ impl<In> Clone for OnInput<In> {
     }
 }
 
-struct OnOutput<Out>(Arc<dyn Fn(&Out) + Send + Sync>);
+struct OnOutput<Out>(Arc<dyn for<'a> Fn(&'a Out) + Send + Sync>);
 
 impl<Out> Clone for OnOutput<Out> {
     fn clone(&self) -> Self {

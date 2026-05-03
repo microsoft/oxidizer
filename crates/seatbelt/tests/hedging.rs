@@ -687,3 +687,22 @@ async fn invoke_on_execute_actually_calls_callback(#[case] use_tower: bool) {
         "on_execute callback must be invoked at least once"
     );
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Hedging::layer("test_hedging", &context)
+            .clone_input()
+            .recovery_with(|_output: &&str, _| RecoveryInfo::never()),
+        Execute::new(|input: &str| async move { input }),
+    );
+    let service = stack.into_service();
+
+    let input = "hello".to_string();
+    let output = service.execute(input.as_str()).await;
+
+    assert_eq!(output, "hello");
+}

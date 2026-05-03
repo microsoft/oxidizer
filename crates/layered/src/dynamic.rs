@@ -16,7 +16,7 @@ pub trait DynamicServiceExt<In, Out>: Sized {
     fn into_dynamic(self) -> DynamicService<In, Out>;
 }
 
-impl<In: Send + 'static, Out: Send + 'static, T> DynamicServiceExt<In, Out> for T
+impl<In: Send, Out: Send, T> DynamicServiceExt<In, Out> for T
 where
     T: Service<In, Out = Out> + 'static,
 {
@@ -53,7 +53,7 @@ where
 /// ```
 pub struct DynamicService<In, Out>(Arc<DynService<'static, In, Out>>);
 
-impl<In: Send + 'static, Out: Send + 'static> DynamicService<In, Out> {
+impl<In: Send, Out: Send> DynamicService<In, Out> {
     pub(crate) fn new<T>(strategy: T) -> Self
     where
         T: Service<In, Out = Out> + Send + Sync + 'static,

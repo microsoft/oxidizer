@@ -47,10 +47,10 @@ impl<E> Execute<E> {
     #[must_use]
     pub fn new<In, Out, F>(e: E) -> Self
     where
-        E: Fn(In) -> F + Send + Sync + 'static,
-        In: Send + 'static,
-        F: Future<Output = Out> + Send + 'static,
-        Out: Send + 'static,
+        E: Fn(In) -> F + Send + Sync,
+        In: Send,
+        F: Future<Output = Out> + Send,
+        Out: Send,
     {
         Self(e)
     }

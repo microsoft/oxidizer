@@ -106,8 +106,8 @@ impl<In, Out> Injection<In, Out, ()> {
 // body MUST be mirrored in the `call` body, and vice versa. See crate-level AGENTS.md.
 impl<In, Out, S> Service<In> for Injection<In, Out, S>
 where
-    In: Send + 'static,
-    Out: Send + 'static,
+    In: Send,
+    Out: Send,
     S: Service<In, Out = Out>,
 {
     type Out = Out;
@@ -186,7 +186,7 @@ where
     }
 }
 
-impl<In: Send + 'static, Out: Send + 'static> InjectionShared<In, Out> {
+impl<In: Send, Out: Send> InjectionShared<In, Out> {
     fn should_inject(&self, input: &In) -> bool {
         let rate = self.rate.call(input, InjectionRateArgs {}).clamp(0.0, 1.0);
         self.rnd.next_f64() < rate

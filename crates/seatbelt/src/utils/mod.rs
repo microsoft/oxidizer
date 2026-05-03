@@ -28,7 +28,7 @@ pub(crate) enum EnableIf<In> {
     /// The middleware is always disabled.
     Disabled,
     /// The middleware is conditionally enabled based on a predicate.
-    Custom(Arc<dyn Fn(&In) -> bool + Send + Sync>),
+    Custom(Arc<dyn for<'a> Fn(&'a In) -> bool + Send + Sync>),
 }
 
 impl<In> EnableIf<In> {
