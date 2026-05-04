@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
-use crate::closure::RelocateFnOnce;
+use crate::closure::ThreadAwareFnOnce;
+use crate::ThreadAware;
 
 /// A closure with erased bounds.
 pub struct ErasedClosureOnce<T: ?Sized> {
@@ -24,7 +24,7 @@ impl<T> ErasedClosureOnce<T> {
     /// Creates a new closure with erased bounds.
     pub fn new<C>(closure: C) -> Self
     where
-        C: RelocateFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
+        C: ThreadAwareFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
     {
         Self {
             inner: Box::new(Wrapper { closure }),
@@ -32,7 +32,7 @@ impl<T> ErasedClosureOnce<T> {
     }
 }
 
-impl<T> RelocateFnOnce<T> for ErasedClosureOnce<T> {
+impl<T> ThreadAwareFnOnce<T> for ErasedClosureOnce<T> {
     fn call_once(self) -> T {
         self.inner.call_boxed_once()
     }
@@ -64,7 +64,7 @@ struct Wrapper<C> {
 
 impl<T, C> Erased<T> for Wrapper<C>
 where
-    C: RelocateFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
+    C: ThreadAwareFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
 {
     fn call_boxed_once(self: Box<Self>) -> T {
         self.closure.call_once()
@@ -84,12 +84,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::closure::relocate_once;
+    use crate::closure::closure_once;
 
     #[test]
     fn test_erased_closure_once_debug() {
         // Create an ErasedClosureOnce with a simple closure
-        let closure = relocate_once(42, |x| x + 1);
+        let closure = closure_once(42, |x| x + 1);
         let erased = ErasedClosureOnce::new(closure);
 
         // Format using Debug trait - this covers line 14-15 (Debug::fmt)
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_erased_closure_once_debug_with_string() {
         // Create an ErasedClosureOnce that returns a String
-        let closure = relocate_once("test", |s: &str| s.to_string());
+        let closure = closure_once("test", |s: &str| s.to_string());
         let erased = ErasedClosureOnce::new(closure);
 
         // Format using Debug trait

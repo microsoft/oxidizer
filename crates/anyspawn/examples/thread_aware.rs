@@ -12,8 +12,8 @@
 //! counter, or connection pool instead of a simple index.
 
 use anyspawn::Spawner;
+use thread_aware::affinity::{pinned_affinities, MemoryAffinity, PinnedAffinity};
 use thread_aware::ThreadAware;
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity, pinned_affinities};
 
 #[tokio::main]
 async fn main() {

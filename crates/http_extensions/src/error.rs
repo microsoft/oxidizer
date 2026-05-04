@@ -4,22 +4,22 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use http::StatusCode;
 use http::header::{InvalidHeaderValue, MaxSizeReached};
 use http::method::InvalidMethod;
 use http::status::InvalidStatusCode;
 use http::uri::{InvalidUri, InvalidUriParts};
+use http::StatusCode;
 use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
-use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::ThreadAware;
 
-use crate::HttpRequest;
 use crate::error_labels::{
     LABEL_BODY_SIZE_LIMIT_REACHED, LABEL_BODY_TIMEOUT, LABEL_HEADER_VALUE_INVALID, LABEL_HTTP_ERROR, LABEL_IO, LABEL_METHOD_INVALID,
     LABEL_RESPONSE_TIMEOUT, LABEL_RESPONSE_UNSUCCESSFUL, LABEL_STATUS_CODE_INVALID, LABEL_UNAVAILABLE, LABEL_URI_INVALID, LABEL_VALIDATION,
 };
 use crate::http_utils::SyncHolder;
+use crate::HttpRequest;
 
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;

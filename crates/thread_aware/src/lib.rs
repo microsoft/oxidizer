@@ -49,7 +49,7 @@
 //!
 //! As this library is primarily intended for use in thread-per-core runtimes,
 //! we use the terms 'thread' and 'core' interchangeably. The assumption is that items
-//! primarily relocate between different threads, where each thread is pinned to a different CPU core.
+//! primarily closure between different threads, where each thread is pinned to a different CPU core.
 //! Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
 //! be able to observe this fact.
 //!
@@ -137,8 +137,12 @@
 //! }
 //! ```
 
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
-#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
+#![doc(
+    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png"
+)]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico"
+)]
 
 mod cell;
 mod core;
@@ -157,6 +161,7 @@ pub mod affinity;
 #[doc(inline)]
 pub use core::ThreadAware;
 
+pub use cell::{storage, Arc, PerCore, PerNuma, PerProcess};
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
@@ -205,5 +210,4 @@ pub use core::ThreadAware;
 /// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
-pub use wrappers::{Unaware, unaware};
+pub use wrappers::{unaware, Unaware};

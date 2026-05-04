@@ -3,12 +3,12 @@
 
 use std::marker::PhantomData;
 
-use thread_aware::ThreadAware;
 use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::ThreadAware;
 
-use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::ClockState;
+use crate::Clock;
 
 /// Marker for an [`InactiveClock`] backed by per-core isolated timer storage.
 ///

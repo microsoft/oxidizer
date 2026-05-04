@@ -2395,6 +2395,7 @@ dependencies = [
 name = "thread_aware"
 version = "0.7.0"
 dependencies = [
+ "futures",
  "many_cpus",
  "mutants",
  "static_assertions",
